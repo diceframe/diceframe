@@ -329,6 +329,7 @@ class Dnd2024CombatEngine(
                     "lucky_advantage_available": self._window_pool_available(
                         instance, current, LUCKY_RESOURCE,
                     ),
+                    **self._attack_state_options(actor, combat),
                 })
             actions.extend([
                 {"type": "dash", "label": "Dash", "actor_id": current, "expected_version": version},
@@ -401,6 +402,85 @@ class Dnd2024CombatEngine(
                 "type": "combat.end", "label": "End combat", "expected_version": version,
             })
         return [*communication, *actions]
+
+    def _attack_state_options(
+        self, actor: dict[str, Any], combat: dict[str, Any],
+    ) -> dict[str, Any]:
+        """What this actor may declare before an attack roll, per the server.
+
+        The client echoes these keys back as intent fields; the same facts are
+        re-derived in validation, so a stale panel cannot submit a declaration
+        the character no longer qualifies for.  Absent keys mean "this actor
+        owns no such feature at all", which is why a plain Fighter's attack row
+        carries neither.
+        """
+
+        if actor["kind"] not in {"player", "companion"}:
+            return {}
+        character = self._feature_character(actor)
+        actor_id = str(actor["actor_id"])
+        options: dict[str, Any] = {}
+
+        def parameter(feature_id: str, key: str) -> Any:
+            return self.features.feature_value(character, feature_id, key, None)
+
+        condition = str(parameter("reckless_attack", "self_condition") or "")
+        if condition:
+            record = (combat.get("attack_rolls") or {}).get(actor_id)
+            same_turn = (
+                isinstance(record, dict)
+                and int(record.get("round", -1)) == int(combat.get("round", 0))
+                and int(record.get("turn_index", -1)) == int(combat.get("turn_index", 0))
+            )
+            options["reckless_attack"] = {
+                "available": (
+                    condition not in (actor.get("conditions") or {})
+                    and not same_turn
+                ),
+                "condition": condition,
+                "ability": str(parameter("reckless_attack", "ability") or ""),
+            }
+
+        if self.features.has_feature(character, "brutal_strike"):
+            allowed = [str(value) for value in parameter(
+                "brutal_strike", "effect_options",
+            ) or []]
+            if self.features.has_feature(character, "improved_brutal_strike"):
+                allowed.extend(
+                    str(value) for value in parameter(
+                        "improved_brutal_strike", "additional_effect_options",
+                    ) or []
+                )
+            class_state = self.features.class_state(character)
+            level = int(class_state[1]) if class_state else 0
+            cap = int(parameter("brutal_strike", "effects_per_use") or 0)
+            if level >= int(parameter("brutal_strike", "upgrade_level") or 0):
+                cap = int(
+                    parameter("brutal_strike", "effects_per_use_upgrade") or cap
+                )
+            used = self._feature_used_this_turn(combat, actor_id, "brutal_strike")
+            reckless_ready = bool(
+                str(parameter("reckless_attack", "self_condition") or "")
+                in (actor.get("conditions") or {})
+                or (options.get("reckless_attack") or {}).get("available")
+            )
+            options["brutal_strike"] = {
+                "available": bool(allowed and cap and reckless_ready and not used),
+                "effects": allowed,
+                "count": cap,
+            }
+
+        mark_kind = str(parameter("studied_attacks", "mark_kind") or "")
+        if mark_kind:
+            marks = (
+                ((combat.get("attack_marks") or {}).get(mark_kind) or {})
+                .get(actor_id) or {}
+            )
+            options["studied_attacks"] = {
+                "mark_kind": mark_kind,
+                "targets": sorted(str(key) for key in marks),
+            }
+        return options
 
     def _available_item_activations(
         self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
@@ -1758,10 +1838,43 @@ class Dnd2024CombatEngine(
             ]:
                 conditions.pop(condition_id, None)
 
+    def _expire_attack_marks(
+        self, combat: dict[str, Any], actor_id: str,
+    ) -> None:
+        """Age the accepting actor's own attack marks at the start of their turn.
+
+        Studied Attacks lasts "before the end of your next turn", which is one
+        turn longer than a turn-start expiry: the mark must survive the whole
+        of the attacker's next turn.  A ``turns_remaining`` counter therefore
+        counts *turn starts still to come* -- created at 1, it drops to 0 as
+        that turn begins (and stays usable), and is removed when the following
+        turn begins.
+        """
+
+        marks = combat.get("attack_marks")
+        if not isinstance(marks, dict):
+            return
+        for per_kind in marks.values():
+            if not isinstance(per_kind, dict):
+                continue
+            per_actor = per_kind.get(str(actor_id))
+            if not isinstance(per_actor, dict):
+                continue
+            for target_id in list(per_actor):
+                row = per_actor[target_id]
+                remaining = int(row.get("turns_remaining", 0) or 0) if isinstance(
+                    row, dict
+                ) else 0
+                if remaining > 0:
+                    row["turns_remaining"] = remaining - 1
+                else:
+                    per_actor.pop(target_id, None)
+
     def _expire_conditions(
         self, snapshot: dict[str, Any], combat: dict[str, Any], actor_id: str,
         previous_actor_id: str,
     ) -> None:
+        self._expire_attack_marks(combat, actor_id)
         conditions = self._conditions(snapshot, combat, actor_id)
         for condition_id in [
             key for key, value in conditions.items()

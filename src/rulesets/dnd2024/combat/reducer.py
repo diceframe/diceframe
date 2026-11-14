@@ -130,6 +130,10 @@ class CombatReducerMixin:
                 "pending_decisions": [], "position_mode": event["position_mode"],
                 "reactions": deepcopy(event["reactions"]),
                 "feature_usage": {},
+                # Reckless 的"本回合第一次攻击"计数与 Studied Attacks 的目标
+                # 标记都只活在一场战斗里：新战斗从零开始，不继承上一场。
+                "attack_rolls": {},
+                "attack_marks": {},
                 "encounter_instance_id": str(event.get("encounter_instance_id") or ""),
                 "encounter_preset_id": str(event.get("encounter_preset_id") or ""),
                 "origin_step_id": str(event.get("origin_step_id") or ""),
@@ -461,6 +465,60 @@ class CombatReducerMixin:
                 economy[resource] -= 1
                 economy["attacks_remaining"] = max(0, int(event["attacks_per_action"]) - 1)
             return
+        if event_type == "dnd2024.attack_roll.recorded":
+            # Reckless Attack 的窗口是"本回合第一次攻击检定"，所以要按
+            # actor + round + turn_index 记一个计数。跨回合不做显式清零：
+            # 回合标识变了就等于归零，和 feature_usage 的记账方式一致。
+            actor_id = str(event["actor_id"])
+            round_index = int(event["round"])
+            turn_index = int(event["turn_index"])
+            ledger = combat.setdefault("attack_rolls", {})
+            if not isinstance(ledger, dict):
+                raise EventBatchError("attack roll ledger is invalid")
+            record = ledger.get(actor_id)
+            if (
+                not isinstance(record, dict)
+                or int(record.get("round", -1)) != round_index
+                or int(record.get("turn_index", -1)) != turn_index
+            ):
+                ledger[actor_id] = {
+                    "round": round_index, "turn_index": turn_index, "count": 1,
+                }
+                return
+            record["count"] = int(record.get("count", 0) or 0) + 1
+            return
+        if event_type == "dnd2024.attack_mark.set":
+            # 目标绑定的攻击状态（Studied Attacks）：按 actor -> kind -> target
+            # 存放，同一 actor 对同一目标只有一份，重复建立就地覆盖而不是叠加。
+            actor_id = str(event["actor_id"])
+            kind = str(event["kind"])
+            target_id = str(event["target_id"])
+            marks = combat.setdefault("attack_marks", {})
+            if not isinstance(marks, dict):
+                raise EventBatchError("attack marks are invalid")
+            per_kind = marks.setdefault(kind, {})
+            if not isinstance(per_kind, dict):
+                raise EventBatchError("attack marks are invalid")
+            per_actor = per_kind.setdefault(actor_id, {})
+            if not isinstance(per_actor, dict):
+                raise EventBatchError("attack marks are invalid")
+            per_actor[target_id] = {
+                "turns_remaining": int(event.get("turns_remaining", 1) or 0),
+                "expiry": str(event.get("expiry") or ""),
+                "round": int(combat.get("round", 0)),
+                "turn_index": int(combat.get("turn_index", 0)),
+            }
+            return
+        if event_type == "dnd2024.attack_mark.cleared":
+            actor_id = str(event["actor_id"])
+            kind = str(event["kind"])
+            target_id = str(event["target_id"])
+            marks = combat.get("attack_marks")
+            per_kind = marks.get(kind) if isinstance(marks, dict) else None
+            per_actor = per_kind.get(actor_id) if isinstance(per_kind, dict) else None
+            if isinstance(per_actor, dict):
+                per_actor.pop(target_id, None)
+            return
         if event_type == "dnd2024.movement.granted":
             amount = int(event["amount"])
             combat["economy"]["movement"] = int(combat["economy"].get("movement", 0)) + amount
@@ -469,6 +527,14 @@ class CombatReducerMixin:
                 # 一份"本次移动免借机攻击"的额度。下一次移动消费掉它，
                 # 不会延续到后续任何移动。
                 combat["economy"]["crit_move"] = amount
+            elif str(event.get("reason") or "") == "brutal_forceful":
+                # Forceful Blow 的跟步额度同样只覆盖一次移动，而且多一个
+                # 方向约束：只能朝被推开的目标走。方向在掷骰侧判定，这里只
+                # 记录额度与目标。
+                combat["economy"]["brutal_move"] = {
+                    "amount": amount,
+                    "target_id": str(event.get("target_id") or ""),
+                }
             return
         if event_type == "dnd2024.position.changed":
             actor_id = str(event["actor_id"])
@@ -485,6 +551,8 @@ class CombatReducerMixin:
                 # 额度只覆盖它自己这一次移动；消费后即失效，其他移动要按
                 # 常规规则判定借机攻击。
                 combat["economy"]["crit_move"] = 0
+            if event.get("brutal_move"):
+                combat["economy"].pop("brutal_move", None)
             return
         if event_type == "resource.changed":
             if str(event.get("resource") or "hp") == "temp_hp":

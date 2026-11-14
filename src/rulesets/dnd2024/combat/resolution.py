@@ -440,6 +440,12 @@ class CombatResolutionMixin:
         sources: list[dict[str, Any]] = []
         if "rage" in conditions and ability == "str":
             sources.append({"code": "rage", "mode": "advantage"})
+        if "next_save_disadvantage" in conditions:
+            # Staggering Blow. It is a marker rather than a registry declaration
+            # because no registry field can say "the *next* saving throw, then
+            # gone": the consumption point is the save itself, not a turn
+            # boundary, so the same code that reads it also removes it.
+            sources.append({"code": "next_save_disadvantage", "mode": "disadvantage"})
         if bool(
             (actor.get("armor_training") or {}).get("untrained_armor_worn")
         ) and ability in {"str", "dex"}:
@@ -452,6 +458,25 @@ class CombatResolutionMixin:
             if isinstance(declared, list) and ability in {str(item) for item in declared}:
                 sources.append({"code": "danger_sense", "mode": "advantage"})
         return sources
+
+    def _consume_save_markers(
+        self, target_id: str, target: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Remove the "next saving throw" markers a save just consumed.
+
+        Called at every real saving-throw site with the actor who rolled.  The
+        two Staggering halves are independent: this only ever removes the
+        saving-throw half, so the Opportunity Attack the other half forbids
+        still lasts until the attacker's next turn.
+        """
+
+        conditions = target.get("conditions") or {}
+        if "next_save_disadvantage" not in conditions:
+            return []
+        return [{
+            "type": "condition.removed", "target_id": str(target_id),
+            "condition": "next_save_disadvantage", "reason": "save_resolved",
+        }]
 
     def _evasion_applies(self, target: dict[str, Any], ability: str) -> bool:
         """Whether Evasion rewrites this effect's damage branches.
@@ -575,6 +600,322 @@ class CombatResolutionMixin:
             return ""
         return str(stored.get("damage_type") or "")
 
+    @staticmethod
+    def attack_ability(actor: dict[str, Any], weapon: dict[str, Any]) -> str:
+        """Which ability modifier this weapon attack uses.
+
+        One authority for a rule that used to be written twice: the attack
+        resolver chose it and the pre-roll preview guessed it separately, so a
+        preview could show a different ability than the roll used.  A real
+        ranged weapon is Dexterity; Finesse picks the better of the two;
+        Thrown melee weapons keep the melee ability (2024 Thrown); and a
+        feature-declared ``ability_choice`` (Martial Arts) covers Unarmed
+        Strikes and Monk weapons without the combat layer naming a class.
+        """
+
+        abilities = actor.get("abilities") or {}
+        if bool(weapon.get("ranged")):
+            return "dex"
+        ability = "str"
+        if weapon.get("finesse"):
+            ability = max(
+                ("str", "dex"),
+                key=lambda key: ability_modifier(abilities.get(key, 10)),
+            )
+        choices = [
+            str(key) for key in weapon.get("ability_choice") or []
+            if str(key) in abilities
+        ]
+        if choices:
+            ability = max(
+                choices, key=lambda key: ability_modifier(abilities.get(key, 10)),
+            )
+        return ability
+
+    @staticmethod
+    def attack_range_disadvantage(weapon: dict[str, Any], distance: int) -> bool:
+        """Whether this attack is past its normal range but still in long range."""
+
+        normal = int(weapon.get("thrown_range") or weapon.get("range", 5) or 5)
+        maximum = int(
+            weapon.get("long_range") or weapon.get("thrown_range")
+            or weapon.get("range", 5) or 5
+        )
+        return normal < int(distance) <= maximum
+
+    def _attack_check_mode(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        target: dict[str, Any], range_disadvantage: bool, *,
+        ability: str, declared_reckless: bool, spend_luck: bool = False,
+        use_grant: bool = True,
+    ) -> dict[str, Any]:
+        """Every Advantage/Disadvantage source on a weapon attack roll.
+
+        The registry supplies condition-borne sources (including the
+        target-side Advantage that Reckless grants to attackers), and this
+        method adds the three code facts that are not conditions: Lucky's
+        declared face, Reckless's *Strength-only* self-Advantage, and
+        untrained armor.
+
+        Reckless cannot live in the condition registry because the registry
+        cannot say "only Strength rolls": a Dexterity Barbarian would get
+        Advantage on every attack it makes.  The ability comes from the
+        declaration, so a second feature offering the same shape only needs
+        its own declaration.
+        """
+
+        from .check_modes import attack_mode, mode_from_sources
+
+        extra: list[dict[str, Any]] = []
+        if spend_luck:
+            extra.append({"code": "lucky", "mode": "advantage"})
+        character = self._feature_character(actor)
+        condition = str(self.features.feature_value(
+            character, "reckless_attack", "self_condition", "",
+        ) or "")
+        declared_ability = str(self.features.feature_value(
+            character, "reckless_attack", "ability", "",
+        ) or "")
+        if condition and declared_ability and declared_ability == ability and (
+            declared_reckless or condition in (actor.get("conditions") or {})
+        ):
+            extra.append({"code": "reckless", "mode": "advantage"})
+        # Studied Attacks 的标记是"攻击者 -> 目标"的一条状态，不是条件：
+        # 它跟着攻击者走、只对同一个目标生效，挂在目标身上会让所有攻击者
+        # 一起受益。
+        mark_kind = str(self.features.feature_value(
+            character, "studied_attacks", "mark_kind", "",
+        ) or "")
+        if mark_kind and self._studied_mark(
+            combat, str(actor["actor_id"]), str(target["actor_id"]),
+        ):
+            extra.append({
+                "code": "studied_attacks",
+                "mode": str(self.features.feature_value(
+                    character, "studied_attacks", "mode", "",
+                ) or "advantage"),
+            })
+        check_mode = attack_mode(
+            self, instance, actor, target, range_disadvantage,
+            use_grant=use_grant, extra_sources=tuple(extra), combat=combat,
+        )
+        # 未受训护甲：武器/徒手攻击（力/敏掷骰）具有劣势。这里内联而不进
+        # check_modes，因为 spell_attack 也用 attack_mode 但走施法属性，不能误伤。
+        if bool((actor.get("armor_training") or {}).get("untrained_armor_worn")):
+            sources = [
+                *check_mode["sources"],
+                {"code": "untrained_armor", "mode": "disadvantage"},
+            ]
+            check_mode = {"mode": mode_from_sources(sources), "sources": sources}
+        return check_mode
+
+    def _attack_declaration_state(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        intent: dict[str, Any], weapon: dict[str, Any], ability: str,
+        target_id: str,
+    ) -> dict[str, Any]:
+        """Read the pre-roll declarations this intent makes, already qualified.
+
+        This is "may the declaration take effect", not "is the submission
+        legal": validation owns rejection, and the internal attack paths
+        (Opportunity Attacks, grant-provided attacks) never carry these
+        fields.  Every gate fails closed, so a directly called resolution
+        cannot hand out an effect the character has not earned.
+        """
+
+        state: dict[str, Any] = {
+            "reckless": False, "reckless_condition": "", "reckless_duration": "",
+            "brutal": False, "brutal_effects": [], "brutal_dice": "",
+            "track_roll": False, "studied_consumed": False, "studied_kind": "",
+            "target_id": str(target_id),
+        }
+        if actor["kind"] not in {"player", "companion"}:
+            return state
+        character = self._feature_character(actor)
+        actor_id = str(actor["actor_id"])
+
+        def parameter(feature_id: str, key: str) -> Any:
+            return self.features.feature_value(character, feature_id, key, None)
+
+        if self.features.has_feature(character, "reckless_attack"):
+            condition = str(parameter("reckless_attack", "self_condition") or "")
+            duration = str(parameter("reckless_attack", "condition_duration") or "")
+            declared = bool(intent.get("reckless_attack"))
+            # 只在"本回合第一次掷骰之前的真实声明"时落条件；声明与否由
+            # validation 校验，这里的 already 检查防的是同一回合重复声明：
+            # 重挂一次会让到期时间被无意延长。声明本身不限于力量攻击——
+            # 规则只把 Advantage *给予*力量掷骰，没说不许在敏捷攻击时声明。
+            if (
+                declared and condition and duration
+                and condition not in (actor.get("conditions") or {})
+            ):
+                state["reckless"] = True
+                state["reckless_condition"] = condition
+                state["reckless_duration"] = duration
+            # 每次*自己回合内*的攻击掷骰都记一笔，Reckless 的"第一次"窗口靠它
+            # 判定。反应里打出的攻击（借机攻击、Retaliation）不算：它们既开不了
+            # 也关不了这个窗口，记下来只会让每个既有反应攻击多出一个与规则无关
+            # 的事件。
+            own_turn = str(
+                (combat.get("economy") or {}).get("actor_id") or ""
+            ) == actor_id
+            state["track_roll"] = own_turn
+
+        mark_kind = str(parameter("studied_attacks", "mark_kind") or "")
+        if mark_kind and self._studied_mark(combat, actor_id, str(target_id)):
+            state["studied_consumed"] = True
+            state["studied_kind"] = mark_kind
+
+        if bool(intent.get("brutal_strike")) and self.features.has_feature(
+            character, "brutal_strike",
+        ):
+            required = str(parameter("brutal_strike", "requires_declaration") or "")
+            ready = state["reckless"]
+            if required and not ready:
+                ready = str(parameter(required, "self_condition") or "") in (
+                    actor.get("conditions") or {}
+                )
+            dice = self._brutal_strike_dice(character)
+            upgrade_level = int(parameter("brutal_strike", "upgrade_level") or 0)
+            class_state = self.features.class_state(character)
+            level = int(class_state[1]) if class_state else 0
+            allowed = [str(value) for value in parameter(
+                "brutal_strike", "effect_options",
+            ) or []]
+            if self.features.has_feature(character, "improved_brutal_strike"):
+                allowed.extend(
+                    str(value) for value in parameter(
+                        "improved_brutal_strike", "additional_effect_options",
+                    ) or []
+                )
+            cap = int(parameter("brutal_strike", "effects_per_use") or 0)
+            if level >= upgrade_level:
+                cap = int(
+                    parameter("brutal_strike", "effects_per_use_upgrade") or cap
+                )
+            submitted = intent.get("brutal_strike_effects")
+            effects = [str(value) for value in submitted or []]
+            if (
+                ready and dice and parameter("brutal_strike", "ability") == ability
+                and len(effects) <= cap
+                and len(set(effects)) == len(effects)
+                and all(value in allowed for value in effects)
+                and not self._feature_used_this_turn(combat, actor_id, "brutal_strike")
+            ):
+                state["brutal"] = True
+                state["brutal_effects"] = effects
+                state["brutal_dice"] = dice
+        return state
+
+    def _attack_declaration_events(
+        self, combat: dict[str, Any], actor_id: str, target_id: str,
+        declaration: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """The events a pre-roll declaration owes, in the order it owes them."""
+
+        events: list[dict[str, Any]] = []
+        round_index = int(combat.get("round", 0))
+        turn_index = int(combat.get("turn_index", 0))
+        if declaration["reckless"]:
+            events.append({
+                "type": "condition.applied", "target_id": actor_id,
+                "condition": declaration["reckless_condition"],
+                "duration": declaration["reckless_duration"],
+                # "Until the start of your next turn" is an expiry the engine
+                # resolves by comparing this field to whoever's turn begins,
+                # so it has to name the declarer even though the target is
+                # also the declarer.  Without it the condition would never
+                # come off.
+                "source_actor_id": actor_id,
+                "source_feature": "reckless_attack",
+            })
+        if declaration["track_roll"]:
+            events.append({
+                "type": "dnd2024.attack_roll.recorded", "actor_id": actor_id,
+                "round": round_index, "turn_index": turn_index,
+            })
+        if declaration["brutal"]:
+            # 选择在掷骰之前就被消耗：未命中也是花掉了这次 Brutal Strike，
+            # 不能改投另一次攻击。记账放在这里，命中结算就不再重复记账。
+            events.append({
+                "type": "dnd2024.feature.used", "actor_id": actor_id,
+                "feature_id": "brutal_strike",
+                "round": round_index, "turn_index": turn_index,
+            })
+        if declaration["studied_consumed"]:
+            # 标记在掷骰前消费：命中与未中都结束旧标记，未中时再由
+            # ``_studied_mark_events`` 建一个新的，两次不互相叠加。
+            events.append({
+                "type": "dnd2024.attack_mark.cleared", "actor_id": actor_id,
+                "kind": declaration["studied_kind"], "target_id": target_id,
+            })
+        return events
+
+    def _studied_mark(
+        self, combat: dict[str, Any], actor_id: str, target_id: str,
+    ) -> dict[str, Any] | None:
+        """One attacker's Studied Attacks mark against one creature."""
+
+        marks = combat.get("attack_marks")
+        if not isinstance(marks, dict):
+            return None
+        studied = marks.get("studied")
+        if not isinstance(studied, dict):
+            return None
+        per_actor = studied.get(str(actor_id))
+        if not isinstance(per_actor, dict):
+            return None
+        row = per_actor.get(str(target_id))
+        return row if isinstance(row, dict) else None
+
+    def _studied_mark_events(
+        self, actor: dict[str, Any], target_id: str,
+    ) -> list[dict[str, Any]]:
+        """Create the mark a missed attack leaves behind."""
+
+        if actor["kind"] not in {"player", "companion"}:
+            return []
+        character = self._feature_character(actor)
+        kind = str(self.features.feature_value(
+            character, "studied_attacks", "mark_kind", "",
+        ) or "")
+        expiry = str(self.features.feature_value(
+            character, "studied_attacks", "expiry", "",
+        ) or "")
+        if not kind or not expiry:
+            return []
+        return [{
+            "type": "dnd2024.attack_mark.set", "actor_id": str(actor["actor_id"]),
+            "kind": kind, "target_id": str(target_id),
+            # 1 表示"撑过攻击者的下一个回合"：回合开始递减，见 engine 的到期逻辑。
+            "turns_remaining": 1, "expiry": expiry,
+        }]
+
+    def _sundering_bonus(
+        self, target: dict[str, Any], actor_id: str,
+    ) -> tuple[int, str]:
+        """The flat bonus another creature's Sundering Blow lends this roll.
+
+        Read from the *condition* the Barbarian left behind, never from the
+        attacker's own features: the beneficiary is "another creature", which
+        by definition does not own Improved Brutal Strike.  Returns ``(0, "")``
+        for the creature that applied it, so the Barbarian never spends its own
+        setup on its own next swing.
+        """
+
+        # 受益者不需要拥有任何特性，只看目标身上留下了什么。
+        for condition_id, stored in (target.get("conditions") or {}).items():
+            if not isinstance(stored, dict):
+                continue
+            if str(stored.get("source_feature") or "") != "improved_brutal_strike":
+                continue
+            if str(stored.get("source_actor_id") or "") == str(actor_id):
+                continue
+            bonus = int(stored.get("attack_bonus") or 0)
+            if bonus:
+                return bonus, str(condition_id)
+        return 0, ""
+
     def _attack_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
         *, spend_attack_action: bool = True,
@@ -600,26 +941,11 @@ class CombatResolutionMixin:
             if weapon is None:  # pragma: no cover - validation guards this
                 raise CombatIntentError("attack profile is not available to the actor")
             distance = self._distance(combat, actor_id, target_id)
-            # 真正的远程武器 vs 近战武器被投掷：2024 Thrown 规定，投掷一把 melee
-            # weapon 时，攻击与伤害沿用**近战使用该武器时相同的属性修正**。所以
-            # "在远处使用" 不等于 "这是远程武器"。属性选择只应被前者（真远程武器）
-            # 排除，否则武僧把长矛/手斧扔出去就会被强制成 DEX。
+            # 属性与射程劣势都由共用函数判定：validation、掷骰后的预演和这里
+            # 读的是同一份规则，否则"面板显示敏捷、结算按力量"这种裂缝永远
+            # 只在某个分支上出现。
             is_ranged_weapon = bool(weapon.get("ranged"))
-            ability = "dex" if is_ranged_weapon else "str"
-            if weapon.get("finesse"):
-                ability = max(("str", "dex"), key=lambda key: ability_modifier(actor["abilities"][key]))
-            # 职业特性投影出来的属性选择（武艺：徒手打击与 Monk Weapon 都可以改用
-            # 力量或敏捷）。客户端不能每次手选属性，因此第一版采用确定性规则——
-            # 取修正值较高者，由 feature boundary 投影到武器档案上，Combat 不判断职业。
-            choices = [
-                str(key) for key in weapon.get("ability_choice") or []
-                if str(key) in actor["abilities"]
-            ]
-            if choices and not is_ranged_weapon:
-                ability = max(
-                    choices,
-                    key=lambda key: ability_modifier(actor["abilities"][key]),
-                )
+            ability = self.attack_ability(actor, weapon)
             modifier = ability_modifier(actor["abilities"][ability])
             if weapon.get("unarmed") or (
                 f"weapon_category:{weapon.get('category')}" in actor["weapon_category_refs"]
@@ -640,9 +966,7 @@ class CombatResolutionMixin:
                 # damage_two_handed 的武器才允许声明该意图。
                 damage_formula = str(weapon.get("damage_two_handed") or damage_formula)
             damage_type = str(weapon["damage_type"])
-            long_range = int(weapon.get("long_range") or weapon.get("thrown_range") or weapon["range"])
-            normal_range = int(weapon.get("thrown_range") or weapon["range"])
-            range_disadvantage = distance > normal_range and distance <= long_range
+            range_disadvantage = self.attack_range_disadvantage(weapon, distance)
         else:
             weapon = next(item for item in actor["attacks"] if item["id"] == intent["attack_id"])
             modifier = int(weapon.get("damage_modifier", 0) or 0)
@@ -650,28 +974,29 @@ class CombatResolutionMixin:
             damage_formula = str(weapon["damage"])
             damage_type = str(weapon.get("damage_type") or "bludgeoning")
             distance = self._distance(combat, actor_id, target_id)
-            range_disadvantage = distance > int(weapon.get("range", 5) or 5)
+            range_disadvantage = self.attack_range_disadvantage(weapon, distance)
         from .check_modes import attack_mode, mode_from_sources
 
+        # 掷骰之前的声明：Reckless / Brutal / Studied 的资格在这里只被"读取"，
+        # 合法性由 validation 保证；这里再问一次是因为借机攻击与特性授予的攻击
+        # 也会走本函数，而它们的意图里根本不带这些字段。
+        declaration = self._attack_declaration_state(
+            instance, combat, actor, intent, weapon, ability, target_id,
+        )
         # Lucky's advantage face is declared before the roll: it adds one
         # source and is consumed unconditionally (validation proves the pool).
         spend_luck = bool(intent.get("spend_luck"))
-        extra_sources: tuple[dict[str, Any], ...] = (
-            ({"code": "lucky", "mode": "advantage"},) if spend_luck else ()
+        check_mode = self._attack_check_mode(
+            instance, combat, actor, target, range_disadvantage,
+            ability=ability,
+            declared_reckless=declaration["reckless"],
+            spend_luck=spend_luck, use_grant=spend_attack_action,
         )
-        check_mode = attack_mode(
-            self, instance, actor, target, range_disadvantage,
-            use_grant=spend_attack_action, extra_sources=extra_sources,
-            combat=combat,
-        )
-        # 未受训护甲：武器/徒手攻击（力/敏掷骰）具有劣势。这里内联而不进
-        # check_modes，因为 spell_attack 也用 attack_mode 但走施法属性，不能误伤。
-        if bool((actor.get("armor_training") or {}).get("untrained_armor_worn")):
-            sources = [
-                *check_mode["sources"],
-                {"code": "untrained_armor", "mode": "disadvantage"},
-            ]
-            check_mode = {"mode": mode_from_sources(sources), "sources": sources}
+        if declaration["brutal"]:
+            # 放弃全部 Advantage：来源仍写进事件留痕，但这一掷只掷一颗 d20。
+            # 存在任何 Disadvantage 时 validation 已拒绝声明，所以"单骰"在这里
+            # 是唯一正确的形态，不需要再猜哪一份 Advantage 该被删掉。
+            check_mode = {"mode": "", "sources": check_mode["sources"]}
         advantage, disadvantage = check_mode["mode"] == "advantage", check_mode["mode"] == "disadvantage"
         first = int(rng.randint(1, 20))
         second = int(rng.randint(1, 20)) if advantage or disadvantage else None
@@ -681,7 +1006,11 @@ class CombatResolutionMixin:
             self._effective_conditions(instance, combat, actor), "attack", rng,
         )
         check_bonus = sum(row["roll"] for row in check_bonus_rolls)
-        total = natural + attack_bonus + check_bonus
+        # Sundering Blow：另一个生物对该目标的第一次攻击 +5。攻击者本人
+        # 不受益，所以这里必须比对施加者；条件本身是唯一的（同一条件下一次
+        # 只能挂一份），因此"一次攻击最多 +5"由数据形状保证。
+        sundering_bonus, sundering_condition = self._sundering_bonus(target, actor_id)
+        total = natural + attack_bonus + check_bonus + sundering_bonus
         target_ac = effective_armor_class(target)
         # 精通重击 / 高效重击只拓宽武器与徒手攻击的重击阈值：取已拥有特性中
         # 最小的阈值，缺省 20。天然 1 的失手判定继续由下方 hit 组合表达。
@@ -704,6 +1033,15 @@ class CombatResolutionMixin:
             *self._spell_end_trigger_events(actor, "attack_roll"),
             *([self._attack_cost_event(combat, actor)] if spend_attack_action else []),
         ]
+        events.extend(self._attack_declaration_events(
+            combat, actor_id, target_id, declaration,
+        ))
+        if sundering_bonus and sundering_condition:
+            # 消费时机是"被这次攻击用掉"，与命中与否无关：+5 已经加进了这一掷。
+            events.append({
+                "type": "condition.removed", "target_id": target_id,
+                "condition": sundering_condition, "reason": "sundering_consumed",
+            })
         ammo_ref = weapon.get("ammunition_item_ref")
         if ammo_ref and actor["kind"] == "player":
             events.append({
@@ -729,6 +1067,14 @@ class CombatResolutionMixin:
         if crit_threshold != 20:
             # 默认 20 时不写字段，避免对既有事件消费方的无谓扰动。
             check_event["crit_threshold"] = crit_threshold
+        if sundering_bonus:
+            # 单独成项：modifier 仍是攻击者本来的加值，+5 不并进去，
+            # 否则事件里再也看不出这一掷吃过破甲一击。
+            check_event["sundering_bonus"] = sundering_bonus
+        if declaration["brutal"]:
+            # 记录"这次放弃了 Advantage"这一事实。advantage_mode 留空是因为
+            # 真的只掷了一颗骰；来源列表保留，让审计看得出放弃了哪几份。
+            check_event["brutal_strike"] = True
         if crit_on_hit:
             # 这是"命中之后"才升级的重击，不是 d20 本身掷出的重击。标记出来，
             # 掷后窗口才知道扣减总数可以把它退回普通命中甚至失手；不标记的话
@@ -786,6 +1132,10 @@ class CombatResolutionMixin:
             events.extend(self._miss_mastery_events(
                 instance, combat, actor, target, weapon, modifier, damage_type, rng,
             ))
+            # Studied Attacks：未命中才建立标记。**只在直通路径**建立——
+            # 开窗（诗人的激励骰可能把这次失手改判成命中）时不写标记，
+            # 宁可少一次机会，也不给一次并未失手的攻击留下优势。
+            events.extend(self._studied_mark_events(actor, target_id))
         events.extend(self._consume_attack_conditions(actor_id, target_id, actor, target))
         return events
 
@@ -925,7 +1275,9 @@ class CombatResolutionMixin:
                 "round": int(combat.get("round", 0)),
                 "turn_index": int(combat.get("turn_index", 0)),
             }
-        riders = self._hit_rider_declarations(actor, weapon, intent, combat)
+        riders = self._hit_rider_declarations(
+            actor, weapon, intent, combat, damage_type=damage_type, check=check,
+        )
         if riders:
             # 声明先挂在伤害事件上，掷骰留到真正提交时：Shield/Uncanny Dodge
             # 把命中改判落空时，不给这些骰子白掷一次的机会。
@@ -935,6 +1287,9 @@ class CombatResolutionMixin:
         )
         if conditions:
             damage_event["hit_condition_effects"] = conditions
+        brutal_effects = self._brutal_effect_declarations(actor, intent, check)
+        if brutal_effects:
+            damage_event["brutal_strike_effects"] = brutal_effects
         mastery = self._weapon_mastery_effect(actor, weapon)
         if mastery is not None and str(mastery.get("on")) == "hit" and (
             not mastery.get("requires_damage") or damage > 0
@@ -969,7 +1324,8 @@ class CombatResolutionMixin:
 
     def _hit_rider_declarations(
         self, actor: dict[str, Any], weapon: dict[str, Any],
-        intent: dict[str, Any], combat: dict[str, Any],
+        intent: dict[str, Any], combat: dict[str, Any], *,
+        damage_type: str = "", check: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """The extra damage this hit declares, as data the commit step rolls.
 
@@ -1053,7 +1409,106 @@ class CombatResolutionMixin:
             declarations.append(
                 declaration(feature_id, formula, damage_type, True)
             )
+        declarations.extend(
+            self._attack_state_riders(
+                character, weapon, combat, actor_id, damage_type=damage_type,
+                conditions=actor.get("conditions") or {}, check=check,
+            )
+        )
         return declarations
+
+    def _attack_state_riders(
+        self, character: Any, weapon: dict[str, Any], combat: dict[str, Any],
+        actor_id: str, *, damage_type: str = "",
+        conditions: dict[str, Any] | None = None,
+        check: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Frenzy and Brutal Strike: the extra damage an attack *state* adds.
+
+        Both live on the same hit as the Smite-family riders but are separate
+        damage instances, because their damage type follows the weapon and the
+        resistance rules must still be applied per instance.
+
+        The two gates read different facts on purpose.  Frenzy asks whether
+        Reckless was actually in force for this roll (its source is in the
+        check's source list); Brutal asks whether the intent declared it this
+        time.  Reading Reckless from the *condition* would be wrong for the
+        first attack of a turn: the condition is applied by this very batch,
+        so the actor view that settlement holds has not seen it yet.
+        """
+
+        source_codes = {
+            str(row.get("code") or "")
+            for row in (check or {}).get("advantage_sources") or []
+        }
+        rows: list[dict[str, Any]] = []
+
+        def parameter(feature_id: str, key: str) -> Any:
+            return self.features.feature_value(character, feature_id, key, None)
+
+        def definition_of(feature_id: str) -> str:
+            definition = self.features.feature_definition(feature_id)
+            return str(getattr(definition, "owner", "") or "")
+
+        if self.features.has_feature(character, "frenzy"):
+            required = str(parameter("frenzy", "requires_condition") or "")
+            sides = int(parameter("frenzy", "damage_die_sides") or 0)
+            count = int(parameter("frenzy", "dice_count") or 0)
+            # Conditions come from the actor view, not from the feature
+            # projection: the projection carries ownership, not live state, so
+            # reading Rage from it would make Frenzy silently unreachable.
+            active = conditions or {}
+            if (
+                sides and count > 0
+                and parameter("frenzy", "damage_type_from_attack")
+                and "reckless" in source_codes
+                and (not required or required in active)
+                and not self._feature_used_this_turn(combat, actor_id, "frenzy")
+            ):
+                rows.append({
+                    "feature_id": "frenzy",
+                    "owner": definition_of("frenzy"),
+                    "dice": f"{count}d{sides}",
+                    "damage_type": damage_type,
+                    "once_per_turn": True,
+                })
+
+        if bool((check or {}).get("brutal_strike")):
+            dice = self._brutal_strike_dice(character)
+            if dice:
+                rows.append({
+                    "feature_id": "brutal_strike",
+                    "owner": definition_of("brutal_strike"),
+                    "dice": dice,
+                    "damage_type": damage_type,
+                    # 选择已在掷骰前记账：这里再记一次会让 reducer 因重复拒绝。
+                    "once_per_turn": False,
+                })
+        return rows
+
+    def _brutal_strike_dice(self, character: Any) -> str:
+        """The extra damage dice, after the 17th-level upgrade.
+
+        The upgrade is a level, not a second declaration: the progression
+        table grants ``improved_brutal_strike`` at both 13 and 17, so a second
+        node would collide on ``(owner, id)`` and could not be granted twice.
+        Reading the class level here keeps the two numbers in one declaration.
+        """
+
+        base = str(self.features.feature_value(
+            character, "brutal_strike", "damage_dice", "",
+        ) or "")
+        upgrade = str(self.features.feature_value(
+            character, "brutal_strike", "damage_dice_upgrade", "",
+        ) or "")
+        needed = int(self.features.feature_value(
+            character, "brutal_strike", "upgrade_level", 0,
+        ) or 0)
+        state = self.features.class_state(character)
+        level = int(state[1]) if state else 0
+        if upgrade and level >= needed:
+            return upgrade
+        return base
 
     def _rider_dice(self, character: Any, feature_id: str) -> str:
         """The dice this rider uses, after its 14th/15th level upgrade.
@@ -1356,11 +1811,30 @@ class CombatResolutionMixin:
         self, instance: Any, combat: dict[str, Any], attacker_id: str,
         target: dict[str, Any], damage_event: dict[str, Any], rng: Any,
     ) -> list[dict[str, Any]]:
-        """Resolve the declared hit conditions after their damage landed."""
+        """Resolve the declared hit conditions after their damage landed.
+
+        Two declaration lists reach this method: ``hit_condition_effects``
+        (save-gated conditions such as Stunning Strike and Open Hand
+        Technique) and ``brutal_strike_effects`` (the four Brutal Strike
+        options, none of which allow a save).  Both are dispatched here so the
+        straight-through attack and the decision-finisher path cannot disagree
+        about *when* a hit-triggered effect lands.
+        """
 
         declarations = damage_event.get("hit_condition_effects")
-        if not isinstance(declarations, list) or not declarations:
+        declarations = declarations if isinstance(declarations, list) else []
+        brutal = damage_event.get("brutal_strike_effects")
+        brutal = brutal if isinstance(brutal, list) else []
+        if not declarations and not brutal:
             return []
+        events: list[dict[str, Any]] = [
+            event for row in brutal if isinstance(row, dict)
+            for event in self._brutal_effect_events(
+                instance, combat, attacker_id, target, row,
+            )
+        ]
+        if not declarations:
+            return events
         attacker = self._actor_view(instance, combat, attacker_id)
         # Monk feature save DC: 8 + Proficiency Bonus + Wisdom modifier.  It is
         # not the spell save DC (a Monk may have none) and never a number the
@@ -1369,7 +1843,6 @@ class CombatResolutionMixin:
             8 + int(attacker.get("proficiency_bonus", 0) or 0)
             + ability_modifier(attacker["abilities"].get("wis", 10))
         )
-        events: list[dict[str, Any]] = []
         for row in declarations:
             if not isinstance(row, dict):
                 continue
@@ -1485,6 +1958,215 @@ class CombatResolutionMixin:
                     "source_feature": "open_hand_technique",
                 })
         return events
+
+    def _brutal_effect_declarations(
+        self, actor: dict[str, Any], intent: dict[str, Any], check: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """The Brutal Strike options this hit declares, as data.
+
+        Declared with the damage event rather than resolved inline for the same
+        reason the riders are: a Shield or Uncanny Dodge that turns this hit
+        into a miss must not leave a push, a Speed reduction or a Sundering
+        bonus behind.  Nothing here rolls dice -- none of the four options
+        allows a save.
+        """
+
+        if not check.get("brutal_strike"):
+            return []
+        if actor["kind"] not in {"player", "companion"}:
+            return []
+        character = self._feature_character(actor)
+        if not self.features.has_feature(character, "brutal_strike"):
+            return []
+
+        def parameter(feature_id: str, key: str) -> Any:
+            return self.features.feature_value(character, feature_id, key, None)
+
+        rows: list[dict[str, Any]] = []
+        for raw in intent.get("brutal_strike_effects") or []:
+            kind = str(raw)
+            if kind == "forceful":
+                rows.append({
+                    "kind": "forceful",
+                    "feature_id": "brutal_strike",
+                    "push_distance_ft": int(
+                        parameter("brutal_strike", "forceful_push_distance_ft") or 0
+                    ),
+                    "follow_divisor": int(
+                        parameter("brutal_strike", "forceful_follow_move_divisor") or 0
+                    ),
+                })
+            elif kind == "hamstring":
+                rows.append({
+                    "kind": "hamstring",
+                    "feature_id": "brutal_strike",
+                    "condition": str(
+                        parameter("brutal_strike", "hamstring_condition") or ""
+                    ),
+                    "duration": str(
+                        parameter("brutal_strike", "hamstring_duration") or ""
+                    ),
+                })
+            elif kind == "staggering":
+                if not self.features.has_feature(character, "improved_brutal_strike"):
+                    continue
+                rows.append({
+                    "kind": "staggering",
+                    "feature_id": "improved_brutal_strike",
+                    "save_condition": str(
+                        parameter("improved_brutal_strike", "staggering_save_condition")
+                        or ""
+                    ),
+                    "reaction_condition": str(parameter(
+                        "improved_brutal_strike", "staggering_reaction_condition",
+                    ) or ""),
+                    "duration": str(
+                        parameter("improved_brutal_strike", "staggering_duration") or ""
+                    ),
+                })
+            elif kind == "sundering":
+                if not self.features.has_feature(character, "improved_brutal_strike"):
+                    continue
+                bonus = int(
+                    parameter("improved_brutal_strike", "sundering_attack_bonus") or 0
+                )
+                condition = str(
+                    parameter("improved_brutal_strike", "sundering_condition") or ""
+                )
+                if not bonus or not condition:
+                    continue
+                rows.append({
+                    "kind": "sundering",
+                    "feature_id": "improved_brutal_strike",
+                    "condition": condition,
+                    "attack_bonus": bonus,
+                    "duration": str(
+                        parameter("improved_brutal_strike", "sundering_duration") or ""
+                    ),
+                })
+        return [row for row in rows if self._brutal_effect_ready(row)]
+
+    @staticmethod
+    def _brutal_effect_ready(row: dict[str, Any]) -> bool:
+        """Every option must carry the magnitudes its resolver reads."""
+
+        kind = str(row.get("kind") or "")
+        if kind == "forceful":
+            return int(row.get("push_distance_ft") or 0) > 0
+        if kind == "hamstring":
+            return bool(row.get("condition")) and bool(row.get("duration"))
+        if kind == "staggering":
+            return bool(row.get("save_condition")) and bool(row.get("reaction_condition"))
+        if kind == "sundering":
+            return bool(row.get("condition")) and int(row.get("attack_bonus") or 0) > 0
+        return False
+
+    def _brutal_effect_events(
+        self, instance: Any, combat: dict[str, Any], attacker_id: str,
+        target: dict[str, Any], row: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Land one Brutal Strike option after its damage.
+
+        Forceful is a forced position change (the same event spells use), so it
+        never spends the target's own movement.  Hamstring reuses the condition
+        registry's Speed modifier, which makes "only the most recent one
+        counts" fall out of the condition being keyed by id instead of
+        accumulating -15 per application.  Staggering's two halves are two
+        conditions on purpose: consuming the saving-throw half must not restore
+        the Opportunity Attack the other half still forbids.
+        """
+
+        kind = str(row.get("kind") or "")
+        target_id = str(target["actor_id"])
+        feature_id = str(row.get("feature_id") or "brutal_strike")
+        if kind == "forceful":
+            distance = int(row.get("push_distance_ft") or 0)
+            if distance <= 0:
+                return []
+            direction = (
+                1 if self._position(combat, target_id)
+                >= self._position(combat, attacker_id) else -1
+            )
+            events = [{
+                "type": "dnd2024.position.changed", "actor_id": target_id,
+                "distance": direction * distance, "forced": True,
+                "source_feature": "brutal_strike",
+            }]
+            events.extend(self._brutal_follow_move_events(
+                instance, combat, attacker_id, target_id,
+                int(row.get("follow_divisor") or 0),
+            ))
+            return events
+        if kind == "hamstring":
+            return [{
+                "type": "condition.applied", "target_id": target_id,
+                "condition": str(row["condition"]),
+                "duration": str(row["duration"]),
+                "source_actor_id": attacker_id,
+                "source_feature": feature_id,
+            }]
+        if kind == "staggering":
+            # 豁免劣势没有时限（"它进行的下一次豁免"），因此不带 duration：
+            # 只有真掷过一次豁免才会被消费掉。反应封锁按时点到期，两者互不影响。
+            return [
+                {
+                    "type": "condition.applied", "target_id": target_id,
+                    "condition": str(row["save_condition"]),
+                    "source_actor_id": attacker_id,
+                    "source_feature": feature_id,
+                },
+                {
+                    "type": "condition.applied", "target_id": target_id,
+                    "condition": str(row["reaction_condition"]),
+                    "duration": str(row["duration"]),
+                    "source_actor_id": attacker_id,
+                    "source_feature": feature_id,
+                },
+            ]
+        if kind == "sundering":
+            return [{
+                "type": "condition.applied", "target_id": target_id,
+                "condition": str(row["condition"]),
+                "duration": str(row["duration"]),
+                "source_actor_id": attacker_id,
+                "attack_bonus": int(row["attack_bonus"]),
+                "source_feature": feature_id,
+            }]
+        return []
+
+    def _brutal_follow_move_events(
+        self, instance: Any, combat: dict[str, Any], attacker_id: str,
+        target_id: str, divisor: int,
+    ) -> list[dict[str, Any]]:
+        """The half-Speed, straight-toward-the-target follow-up allowance.
+
+        Like the critical-hit allowance it is a *budget in feet* with a
+        direction: the player still submits a ``move`` intent, and the flag
+        only suppresses Opportunity Attacks for a move that actually points at
+        the pushed creature and fits inside the allowance.  Granting to anyone
+        but the current actor would hand the movement pool to a different
+        creature, so it fails closed there.
+        """
+
+        if divisor <= 0:
+            return []
+        order = [str(item) for item in combat.get("initiative") or []]
+        index = combat.get("turn_index", -1)
+        if not (0 <= index < len(order) and order[index] == attacker_id):
+            return []
+        actor = self._actor_view(instance, combat, attacker_id)
+        speed = effective_speed(
+            self.catalog.conditions, actor.get("conditions") or {},
+            max(0, int(actor.get("speed", 0) or 0)),
+        )
+        budget = speed // divisor
+        if budget <= 0:
+            return []
+        return [{
+            "type": "dnd2024.movement.granted", "actor_id": attacker_id,
+            "amount": budget, "reason": "brutal_forceful",
+            "target_id": target_id, "source_feature": "brutal_strike",
+        }]
 
     def _critical_hit_move_events(
         self, instance: Any, combat: dict[str, Any], actor_id: str,
@@ -1740,6 +2422,9 @@ class CombatResolutionMixin:
                 succeeded = check_event["success"]
                 save_check_index = len(events)
                 events.append(check_event)
+                # 无论成功、失败还是自动失败，这次豁免都算"用掉了"那份
+                # "下一次豁免有劣势"：消费点就是豁免本身，不是回合边界。
+                events.extend(self._consume_save_markers(target_id, target))
                 if effect.get("damage"):
                     damage_node = spell_formula_node(
                         str(effect["damage"]), effect.get("upcast_damage"),
@@ -2109,7 +2794,24 @@ class CombatResolutionMixin:
         # 这一次移动——阈值是额度（英尺），不是"永久免疫"。
         crit_budget = int(economy.get("crit_move", 0) or 0)
         covered_by_crit = bool(crit_budget) and abs(distance) <= crit_budget
-        if adjacent_hostiles and not disengaged and not covered_by_crit:
+        # Forceful Blow 的跟步额度：同样是"英尺预算 + 方向"。方向是"朝被推开
+        # 的那个目标"，所以只有当这一步真的朝它走、而且没超额度时才免借机攻击；
+        # 朝别处走只是普通移动，照常开窗。
+        follow = economy.get("brutal_move")
+        covered_by_brutal = False
+        if isinstance(follow, dict):
+            budget = int(follow.get("amount", 0) or 0)
+            follow_target = str(follow.get("target_id") or "")
+            toward = (
+                self._position(combat, follow_target)
+                - self._position(combat, actor_id)
+                if follow_target else 0
+            )
+            covered_by_brutal = bool(
+                budget and toward and abs(distance) <= budget
+                and (distance > 0) == (toward > 0)
+            )
+        if adjacent_hostiles and not disengaged and not covered_by_crit and not covered_by_brutal:
             decision = {
                 "decision_id": f"decision:{intent['intent_id']}",
                 "kind": "opportunity_attack",
@@ -2123,6 +2825,7 @@ class CombatResolutionMixin:
             "type": "dnd2024.position.changed", "actor_id": actor_id,
             "distance": distance, "movement_cost": abs(distance), "forced": False,
             **({"crit_move": True} if covered_by_crit else {}),
+            **({"brutal_move": True} if covered_by_brutal else {}),
         }]
 
     @staticmethod
@@ -2146,6 +2849,7 @@ class CombatResolutionMixin:
         # they can neither be merged into this event nor ride along on the wire.
         event.pop("hit_riders", None)
         event.pop("hit_condition_effects", None)
+        event.pop("brutal_strike_effects", None)
         events: list[dict[str, Any]] = [event]
         if isinstance(feature_use, dict):
             events.append({"type": "dnd2024.feature.used", **feature_use})
@@ -2894,6 +3598,7 @@ class CombatResolutionMixin:
                 events.append({"type": "dnd2024.decision.pending", **window})
                 return events
             events.append(check)
+            events.extend(self._consume_save_markers(actor_id, actor))
             if check["success"]:
                 events.append({
                     "type": "condition.removed", "target_id": actor_id,
@@ -3306,6 +4011,7 @@ class CombatResolutionMixin:
             check["advantage_mode"] = mode
             check["advantage_sources"] = sources
         events.append(check)
+        events.extend(self._consume_save_markers(actor_id, actor))
         # DC 递增写在 save 之后、结果之前：失败也是一次实际使用。
         events.append({
             "type": "dnd2024.feature_state.set", "actor_id": actor_id,

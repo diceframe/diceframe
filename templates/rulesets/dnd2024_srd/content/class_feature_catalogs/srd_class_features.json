@@ -118,8 +118,10 @@
     "foe_slayer": "Foe Slayer",
     "font_of_inspiration": "Font of Inspiration",
     "font_of_magic": "Font of Magic",
+    "forceful_blow": "Forceful Blow",
     "frenzy": "Frenzy",
     "greater_divine_intervention": "Greater Divine Intervention",
+    "hamstring_blow": "Hamstring Blow",
     "heightened_focus": "Heightened Focus",
     "heroic_warrior": "Heroic Warrior",
     "holy_nimbus": "Holy Nimbus",
@@ -194,11 +196,13 @@
     "sorcery_incarnate": "Sorcery Incarnate",
     "spell_mastery": "Spell Mastery",
     "spellcasting": "Spellcasting",
+    "staggering_blow": "Staggering Blow",
     "steady_aim": "Steady Aim",
     "stroke_of_luck": "Stroke of Luck",
     "studied_attacks": "Studied Attacks",
     "stunning_strike": "Stunning Strike",
     "subclass_feature": "Subclass Feature",
+    "sundering_blow": "Sundering Blow",
     "superior_defense": "Superior Defense",
     "superior_hunters_defense": "Superior Hunter's Defense",
     "superior_hunters_prey": "Superior Hunter's Prey",
@@ -638,6 +642,17 @@
           "minimum_level": 20,
           "summary": "When you take the Attack action, you can attack four times instead of once.",
           "parameters": {"attacks_per_action": 4}
+        },
+        {
+          "id": "studied_attacks",
+          "minimum_level": 13,
+          "source_ref": "srd-5.2.1:p48:studied-attacks",
+          "summary": "If you make an attack roll against a creature and miss, you have Advantage on your next attack roll against that creature before the end of your next turn.",
+          "parameters": {
+            "mark_kind": "studied",
+            "mode": "advantage",
+            "expiry": "attacker_next_turn_end"
+          }
         }
       ]
     },
@@ -724,6 +739,70 @@
             "base_dc": 10,
             "dc_step": 5,
             "hp_multiplier": 2
+          }
+        },
+        {
+          "id": "reckless_attack",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p29:reckless-attack",
+          "summary": "When you make your first attack roll on your turn, you can decide to attack recklessly. Doing so gives you Advantage on attack rolls using Strength until the start of your next turn, but attack rolls against you have Advantage during that time.",
+          "parameters": {
+            "self_condition": "reckless",
+            "condition_duration": "attacker_next_turn_start",
+            "ability": "str"
+          }
+        },
+        {
+          "id": "frenzy",
+          "owner": "subclass:path_of_the_berserker",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p30:frenzy",
+          "summary": "If you use Reckless Attack while your Rage is active, you deal extra damage to the first target you hit on your turn with a Strength-based attack. To determine the extra damage, roll a number of d6s equal to your Rage Damage bonus, and add them together. The damage has the same type as the weapon or Unarmed Strike used for the attack.",
+          "parameters": {
+            "requires_condition": "rage",
+            "requires_declaration": "reckless_attack",
+            "ability": "str",
+            "damage_die_sides": 6,
+            "dice_count_track": "rage_damage",
+            "damage_type_from_attack": true,
+            "once_per_turn": true
+          }
+        },
+        {
+          "id": "brutal_strike",
+          "minimum_level": 9,
+          "source_ref": "srd-5.2.1:p30:brutal-strike",
+          "summary": "If you use Reckless Attack, you can forgo any Advantage on one Strength-based attack roll of your choice on your turn. The chosen attack roll mustn't have Disadvantage. If the chosen attack roll hits, the target takes an extra 1d10 damage of the same type dealt by the weapon or Unarmed Strike, and you can cause one Brutal Strike effect of your choice.",
+          "parameters": {
+            "requires_declaration": "reckless_attack",
+            "ability": "str",
+            "damage_dice": "1d10",
+            "damage_dice_upgrade": "2d10",
+            "upgrade_level": 17,
+            "effect_options": ["forceful", "hamstring"],
+            "effects_per_use": 1,
+            "effects_per_use_upgrade": 2,
+            "once_per_turn": true,
+            "forceful_push_distance_ft": 15,
+            "forceful_follow_move_divisor": 2,
+            "hamstring_condition": "hamstrung",
+            "hamstring_speed_reduction_ft": 15,
+            "hamstring_duration": "attacker_next_turn_start"
+          }
+        },
+        {
+          "id": "improved_brutal_strike",
+          "minimum_level": 13,
+          "source_ref": "srd-5.2.1:p30:improved-brutal-strike",
+          "summary": "Staggering Blow: the target has Disadvantage on the next saving throw it makes, and it can't make Opportunity Attacks until the start of your next turn. Sundering Blow: before the start of your next turn, the next attack roll made by another creature against the target gains a +5 bonus to the roll.",
+          "parameters": {
+            "additional_effect_options": ["staggering", "sundering"],
+            "staggering_save_condition": "next_save_disadvantage",
+            "staggering_reaction_condition": "reaction_blocked",
+            "staggering_duration": "attacker_next_turn_start",
+            "sundering_condition": "sundered",
+            "sundering_attack_bonus": 5,
+            "sundering_duration": "attacker_next_turn_start"
           }
         }
       ]

@@ -80,6 +80,39 @@ _RIDER_ATTACK_KINDS = frozenset({"weapon", "melee_weapon", "unarmed_strike", "be
 _OPEN_HAND_CHOICES = frozenset({"addle", "push", "topple"})
 _RIDER_CONDITION_DURATIONS = frozenset({"attacker_next_turn_start", "target_turn_start"})
 
+#: 攻击前声明与持续状态声明（S0-F15）允许的参数键。与 rider 表分开：这张表
+#: 描述的是"掷骰之前就确定、之后一直生效"的状态，两者的消费时点不同，混在
+#: 一张表里会让"缺键即加载失败"的断言说不清缺的是哪一种。
+_ATTACK_STATE_PARAMETER_KEYS: dict[str, frozenset[str]] = {
+    "reckless_attack": frozenset({
+        "self_condition", "condition_duration", "ability",
+    }),
+    "frenzy": frozenset({
+        "requires_condition", "requires_declaration", "ability",
+        "damage_die_sides", "dice_count_track", "damage_type_from_attack",
+        "once_per_turn",
+    }),
+    "brutal_strike": frozenset({
+        "requires_declaration", "ability", "damage_dice", "damage_dice_upgrade",
+        "upgrade_level", "effect_options", "effects_per_use",
+        "effects_per_use_upgrade", "once_per_turn",
+        "forceful_push_distance_ft", "forceful_follow_move_divisor",
+        "hamstring_condition", "hamstring_speed_reduction_ft",
+        "hamstring_duration",
+    }),
+    "improved_brutal_strike": frozenset({
+        "additional_effect_options", "staggering_save_condition",
+        "staggering_reaction_condition", "staggering_duration",
+        "sundering_condition", "sundering_attack_bonus", "sundering_duration",
+    }),
+    "studied_attacks": frozenset({"mark_kind", "mode", "expiry"}),
+}
+#: Brutal Strike 的四个效果是闭集：效果名同时是意图里提交的值，拼错一个
+#: 就会变成"提交了但没人实现"的静默失手。
+_BRUTAL_STRIKE_EFFECTS = frozenset({
+    "forceful", "hamstring", "staggering", "sundering",
+})
+
 
 def _humanize(feature_id: str) -> str:
     return str(feature_id).replace("_", " ").strip().title()
@@ -1864,6 +1897,7 @@ class Dnd2024ClassFeatureResolver:
             self._validate_movement_parameters(definition)
             self._validate_overchannel_parameters(definition)
             self._validate_hit_rider_parameters(definition)
+            self._validate_attack_state_parameters(definition)
             if definition.resource_id:
                 declaration = self.resources.declaration(
                     definition.class_id, definition.resource_id,
@@ -2505,3 +2539,119 @@ class Dnd2024ClassFeatureResolver:
             dice("primal_strike_dice")
             positive_int("range_bonus_ft")
             positive_int("range_minimum_ft")
+
+    @staticmethod
+    def _validate_attack_state_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on the pre-roll declaration and persistent-state contract.
+
+        Same two-way rule as the rider table: an unknown key promises behaviour
+        no code reads, and a missing key would make the runtime fall back to a
+        number the SRD never states.  The effect ids are a closed set because
+        they travel through an intent -- a typo there is a silent no-op that
+        still consumes the once-per-turn budget.
+        """
+
+        expected = _ATTACK_STATE_PARAMETER_KEYS.get(definition.id)
+        if expected is None:
+            return
+        from src.rulesets.dnd2024.combat.catalog import DICE_RE
+
+        parameters = definition.parameters
+        unknown = sorted(set(parameters) - expected)
+        if unknown:
+            raise ClassFeatureError(
+                f"{definition.id} does not support {', '.join(unknown)}"
+            )
+        missing = sorted(expected - set(parameters))
+        if missing:
+            raise ClassFeatureError(
+                f"{definition.id} is missing {', '.join(missing)}"
+            )
+
+        feature_id = definition.id
+
+        def flag(key: str) -> None:
+            if not isinstance(parameters[key], bool):
+                raise ClassFeatureError(f"{feature_id}.{key} must be a boolean")
+
+        def positive_int(key: str) -> None:
+            value = parameters[key]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ClassFeatureError(
+                    f"{feature_id}.{key} must be a positive integer"
+                )
+
+        def bare_id(key: str) -> None:
+            value = parameters[key]
+            if not isinstance(value, str) or not value or ":" in value:
+                raise ClassFeatureError(f"{feature_id}.{key} must name a value")
+
+        def one_of(key: str, allowed: frozenset[str]) -> None:
+            value = parameters[key]
+            if not isinstance(value, str) or value not in allowed:
+                raise ClassFeatureError(
+                    f"{feature_id}.{key} must be one of {sorted(allowed)}"
+                )
+
+        def id_list(key: str, allowed: frozenset[str]) -> None:
+            value = parameters[key]
+            if (
+                not isinstance(value, list)
+                or not value
+                or any(not isinstance(item, str) or item not in allowed for item in value)
+                or len(set(value)) != len(value)
+            ):
+                raise ClassFeatureError(
+                    f"{feature_id}.{key} must be a list drawn from {sorted(allowed)}"
+                )
+
+        def dice(key: str) -> None:
+            value = parameters[key]
+            if not isinstance(value, str) or not DICE_RE.match(value):
+                raise ClassFeatureError(f"{feature_id}.{key} must be a dice formula")
+
+        if feature_id == "reckless_attack":
+            bare_id("self_condition")
+            one_of("condition_duration", _RIDER_CONDITION_DURATIONS)
+            one_of("ability", frozenset(ABILITY_IDS))
+        elif feature_id == "frenzy":
+            bare_id("requires_condition")
+            bare_id("requires_declaration")
+            one_of("ability", frozenset(ABILITY_IDS))
+            # 骰面决定每一颗狂怒骰的点数上限；颗数来自 class track，不在这里。
+            positive_int("damage_die_sides")
+            flag("damage_type_from_attack")
+            flag("once_per_turn")
+        elif feature_id == "brutal_strike":
+            bare_id("requires_declaration")
+            one_of("ability", frozenset(ABILITY_IDS))
+            dice("damage_dice")
+            dice("damage_dice_upgrade")
+            positive_int("upgrade_level")
+            id_list("effect_options", _BRUTAL_STRIKE_EFFECTS)
+            positive_int("effects_per_use")
+            positive_int("effects_per_use_upgrade")
+            flag("once_per_turn")
+            positive_int("forceful_push_distance_ft")
+            positive_int("forceful_follow_move_divisor")
+            bare_id("hamstring_condition")
+            positive_int("hamstring_speed_reduction_ft")
+            one_of("hamstring_duration", _RIDER_CONDITION_DURATIONS)
+            if parameters["effects_per_use_upgrade"] < parameters["effects_per_use"]:
+                raise ClassFeatureError(
+                    f"{feature_id}.effects_per_use_upgrade cannot lower the allowance"
+                )
+        elif feature_id == "improved_brutal_strike":
+            id_list("additional_effect_options", _BRUTAL_STRIKE_EFFECTS)
+            bare_id("staggering_save_condition")
+            bare_id("staggering_reaction_condition")
+            one_of("staggering_duration", _RIDER_CONDITION_DURATIONS)
+            bare_id("sundering_condition")
+            positive_int("sundering_attack_bonus")
+            one_of("sundering_duration", _RIDER_CONDITION_DURATIONS)
+        elif feature_id == "studied_attacks":
+            bare_id("mark_kind")
+            one_of("mode", frozenset({"advantage", "disadvantage"}))
+            # 到期点是攻击者"下一个回合结束"：引擎只实现这一个时点，写成
+            # 别的值会得到一条永远不会到期的标记。
+            one_of("expiry", frozenset({"attacker_next_turn_end"}))

@@ -130,6 +130,8 @@
     "unconscious": {"attack_modes": [{"side": "target", "mode": "advantage"}], "implies_incapacitated": true, "speed_zero": true, "auto_fail_saves": ["str", "dex"], "crit_on_hit_within_5": true},
     "prone": {"attack_modes": [{"side": "actor", "mode": "disadvantage"}]},
     "staggered": {"speed_halved": true},
-    "staggered_opening": {"attack_modes": [{"side": "target", "mode": "advantage", "consume_on": "attack_resolved"}]}
+    "staggered_opening": {"attack_modes": [{"side": "target", "mode": "advantage", "consume_on": "attack_resolved"}]},
+    "reckless": {"attack_modes": [{"side": "target", "mode": "advantage"}]},
+    "hamstrung": {"speed_modifier": -15}
   }
 }
