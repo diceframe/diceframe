@@ -319,6 +319,8 @@ class Dnd2024CharacterStateReconciler:
             return None
         features = Dnd2024ClassFeatureResolver(self.bundle)
         bound = sorted(attuned_refs(canonical))
+        feat_state = canonical.get("features")
+        owned_feats = feat_state.get("feat_refs") if isinstance(feat_state, dict) else ()
         armor_training = derive_armor_training_state(
             abilities, item_refs, armor_category_refs, self.bundle,
         )
@@ -327,6 +329,7 @@ class Dnd2024CharacterStateReconciler:
             armor_category_refs=armor_category_refs, warnings=warnings,
             unarmored_ability_bonuses=features.unarmored_ac_bonus_abilities(canonical),
             attuned_refs=bound,
+            feat_refs=owned_feats if isinstance(owned_feats, list) else (),
         )
         return {
             "armor_training": armor_training,

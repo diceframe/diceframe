@@ -28,14 +28,20 @@ from dnd2024_monk_common import (
 )
 
 
-def _fighter_sheet(runtime: Dnd2024Runtime, level: int = 1) -> dict:
+def _fighter_sheet(
+    runtime: Dnd2024Runtime, level: int = 1, *, fighting_style: str = "feat:archery",
+) -> dict:
     choices = runtime.builder_choices(None, {"locale": "en"})
     preset = next(
         item for item in choices["quick_presets"] if item["id"] == "stalwart_guardian"
     )
-    sheet = runtime.finalize_character(
-        None, {**preset["draft"], "locale": "en", "name": "Fighter"},
-    )
+    draft = {**preset["draft"], "locale": "en", "name": "Fighter"}
+    # 1 级 Fighting Style 是 7 级 Additional Fighting Style 的父级选择。默认
+    # 取 Archery 而不是预设的 Defense：已经拥有 Defense 的冠军在 7 级既不能
+    # 重复选它、其余三项的效果又尚未实现，那条路径上无法构造任何合法高等级
+    # 角色。需要"已拥有 Defense"的场景由测试显式传 defense。
+    draft["class_feature_feat_choices"] = {"fighting_style": fighting_style}
+    sheet = runtime.finalize_character(None, draft)
     # 高等级必须走真实升级链；默认 helper 总把 ASI 加在 STR 上会撞 20 上限，
     # 因此这里按"仍有空间"的确定性规则分配。
     while int(sheet["ruleset_character"]["build"]["level"]) < level:

@@ -99,6 +99,78 @@ describe('D&D 2024 advancement panel', () => {
     expect(wrapper.text()).toContain('Champion')
   })
 
+  it('renders feature choices and submits the picked option', async () => {
+    // Without this block the panel showed "feature choice ... requires a
+    // selection at this level" and offered nothing to click, so a Champion
+    // could never reach level 7.
+    mocks.preview.mockResolvedValueOnce({
+      ok: true,
+      rule_id: 'dnd2024_srd',
+      advancement: {
+        ok: false,
+        errors: ['feature choice additional_fighting_style requires a selection at this level'],
+        requirements: [{
+          id: 'feature_choice:subclass:champion:additional_fighting_style:fighting_style_feat',
+          kind: 'feature_choice',
+          required: true,
+          owner: 'subclass:champion',
+          feature_id: 'additional_fighting_style',
+          choice_id: 'fighting_style_feat',
+          count: 1,
+          options: [
+            {
+              value: 'feat:defense', name: 'Defense',
+              source_ref: 'srd-5.2.1:p47:defense',
+              available: true, unavailable_reasons: [],
+            },
+            {
+              value: 'feat:great_weapon_fighting', name: 'Great Weapon Fighting',
+              source_ref: 'srd-5.2.1:p47:great-weapon-fighting',
+              available: false, unavailable_reasons: ['effect_not_implemented'],
+            },
+          ],
+        }],
+        from_level: 6, to_level: 7, class_ref: 'class:fighter',
+        source_ref: 'srd-5.2.1:p42:fighter-features',
+        content_version: 'srd-5.2.1+r2',
+        diff: {
+          proficiency_bonus: { before: 3, after: 3 }, hp: { gain: 6 },
+          gained_feature_ids: ['additional_fighting_style'],
+          spell_slot_changes: {}, abilities: {},
+        },
+        snapshot: {},
+      },
+    })
+    const wrapper = mount(Dnd2024AdvancementPanel, {
+      props: { ruleId: 'dnd2024_srd', character, language: 'en' },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Additional Fighting Style')
+    // "This ruleset does not implement it" must not read like a prerequisite
+    // the player could satisfy by changing ability scores.
+    expect(wrapper.text()).toContain('Not implemented in this ruleset yet')
+
+    const defense = wrapper.findAll('label').find(label => label.text().includes('Defense'))
+    await defense!.get('input').trigger('change')
+    await flushPromises()
+
+    expect(mocks.preview).toHaveBeenLastCalledWith(
+      'dnd2024_srd',
+      character,
+      {
+        hp_method: 'fixed',
+        feature_choices: [{
+          owner: 'subclass:champion',
+          feature_id: 'additional_fighting_style',
+          choice_id: 'fighting_style_feat',
+          selected_refs: ['feat:defense'],
+        }],
+      },
+      'en',
+    )
+  })
+
   it('uses the live entity endpoint when game and player IDs are present', async () => {
     const wrapper = mount(Dnd2024AdvancementPanel, {
       props: {

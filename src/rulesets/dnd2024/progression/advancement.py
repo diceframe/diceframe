@@ -7,7 +7,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.rulesets.bundle import LoadedRulesetBundle
+from src.rulesets.dnd2024.character.attunement import attuned_refs
 from src.rulesets.dnd2024.character.builder import ABILITY_IDS, ability_modifier
+from src.rulesets.dnd2024.character.derivation import derive_armor_class
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.progression.catalog import (
     Dnd2024ProgressionCatalog,
@@ -17,6 +19,10 @@ from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 
 # 专长机械参数的封闭键集：新参数随其归属切片一起扩这里，未知键 fail closed。
 ADVANCEMENT_FEAT_PARAMETER_KEYS = frozenset({"ranged_attack_bonus"})
+# 被动效果的封闭 kind 集：本切片只消费 armor_class_bonus，其余必须加载期拒绝。
+ADVANCEMENT_FEAT_PASSIVE_EFFECT_KINDS = frozenset({"armor_class_bonus"})
+# 一个特性选项槽的规范化输入只接受这四个字段，多余字段一律拒绝。
+FEATURE_CHOICE_KEYS = frozenset({"owner", "feature_id", "choice_id", "selected_refs"})
 
 # 纯 ASI 走的是一条与专长相同的代码路径：属性值提升被声明成一条伪专长，
 # 让「占专长槽」只有一种实现。它不是角色拥有的专长，账本据此把它记成
@@ -68,8 +74,11 @@ class Dnd2024AdvancementEngine:
     catalog: Dnd2024ProgressionCatalog = field(init=False)
     advancement_feats: dict[str, dict[str, Any]] = field(init=False)
     advancement_feat_labels: dict[str, str] = field(init=False)
+    # 同一次升级里特性解析被问多次（选项槽、生命值增量、AC 重算），共用一份。
+    _feature_resolver: Dnd2024ClassFeatureResolver = field(init=False)
 
     def __post_init__(self) -> None:
+        self._feature_resolver = Dnd2024ClassFeatureResolver(self.bundle)
         self.catalog = Dnd2024ProgressionCatalog.from_bundle(self.bundle)
         feat_catalog = self.bundle.get("advancement_feat_catalog", "srd_advancement_feats")
         if feat_catalog is None or not isinstance(feat_catalog.get("feats"), dict):
@@ -79,6 +88,7 @@ class Dnd2024AdvancementEngine:
             raise ProgressionCatalogError("advancement feat labels must cover the catalog")
         for feat_id, feat in feat_catalog["feats"].items():
             self._validate_feat_parameters(str(feat_id), feat)
+            self._validate_feat_passive_effects(str(feat_id), feat)
         self.advancement_feats = deepcopy(feat_catalog["feats"])
         self.advancement_feat_labels = {
             str(feat_id): str(label) for feat_id, label in labels.items()
@@ -343,6 +353,55 @@ class Dnd2024AdvancementEngine:
     def _recorded_a_choice(record: dict[str, Any], epic: bool) -> bool:
         key = "epic_boon_ref" if epic else "feat_ref"
         return bool(record.get("ability_score_increase") or record.get(key))
+    @staticmethod
+    def _validate_feat_passive_effects(feat_id: str, feat: Any) -> None:
+        """Validate a feat's closed passive-effect declarations.
+
+        The armor class formula reads these declarations instead of embedding
+        the numbers, so an unknown kind or a non-integer value has to fail at
+        load -- silently contributing nothing would look like a working feat.
+        """
+
+        if not isinstance(feat, dict):
+            return
+        effects = feat.get("passive_effects")
+        if effects is None:
+            return
+        if not isinstance(effects, list) or not effects:
+            raise ProgressionCatalogError(
+                f"advancement feat {feat_id} passive_effects must be a non-empty array"
+            )
+        for effect in effects:
+            if not isinstance(effect, dict):
+                raise ProgressionCatalogError(
+                    f"advancement feat {feat_id} passive effect must be an object"
+                )
+            kind = str(effect.get("kind") or "")
+            if kind not in ADVANCEMENT_FEAT_PASSIVE_EFFECT_KINDS:
+                raise ProgressionCatalogError(
+                    f"advancement feat {feat_id} has an unknown passive effect: {kind!r}"
+                )
+            unknown = sorted(set(effect) - {"kind", "value", "requires_armor"})
+            if unknown:
+                raise ProgressionCatalogError(
+                    f"advancement feat {feat_id} passive effect has an unknown "
+                    f"field: {unknown[0]}"
+                )
+            value = effect.get("value")
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 1 <= value <= 10
+            ):
+                raise ProgressionCatalogError(
+                    f"advancement feat {feat_id} passive effect value must be an "
+                    "integer from 1 to 10"
+                )
+            if not isinstance(effect.get("requires_armor"), bool):
+                raise ProgressionCatalogError(
+                    f"advancement feat {feat_id} passive effect requires_armor "
+                    "must be a boolean"
+                )
 
     def preview_next_level(
         self,
@@ -505,7 +564,7 @@ class Dnd2024AdvancementEngine:
         retrospective_con_hp = current_level * (new_con - old_con)
         # 防御类特性的生命值上限加成只按等级增量发放：2→3 得 +3，之后每级 +1。
         # 用与建卡相同的 resolver 公式，不回溯 from_level 之前的等级。
-        features = Dnd2024ClassFeatureResolver(self.bundle)
+        features = self._feature_resolver
         current_subclass_ref = str(feature_state.get("subclass_ref") or "")
         next_subclass_ref = (
             selected_subclass_ref
@@ -533,6 +592,11 @@ class Dnd2024AdvancementEngine:
             ),
         )
         gained_feature_ids = [*after["gained_feature_ids"], *subclass_feature_ids]
+        choice_requirements, choice_records, choice_errors = self._plan_feature_choices(
+            character, class_ref, target_level, gained_feature_ids, after, choices,
+        )
+        errors.extend(choice_errors)
+        requirements.extend(choice_requirements)
         return {
             "ok": not errors,
             "errors": errors,
@@ -558,6 +622,10 @@ class Dnd2024AdvancementEngine:
                 "spell_slots": after["spell_slots"],
                 "ability_increases": ability_increases,
                 "advancement_feat_ref": advancement_feat_ref,
+                "feature_choices": choice_records,
+                "feature_choice_refs": [
+                    ref for record in choice_records for ref in record["selected_refs"]
+                ],
                 "abilities": new_abilities,
                 "class_spell_choices": spell_choices,
                 "hp": {
@@ -607,6 +675,16 @@ class Dnd2024AdvancementEngine:
         advancement_feat_ref = str(preview["diff"].get("advancement_feat_ref") or "")
         if advancement_feat_ref:
             features.setdefault("feat_refs", []).append(advancement_feat_ref)
+        choice_records = preview["diff"].get("feature_choices") or []
+        if choice_records:
+            # 选项槽与专长所有权分开保存：前者记录玩家选了什么、哪一级选的，
+            # 后者才是既有专长前提与被动效果读取的所有权来源。
+            features.setdefault("feature_choices", []).extend(deepcopy(choice_records))
+            owned_refs = features.setdefault("feat_refs", [])
+            for record in choice_records:
+                for ref in record["selected_refs"]:
+                    if ref not in owned_refs:
+                        owned_refs.append(ref)
         grants = features.setdefault("class_feature_grants", [])
         if not grants:
             level_one = self.catalog.snapshot(preview["class_ref"], 1)
@@ -1090,6 +1168,169 @@ class Dnd2024AdvancementEngine:
             errors.append(f"ability_score_increases must total exactly {points}")
         return parsed, selected_ref, errors
 
+    def _plan_feature_choices(
+        self,
+        character: dict[str, Any],
+        class_ref: str,
+        target_level: int,
+        gained_feature_ids: list[str],
+        snapshot: dict[str, Any],
+        choices: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+        """Validate the selections this level's newly gained features demand.
+
+        Only a feature gained *at this level* may own a slot, so an old slot
+        cannot be resubmitted and a future one cannot be pre-filled.  A
+        submitted record matching no such slot is an error, never a field to
+        silently ignore.  Options outside a feature's executability whitelist
+        are still projected, but marked ``effect_not_implemented`` and
+        rejected, so a selection that grants nothing cannot look finished.
+        """
+
+        errors: list[str] = []
+        requirements: list[dict[str, Any]] = []
+        records: list[dict[str, Any]] = []
+
+        feature_state = character.get("features")
+        feature_state = feature_state if isinstance(feature_state, dict) else {}
+        subclass_ref = str(feature_state.get("subclass_ref") or "")
+        owners = [f"class:{_class_id(class_ref)}"]
+        if subclass_ref:
+            owners.append(subclass_ref)
+        resolver = self._feature_resolver
+        declared: list[Any] = []
+        seen: set[tuple[str, str]] = set()
+        for feature_id in gained_feature_ids:
+            for owner in owners:
+                key = (owner, str(feature_id))
+                if key in seen:
+                    continue
+                definition = resolver.catalog.features_by_key.get(key)
+                if definition is None or definition.choice is None:
+                    continue
+                seen.add(key)
+                declared.append(definition)
+
+        raw_choices = choices.get("feature_choices")
+        if raw_choices is None:
+            raw_choices = []
+        elif not isinstance(raw_choices, list):
+            errors.append("feature_choices must be an array")
+            raw_choices = []
+
+        submitted: list[dict[str, Any]] = []
+        for raw in raw_choices:
+            if not isinstance(raw, dict):
+                errors.append("each feature choice must be an object")
+                continue
+            unknown = sorted(set(raw) - FEATURE_CHOICE_KEYS)
+            if unknown:
+                errors.append(f"feature choice has an unknown field: {unknown[0]}")
+                continue
+            submitted.append({
+                "owner": str(raw.get("owner") or ""),
+                "feature_id": str(raw.get("feature_id") or ""),
+                "choice_id": str(raw.get("choice_id") or ""),
+                "selected_refs": raw.get("selected_refs"),
+            })
+
+        matched: set[int] = set()
+        for definition in declared:
+            choice = definition.choice
+            enabled = set(choice.enabled_options)
+            projected: list[dict[str, Any]] = []
+            for option in self._feat_options(
+                choice.category, character, target_level, snapshot,
+            ):
+                if option["value"] in enabled:
+                    projected.append(option)
+                    continue
+                reasons = list(option["unavailable_reasons"])
+                if "effect_not_implemented" not in reasons:
+                    reasons.append("effect_not_implemented")
+                projected.append({**option, "available": False, "unavailable_reasons": reasons})
+            requirements.append({
+                "id": f"feature_choice:{definition.owner}:{definition.id}:{choice.id}",
+                "kind": "feature_choice",
+                "required": True,
+                "owner": definition.owner,
+                "feature_id": definition.id,
+                "choice_id": choice.id,
+                "count": choice.count,
+                "options": projected,
+            })
+
+            slot = [
+                index for index, record in enumerate(submitted)
+                if record["owner"] == definition.owner
+                and record["feature_id"] == definition.id
+                and record["choice_id"] == choice.id
+            ]
+            if not slot:
+                errors.append(
+                    f"feature choice {definition.id} requires a selection at this level"
+                )
+                continue
+            if len(slot) > 1:
+                errors.append(
+                    f"feature choice {definition.id} was submitted more than once"
+                )
+                matched.update(slot)
+                continue
+            matched.add(slot[0])
+            raw_refs = submitted[slot[0]]["selected_refs"]
+            if not isinstance(raw_refs, list):
+                errors.append(
+                    f"feature choice {definition.id} selected_refs must be an array"
+                )
+                continue
+            if len(raw_refs) != choice.count:
+                errors.append(
+                    f"feature choice {definition.id} must select exactly "
+                    f"{choice.count} option"
+                )
+                continue
+            if not all(isinstance(ref, str) for ref in raw_refs):
+                errors.append(
+                    f"feature choice {definition.id} selected_refs must be strings"
+                )
+                continue
+            if len(set(raw_refs)) != len(raw_refs):
+                errors.append(
+                    f"feature choice {definition.id} selected_refs repeats an option"
+                )
+                continue
+            ref = str(raw_refs[0])
+            feat = self.advancement_feats.get(ref.removeprefix("feat:"))
+            if not ref.startswith("feat:") or not isinstance(feat, dict) or (
+                feat.get("category") != choice.category
+            ):
+                errors.append(f"{ref} is not a {choice.category} feat")
+                continue
+            if ref not in enabled:
+                errors.append(f"{ref} cannot be selected: effect_not_implemented")
+                continue
+            option = next((item for item in projected if item["value"] == ref), None)
+            if option is None or option["unavailable_reasons"]:
+                reasons = option["unavailable_reasons"] if option else ["unknown"]
+                errors.append(f"{ref} is not available: {', '.join(reasons)}")
+                continue
+            records.append({
+                "owner": definition.owner,
+                "feature_id": definition.id,
+                "choice_id": choice.id,
+                "selected_refs": [ref],
+                "granted_level": target_level,
+            })
+
+        for index, record in enumerate(submitted):
+            if index not in matched:
+                errors.append(
+                    f"feature choice {record['choice_id']} does not belong to a "
+                    "feature gained at this level"
+                )
+        return requirements, records, errors
+
     def _feat_options(
         self,
         category: str,
@@ -1238,6 +1479,26 @@ class Dnd2024AdvancementEngine:
             "saving_throws": saving_throws,
         })
         proficiencies["skill_values"] = skill_values
+        # 升级当次就要生效：Defense 这类被动 AC 加值不能等下一次换装。
+        # 复用建卡与 live 协调共用的唯一公式，装备取 canonical 已装备列表。
+        equipment = character.get("equipment")
+        equipment = equipment if isinstance(equipment, dict) else {}
+        equipped_refs = [str(ref) for ref in (equipment.get("item_refs") or [])]
+        armor_category_refs = [
+            str(ref) for ref in (proficiencies.get("armor_category_refs") or [])
+        ]
+        feat_state = character.get("features")
+        feat_state = feat_state if isinstance(feat_state, dict) else {}
+        owned_refs = feat_state.get("feat_refs")
+        derived["armor_class"] = derive_armor_class(
+            abilities, equipped_refs, self.bundle,
+            armor_category_refs=armor_category_refs,
+            unarmored_ability_bonuses=self._feature_resolver.unarmored_ac_bonus_abilities(
+                character
+            ),
+            attuned_refs=attuned_refs(character),
+            feat_refs=owned_refs if isinstance(owned_refs, list) else (),
+        )
         class_ref = str(character["build"]["class_levels"][0]["class_ref"])
         class_entity = self.bundle.get("class", _class_id(class_ref)) or {}
         spell_ability = str(class_entity.get("spellcasting_ability") or "")
