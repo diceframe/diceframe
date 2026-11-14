@@ -7,7 +7,6 @@ from copy import deepcopy
 import pytest
 
 from src.rulesets.dnd2024.progression.advancement import (
-    ADVANCEMENT_RECORDS_KEY,
     Dnd2024AdvancementEngine,
 )
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
@@ -65,6 +64,35 @@ def _without_subclass(character: dict) -> dict:
 
 def _ids(missing: list[dict]) -> set[str]:
     return {row["id"] for row in missing}
+
+
+def _drop_increase(character: dict, level: int) -> dict:
+    """Erase one level's ability answer, as a skipped level actually looks."""
+
+    damaged = deepcopy(character)
+    for entry in damaged["progression"]["history"]:
+        if entry["to_level"] == level:
+            entry["choices"].pop("ability_score_increases", None)
+            entry["diff"].pop("advancement_feat_ref", None)
+    return damaged
+
+
+def _forged_history(target: int, increases_at: set[int]) -> list[dict]:
+    """A contiguous history for 2..target, with the listed levels answered."""
+
+    return [
+        {
+            "from_level": level - 1,
+            "to_level": level,
+            "choices": (
+                {"ability_score_increases": {"con": 2}}
+                if level in increases_at else {}
+            ),
+            "diff": {},
+            "source_ref": "test:fixture",
+        }
+        for level in range(2, target + 1)
+    ]
 
 
 def test_a_fighter_past_level_three_without_a_subclass_is_reported() -> None:
@@ -143,17 +171,13 @@ def test_a_chosen_subclass_cannot_be_swapped() -> None:
 
 
 def test_a_skipped_ability_increase_is_reported_from_the_ledger() -> None:
-    """矩阵 13：账本缺哪一级，就报哪一级。"""
+    """矩阵 13：哪一级没作答，就报哪一级。"""
 
     runtime, character = _quick_character()
     engine = _engine(runtime)
     five = _advance_to(engine, character, 5)
 
-    damaged = deepcopy(five)
-    records = damaged["progression"][ADVANCEMENT_RECORDS_KEY]
-    damaged["progression"][ADVANCEMENT_RECORDS_KEY] = [
-        record for record in records if record["level"] != 4
-    ]
+    damaged = _drop_increase(five, 4)
 
     missing = engine.missing_choices(damaged)
     asi = next(item for item in missing if item["id"] == "ability_score_increases")
@@ -168,11 +192,7 @@ def test_the_fighter_extra_ability_levels_are_not_assumed_to_be_four_eight_twelv
     engine = _engine(runtime)
     six = _advance_to(engine, character, 6)
 
-    damaged = deepcopy(six)
-    records = damaged["progression"][ADVANCEMENT_RECORDS_KEY]
-    damaged["progression"][ADVANCEMENT_RECORDS_KEY] = [
-        record for record in records if record["level"] != 6
-    ]
+    damaged = _drop_increase(six, 6)
 
     asi_levels = {
         item["level"]
@@ -183,14 +203,14 @@ def test_the_fighter_extra_ability_levels_are_not_assumed_to_be_four_eight_twelv
 
 
 def test_an_old_save_without_a_ledger_is_not_declared_incomplete() -> None:
-    """矩阵 17：没有账本就无法区分「漏选」与「字段还不存在」，不能误报。"""
+    """矩阵 17：没有历史就无法区分「漏选」与「字段还不存在」，不能误报。"""
 
     runtime, character = _quick_character()
     engine = _engine(runtime)
     five = _advance_to(engine, character, 5)
 
     old = deepcopy(five)
-    (old.get("progression") or {}).pop(ADVANCEMENT_RECORDS_KEY, None)
+    (old.get("progression") or {}).pop("history", None)
 
     assert "ability_score_increases" not in _ids(engine.missing_choices(old))
 
@@ -203,7 +223,7 @@ def test_an_old_save_still_owes_its_subclass() -> None:
     five = _without_subclass(_advance_to(engine, character, 5))
 
     old = deepcopy(five)
-    (old.get("progression") or {}).pop(ADVANCEMENT_RECORDS_KEY, None)
+    (old.get("progression") or {}).pop("history", None)
 
     assert "subclass_ref" in _ids(engine.missing_choices(old))
 
@@ -257,9 +277,7 @@ def test_epic_boons_are_audited_at_nineteen() -> None:
     forged["build"]["level"] = 19
     forged["build"]["class_levels"][0]["level"] = 19
     forged["progression"]["level"] = 19
-    forged["progression"][ADVANCEMENT_RECORDS_KEY] = [
-        {"level": level, "class_ref": "class:fighter"} for level in range(2, 20)
-    ]
+    forged["progression"]["history"] = _forged_history(19, {4, 6, 8, 12, 14, 16})
 
     missing = engine.missing_choices(forged)
     assert "epic_boon_ref" in _ids(missing)
