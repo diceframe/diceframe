@@ -21,7 +21,7 @@ import time
 import zipfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 from .capabilities import (
@@ -37,6 +37,7 @@ from .contracts import (
     AIProviderResolver,
     ListedBridgeExtensionDescriptor,
     ListedToolDescriptor,
+    PluginManifest,
     PluginContributionView,
     PluginPublicDetail,
     PluginStoppedCallback,
@@ -252,9 +253,9 @@ class PluginHost:
         for plugin_id in graph:
             walk(plugin_id)
         for plugin_id in cyclic:
-            runtime = self.plugins.get(plugin_id)
-            if runtime is not None:
-                runtime.status, runtime.error = "failed", "plugin dependency cycle detected"
+            cycle_runtime = self.plugins.get(plugin_id)
+            if cycle_runtime is not None:
+                cycle_runtime.status, cycle_runtime.error = "failed", "plugin dependency cycle detected"
 
         for plugin_id, runtime in self.plugins.items():
             if runtime.status == "failed":
@@ -365,7 +366,7 @@ class PluginHost:
 
         if not isinstance(payloads, list) or not payloads or len(payloads) > 32:
             raise ValueError("插件组必须是 1 到 32 个安装包")
-        candidate: dict[str, tuple[dict[str, Any], Path]] = {}
+        candidate: dict[str, tuple[PluginManifest, Path]] = {}
         temp = tempfile.TemporaryDirectory(
             prefix="plugin-group-plan-",
             dir=str(self.data_dir) if self.data_dir.exists() else None,
@@ -387,7 +388,7 @@ class PluginHost:
                 self._validate_package_before_install(
                     source_dir, dict(runtime.manifest), "",
                 )
-                candidate[plugin_id] = (dict(runtime.manifest), source_dir)
+                candidate[plugin_id] = (cast(PluginManifest, dict(runtime.manifest)), source_dir)
 
             manifests: dict[str, Mapping[str, Any]] = {
                 plugin_id: runtime.manifest
@@ -520,7 +521,7 @@ class PluginHost:
                 value = runtime.secrets.get(key, "")
                 public_config[key] = {"configured": bool(value), "masked": f"***{value[-4:]}" if value else ""}
         min_app_version = str(runtime.manifest.get("min_app_version") or "").strip()
-        dependency_projection = next(
+        dependency_projection: dict[str, Any] = next(
             (row for row in self.dependency_plan() if row["id"] == plugin_id),
             {"dependencies": [], "dependents": []},
         )
@@ -1164,11 +1165,9 @@ class PluginHost:
                     if target.exists():
                         self._guard_package_mutation(plugin_id, "overwrite")
                     shutil.copytree(source_dir, staging)
-                    was_running[plugin_id] = bool(
-                        self.plugins.get(plugin_id)
-                        and self.plugins[plugin_id].process
-                        and self.plugins[plugin_id].process.returncode is None
-                    )
+                    installed = self.plugins.get(plugin_id)
+                    process = installed.process if installed else None
+                    was_running[plugin_id] = bool(process and process.returncode is None)
                     entries.append({
                         "plugin_id": plugin_id,
                         "target": str(target),
@@ -2001,7 +2000,7 @@ class PluginHost:
         self._atomic_json(folder / "marketplace.json", metadata)
 
     @staticmethod
-    def _manifest_digest(manifest: dict[str, Any]) -> str:
+    def _manifest_digest(manifest: Mapping[str, Any]) -> str:
         encoded = json.dumps(
             manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
         ).encode("utf-8")
@@ -2045,7 +2044,7 @@ class PluginHost:
     def _save_install_receipt(
         self,
         plugin_id: str,
-        manifest: dict[str, Any],
+        manifest: Mapping[str, Any],
         *,
         artifact_hash: str = "",
         source: str = "zip",
@@ -2464,7 +2463,7 @@ class PluginHost:
             raise ValueError("路径越界")
 
     @staticmethod
-    def _atomic_json(path: Path, value: dict[str, Any]) -> None:
+    def _atomic_json(path: Path, value: object) -> None:
         temp = path.with_suffix(path.suffix + ".tmp")
         temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
         temp.replace(path)

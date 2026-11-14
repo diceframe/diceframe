@@ -548,6 +548,7 @@ async def submit_intent(
         )
         try:
             rng = dependencies.rng_factory()
+            batch: dict[str, Any] | None = None
             if is_sequential_action:
                 if not isinstance(runtime, SequentialActionRuntime):
                     return _error(
