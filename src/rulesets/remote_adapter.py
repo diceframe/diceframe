@@ -57,6 +57,7 @@ class RemoteRulesetRuntimeAdapter:
         timeout_seconds: float = 5.0,
         ledger_path: Any = None,
         request_id_factory: Callable[[], str] | None = None,
+        adventure_resolver: Any = None,
     ) -> None:
         if not runtime_id or isinstance(runtime_version, bool) or runtime_version < 1:
             raise ValueError("remote runtime identity is invalid")
@@ -64,11 +65,22 @@ class RemoteRulesetRuntimeAdapter:
         self.runtime_version = runtime_version
         self.capabilities = capabilities
         self._request_id_factory = request_id_factory or (lambda: secrets.token_urlsafe(18))
+        self._adventure_resolver = adventure_resolver
         self._probe = RuntimeProbeClient(
             transport,
             timeout_seconds=timeout_seconds,
             ledger=RuntimeProbeLedger(ledger_path) if ledger_path is not None else None,
         )
+
+    def set_adventure_resolver(self, resolver: Any) -> None:
+        """Adopt the application's single AdventureResolver (composition injection).
+
+        The registry pushes this after construction, and again for runtimes that
+        are registered later (plugins enabled at runtime), so a projection never
+        depends on startup order.
+        """
+
+        self._adventure_resolver = resolver
 
     def close(self) -> None:
         """Release an injected transport when its owning runtime is revoked."""
@@ -146,6 +158,29 @@ class RemoteRulesetRuntimeAdapter:
             rule if template is None else template, "rule",
         )
 
+    def _instance_dto(self, instance: Any) -> dict[str, Any]:
+        """Serialize the instance, plus the adventure graph when it is needed.
+
+        The persisted instance shape is the wire contract for every runtime, so
+        the projection has to ride along with it rather than in a sibling field:
+        the child rebuilds an instance from this object and nothing else.
+        """
+
+        dto = self._dto(instance, "instance")
+        if not isinstance(dto, dict) or not self.capabilities.adventure_projection:
+            return dto
+        if self._adventure_resolver is None:
+            return dto
+        from src.rulesets.adventure_projection import project_bound_adventure
+
+        projection = project_bound_adventure(
+            instance, self._adventure_resolver,
+            locale=str(getattr(instance, "language", "") or ""),
+        )
+        if projection:
+            dto["adventure"] = projection
+        return dto
+
     def game_binding(self, rule: Any, locale: str) -> dict[str, Any]:
         """Name the runtime that owns this rule's versioned save state.
 
@@ -188,7 +223,7 @@ class RemoteRulesetRuntimeAdapter:
         )
 
     def available_intents(self, instance: Any, actor_id: str) -> list[dict[str, Any]]:
-        result = self._call("available_intents", {"instance": self._dto(instance, "instance"), "actor_id": actor_id})
+        result = self._call("available_intents", {"instance": self._instance_dto(instance), "actor_id": actor_id})
         if not isinstance(result, list):
             raise RuntimeProbeError("remote available_intents result must be a list")
         return result
@@ -204,7 +239,7 @@ class RemoteRulesetRuntimeAdapter:
         """
 
         result = self._call(
-            "next_automatic_intent", {"instance": self._dto(instance, "instance")},
+            "next_automatic_intent", {"instance": self._instance_dto(instance)},
         )
         if result is None:
             return None
@@ -234,7 +269,7 @@ class RemoteRulesetRuntimeAdapter:
         return result
 
     def validate_intent(self, instance: Any, intent: dict[str, Any]) -> dict[str, Any]:
-        return self._call("validate_intent", {"instance": self._dto(instance, "instance"), "intent": intent})
+        return self._call("validate_intent", {"instance": self._instance_dto(instance), "intent": intent})
 
     def validate_sequential_plan(
         self, instance: Any, plan: dict[str, Any],
@@ -242,7 +277,7 @@ class RemoteRulesetRuntimeAdapter:
     ) -> dict[str, Any]:
         result = self._call(
             "validate_sequential_plan",
-            {"instance": self._dto(instance, "instance"), "plan": plan,
+            {"instance": self._instance_dto(instance), "plan": plan,
              "requester_id": requester_id, "requester_is_gm": requester_is_gm},
             request_id=(f"seq-validate:{_game_scope(instance)}:{plan['intent_id']}"
                         if isinstance(plan.get("intent_id"), str) and plan["intent_id"] else None),
@@ -263,7 +298,7 @@ class RemoteRulesetRuntimeAdapter:
         # 必须携带父计划的 intent_id，否则同局连续两个计划会互串步骤结果。
         return self._call(
             "resolve_sequential_step",
-            {"instance": self._dto(instance, "instance"), "step": step,
+            {"instance": self._instance_dto(instance), "step": step,
              "rng": self._dto(rng, "rng"), "plan_id": plan_id},
             request_id=(f"seq-resolve:{_game_scope(instance)}:{plan_id}:{step['step_id']}"
                         if isinstance(step.get("step_id"), str) and step["step_id"] else None),
@@ -273,7 +308,7 @@ class RemoteRulesetRuntimeAdapter:
     def resolve_intent(self, instance: Any, intent: dict[str, Any], rng: Any) -> dict[str, Any]:
         return self._call(
             "resolve_intent",
-            {"instance": self._dto(instance, "instance"), "intent": intent, "rng": self._dto(rng, "rng")},
+            {"instance": self._instance_dto(instance), "intent": intent, "rng": self._dto(rng, "rng")},
             request_id=(f"intent:{_game_scope(instance)}:{intent['intent_id']}"
                         if isinstance(intent.get("intent_id"), str) and intent["intent_id"] else None),
             receipt_payload={"intent": deepcopy(intent)},
@@ -290,7 +325,7 @@ class RemoteRulesetRuntimeAdapter:
         result = self._call(
             "resolve_narrative_checks",
             {
-                "instance": self._dto(instance, "instance"),
+                "instance": self._instance_dto(instance),
                 "requests": [deepcopy(item) for item in requests],
                 "rng": self._dto(rng, "rng"),
             },
@@ -300,7 +335,7 @@ class RemoteRulesetRuntimeAdapter:
         return result
 
     def apply_event_batch(self, instance: Any, batch: dict[str, Any]) -> dict[str, Any]:
-        instance_dto = self._dto(instance, "instance")
+        instance_dto = self._instance_dto(instance)
         result = self._call(
             "apply_event_batch",
             {"instance": instance_dto, "batch": batch},
@@ -445,7 +480,7 @@ class RemoteRulesetRuntimeAdapter:
     ) -> list[dict[str, Any]]:
         result = self._call(
             "memory_deltas_from_event_batch",
-            {"batch": batch, "instance": self._dto(instance, "instance")},
+            {"batch": batch, "instance": self._instance_dto(instance)},
         )
         if not isinstance(result, list):
             raise RuntimeProbeError("remote memory deltas result must be a list")
@@ -456,11 +491,11 @@ class RemoteRulesetRuntimeAdapter:
     ) -> dict[str, Any]:
         return self._call(
             "gameplay_view",
-            {"instance": self._dto(instance, "instance"), "viewer_id": viewer_id, "viewer_is_gm": viewer_is_gm},
+            {"instance": self._instance_dto(instance), "viewer_id": viewer_id, "viewer_is_gm": viewer_is_gm},
         )
 
     def build_llm_view(self, instance: Any) -> dict[str, Any]:
-        return self._call("build_llm_view", {"instance": self._dto(instance, "instance")})
+        return self._call("build_llm_view", {"instance": self._instance_dto(instance)})
 
     def project_legacy_character(self, character: dict[str, Any]) -> dict[str, Any]:
         return self._call("project_legacy_character", {"character": character})
