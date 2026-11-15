@@ -38,7 +38,8 @@ RUNTIME_ID = "external:t3-sample"
 # ---------------------------------------------------------------- fixtures
 
 
-def _runtime_server_script(*, broken: bool = False, slow_resolve: float = 0.0) -> str:
+def _runtime_server_script(*, broken: bool = False, slow_resolve: float = 0.0,
+                           sequential_ops: bool = True) -> str:
     """A minimal RuntimeProbe JSON-lines server shipped inside the package.
 
     stateless：所有以 payload 提供的 instance 状态为准，子进程不持有跨请求
@@ -49,7 +50,7 @@ def _runtime_server_script(*, broken: bool = False, slow_resolve: float = 0.0) -
 
     if broken:
         return "import sys\nsys.exit(3)\n"
-    slow_prefix = f"import time\nSLOW_RESOLVE = {slow_resolve!r}\n\n"
+    slow_prefix = f"import time\nSLOW_RESOLVE = {slow_resolve!r}\nSEQ_OPS = {sequential_ops!r}\n\n"
     return slow_prefix + """
 import json
 import sys
@@ -94,6 +95,20 @@ def handle(op, payload):
         return payload.get("intent") or {}
     if op == "validate_intent":
         return {"ok": True}
+    if SEQ_OPS and op == "validate_sequential_plan":
+        plan = payload.get("plan") or {}
+        return {"ok": True, "intent_id": plan.get("intent_id"), "validated": True,
+                "steps": plan.get("steps") or []}
+    if SEQ_OPS and op == "resolve_sequential_step":
+        step = payload.get("step") or {}
+        instance = payload.get("instance") or {}
+        state = (instance.get("modules") or {}).get("ruleset_runtime", {}).get("state") or {}
+        version = int(state.get("version", 0))
+        return {"ok": True, "event_batch": {
+            "batch_id": "t3-step-%s-%d" % (step.get("step_id"), version + 1),
+            "intent_id": step.get("intent_id"),
+            "events": [{"type": "t3.step_resolved", "step_id": step.get("step_id")}],
+        }}
     if op == "resolve_intent":
         if SLOW_RESOLVE:
             time.sleep(SLOW_RESOLVE)
@@ -163,7 +178,9 @@ if __name__ == "__main__":
 
 def _write_runtime_package(root: Path, plugin_id: str, *, broken: bool = False,
                            runtime_id: str = RUNTIME_ID, entrypoint: list[str] | None = None,
-                           slow_resolve: float = 0.0, rule_id: str = "t3sample") -> Path:
+                           slow_resolve: float = 0.0, rule_id: str = "t3sample",
+                           sequential_checks: bool = False,
+                           sequential_ops: bool = True) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     package_dir = root / plugin_id
     package_dir.mkdir(exist_ok=True)
@@ -183,6 +200,8 @@ def _write_runtime_package(root: Path, plugin_id: str, *, broken: bool = False,
                 "character_builder": "professional",
                 "authoritative_intents": True,
                 "versioned_state": True,
+                **({"sequential_checks": True, "composite_action": True}
+                   if sequential_checks else {}),
             },
             "timeout_seconds": 10,
         },
@@ -197,7 +216,8 @@ def _write_runtime_package(root: Path, plugin_id: str, *, broken: bool = False,
     runtime_dir = package_dir / "runtime"
     runtime_dir.mkdir(exist_ok=True)
     (runtime_dir / "server.py").write_text(
-        _runtime_server_script(broken=broken, slow_resolve=slow_resolve), encoding="utf-8")
+        _runtime_server_script(broken=broken, slow_resolve=slow_resolve,
+                               sequential_ops=sequential_ops), encoding="utf-8")
     rules_dir = package_dir / "rules"
     rules_dir.mkdir(exist_ok=True)
     (rules_dir / f"{rule_id}.json").write_text(json.dumps({
@@ -368,6 +388,52 @@ async def test_prepare_receipts_are_isolated_per_game(tmp_path):
     # fixture 的 prepare 返回 intent 本身；隔离意味着两条独立收据，互不覆盖。
     assert prepared_a["intent_id"] == "t3-prepare-1"
     assert prepared_b["intent_id"] == "t3-prepare-1"
+    source.close()
+
+
+@pytest.mark.asyncio
+async def test_declared_sequential_capability_survives_and_serves(tmp_path):
+    """P1-01：真实提供顺序动作协议的 runtime，宣称的能力位注册后保留并可用。"""
+    plugins, data_dir = tmp_path / "plugins", tmp_path / "data"
+    host = PluginHost(plugins, data_dir)
+    registry = RulesetRuntimeRegistry([])
+    source = _make_source(registry, host)
+    package = _write_runtime_package(tmp_path, "t3-pack", sequential_checks=True)
+    await host.install_from_zip(package.read_bytes())
+    await host.start("t3-pack", require_enabled=False)
+    runtime = registry.get(RUNTIME_ID, minimum_version=1)
+    assert runtime.capabilities.sequential_checks is True
+    assert runtime.capabilities.composite_action is True
+
+    validated = runtime.validate_sequential_plan(
+        {}, {"intent_id": "seq-1", "steps": [{"step_id": "s1"}]}, "p1", False,
+    )
+    assert validated.get("validated") is True
+    resolved = runtime.resolve_sequential_step(
+        {}, {"step_id": "s1", "intent_id": "seq-1"}, random.Random(secrets.randbits(128)),
+    )
+    assert resolved["event_batch"]["intent_id"] == "seq-1"
+    source.close()
+
+
+@pytest.mark.asyncio
+async def test_unimplemented_sequential_capability_is_stripped_at_registration(tmp_path):
+    """P1-01：宣称顺序动作能力但子进程没有协议操作 → 注册时剥离能力位。"""
+    plugins, data_dir = tmp_path / "plugins", tmp_path / "data"
+    host = PluginHost(plugins, data_dir)
+    registry = RulesetRuntimeRegistry([])
+    source = _make_source(registry, host)
+    package = _write_runtime_package(tmp_path, "t3-pack", sequential_checks=True,
+                                     sequential_ops=False)
+    await host.install_from_zip(package.read_bytes())
+    await host.start("t3-pack", require_enabled=False)
+    report = source.sync(host)
+    # runtime 本身可用（registered），但能力位被剥离：UI/服务端不再按多技能执行。
+    assert report["registered"] == [RUNTIME_ID]
+    assert report["failed"] == {}
+    capabilities = registry.get(RUNTIME_ID, minimum_version=1).capabilities
+    assert capabilities.sequential_checks is False
+    assert capabilities.composite_action is False
     source.close()
 
 

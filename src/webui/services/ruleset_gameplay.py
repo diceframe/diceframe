@@ -589,10 +589,18 @@ async def submit_intent(
                         "SEQUENTIAL_ACTION_UNAVAILABLE",
                         "当前规则运行时没有提供顺序动作 authority",
                     )
-                sequential = execute_sequential_plan(
-                    instance, runtime, intent, effective_requester,
-                    requester_is_gm, rng,
-                )
+                if isinstance(runtime, RemoteRulesetRuntimeAdapter):
+                    # 外部 adapter 的逐步骤 RPC 是有界同步阻塞（P1-04），
+                    # 整个计划执行卸到工作线程；进程内实现留在事件循环上。
+                    sequential = await asyncio.to_thread(
+                        execute_sequential_plan, instance, runtime, intent,
+                        effective_requester, requester_is_gm, rng,
+                    )
+                else:
+                    sequential = execute_sequential_plan(
+                        instance, runtime, intent, effective_requester,
+                        requester_is_gm, rng,
+                    )
                 if not sequential.get("ok"):
                     return sequential
                 resolved = sequential

@@ -27,6 +27,7 @@ import hashlib
 import json
 import logging
 import sys
+from dataclasses import replace as _dataclass_replace
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +81,7 @@ class PluginRulesetRuntimeSource:
                 )
                 # 注册前探活：起不来的 runtime 不暴露给 resolve（fail closed）。
                 new_adapter.describe_experience({}, "zh-CN")
+                self._verify_declared_sequential_capability(new_adapter)
             except Exception as exc:  # noqa: BLE001 - 单个坏 runtime 不拖垮其它注册
                 # 新实现不可用：旧 adapter（若有）保持注册且子进程仍然存活，
                 # 玩家继续拿到可用规则；新构建的 adapter 必须关闭避免泄漏。
@@ -172,6 +174,32 @@ class PluginRulesetRuntimeSource:
             self._registry.unregister(runtime_id)
 
     # ---------------------------------------------------------------- 内部
+
+    def _verify_declared_sequential_capability(self, adapter: RemoteRulesetRuntimeAdapter) -> None:
+        """P1-01 合同检验：宣称 R05/SK-01 能力就必须真的提供协议操作。
+
+        用一次空计划探针验证 validate_sequential_plan 存在且返回对象；协议层
+        失败（未实现该 op / 探针错误 / 返回非对象）时把能力位剥离——UI 与
+        服务端不再按"支持多技能"执行，真实调用在运行时侧继续 fail closed。
+        """
+        capabilities = adapter.capabilities
+        if not (capabilities.sequential_checks or capabilities.composite_action):
+            return
+        try:
+            probed = adapter.validate_sequential_plan(
+                {}, {"intent_id": "capability-probe", "steps": []}, "probe", True,
+            )
+            supported = isinstance(probed, dict)
+        except Exception as exc:  # noqa: BLE001 - 探针失败即视为能力不可用
+            logger.warning(
+                "外部规则 runtime %s 宣称顺序动作能力但探针失败，能力位已剥离: %s",
+                adapter.runtime_id, exc,
+            )
+            supported = False
+        if not supported:
+            adapter.capabilities = _dataclass_replace(
+                adapter.capabilities, sequential_checks=False, composite_action=False,
+            )
 
     def _revoke_stale(self, desired: dict[str, dict[str, Any]]) -> list[str]:
         removed: list[str] = []

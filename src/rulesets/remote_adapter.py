@@ -176,6 +176,35 @@ class RemoteRulesetRuntimeAdapter:
     def validate_intent(self, instance: Any, intent: dict[str, Any]) -> dict[str, Any]:
         return self._call("validate_intent", {"instance": self._dto(instance, "instance"), "intent": intent})
 
+    def validate_sequential_plan(
+        self, instance: Any, plan: dict[str, Any],
+        requester_id: str, requester_is_gm: bool,
+    ) -> dict[str, Any]:
+        result = self._call(
+            "validate_sequential_plan",
+            {"instance": self._dto(instance, "instance"), "plan": plan,
+             "requester_id": requester_id, "requester_is_gm": requester_is_gm},
+            request_id=(f"seq-validate:{_game_scope(instance)}:{plan['intent_id']}"
+                        if isinstance(plan.get("intent_id"), str) and plan["intent_id"] else None),
+            receipt_payload={
+                "plan": deepcopy(plan),
+                "requester_id": requester_id,
+                "requester_is_gm": requester_is_gm,
+            },
+        )
+        if not isinstance(result, dict):
+            raise RuntimeProbeError("remote sequential plan validation must be an object")
+        return result
+
+    def resolve_sequential_step(self, instance: Any, step: dict[str, Any], rng: Any) -> dict[str, Any]:
+        return self._call(
+            "resolve_sequential_step",
+            {"instance": self._dto(instance, "instance"), "step": step, "rng": self._dto(rng, "rng")},
+            request_id=(f"seq-resolve:{_game_scope(instance)}:{step['step_id']}"
+                        if isinstance(step.get("step_id"), str) and step["step_id"] else None),
+            receipt_payload={"step": deepcopy(step)},
+        )
+
     def resolve_intent(self, instance: Any, intent: dict[str, Any], rng: Any) -> dict[str, Any]:
         return self._call(
             "resolve_intent",
