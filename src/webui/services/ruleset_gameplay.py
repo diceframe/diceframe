@@ -524,7 +524,7 @@ async def submit_intent(
             "权威规则运行时缺少请求身份与投影边界",
         )
     intent = await _await_runtime_call(
-        runtime, "prepare_intent_submission", intent, effective_requester, requester_is_gm,
+        runtime, "prepare_intent_submission", intent, effective_requester, requester_is_gm, instance,
     )
     is_sequential_action = str(intent.get("type") or "") == "sequential_action"
 

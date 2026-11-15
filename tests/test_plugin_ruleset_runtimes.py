@@ -319,6 +319,59 @@ async def test_resolve_intent_accepts_default_serializable_rng(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_receipts_are_isolated_per_game_and_run(tmp_path):
+    """P1-03 回归：两场游戏用同 intent_id 同 payload，不得互相命中收据。
+
+    request_id 现在携带服务器权威的 (game_key, run_id) 隔离段：游戏 A 的
+    收据不能替游戏 B 回答（旧实现会返回 A 的 event_batch）。
+    """
+    plugins, data_dir = tmp_path / "plugins", tmp_path / "data"
+    host = PluginHost(plugins, data_dir)
+    registry = RulesetRuntimeRegistry([])
+    source = _make_source(registry, host)
+    package = _write_runtime_package(tmp_path, "t3-pack")
+    await host.install_from_zip(package.read_bytes())
+    await host.start("t3-pack", require_enabled=False)
+    runtime = registry.get(RUNTIME_ID, minimum_version=1)
+
+    intent = {"intent_id": "t3-shared", "type": "t3.check"}
+    game_a = {"game_key": ["web", "room-a", "alice"], "run_id": "run_aaa",
+              "modules": {"ruleset_runtime": {"state": {"version": 0}, "event_ledger": []}}}
+    game_b = {"game_key": ["web", "room-b", "bob"], "run_id": "run_bbb",
+              "modules": {"ruleset_runtime": {"state": {"version": 4}, "event_ledger": []}}}
+
+    resolved_a = runtime.resolve_intent(game_a, dict(intent), random.Random(secrets.randbits(128)))
+    resolved_b = runtime.resolve_intent(game_b, dict(intent), random.Random(secrets.randbits(128)))
+    # B 按自己的状态版本结算（t3-batch-5），而不是复用 A 的 t3-batch-1。
+    assert resolved_a["event_batch"]["batch_id"] == "t3-batch-1"
+    assert resolved_b["event_batch"]["batch_id"] == "t3-batch-5"
+    source.close()
+
+
+@pytest.mark.asyncio
+async def test_prepare_receipts_are_isolated_per_game(tmp_path):
+    """P1-03 回归：prepare 钩子的收据同样按 (game_key, run_id) 隔离。"""
+    plugins, data_dir = tmp_path / "plugins", tmp_path / "data"
+    host = PluginHost(plugins, data_dir)
+    registry = RulesetRuntimeRegistry([])
+    source = _make_source(registry, host)
+    package = _write_runtime_package(tmp_path, "t3-pack")
+    await host.install_from_zip(package.read_bytes())
+    await host.start("t3-pack", require_enabled=False)
+    runtime = registry.get(RUNTIME_ID, minimum_version=1)
+
+    intent = {"intent_id": "t3-prepare-1", "type": "t3.check"}
+    game_a = {"game_key": ["web", "room-a", "alice"], "run_id": "run_aaa"}
+    game_b = {"game_key": ["web", "room-b", "bob"], "run_id": "run_bbb"}
+    prepared_a = runtime.prepare_intent_submission(dict(intent), "alice", False, game_a)
+    prepared_b = runtime.prepare_intent_submission(dict(intent), "bob", False, game_b)
+    # fixture 的 prepare 返回 intent 本身；隔离意味着两条独立收据，互不覆盖。
+    assert prepared_a["intent_id"] == "t3-prepare-1"
+    assert prepared_b["intent_id"] == "t3-prepare-1"
+    source.close()
+
+
+@pytest.mark.asyncio
 async def test_slow_remote_resolve_keeps_event_loop_responsive(tmp_path):
     """P1-04 回归：慢的外部 runtime 不拖住宿主事件循环。
 

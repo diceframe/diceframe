@@ -19,6 +19,25 @@ MAX_EVENT_LEDGER_ROWS = 4096
 MAX_EVENT_BATCH_ID_LENGTH = 200
 
 
+def _game_scope(instance: Any) -> str:
+    """收据请求身份里的服务器权威游戏/Run 隔离段（P1-03）。
+
+    instance 持久投影的顶层携带 game_key 与 run_id（GameStateCodec.encode）；
+    二者都由服务端持有，客户端不能伪造。缺失时归入 unknown 段——宁可显式
+    隔离桶，也不让两场游戏共用一份收据。
+    """
+    if isinstance(instance, dict):
+        game_key = instance.get("game_key")
+        parts = [str(part) for part in (game_key if isinstance(game_key, (list, tuple)) else [])]
+        run_id = str(instance.get("run_id") or "")
+        if run_id:
+            parts.append(run_id)
+        scope = "|".join(part for part in parts if part)
+        if scope:
+            return scope
+    return "unknown"
+
+
 class RemoteRulesetRuntimeAdapter:
     def __init__(
         self,
@@ -137,11 +156,12 @@ class RemoteRulesetRuntimeAdapter:
 
     def prepare_intent_submission(
         self, intent: dict[str, Any], requester_id: str, requester_is_gm: bool,
+        instance: Any,
     ) -> dict[str, Any]:
         result = self._call(
             "prepare_intent_submission",
             {"intent": intent, "requester_id": requester_id, "requester_is_gm": requester_is_gm},
-            request_id=(f"prepare:{intent['intent_id']}"
+            request_id=(f"prepare:{_game_scope(instance)}:{intent['intent_id']}"
                         if isinstance(intent.get("intent_id"), str) and intent["intent_id"] else None),
             receipt_payload={
                 "intent": deepcopy(intent),
@@ -160,7 +180,7 @@ class RemoteRulesetRuntimeAdapter:
         return self._call(
             "resolve_intent",
             {"instance": self._dto(instance, "instance"), "intent": intent, "rng": self._dto(rng, "rng")},
-            request_id=(f"intent:{intent['intent_id']}"
+            request_id=(f"intent:{_game_scope(instance)}:{intent['intent_id']}"
                         if isinstance(intent.get("intent_id"), str) and intent["intent_id"] else None),
             receipt_payload={"intent": deepcopy(intent)},
         )
@@ -171,7 +191,7 @@ class RemoteRulesetRuntimeAdapter:
             "apply_event_batch",
             {"instance": instance_dto, "batch": batch},
             live_state=instance_dto,
-            request_id=(f"batch:{batch['batch_id']}"
+            request_id=(f"batch:{_game_scope(instance)}:{batch['batch_id']}"
                         if isinstance(batch.get("batch_id"), str) and batch["batch_id"] else None),
             receipt_payload={"batch": deepcopy(batch)},
         )

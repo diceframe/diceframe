@@ -156,6 +156,7 @@ class AuthoritativeIntentHooks(Protocol):
 
     def prepare_intent_submission(
         self, intent: dict[str, Any], requester_id: str, requester_is_gm: bool,
+        instance: Any,
     ) -> dict[str, Any]: ...
 
     def memory_deltas_from_event_batch(
