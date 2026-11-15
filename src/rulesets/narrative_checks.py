@@ -180,6 +180,7 @@ def resolve_planned_checks(
         if check is None:
             continue
         request["dice_system"] = "runtime"
+        action["check_request"] = request
         action["check_result"] = check
         action["dice_value"] = check["roll"]
         action["dice_rolls"] = list(check["rolls"])

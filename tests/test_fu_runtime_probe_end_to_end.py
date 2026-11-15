@@ -30,9 +30,14 @@ from pathlib import Path
 
 import pytest
 
+from src.commands.dice_resolver import DiceResolver
+from src.commands.round_actions import build_dice_constraint_block
 from src.engine.game_instance import GameInstance
+from src.engine.modules import checks as checks_module
 from src.engine.modules import ruleset_runtime
 from src.plugin_host.host import PluginHost
+from src.rules.rule_system import RuleSystem
+from src.rulesets.narrative_checks import resolve_planned_checks, resolver_for
 from src.rulesets.plugin_runtime_source import PluginRulesetRuntimeSource
 from src.rulesets.registry import RulesetRuntimeRegistry
 
@@ -131,6 +136,29 @@ def handle(op, payload):
     if op == "validate_intent":
         intent = payload.get("intent") or {}
         return {"ok": bool(intent.get("type"))}
+    if op == "resolve_narrative_checks":
+        # 自由叙事的检定：核心只提出「谁、用哪项属性、多难」，骰子留在包里。
+        characters = _state(payload).get("characters") or {}
+        results = []
+        for request in payload.get("requests") or []:
+            attributes = (characters.get(str(request.get("actor_uid") or "")) or {}).get("attributes") or {}
+            key_a = str(request.get("attribute") or "")
+            faces_a = max(1, min(DICE_FACES, int(attributes.get(key_a, DICE_FACES) or DICE_FACES)))
+            others = [int(value or DICE_FACES) for key, value in attributes.items() if key != key_a]
+            faces_b = max(1, min(DICE_FACES, max(others or [DICE_FACES])))
+            rolls = [min(4, faces_a), min(3, faces_b)]
+            total = sum(rolls)
+            target = int(request.get("target") or 10)
+            results.append({
+                "check_id": request.get("check_id"),
+                "dice": "d%d+d%d" % (faces_a, faces_b),
+                "rolls": rolls,
+                "roll": total,
+                "total": total,
+                "dc": target,
+                "verdict": "成功" if total >= target else "失败",
+            })
+        return results
     if op == "resolve_intent":
         # 假想 FU 检定：双属性 d8 之和 + 等级，对抗固定难度。
         intent = payload.get("intent") or {}
@@ -270,6 +298,7 @@ def write_fu_package(root: Path, plugin_id: str = "fu-core") -> Path:
                 "character_builder": "professional",
                 "authoritative_intents": True,
                 "versioned_state": True,
+                "narrative_checks": True,
             },
             "timeout_seconds": 10,
         },
@@ -541,3 +570,58 @@ async def test_fu_rule_template_cannot_declare_custom_dice_system(tmp_path):
     assert template["dice_system"] == "none"
     with pytest.raises(ValueError, match="不支持的检定骰制"):
         RuleSystem({**template, "dice_system": "fu_dual"})
+
+
+@pytest.mark.asyncio
+async def test_fu_runtime_resolves_free_text_checks(tmp_path):
+    """探索阶段的自由描述也能掷骰：核心只规划，骰子留在包里。
+
+    闭环是「规划出的 CheckRequest → 跨进程 resolve_narrative_checks →
+    check_result 落到行动上 → 生成必须遵循的约束块 → 记录本轮检定」。
+    """
+
+    host, registry, source = await _install_and_enable(tmp_path)
+    try:
+        template = _packaged_rule_template(tmp_path / "plugins")
+        runtime = registry.resolve(template)
+        # 能力位来自包声明，适配器据此才允许宿主把骰子交出去。
+        assert runtime.capabilities.narrative_checks is True
+
+        instance = GameInstance(game_key=("probe", "fu", "check"), run_id="run-check")
+        instance.modules["ruleset_runtime"] = ruleset_runtime.fresh()
+        ruleset_runtime.replace_binding(
+            instance, {"id": FU_RUNTIME_ID, "runtime_version": 1})
+        ruleset_runtime.state(instance)["characters"] = {
+            "alice": {"attributes": {"dex": 10, "ins": 8, "mig": 12, "wlp": 6}},
+        }
+        instance.players["alice"] = {"user_id": "alice", "character_name": "Livia"}
+        action = {"user_id": "alice", "text": "我翻过塌了一半的墙"}
+        instance.action_queue = [action]
+        planned = [(action, {
+            "check_id": "check-1",
+            "actor_uid": "alice",
+            "actor_name": "Livia",
+            "attribute": "dex",
+            "target": 6,
+            "label": "灵巧检定",
+        })]
+
+        surviving = resolve_planned_checks(instance, resolver_for(runtime), planned)
+
+        assert [request["check_id"] for _, request in surviving] == ["check-1"]
+        check = action["check_result"]
+        assert check["planner_source"] == "runtime"
+        assert check["dice"] == "d8+d8"
+        assert check["roll"] == 7 and check["total"] == 7
+        assert check["dc"] == 6 and check["verdict"] == "成功"
+        assert action["dice_value"] == 7
+
+        block = build_dice_constraint_block(
+            instance, action["text"], RuleSystem(template), "none", DiceResolver(),
+            planned_only=True,
+        )
+        assert "必须遵循" in block
+        assert "成功" in block
+        assert checks_module.last_check(instance)["roll"] == 7
+    finally:
+        source.close()
