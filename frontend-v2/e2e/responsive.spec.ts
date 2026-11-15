@@ -69,9 +69,36 @@ test('phone module recovery stays contained and exposes local import', async ({ 
   await page.goto('/#/modules?adventure=core%3Acastle&version=1.0.0')
   await expect(page.getByRole('heading', { name: '内容包管理', exact: true })).toBeVisible()
   await expect(page.getByText('恢复本局冒险')).toBeVisible()
-  await expect(page.locator('.module-import input[type="file"]')).toBeVisible()
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
-  expect(overflow).toBe(0)
+  // 本地导入收进「我的内容包」下拉面板（W7 商店化重做）。
+  await page.locator('.modules-my-btn').click()
+  await expect(page.locator('[data-testid="modules-installed"] input[type="file"]')).toBeVisible()
+  const overflow = await page.evaluate(() => {
+    const width = document.documentElement.clientWidth
+    const wide = [...document.querySelectorAll<HTMLElement>('*')]
+      .filter(el => {
+      // 跳过被祖先 overflow 裁剪的元素（它们不产生文档级横向滚动）。
+      let cursor: HTMLElement | null = el.parentElement
+      while (cursor && cursor !== document.body) {
+        const clip = getComputedStyle(cursor).overflowX
+        if (clip === 'auto' || clip === 'hidden' || clip === 'scroll' || clip === 'clip') return false
+        cursor = cursor.parentElement
+      }
+      return el.getBoundingClientRect().right > width + 1
+    })
+      .slice(0, 6)
+      .map(el => {
+      const chain: string[] = []
+      let cursor: HTMLElement | null = el
+      while (cursor && cursor !== document.body) {
+        const rect = cursor.getBoundingClientRect()
+        chain.push(`${cursor.tagName}<${Math.round(rect.width)}w/${Math.round(rect.left)}l>`)
+        cursor = cursor.parentElement
+      }
+      return `${el.tagName} right=${Math.round(el.getBoundingClientRect().right)} text=${(el.textContent || '').trim().slice(0, 16)} chain=${chain.join('>')}`
+    })
+    return { overflow: document.documentElement.scrollWidth - width, wide }
+  })
+  expect(overflow.overflow, `超宽元素: ${overflow.wide.join(' | ')}`).toBe(0)
 })
 
 test('module library separates installed, local import, and online modules', async ({ page }) => {
@@ -79,11 +106,15 @@ test('module library separates installed, local import, and online modules', asy
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
   await page.goto('/#/modules')
 
-  // §8：三个区块同页可见，不再把在线模组甩给插件页面。
+  // §8：已安装（我的内容包面板）、本地导入（面板底部）与在线货架同页可达。
+  await page.locator('.modules-my-btn').click()
   await expect(page.getByTestId('modules-installed')).toBeVisible()
-  await expect(page.getByTestId('modules-local-import')).toBeVisible()
-  await expect(page.getByTestId('modules-online')).toBeVisible()
   await expect(page.getByTestId('modules-installed').getByText('E2E Module')).toBeVisible()
+  await expect(page.getByTestId('modules-installed').locator('input[type="file"]')).toBeVisible()
+  await expect(page.getByTestId('modules-category-chips')).toBeVisible({ timeout: 15000 })
+  // 在线货架内容由目录决定（fake hub 目录不含刚安装的本地包）：
+  // 有卡即证明在线区可达，不锁定目录条目。
+  await expect(page.locator('.content-pack-card').first()).toBeVisible()
 })
 
 test('module detail renders metadata and server-guarded actions', async ({ page }) => {
@@ -96,11 +127,12 @@ test('module detail renders metadata and server-guarded actions', async ({ page 
   await page.goto('/#/modules/e2e-module')
   await page.getByTestId('module-metadata').locator('summary').click()
   await expect(page.getByTestId('module-metadata').getByText('e2e-module')).toBeVisible()
-  await expect(page.getByTestId('module-metadata').getByText('catalog')).toBeVisible()
+  // 重写后的元信息展示可读投递标签（原始值不再上屏）。
+  await expect(page.getByTestId('module-metadata').getByText('开局时按需取用，启用时不导入')).toBeVisible()
   await expect(page.getByTestId('module-adventures').getByText('plugin:module_quest')).toBeVisible()
   // 该模组没有被任何存档绑定 → 服务端 guard 判定受保护操作都可用；按钮文案则由
   // 服务端的模块状态决定（发现但未启用的包显示"启用"）。
-  const actions = page.getByTestId('module-actions')
+  const actions = page.getByTestId('module-action-toolbar')
   await expect(actions.getByRole('button', { name: '更新到 9.9.9' })).toBeEnabled()
   await expect(actions.getByRole('button', { name: '启用' })).toBeEnabled()
   await expect(actions.getByRole('button', { name: '卸载' })).toBeEnabled()

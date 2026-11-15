@@ -921,7 +921,20 @@ async function checkRecovery() {
 .modules-my-btn.active, .modules-my-btn:hover { border-color: var(--df-interactive); background: color-mix(in srgb, var(--df-interactive) 8%, var(--df-surface-1)); }
 .modules-my-count { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 .35rem; border-radius: 999px; background: var(--df-interactive); color: #fff; font-size: .72rem; font-weight: 800; }
 .modules-my-count.is-update { background: var(--df-warning, #d39b4d); color: #fff; }
-.modules-my-panel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 100; width: min(420px, 90vw); max-height: 70vh; overflow-y: auto; display: flex; flex-direction: column; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-1); box-shadow: 0 8px 32px rgba(0,0,0,.18); }
+.modules-my-panel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 100; width: min(420px, 90vw);
+  /* 窄屏：浮层固定于视口两侧——绝对定位锚点在换行后的工具栏上会把面板推到
+     视口外，撑出 147px 的文档横向滚动（e2e responsive 恢复页实测）。 */ max-height: 70vh; overflow-y: auto; display: flex; flex-direction: column; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-1); box-shadow: 0 8px 32px rgba(0,0,0,.18); }
+
+@media (max-width: 560px) {
+  .modules-my-panel {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: 118px;
+    width: auto;
+  }
+}
+
 .modules-my-panel-header { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .75rem 1rem .5rem; border-bottom: 1px solid var(--df-border-soft); }
 .modules-my-panel-header strong { font-size: .92rem; }
 .modules-my-panel-actions { display: flex; gap: .4rem; }
