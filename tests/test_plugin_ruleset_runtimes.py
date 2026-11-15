@@ -13,6 +13,8 @@
 from __future__ import annotations
 
 import json
+import random
+import secrets
 import zipfile
 from pathlib import Path
 
@@ -277,6 +279,36 @@ async def test_install_registers_runtime_and_serves_character_flow(tmp_path):
     source.close()
     with pytest.raises(UnknownRulesetRuntimeError):
         registry.get(RUNTIME_ID)
+
+
+@pytest.mark.asyncio
+async def test_resolve_intent_accepts_default_serializable_rng(tmp_path):
+    """P0 回归（审查 P0-01）：默认服务 RNG 必须可序列化并可过真实 stdio 结算。
+
+    旧默认 random.SystemRandom 的 getstate() 抛 NotImplementedError，外部
+    规则的权威动作在送到子进程之前就 500。现默认为每意图 OS 熵种子的
+    random.Random：可序列化、跨意图不可预测；同 intent 的重试命中幂等收据。
+    """
+    plugins, data_dir = tmp_path / "plugins", tmp_path / "data"
+    host = PluginHost(plugins, data_dir)
+    registry = RulesetRuntimeRegistry([])
+    source = _make_source(registry, host)
+    package = _write_runtime_package(tmp_path, "t3-pack")
+    await host.install_from_zip(package.read_bytes())
+    await host.start("t3-pack", require_enabled=False)
+    runtime = registry.get(RUNTIME_ID, minimum_version=1)
+
+    instance = {"modules": {"ruleset_runtime": {"state": {"version": 0}, "event_ledger": []}}}
+    intent = {"intent_id": "t3-intent-1", "type": "t3.check"}
+    rng = random.Random(secrets.randbits(128))  # 与 ruleset_gameplay._default_rng 同形
+    resolved = runtime.resolve_intent(instance, intent, rng)
+    assert resolved.get("ok") is True
+    assert resolved["event_batch"]["intent_id"] == "t3-intent-1"
+
+    # 同 intent 换一个新 rng 重试：收据身份只含规范化 payload，命中同一收据。
+    replayed = runtime.resolve_intent(instance, intent, random.Random(secrets.randbits(128)))
+    assert replayed == resolved
+    source.close()
 
 
 @pytest.mark.asyncio
