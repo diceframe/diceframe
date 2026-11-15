@@ -1102,6 +1102,10 @@ function toggleTaskWorkspace() {
 .assistant-head-copy strong {
   color: var(--df-accent-strong);
   font-size: 15px;
+  /* 工程名可能极长（压测：整行重复词）：与「我的作品」行一致，省略而不是撑爆头部。 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .assistant-head-copy span {

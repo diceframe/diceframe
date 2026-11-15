@@ -188,8 +188,15 @@ def gameplay_tools(deps: GameplayToolDependencies) -> tuple[AgentTool, ...]:
     if deps.available_ruleset_actions is not None:
         async def read_ruleset_actions(args: dict, owner: str) -> Any:
             _game, viewer = instance(args, owner)
-            return await _call(deps.available_ruleset_actions, args["game_key"],
-                               getattr(viewer, "uid", ""), bool(getattr(viewer, "is_gm", False)))
+            result = await _call(deps.available_ruleset_actions, args["game_key"],
+                                 getattr(viewer, "uid", ""), bool(getattr(viewer, "is_gm", False)))
+            # 自由文本回合流程的规则没有结构化动作：这是明确的产品语义，不是
+            # 故障。降级为"空列表 + 说明"，避免运行日志把每次探询都记成失败，
+            # 也避免 agent 把 409 语义当成可重试错误。
+            if not result.get("ok") and result.get("code") == "RULESET_INTENTS_UNAVAILABLE":
+                return {"ok": True, "available": False, "actions": [],
+                        "reason": str(result.get("error") or "free-text turn flow")}
+            return result
         tools.append(_tool("get_ruleset_available_actions",
             "Read the current ruleset's canonical available actions for this player",
             obj(game_prop, ("game_key",)), read_ruleset_actions, domain="games", effect="read"))

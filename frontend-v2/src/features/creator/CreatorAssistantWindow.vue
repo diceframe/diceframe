@@ -52,7 +52,9 @@ const panelStyle: CSSProperties = { position: 'fixed', zIndex: 500, borderRadius
 
 function onWindowPointerDown(event: PointerEvent) {
   if (expanded.value) return
-  const head = (event.target as HTMLElement | null)?.closest('.creator-window-drag-handle')
+  // 只有面板头部（标题栏）触发窗口拖动，对齐 DF Agent 外壳的行为：
+  // 聊天内容、气泡、滚动都不能拖走窗口。
+  const head = (event.target as HTMLElement | null)?.closest('.assistant-panel-head')
   if (head) startMove(event)
 }
 </script>
@@ -84,7 +86,7 @@ function onWindowPointerDown(event: PointerEvent) {
       :expanded="expanded || windowWide"
       :wide="windowWide"
       :review-request="reviewRequest"
-      class="creator-window-drag-handle"
+      class="creator-window-panel"
       @close="emit('close')"
       @toggle-expanded="expanded = !expanded"
       @files-changed="loadProjectFiles"
@@ -137,7 +139,7 @@ function onWindowPointerDown(event: PointerEvent) {
   display: grid;
   grid-template-columns: 1fr 240px;
 }
-.creator-assistant-window.is-expanded.has-overview .creator-window-drag-handle {
+.creator-assistant-window.is-expanded.has-overview .creator-window-panel {
   min-height: 0;
   overflow: hidden;
 }
