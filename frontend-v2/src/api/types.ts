@@ -1587,6 +1587,35 @@ export interface RulesetGameplayView {
   recent_combat_events?: RulesetCombatEvent[]
   director?: { context?: JsonObject; proposal?: RulesetDirectorProposal }
   campaign?: RulesetCampaignView
+  /**
+   * 规则运行时自带的声明式面板。
+   *
+   * 插件不能携带 Vue 组件（`ruleset-runtime` 只贡献 rules），所以规则的
+   * 专属信息（命刻、机会、冲突步骤）只能以这组声明式节点表达，由
+   * `GameplayDeclarativeNode` 渲染。宿主不解释节点语义，只渲染。
+   */
+  panels?: GameplayDeclarativeNode[]
+}
+
+/**
+ * 声明式节点：规则运行时与 gameplay provider 共用的最小渲染词汇。
+ *
+ * 与 `GameplayDeclarativeNode.vue` 的 `component` 分支一一对应；新增控件
+ * 必须同时改渲染器和这里，否则插件发来的节点会被静默丢弃。
+ */
+export interface GameplayDeclarativeNode extends Record<string, unknown> {
+  component: 'group' | 'text' | 'value' | 'progress' | 'button' | 'list'
+  label?: string
+  value?: unknown
+  projected_value?: unknown
+  children?: GameplayDeclarativeNode[]
+  /** `button` 专用：提交为 intent 的 `type`。 */
+  action?: string
+  /** `button` 专用：并入 intent 的其余字段。 */
+  arguments?: JsonObject
+  /** `progress` 专用。 */
+  min?: number
+  max?: number
 }
 
 export interface RulesetDirectorProposal {

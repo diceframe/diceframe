@@ -64,6 +64,7 @@ import { useCheckReveal } from '@/features/play/check-decisions/useCheckReveal'
 import CheckModePanel from '@/features/play/check-modes/CheckModePanel.vue'
 import AdventurePanel from '@/components/play/AdventurePanel.vue'
 import RulesetCharacterCenterHost from '@/features/rulesets/RulesetCharacterCenterHost.vue'
+import RulesetPanels from '@/features/play/RulesetPanels.vue'
 import RulesetPlayHost from '@/features/rulesets/RulesetPlayHost.vue'
 import { resolveRulesetPlayExtension } from '@/features/rulesets/registry'
 import { ruleSceneUrl } from '@/composables/useBackgroundImages'
@@ -1553,6 +1554,14 @@ function onPlayKeydown(event: KeyboardEvent) {
           :is-gm="game.isGm.value"
           @open-campaign="openRulesetTool('campaign')"
           @open-combat="openRulesetTool('combat')"
+        />
+
+        <!-- 规则运行时自带的声明式面板：插件无法携带 Vue 组件，命刻/机会/冲突
+             步骤这类专属信息只能以节点形式下发，由统一渲染器呈现。 -->
+        <RulesetPanels
+          :game-key="game.currentGame.value"
+          :panels="rulesetGameplay?.panels"
+          @refresh="refreshRulesetPanels"
         />
 
         <GameTimeline
