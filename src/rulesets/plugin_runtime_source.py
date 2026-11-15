@@ -10,8 +10,9 @@
 - 每个插件 runtime 的 stdio 子进程由注入 transport 持有：注册即拉起并探活
   （fail closed：探活失败不注册，resolve 时抛 ``UnknownRulesetRuntimeError``）；
   注销/停用/卸载时关闭子进程；
-- 同步是**幂等全量重放**：以 (plugin_id, 声明, entrypoint) 指纹复用已注册的
-  adapter，重复通知不会重启子进程。
+- 同步是**幂等全量重放**：以 (plugin_id, 声明, entrypoint, 工件内容) 指纹复用
+  已注册的 adapter，重复通知不会重启子进程；指纹变化时先构建并探活新实现，
+  成功后一致切换，失败保留旧可用实现。
 
 fail closed 语义（全部保持 resolve 侧既有异常行为）：
 
@@ -51,9 +52,84 @@ class PluginRulesetRuntimeSource:
     # ---------------------------------------------------------------- 同步
 
     def sync(self, plugin_host: Any) -> dict[str, Any]:
-        """Idempotent full resync; returns a report for logs and tests."""
+        """Idempotent full resync; returns a report for logs and tests.
 
+        切换协议（P1-02）：先构建并探活新 adapter，成功后才以「注销旧 → 注册新 →
+        更新所有权 → 关闭旧子进程」的顺序切换；构建/探活失败时**保留旧可用实现**，
+        不产生"注册表挂着已关闭 adapter"的空洞。跨插件重名 runtime_id 按歧义
+        显式拒绝（fail closed），不依赖遍历顺序。
+        """
+
+        desired, collisions = self._collect_desired(plugin_host)
+
+        removed = sorted(self._revoke_stale(desired))
+        registered: list[str] = []
+        failed: dict[str, str] = dict(collisions)
+        host_data_dir = Path(getattr(plugin_host, "data_dir", "") or "").resolve() if getattr(plugin_host, "data_dir", None) else None
+        for runtime_id in sorted(desired):
+            entry = desired[runtime_id]
+            fingerprint = self._fingerprint(entry["plugin_id"], entry["declaration"], entry["runtime"])
+            existing = self._owned.get(runtime_id)
+            if existing and existing[0] == fingerprint:
+                registered.append(runtime_id)
+                continue
+            new_adapter = None
+            try:
+                new_adapter = self._build_adapter(
+                    entry["plugin_id"], entry["runtime"], entry["declaration"], host_data_dir,
+                )
+                # 注册前探活：起不来的 runtime 不暴露给 resolve（fail closed）。
+                new_adapter.describe_experience({}, "zh-CN")
+            except Exception as exc:  # noqa: BLE001 - 单个坏 runtime 不拖垮其它注册
+                # 新实现不可用：旧 adapter（若有）保持注册且子进程仍然存活，
+                # 玩家继续拿到可用规则；新构建的 adapter 必须关闭避免泄漏。
+                if new_adapter is not None:
+                    try:
+                        new_adapter.close()
+                    except Exception:  # noqa: BLE001 - 清理失败不影响报告
+                        logger.warning("外部规则 runtime %s 探活失败后清理子进程出错", runtime_id, exc_info=True)
+                failed[runtime_id] = str(exc)
+                logger.warning("外部规则 runtime %s 注册失败（fail closed）: %s", runtime_id, exc)
+                continue
+            # 一致切换：只撤**本源拥有**的旧注册（幂等）。注册表里的外部条目
+            # （内置实现或其它来源）不得由本源注销——直接尝试注册，重名失败
+            # 会落入 failed 并保持原实现（P1-02 回归：内置实现不被插件顶掉）。
+            if existing is not None:
+                self._registry.unregister(runtime_id)
+            try:
+                self._registry.register(new_adapter)
+            except Exception as exc:  # noqa: BLE001
+                failed[runtime_id] = str(exc)
+                logger.warning("外部规则 runtime %s 注册进注册表失败: %s", runtime_id, exc)
+                try:
+                    new_adapter.close()
+                except Exception:  # noqa: BLE001
+                    logger.warning("外部规则 runtime %s 注册失败后清理子进程出错", runtime_id, exc_info=True)
+                if existing is not None:
+                    try:
+                        self._registry.register(existing[1])
+                        self._owned[runtime_id] = existing
+                        registered.append(runtime_id)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("外部规则 runtime %s 回退旧实现失败，进入不可用状态", runtime_id)
+                continue
+            self._owned[runtime_id] = (fingerprint, new_adapter)
+            if existing is not None:
+                existing[1].close()
+            registered.append(runtime_id)
+        if removed:
+            logger.info("外部规则 runtime 已撤销注册: %s", ", ".join(removed))
+        if registered:
+            logger.info("外部规则 runtime 已注册: %s", ", ".join(registered))
+        if failed:
+            logger.warning("外部规则 runtime 同步失败项: %s", failed)
+        return {"registered": registered, "removed": removed, "failed": failed}
+
+    def _collect_desired(
+        self, plugin_host: Any,
+    ) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
         desired: dict[str, dict[str, Any]] = {}
+        owners: dict[str, list[str]] = {}
         for plugin_id, runtime in plugin_host.plugins.items():
             manifest = getattr(runtime, "manifest", None) or {}
             if str(manifest.get("plugin_type") or "") != _RULESET_RUNTIME_PLUGIN_TYPE:
@@ -67,42 +143,22 @@ class PluginRulesetRuntimeSource:
             except ValueError as exc:
                 logger.warning("插件 %s 的 ruleset_runtime 声明无效，保持未注册: %s", plugin_id, exc)
                 continue
-            desired[declaration["runtime_id"]] = {
+            runtime_id = declaration["runtime_id"]
+            desired[runtime_id] = {
                 "plugin_id": plugin_id,
                 "runtime": runtime,
                 "declaration": declaration,
             }
-
-        removed = sorted(self._revoke_stale(desired))
-        registered: list[str] = []
-        failed: dict[str, str] = {}
-        host_data_dir = Path(getattr(plugin_host, "data_dir", "") or "").resolve() if getattr(plugin_host, "data_dir", None) else None
-        for runtime_id in sorted(desired):
-            entry = desired[runtime_id]
-            fingerprint = self._fingerprint(entry["plugin_id"], entry["declaration"], entry["runtime"])
-            existing = self._owned.get(runtime_id)
-            if existing and existing[0] == fingerprint:
-                registered.append(runtime_id)
-                continue
-            if existing is not None:
-                self._drop(runtime_id)
-            try:
-                adapter = self._build_adapter(
-                    entry["plugin_id"], entry["runtime"], entry["declaration"], host_data_dir,
+            owners.setdefault(runtime_id, []).append(plugin_id)
+        collisions: dict[str, str] = {}
+        for runtime_id, owner_ids in owners.items():
+            if len(owner_ids) > 1:
+                # 跨插件重名：按插件身份显式拒绝歧义，绝不靠遍历顺序取胜。
+                collisions[runtime_id] = (
+                    "runtime_id 被多个启用的插件声明: " + ", ".join(sorted(owner_ids))
                 )
-                # 注册前探活：起不来的 runtime 不暴露给 resolve（fail closed）。
-                adapter.describe_experience({}, "zh-CN")
-                self._registry.register(adapter)
-                self._owned[runtime_id] = (fingerprint, adapter)
-                registered.append(runtime_id)
-            except Exception as exc:  # noqa: BLE001 - 单个坏 runtime 不拖垮其它注册
-                failed[runtime_id] = str(exc)
-                logger.warning("外部规则 runtime %s 注册失败（fail closed）: %s", runtime_id, exc)
-        if removed:
-            logger.info("外部规则 runtime 已撤销注册: %s", ", ".join(removed))
-        if registered:
-            logger.info("外部规则 runtime 已注册: %s", ", ".join(registered))
-        return {"registered": registered, "removed": removed, "failed": failed}
+                desired.pop(runtime_id, None)
+        return desired, collisions
 
     def close(self) -> None:
         """Shut down every adapter owned by this source and revoke registrations.
@@ -133,17 +189,41 @@ class PluginRulesetRuntimeSource:
             entry[1].close()
 
     def _fingerprint(self, plugin_id: str, declaration: dict[str, Any], runtime: Any) -> str:
+        # 指纹必须覆盖**实际安装的工件内容**：原地覆盖代码而 manifest 关键字段
+        # 不变时，纯声明式指纹会复用过期的子进程（P1-02）。
         payload = json.dumps(
             {
                 "plugin_id": plugin_id,
                 "declaration": declaration,
                 "entrypoint": list((getattr(runtime, "manifest", {}) or {}).get("entrypoint") or []),
                 "plugin_dir": str(getattr(getattr(runtime, "directory", None), "resolve", lambda: "")() or ""),
+                "artifacts": self._artifact_digest(getattr(runtime, "directory", None)),
             },
             ensure_ascii=False,
             sort_keys=True,
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _artifact_digest(directory: Any) -> str:
+        """内容指纹：插件目录内全部普通文件的 (相对路径, sha256)。读不到就说读不到。"""
+        if directory is None:
+            return "unavailable"
+        parts: list[str] = []
+        try:
+            resolved = Path(directory).resolve()
+            for path in sorted(resolved.rglob("*")):
+                if not path.is_file() or path.is_symlink():
+                    continue
+                digest = hashlib.sha256()
+                with path.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(65536), b""):
+                        digest.update(chunk)
+                parts.append(f"{path.relative_to(resolved).as_posix()}:{digest.hexdigest()}")
+        except OSError as exc:
+            logger.warning("外部规则 runtime 工件指纹读取失败（沿用可用性现状）: %s", exc)
+            return "unavailable"
+        return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
 
     def _build_adapter(
         self, plugin_id: str, runtime: Any, declaration: dict[str, Any],

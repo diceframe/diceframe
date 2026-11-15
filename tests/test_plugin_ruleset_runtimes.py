@@ -163,7 +163,7 @@ if __name__ == "__main__":
 
 def _write_runtime_package(root: Path, plugin_id: str, *, broken: bool = False,
                            runtime_id: str = RUNTIME_ID, entrypoint: list[str] | None = None,
-                           slow_resolve: float = 0.0) -> Path:
+                           slow_resolve: float = 0.0, rule_id: str = "t3sample") -> Path:
     root.mkdir(parents=True, exist_ok=True)
     package_dir = root / plugin_id
     package_dir.mkdir(exist_ok=True)
@@ -200,8 +200,8 @@ def _write_runtime_package(root: Path, plugin_id: str, *, broken: bool = False,
         _runtime_server_script(broken=broken, slow_resolve=slow_resolve), encoding="utf-8")
     rules_dir = package_dir / "rules"
     rules_dir.mkdir(exist_ok=True)
-    (rules_dir / "t3sample.json").write_text(json.dumps({
-        "rule_id": "t3sample",
+    (rules_dir / f"{rule_id}.json").write_text(json.dumps({
+        "rule_id": rule_id,
         "rule_name": "T3 样例规则",
         "description": "rights-clean sample",
         "runtime": {"id": runtime_id, "minimum_version": 1},
@@ -354,6 +354,80 @@ async def test_slow_remote_resolve_keeps_event_loop_responsive(tmp_path):
     assert resolved.get("ok") is True
     # 1.5s 里按 10ms 心跳应累计 ~150 次；被阻塞的话接近 0。留出 CI 抖动余量。
     assert ticks >= 30, ticks
+    source.close()
+
+
+def _installed_runtime_dir(plugins: Path, plugin_id: str = "t3-pack") -> Path:
+    return plugins / plugin_id / "runtime"
+
+
+@pytest.mark.asyncio
+async def test_overwrite_update_swaps_adapter_and_closes_old_process(tmp_path):
+    """P1-02 回归：原地覆盖代码后必须换新子进程，且不允许重复 ID 注册失败。"""
+    plugins, data_dir = tmp_path / "plugins", tmp_path / "data"
+    host = PluginHost(plugins, data_dir)
+    registry = RulesetRuntimeRegistry([])
+    source = _make_source(registry, host)
+    package = _write_runtime_package(tmp_path, "t3-pack")
+    await host.install_from_zip(package.read_bytes())
+    await host.start("t3-pack", require_enabled=False)
+    assert source.sync(host)["registered"] == [RUNTIME_ID]
+
+    # 原地覆盖：manifest 关键字段不变，只改服务器行为（describe 名称带 v2）。
+    server = _installed_runtime_dir(plugins) / "server.py"
+    server.write_text(_runtime_server_script().replace("T3 样例规则", "T3 样例规则 v2"), encoding="utf-8")
+
+    report = source.sync(host)
+    assert report["failed"] == {}
+    assert report["registered"] == [RUNTIME_ID]
+    # 注册表服务的是新工件：describe 名称带 v2（旧子进程已关闭并被替换）。
+    served = registry.get(RUNTIME_ID, minimum_version=1).describe_experience({}, "zh-CN")
+    assert served["name"] == "T3 样例规则 v2"
+    source.close()
+
+
+@pytest.mark.asyncio
+async def test_probe_failure_keeps_previous_runtime_registered(tmp_path):
+    """P1-02 回归：新版本探活失败时，旧可用实现保持注册（不得留下已关闭 adapter）。"""
+    plugins, data_dir = tmp_path / "plugins", tmp_path / "data"
+    host = PluginHost(plugins, data_dir)
+    registry = RulesetRuntimeRegistry([])
+    source = _make_source(registry, host)
+    package = _write_runtime_package(tmp_path, "t3-pack")
+    await host.install_from_zip(package.read_bytes())
+    await host.start("t3-pack", require_enabled=False)
+    assert source.sync(host)["registered"] == [RUNTIME_ID]
+
+    # 覆盖成启动即退出的坏实现（manifest 不变 → 走更新路径）。
+    (_installed_runtime_dir(plugins) / "server.py").write_text(
+        _runtime_server_script(broken=True), encoding="utf-8")
+
+    report = source.sync(host)
+    assert report["registered"] == []
+    assert RUNTIME_ID in report["failed"]
+    # 旧实现仍然可用：resolve 探针照常工作，不会拿到已关闭的子进程。
+    served = registry.get(RUNTIME_ID, minimum_version=1).describe_experience({}, "zh-CN")
+    assert served["name"] == "T3 样例规则"
+    source.close()
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_runtime_id_rejected_across_plugins(tmp_path):
+    """P1-02 回归：多个启用插件声明同一 runtime_id 时按歧义拒绝，不靠遍历顺序。"""
+    plugins, data_dir = tmp_path / "plugins", tmp_path / "data"
+    host = PluginHost(plugins, data_dir)
+    registry = RulesetRuntimeRegistry([])
+    source = _make_source(registry, host)
+    await host.install_from_zip(_write_runtime_package(tmp_path, "t3-pack").read_bytes())
+    await host.install_from_zip(_write_runtime_package(tmp_path, "t3-pack-b", rule_id="t3-pack-b").read_bytes())
+    await host.start("t3-pack", require_enabled=False)
+    await host.start("t3-pack-b", require_enabled=False)
+
+    report = source.sync(host)
+    assert RUNTIME_ID not in report["registered"]
+    assert "runtime_id 被多个启用的插件声明" in report["failed"][RUNTIME_ID]
+    with pytest.raises(UnknownRulesetRuntimeError):
+        registry.get(RUNTIME_ID)
     source.close()
 
 
