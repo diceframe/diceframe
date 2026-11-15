@@ -17,6 +17,8 @@ from src.rulesets.runtime_probe import RuntimeProbeClient, RuntimeProbeError, Ru
 
 MAX_EVENT_LEDGER_ROWS = 4096
 MAX_EVENT_BATCH_ID_LENGTH = 200
+MAX_SHEET_BRIDGE_ROWS = 64
+MAX_CHARACTER_SHEET_BYTES = 262_144
 
 
 def _game_scope(instance: Any) -> str:
@@ -313,35 +315,85 @@ class RemoteRulesetRuntimeAdapter:
         # append-only ledger as JSON DTOs.  The host writes them through the
         # existing ruleset_runtime module owner; it never accepts a live object
         # or an arbitrary instance patch from the transport.
-        if "state" in result or "event_ledger" in result:
+        bridge_keys = {"state", "event_ledger", "character_sheets"}
+        if bridge_keys.intersection(result):
             state, ledger = self._validate_state_bridge(instance, batch, result)
+            sheets = self._validate_sheet_bridge(instance, result)
             from src.engine.modules import ruleset_runtime
 
             binding = ruleset_runtime.binding(instance)
             if str(binding.get("id") or "") != self.runtime_id:
                 raise RuntimeProbeError("remote event batch runtime binding mismatch")
-            # Validation above is deliberately complete before either owner
-            # slot is touched.  A malformed child response therefore cannot
-            # leave state and ledger half-updated.
-            ruleset_runtime.replace_state(instance, state)
-            ruleset_runtime.replace_event_ledger(instance, ledger)
+            # Validation above is deliberately complete before any owner slot
+            # is touched.  A malformed child response therefore cannot leave
+            # state, ledger and sheets half-updated.
+            if state is not None:
+                ruleset_runtime.replace_state(instance, state)
+            if ledger is not None:
+                ruleset_runtime.replace_event_ledger(instance, ledger)
+            for uid, sheet in sheets.items():
+                instance.set_character_sheet(uid, sheet)
             return {key: deepcopy(value) for key, value in result.items()
-                    if key not in {"state", "event_ledger"}}
+                    if key not in bridge_keys}
         return result
+
+    def _validate_sheet_bridge(
+        self, instance: Any, result: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        """Validate an authoritative runtime's character-sheet handoff.
+
+        A runtime that keeps ``hp``/``mp``/inventory inside the sheet it was
+        given must be able to hand the mutated sheet back: the process owns the
+        rules, the host owns persistence.  The bridge is deliberately narrow—
+        only seats that already exist on the roster, only their
+        ``character_sheet`` slot, whole-sheet replacement, bounded size—so a
+        broken or hostile runtime cannot invent, delete or re-parent a player.
+        """
+
+        raw = result.get("character_sheets")
+        if raw is None:
+            return {}
+        if not isinstance(raw, dict) or len(raw) > MAX_SHEET_BRIDGE_ROWS:
+            raise RuntimeProbeError("remote character sheet bridge is invalid")
+        players = getattr(instance, "players", None)
+        if not isinstance(players, dict):
+            raise RuntimeProbeError("remote character sheet bridge needs a roster")
+        sheets: dict[str, dict[str, Any]] = {}
+        for uid, sheet in raw.items():
+            if not isinstance(uid, str) or not uid or uid not in players:
+                raise RuntimeProbeError("remote character sheet bridge names an unknown seat")
+            if not isinstance(sheet, dict):
+                raise RuntimeProbeError("remote character sheet must be an object")
+            payload = self._dto(sheet, "remote character sheet")
+            if not isinstance(payload, dict):
+                raise RuntimeProbeError("remote character sheet must be an object")
+            try:
+                encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            except (TypeError, ValueError) as exc:
+                raise RuntimeProbeError("remote character sheet is not JSON serializable") from exc
+            if len(encoded) > MAX_CHARACTER_SHEET_BYTES:
+                raise RuntimeProbeError("remote character sheet is too large")
+            sheets[uid] = payload
+        return sheets
 
     def _validate_state_bridge(
         self, instance: Any, batch: dict[str, Any], result: dict[str, Any],
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None]:
         """Validate an opaque state/ledger handoff before mutating host state.
 
         The child owns the opaque contents, but it may only append to the
         host's already persisted ledger.  This keeps restart recovery and
         replay deterministic without allowing a runtime process to erase or
         reorder another owner's history.
+
+        A runtime that owns no versioned state answers with neither key; that
+        is not an error, it simply has nothing to hand back.
         """
 
         state = result.get("state")
         ledger = result.get("event_ledger")
+        if state is None and ledger is None:
+            return None, None
         if not isinstance(state, dict) or not isinstance(ledger, list):
             raise RuntimeProbeError("remote event batch state bridge is invalid")
         state = self._dto(state, "remote state")

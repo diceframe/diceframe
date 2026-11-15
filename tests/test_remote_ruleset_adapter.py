@@ -560,3 +560,98 @@ def test_remote_adapter_rejects_a_non_list_check_reply():
 
     with pytest.raises(RuntimeProbeError):
         runtime.resolve_narrative_checks({"run_id": "r"}, [{"check_id": "a"}])
+
+
+def _bound_instance_with_seat(uid: str = "alice"):
+    from src.engine.game_instance import GameInstance
+    from src.engine.modules import ruleset_runtime
+
+    instance = GameInstance(game_key=("test", "group", "sheet"), run_id="run-sheet")
+    ruleset_runtime.bind(instance, {
+        "id": "external:demo", "version": 1, "rule_id": "demo",
+        "content_version": "1", "state_schema_version": 1,
+    })
+    instance.put_player(uid, {"character_name": "Livia", "character_sheet": {"hp": 10}})
+    return instance
+
+
+def test_remote_adapter_writes_back_only_known_character_sheets():
+    from src.engine.modules import ruleset_runtime
+
+    instance = _bound_instance_with_seat()
+    runtime = RemoteRulesetRuntimeAdapter(
+        "external:demo", 1, RulesetCapabilities(),
+        lambda request: {
+            "request_id": request["request_id"], "ok": True,
+            "result": {
+                "ok": True,
+                "applied": True,
+                "state": {"version": 1},
+                "event_ledger": [{"batch_id": "b1"}],
+                "character_sheets": {"alice": {"hp": 3, "max_hp": 10}},
+            },
+        },
+    )
+
+    result = runtime.apply_event_batch(instance, {"batch_id": "b1"})
+
+    # The bridge keys never reach the caller: they are transport, not results.
+    assert result == {"ok": True, "applied": True}
+    assert instance.get_character_sheet("alice") == {"hp": 3, "max_hp": 10}
+    assert ruleset_runtime.state(instance) == {"version": 1}
+
+
+def test_remote_adapter_sheet_bridge_rejects_an_unknown_seat_without_mutating_anything():
+    from src.engine.modules import ruleset_runtime
+
+    instance = _bound_instance_with_seat()
+    runtime = RemoteRulesetRuntimeAdapter(
+        "external:demo", 1, RulesetCapabilities(),
+        lambda request: {
+            "request_id": request["request_id"], "ok": True,
+            "result": {
+                "ok": True,
+                "state": {"version": 9},
+                "event_ledger": [{"batch_id": "b1"}],
+                "character_sheets": {"mallory": {"hp": 0}},
+            },
+        },
+    )
+
+    with pytest.raises(RuntimeProbeError, match="unknown seat"):
+        runtime.apply_event_batch(instance, {"batch_id": "b1"})
+
+    assert instance.get_character_sheet("alice") == {"hp": 10}
+    assert ruleset_runtime.state(instance) == {"state_schema_version": 1}
+
+
+def test_remote_adapter_sheet_bridge_rejects_a_non_object_sheet():
+    instance = _bound_instance_with_seat()
+    runtime = RemoteRulesetRuntimeAdapter(
+        "external:demo", 1, RulesetCapabilities(),
+        lambda request: {
+            "request_id": request["request_id"], "ok": True,
+            "result": {"ok": True, "character_sheets": {"alice": ["hp", 3]}},
+        },
+    )
+
+    with pytest.raises(RuntimeProbeError, match="must be an object"):
+        runtime.apply_event_batch(instance, {"batch_id": "b1"})
+
+    assert instance.get_character_sheet("alice") == {"hp": 10}
+
+
+def test_remote_adapter_accepts_a_sheet_only_handoff():
+    instance = _bound_instance_with_seat()
+    runtime = RemoteRulesetRuntimeAdapter(
+        "external:demo", 1, RulesetCapabilities(),
+        lambda request: {
+            "request_id": request["request_id"], "ok": True,
+            "result": {"ok": True, "character_sheets": {"alice": {"hp": 7}}},
+        },
+    )
+
+    result = runtime.apply_event_batch(instance, {"batch_id": "b1"})
+
+    assert result == {"ok": True}
+    assert instance.get_character_sheet("alice") == {"hp": 7}
