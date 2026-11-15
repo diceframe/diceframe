@@ -189,10 +189,27 @@ def handle(op, payload):
         return []
     if op == "gameplay_view":
         state = _state(payload)
-        view = {"public": {
-            "version": state.get("version", 0),
-            "pending_enemies": list(state.get("pending_enemies") or []),
-        }}
+        pending = list(state.get("pending_enemies") or [])
+        version = int(state.get("version") or 0)
+        # 插件不能携带 Vue 组件，FU 的面板只能以声明式节点下发。
+        panels = [
+            {"component": "group", "label": "Clock", "children": [
+                {"component": "text", "label": "Doom", "value": "%d / 6" % min(version, 6)},
+                {"component": "progress", "label": "Doom", "value": min(version, 6),
+                 "min": 0, "max": 6},
+            ]},
+            {"component": "list", "label": "Opportunities",
+             "value": ["A merchant offers a map"]},
+        ]
+        if pending:
+            panels.append({
+                "component": "button", "label": "Enemy turn",
+                "action": "fu.attack", "arguments": {"actor_id": pending[0]},
+            })
+        view = {
+            "public": {"version": version, "pending_enemies": pending},
+            "panels": panels,
+        }
         if payload.get("viewer_is_gm"):
             view["private"] = {"notes": "gm-only"}
         return view
@@ -469,6 +486,41 @@ async def test_fu_runtime_declares_automatic_enemy_turns(tmp_path):
                                           random.Random(secrets.randbits(128)))
         runtime.apply_event_batch(instance, settled2["event_batch"])
         assert runtime.next_automatic_intent(instance) is None
+    finally:
+        source.close()
+
+
+@pytest.mark.asyncio
+async def test_fu_view_carries_declarative_panels(tmp_path):
+    """面板能穿过子进程边界：插件发声明式节点，宿主原样透传、不裁剪。
+
+    插件包不能带 Vue 组件，命刻/机会/冲突步骤只能这样表达；这条用例守住
+    「节点不被宿主改写或丢弃」，前端渲染由 `RulesetPanels.test.ts` 覆盖。
+    """
+
+    host, registry, source = await _install_and_enable(tmp_path)
+    try:
+        template = _packaged_rule_template(tmp_path / "plugins")
+        runtime = registry.resolve(template)
+        instance = GameInstance(game_key=("probe", "fu", "panel"), run_id="run-panel")
+        instance.modules["ruleset_runtime"] = ruleset_runtime.fresh()
+        ruleset_runtime.replace_binding(
+            instance, {"id": FU_RUNTIME_ID, "runtime_version": 1})
+        ruleset_runtime.replace_state(
+            instance, {"version": 2, "pending_enemies": ["goblin-a"]})
+
+        view = runtime.gameplay_view(instance, "alice", False)
+        panels = view["panels"]
+        assert panels[0]["component"] == "group"
+        assert panels[0]["children"][1]["component"] == "progress"
+        assert panels[0]["children"][1]["max"] == 6
+        assert panels[1]["component"] == "list"
+        assert panels[2]["action"] == "fu.attack"
+
+        # 玩家投影不带 GM 私有段，但面板对所有人一致（面板内容由 runtime 自己裁剪）。
+        assert "private" not in view
+        gm_view = runtime.gameplay_view(instance, "gm", True)
+        assert gm_view["panels"] == panels
     finally:
         source.close()
 
