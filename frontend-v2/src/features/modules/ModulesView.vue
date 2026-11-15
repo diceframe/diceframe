@@ -111,12 +111,6 @@ const myPanelOpen = ref(false)
 const showFilters = ref(false)
 // 跳转前保存面板状态，回来后恢复
 watch(myPanelOpen, v => { try { sessionStorage.setItem('df_modules_panel', v ? '1' : '0') } catch { /* ignore */ } })
-onMounted(() => {
-  void load()
-  void loadMarketplace()
-  void checkRecovery()
-  try { if (sessionStorage.getItem('df_modules_panel') === '1') myPanelOpen.value = true } catch { /* ignore */ }
-})
 function uniqueFilterValues(values: Array<string | undefined>): string[] {
   const unique = new Set(values.map(value => String(value || '').trim()).filter(Boolean))
   return [...unique].sort((a, b) => a.localeCompare(b))
@@ -771,6 +765,7 @@ async function checkRecovery() {
           :installing="installBusy === item.id"
           :has-newer-version="item.update_available"
           :show-hub-stats="Boolean(marketSource?.hub)"
+          :data-testid="`modules-market-${item.id}`"
           @install="installFromMarketplace(item)"
           @detail="openMarketDetail(item)"
         />
@@ -807,6 +802,7 @@ async function checkRecovery() {
               v-for="item in shelfAdventure"
               :key="item.id"
               :item="item"
+              :data-testid="`modules-market-${item.id}`"
               :installing="installBusy === item.id"
               :has-newer-version="item.update_available"
               :show-hub-stats="Boolean(marketSource?.hub)"
@@ -826,6 +822,7 @@ async function checkRecovery() {
               v-for="item in shelfTopDownloads"
               :key="item.id"
               :item="item"
+              :data-testid="`modules-market-${item.id}`"
               :installing="installBusy === item.id"
               :has-newer-version="item.update_available"
               :show-hub-stats="Boolean(marketSource?.hub)"
@@ -846,6 +843,7 @@ async function checkRecovery() {
               v-for="item in shelfOfficial"
               :key="item.id"
               :item="item"
+              :data-testid="`modules-market-${item.id}`"
               :installing="installBusy === item.id"
               :has-newer-version="item.update_available"
               :show-hub-stats="Boolean(marketSource?.hub)"

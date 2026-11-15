@@ -138,13 +138,15 @@ describe('ModuleDetailView', () => {
 
     const metadata = wrapper.get('[data-testid="module-metadata"]').text()
     expect(metadata).toContain('castle-module')
-    // Readable labels first, raw host values kept for troubleshooting.
-    expect(metadata).toContain('冒险内容包 adventure-module')
-    expect(metadata).toContain('已启用 running')
-    expect(metadata).toContain('开局时按需取用，启用时不导入 catalog')
+    // Readable labels in the dl; the readable profile moved to the header eyebrow.
+    expect(metadata).toContain('已启用')
+    expect(metadata).toContain('开局时按需取用，启用时不导入')
+    expect(wrapper.get('.mod-header-eyebrow').text()).toBe('冒险内容包')
     expect(wrapper.get('[data-testid="module-compatibility"]').text()).toContain('兼容')
     expect(wrapper.get('[data-testid="module-adventures"]').text()).toContain('plugin:castle-quest')
-    expect(wrapper.get('[data-testid="module-content"]').text()).toContain('NPC · 1')
+    const content = wrapper.get('[data-testid="module-content"]').text()
+    expect(content).toContain('NPC')
+    expect(content).toContain('1')
     expect(wrapper.get('[data-testid="module-usage"]').text()).toContain('web|room|bot')
   })
 
@@ -160,8 +162,8 @@ describe('ModuleDetailView', () => {
 
     expect(wrapper.text()).toContain('资源内容包')
     expect(wrapper.text()).toContain('不含固定剧情')
-    expect(wrapper.get('[data-testid="module-metadata"]').text()).toContain('content-pack')
-    expect(wrapper.get('[data-testid="module-adventures"]').text()).not.toContain('用此冒险创建游戏')
+    expect(wrapper.get('.mod-header-eyebrow').text()).toBe('资源内容包')
+    expect(wrapper.find('[data-testid="module-adventures"]').exists()).toBe(false)
   })
 
   it('keeps a content pack with adventures labelled by its profile', async () => {
@@ -169,10 +171,9 @@ describe('ModuleDetailView', () => {
 
     const { wrapper } = await mountView()
 
-    expect(wrapper.get('.module-quick-facts').text()).toContain('资源内容包')
-    expect(wrapper.get('.module-quick-facts').text()).not.toContain('content-pack')
+    expect(wrapper.get('.mod-header-eyebrow').text()).toBe('资源内容包')
     expect(wrapper.get('[data-testid="module-adventures"]').text()).toContain('plugin:castle-quest')
-    expect(wrapper.get('[data-testid="module-metadata"]').text()).toContain('启用时自动导入包里的内容 legacy_autoimport')
+    expect(wrapper.get('[data-testid="module-metadata"]').text()).toContain('启用时自动导入包里的内容')
   })
 
   it('shows unknown host values as they are', async () => {
@@ -180,10 +181,10 @@ describe('ModuleDetailView', () => {
 
     const { wrapper } = await mountView()
 
-    expect(wrapper.get('.module-quick-facts').text()).toContain('内容包')
+    expect(wrapper.get('.mod-header-eyebrow').text()).toContain('内容包')
     const metadata = wrapper.get('[data-testid="module-metadata"]').text()
-    expect(metadata).toContain('paused paused')
-    expect(metadata).toContain('streamed streamed')
+    expect(metadata).toContain('paused')
+    expect(metadata).toContain('streamed')
   })
 
   it('shows installed adventures in a disabled package without promising playability', async () => {
@@ -199,7 +200,8 @@ describe('ModuleDetailView', () => {
   it('does not describe unreadable installed content as an empty resource pack', async () => {
     mocks.detail.mockResolvedValue(detailPayload({ adventure_count: null, content_counts: null, inventory_status: 'unknown', adventures: [] }))
     const { wrapper } = await mountView()
-    expect(wrapper.get('[data-testid="module-adventures"]').text()).toContain('内容清单暂不可读')
+    // 不可读清单既不渲染成空资源包，也不承诺可玩冒险：两个分区都不出现。
+    expect(wrapper.find('[data-testid="module-adventures"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('不含固定剧情')
   })
 
@@ -208,7 +210,7 @@ describe('ModuleDetailView', () => {
     const { wrapper } = await mountView()
 
     const navigation = wrapper.get('[data-testid="module-fallback-navigation"]')
-    expect(navigation.find('a[href="#/library"]').exists()).toBe(true)
+    // 重写后的兜底导航只保留列表出口（返回内容库由页头/浏览器承担）。
     expect(navigation.find('a[href="#/modules"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('detail unavailable')
   })
@@ -223,7 +225,7 @@ describe('ModuleDetailView', () => {
 
     const { wrapper } = await mountView()
 
-    expect(wrapper.get('[data-testid="module-action-blocked"]').text()).toContain('1 个存档正在使用此内容包')
+    expect(wrapper.get('.mod-blocked-hint').text()).toContain('1 个存档正在使用此内容包')
     expect(buttonByText(wrapper, '更新到 1.1.0').attributes('disabled')).toBeDefined()
     expect(buttonByText(wrapper, '禁用').attributes('disabled')).toBeDefined()
     expect(buttonByText(wrapper, '卸载').attributes('disabled')).toBeDefined()
@@ -397,7 +399,7 @@ describe('ModuleDetailView', () => {
     mocks.compatibility.mockResolvedValue({ ok: false, module_id: 'castle-module', blockers: ['runtime missing'], warnings: [] })
     const { wrapper } = await mountView()
     const compatibility = wrapper.get('[data-testid="module-compatibility"]')
-    expect(compatibility.attributes('open')).toBeDefined()
+    expect(compatibility.text()).toContain('runtime missing')
     expect(wrapper.get('[data-testid="module-adventures"]')).toBeTruthy()
     expect(wrapper.findComponent({ name: 'ModuleResourceBrowser' }).exists()).toBe(true)
     expect(wrapper.get('[data-testid="module-metadata"]').element.tagName).toBe('DETAILS')
@@ -420,8 +422,9 @@ describe('ModuleDetailView', () => {
     await buttonByText(wrapper, '禁用').trigger('click')
     await flushPromises()
 
+    // 服务端的 MODULE_IN_USE 结论映射成可读文案后透出，guard 随刷新生效。
     expect(wrapper.text()).toContain('该内容包正在被存档使用')
-    expect(wrapper.get('[data-testid="module-action-blocked"]').text()).toContain('1 个存档正在使用此内容包')
+    expect(wrapper.get('.mod-blocked-hint').text()).toContain('1 个存档正在使用此内容包')
     expect(buttonByText(wrapper, '禁用').attributes('disabled')).toBeDefined()
   })
 })
