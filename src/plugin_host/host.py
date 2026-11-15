@@ -986,6 +986,20 @@ class PluginHost:
         except Exception:
             self.logger.exception("外部规则 runtime 注册表重同步失败")
 
+    async def _anotify_ruleset_runtime_changed(self) -> None:
+        """异步路径的注册表重同步：探活 RPC 卸到工作线程（P1-04）。
+
+        完成后才返回，调用方（start/stop/uninstall）的后续断言与状态保持
+        确定性；发现（discover）等同步路径继续用同步版本，上限为探活超时。
+        """
+        listener = getattr(self, "_ruleset_runtime_listener", None)
+        if listener is None:
+            return
+        try:
+            await asyncio.to_thread(listener)
+        except Exception:
+            self.logger.exception("外部规则 runtime 注册表重同步失败")
+
     def _guard_package_mutation(self, plugin_id: str, action: str) -> None:
         """Ask the injected guard before changing/removing installed package bytes."""
 
@@ -1536,7 +1550,7 @@ class PluginHost:
                 shutil.rmtree(data_dir)
         self.plugins.pop(plugin_id, None)
         self._api_tokens.pop(plugin_id, None)
-        self._notify_ruleset_runtime_changed()
+        await self._anotify_ruleset_runtime_changed()
         return {"id": plugin_id, "uninstalled": True, "data_deleted": bool(delete_data)}
 
     async def start_enabled(self) -> None:
@@ -1596,7 +1610,7 @@ class PluginHost:
         # 启动时只拉起 enabled 的插件；前端开关用 require_enabled=False 强制启动进程。
         if require_enabled and not runtime.config.get("enabled"):
             runtime.status = "disabled"
-            self._notify_ruleset_runtime_changed()
+            await self._anotify_ruleset_runtime_changed()
             return
         if runtime.process and runtime.process.returncode is None:
             runtime.status = "running"
@@ -1618,7 +1632,7 @@ class PluginHost:
             if not runtime.config.get("enabled"):
                 runtime.config["enabled"] = True
                 self._save_config(plugin_id, runtime)
-            self._notify_ruleset_runtime_changed()
+            await self._anotify_ruleset_runtime_changed()
             return
         runtime.status, runtime.error = "starting", ""
         env = self._build_process_env(plugin_id, runtime)
@@ -1875,7 +1889,7 @@ class PluginHost:
                 await self._on_plugin_stopped(plugin_id)
             except Exception:
                 self.logger.exception("插件停止回调失败: %s", plugin_id)
-        self._notify_ruleset_runtime_changed()
+        await self._anotify_ruleset_runtime_changed()
 
     async def _fail_rpc_runtime(self, runtime: PluginRuntime, error: str) -> None:
         monitor = runtime.monitor_task

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import random
 import secrets
@@ -33,6 +34,7 @@ from src.rulesets.contracts import (
     TemporaryEncounterPlannerRuntime,
 )
 from src.rulesets.registry import RulesetRuntimeRegistry
+from src.rulesets.remote_adapter import RemoteRulesetRuntimeAdapter
 from src.rulesets.sequential_actions import execute_sequential_plan
 from src.llm.seat_policy import SeatRuntime
 from src.webui.services import hosted_combat, adventure_commands
@@ -47,6 +49,19 @@ def _RNG_UNSET() -> Any:  # pragma: no cover - identity sentinel, never called
 
 def _default_rng() -> Any:
     return random.Random(secrets.randbits(128))
+
+
+async def _await_runtime_call(runtime: Any, method: str, *args: Any) -> Any:
+    """把可能阻塞的外部 ruleset RPC 卸到工作线程（P1-04）。
+
+    RemoteRulesetRuntimeAdapter 的 stdio 等待是有界的同步阻塞；直接在事件
+    循环上调用会拖住所有其它请求。进程内 runtime 会就地改写 instance 共享
+    状态，必须留在事件循环上执行，不得移入线程。
+    """
+    call = getattr(runtime, method)
+    if isinstance(runtime, RemoteRulesetRuntimeAdapter):
+        return await asyncio.to_thread(call, *args)
+    return call(*args)
 
 
 @dataclass(frozen=True)
@@ -241,7 +256,7 @@ def _context(
     return instance, rule, runtime, effective_requester, None
 
 
-def _response(
+async def _response(
     dependencies: RulesetGameplayDependencies,
     rule: Any,
     runtime: Any,
@@ -249,8 +264,8 @@ def _response(
     requester_id: str,
     *, requester_is_gm: bool = False, result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    view = runtime.gameplay_view(instance, requester_id, requester_is_gm)
-    actions = runtime.available_intents(instance, requester_id)
+    view = await _await_runtime_call(runtime, "gameplay_view", instance, requester_id, requester_is_gm)
+    actions = await _await_runtime_call(runtime, "available_intents", instance, requester_id)
     payload: dict[str, Any] = {
         "ok": True,
         "game_key": "|".join(instance.game_key),
@@ -262,20 +277,22 @@ def _response(
         "available_actions": actions,
     }
     if result is not None:
-        payload["result"] = _viewer_result(
+        payload["result"] = await _viewer_result(
             runtime, instance, result, requester_id, requester_is_gm,
         )
     return payload
 
 
-def _viewer_result(
+async def _viewer_result(
     runtime: Any, instance: Any, result: dict[str, Any],
     viewer_id: str, viewer_is_gm: bool,
 ) -> dict[str, Any]:
     """Let the ruleset decide what a viewer may see of a raw intent payload."""
 
     if isinstance(runtime, IntentResultProjectionRuntime):
-        return runtime.project_intent_result(instance, result, viewer_id, viewer_is_gm)
+        return await _await_runtime_call(
+            runtime, "project_intent_result", instance, result, viewer_id, viewer_is_gm,
+        )
     return result
 
 
@@ -454,7 +471,7 @@ async def available_actions(
         )
         if binding_error:
             return binding_error
-        return _response(
+        return await _response(
             dependencies, rule, runtime, instance, effective_requester,
             requester_is_gm=requester_is_gm,
         )
@@ -493,7 +510,7 @@ async def submit_intent(
         )
         if not command["ok"]:
             return command
-        return _response(dependencies, rule, runtime, instance, effective_requester,
+        return await _response(dependencies, rule, runtime, instance, effective_requester,
                          requester_is_gm=requester_is_gm, result=command["result"])
 
     try:
@@ -506,8 +523,8 @@ async def submit_intent(
             "RULESET_INTENT_HOOKS_UNAVAILABLE",
             "权威规则运行时缺少请求身份与投影边界",
         )
-    intent = runtime.prepare_intent_submission(
-        intent, effective_requester, requester_is_gm,
+    intent = await _await_runtime_call(
+        runtime, "prepare_intent_submission", intent, effective_requester, requester_is_gm,
     )
     is_sequential_action = str(intent.get("type") or "") == "sequential_action"
 
@@ -530,7 +547,7 @@ async def submit_intent(
         if not planned.get("ok"):
             return planned
         await _project_batch_memory(dependencies, runtime, instance, planned["batches"])
-        return _response(dependencies, rule, runtime, instance, effective_requester,
+        return await _response(dependencies, rule, runtime, instance, effective_requester,
                          requester_is_gm=requester_is_gm, result=planned["result"])
 
     async with instance._lock:
@@ -588,13 +605,13 @@ async def submit_intent(
                     _project_public_batch(runtime, instance, batch, applied)
                 batch = None
             else:
-                resolved = runtime.resolve_intent(instance, intent, rng)
+                resolved = await _await_runtime_call(runtime, "resolve_intent", instance, intent, rng)
                 if not resolved.get("ok"):
                     return resolved
                 batch = resolved.get("event_batch")
                 if not isinstance(batch, dict):
                     return _error("INVALID_EVENT_BATCH", "规则运行时没有返回有效事件批次")
-                applied = runtime.apply_event_batch(instance, batch)
+                applied = await _await_runtime_call(runtime, "apply_event_batch", instance, batch)
                 _project_public_batch(runtime, instance, batch, applied)
             if marks_seat:
                 # A player-side intent applied for its own seat: the seat has
@@ -640,7 +657,7 @@ async def submit_intent(
                 "automatic_results": automatic_results,
                 "resolved_event_batches": [batch, *automatic_batches],
             }
-        return _response(
+        return await _response(
             dependencies, rule, runtime, instance, effective_requester,
             requester_is_gm=requester_is_gm,
             result=result,
@@ -785,7 +802,7 @@ async def resume_authoritative_combat(
         "ok": True,
         "handled": True,
         "resumed": True,
-        **_viewer_result(
+        **await _viewer_result(
             runtime, instance,
             {
                 "automatic_event_batches": automatic_batches,

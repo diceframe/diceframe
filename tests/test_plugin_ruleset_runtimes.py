@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import random
 import secrets
@@ -37,17 +38,19 @@ RUNTIME_ID = "external:t3-sample"
 # ---------------------------------------------------------------- fixtures
 
 
-def _runtime_server_script(*, broken: bool = False) -> str:
+def _runtime_server_script(*, broken: bool = False, slow_resolve: float = 0.0) -> str:
     """A minimal RuntimeProbe JSON-lines server shipped inside the package.
 
     stateless：所有以 payload 提供的 instance 状态为准，子进程不持有跨请求
     状态——这正是重启恢复依赖的运行时契约。broken=True 时进程立刻退出，
-    用于探活 fail closed 用例。
+    用于探活 fail closed 用例。slow_resolve>0 时 resolve_intent 故意睡眠，
+    用于验证慢子进程不阻塞宿主事件循环（P1-04）。
     """
 
     if broken:
         return "import sys\nsys.exit(3)\n"
-    return """
+    slow_prefix = f"import time\nSLOW_RESOLVE = {slow_resolve!r}\n\n"
+    return slow_prefix + """
 import json
 import sys
 
@@ -92,6 +95,8 @@ def handle(op, payload):
     if op == "validate_intent":
         return {"ok": True}
     if op == "resolve_intent":
+        if SLOW_RESOLVE:
+            time.sleep(SLOW_RESOLVE)
         instance = payload.get("instance") or {}
         state = (instance.get("modules") or {}).get("ruleset_runtime", {}).get("state") or {}
         version = int(state.get("version", 0))
@@ -157,7 +162,8 @@ if __name__ == "__main__":
 
 
 def _write_runtime_package(root: Path, plugin_id: str, *, broken: bool = False,
-                           runtime_id: str = RUNTIME_ID, entrypoint: list[str] | None = None) -> Path:
+                           runtime_id: str = RUNTIME_ID, entrypoint: list[str] | None = None,
+                           slow_resolve: float = 0.0) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     package_dir = root / plugin_id
     package_dir.mkdir(exist_ok=True)
@@ -190,7 +196,8 @@ def _write_runtime_package(root: Path, plugin_id: str, *, broken: bool = False,
     }), encoding="utf-8")
     runtime_dir = package_dir / "runtime"
     runtime_dir.mkdir(exist_ok=True)
-    (runtime_dir / "server.py").write_text(_runtime_server_script(broken=broken), encoding="utf-8")
+    (runtime_dir / "server.py").write_text(
+        _runtime_server_script(broken=broken, slow_resolve=slow_resolve), encoding="utf-8")
     rules_dir = package_dir / "rules"
     rules_dir.mkdir(exist_ok=True)
     (rules_dir / "t3sample.json").write_text(json.dumps({
@@ -308,6 +315,45 @@ async def test_resolve_intent_accepts_default_serializable_rng(tmp_path):
     # 同 intent 换一个新 rng 重试：收据身份只含规范化 payload，命中同一收据。
     replayed = runtime.resolve_intent(instance, intent, random.Random(secrets.randbits(128)))
     assert replayed == resolved
+    source.close()
+
+
+@pytest.mark.asyncio
+async def test_slow_remote_resolve_keeps_event_loop_responsive(tmp_path):
+    """P1-04 回归：慢的外部 runtime 不拖住宿主事件循环。
+
+    服务层把外部 adapter 的同步 RPC 卸到工作线程（asyncio.to_thread）。
+    这里用真实子进程（resolve 睡 1.5s）证明：结算进行期间事件循环仍以
+    ~10ms 的节奏持续调度其它协程（ticks 计数远大于 0）；若有人把 RPC
+    拉回事件循环上执行，ticks 会跌到接近 0，测试失败。
+    """
+    plugins, data_dir = tmp_path / "plugins", tmp_path / "data"
+    host = PluginHost(plugins, data_dir)
+    registry = RulesetRuntimeRegistry([])
+    source = _make_source(registry, host)
+    package = _write_runtime_package(tmp_path, "t3-pack", slow_resolve=1.5)
+    await host.install_from_zip(package.read_bytes())
+    await host.start("t3-pack", require_enabled=False)
+    runtime = registry.get(RUNTIME_ID, minimum_version=1)
+    instance = {"modules": {"ruleset_runtime": {"state": {"version": 0}, "event_ledger": []}}}
+    intent = {"intent_id": "t3-slow-1", "type": "t3.check"}
+
+    slow_task = asyncio.create_task(asyncio.to_thread(
+        runtime.resolve_intent, instance, intent, random.Random(secrets.randbits(128)),
+    ))
+    ticks = 0
+
+    async def tick() -> None:
+        nonlocal ticks
+        while not slow_task.done():
+            ticks += 1
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(tick(), timeout=10)
+    resolved = await asyncio.wait_for(slow_task, timeout=10)
+    assert resolved.get("ok") is True
+    # 1.5s 里按 10ms 心跳应累计 ~150 次；被阻塞的话接近 0。留出 CI 抖动余量。
+    assert ticks >= 30, ticks
     source.close()
 
 
