@@ -283,8 +283,10 @@ def test_step_of_the_wind_grants_dash_movement_as_a_bonus_action() -> None:
         if event["type"] == "dnd2024.movement.granted"
     )
 
-    assert granted["amount"] == 30
-    assert ruleset_runtime.state(instance)["combat"]["economy"]["movement"] == 60
+    # 2 级武僧的 Unarmored Movement 让派生速度变成 40，于是 Dash 给 40，
+    # 当回合移动额度是 40 + 40。
+    assert granted["amount"] == 40
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["movement"] == 80
     assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == 0
 
 
@@ -307,7 +309,8 @@ def test_focus_variants_spend_focus_and_resolve_both_actions() -> None:
         if event["type"] == "condition.applied"
     ] == ["disengaged"]
     assert focus_state(instance)["current"] == 1
-    assert ruleset_runtime.state(instance)["combat"]["economy"]["movement"] == 60
+    # 同上：派生速度 40，Dash 后当回合额度 80。
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["movement"] == 80
 
 
 def test_patient_defense_focus_also_dodges() -> None:
@@ -483,7 +486,9 @@ def test_every_combat_actor_view_projects_class_resources_as_a_list() -> None:
     by_id = {actor["actor_id"]: actor for actor in actors}
 
     assert isinstance(by_id["player:gm"]["class_resources"], list)
-    assert [row["id"] for row in by_id["player:gm"]["class_resources"]] == ["focus_points"]
+    assert [
+        row["id"] for row in by_id["player:gm"]["class_resources"]
+    ] == ["focus_points", "uncanny_metabolism"]
     # 敌人没有职业资源，但字段仍然存在，并且仍然是同一张列表。
     assert by_id["enemy:goblin-1"]["class_resources"] == []
 

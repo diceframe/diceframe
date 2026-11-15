@@ -50,8 +50,15 @@ def runtime(tmp_path: Path) -> Dnd2024Runtime:
         "license": {"id": "test", "attribution": "legal/ATTRIBUTION.md"},
     })
     for ability_id in ("str", "dex", "con", "int", "wis", "cha"):
+        # `con` is a reserved device name on Windows, and `con.json` counts as
+        # the device too: the write goes to the console and no file appears, so
+        # the fixture silently lost one ability and every reference to it failed
+        # as "unresolved".  The loader takes the id from inside the file, which
+        # is why the real content can spell the filename out -- so this does the
+        # same instead of depending on the platform.
+        filename = "constitution" if ability_id == "con" else ability_id
         _write(
-            root / "content" / "abilities" / f"{ability_id}.json",
+            root / "content" / "abilities" / f"{filename}.json",
             _entity("ability", ability_id),
         )
     for skill_id, ability_id in {
@@ -256,7 +263,9 @@ def _real_bundle_draft(runtime: Dnd2024Runtime, class_ref: str, species_ref: str
         "language_refs": ["language:common", "language:dwarvish", "language:elvish"],
     }
     if "fighting_style" in (class_entity.get("level_1_feature_ids") or []):
-        draft["class_feature_feat_choices"] = {"fighting_style": "feat:defense"}
+        # 建卡 AC 现在会消费 Defense 的 +1；这个文件的断言是"无被动加值"的
+        # 基线，因此用 Archery（无 AC 效果），Defense 由独立回归覆盖。
+        draft["class_feature_feat_choices"] = {"fighting_style": "feat:archery"}
     if class_entity.get("recommended_spell_choices"):
         draft["class_spell_choices"] = class_entity["recommended_spell_choices"]
     choices = runtime.builder_choices(None, draft)

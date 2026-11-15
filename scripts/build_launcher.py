@@ -238,7 +238,13 @@ def ensure_webview2_sdk(cache_dir: Path = WEBVIEW2_CACHE_DIR) -> Path:
     return sdk_dir
 
 
-def csc_command(output: Path, sdk_dir: Path, icon: Path | None = None) -> list[str]:
+def csc_command(
+    output: Path,
+    sdk_dir: Path,
+    icon: Path | None = None,
+    *,
+    defines: tuple[str, ...] = (),
+) -> list[str]:
     command = [
         str(find_csc()),
         "/nologo",
@@ -256,6 +262,9 @@ def csc_command(output: Path, sdk_dir: Path, icon: Path | None = None) -> list[s
     ]
     if icon is not None:
         command.append(f"/win32icon:{icon}")
+    if defines:
+        # 只有测试会传（例如 LAUNCHER_TESTING）；发布构建永远不带。
+        command.append("/define:" + ";".join(defines))
     command.append(f"/out:{output}")
     command.extend(launcher_sources())
     return command

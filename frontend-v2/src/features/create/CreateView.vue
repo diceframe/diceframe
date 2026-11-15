@@ -724,9 +724,9 @@ function openWizard(idx: number | null) {
     if (idx !== null && level > 1) {
       editIdx.value = null
       toast.info(gameDefault(
-        '这个角色已经高于 1 级，已可直接用于本局，不需要重新建卡。高级建卡器只负责创建 1 级角色；职业能力请在角色管理或对局内通过“职业升级”调整。',
-        'This character is already above level 1 and can be used as-is. The advanced builder creates level-1 characters; use Class advancement for later levels.',
-        'Dieser Charakter ist bereits über Stufe 1 und kann direkt für dieses Spiel verwendet werden, ein erneutes Erstellen ist nicht nötig. Der erweiterte Charaktereditor erstellt nur Charaktere auf Stufe 1; Klassenfähigkeiten bitte in der Charakterverwaltung oder im Spiel über „Klassenaufstieg” anpassen.',
+        '这个角色已经高于 1 级，已可直接用于本局，不需要重新建卡。如需更高等级的卡，请新建角色并在建卡时选择起始等级。',
+        'This character is already above level 1 and can be used as-is. For a higher-level character, create a new one and pick a starting level while building it.',
+        'Dieser Charakter ist bereits über Stufe 1 und kann direkt für dieses Spiel verwendet werden, ein erneutes Erstellen ist nicht nötig. Für einen Charakter höherer Stufe erstelle bitte einen neuen und wähle beim Erstellen eine Startstufe.',
       ))
       return
     }

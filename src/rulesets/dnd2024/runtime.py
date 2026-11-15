@@ -128,7 +128,7 @@ class Dnd2024Runtime:
     runtime_version = 1
     # 显式 rest option 契约：generic rest service 只转发这里声明的请求字段；
     # 未声明该能力的 ruleset 不会收到 D&D 专属的 attunement 参数。
-    rest_option_names = frozenset({"attunement"})
+    rest_option_names = frozenset({"attunement", "prepared_spells"})
     capabilities = RulesetCapabilities(
         experience_profile="dnd2024",
         character_builder="professional",
@@ -840,10 +840,52 @@ class Dnd2024Runtime:
         advanced = self._sync_class_resources(bundle, advanced)
         return self._live_projection(character, advanced, bundle)
 
+    def missing_advancement_choices(
+        self, rule: Any, character: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Choices this character still owes, in level order."""
+
+        del rule
+        canonical = character.get("ruleset_character")
+        locale = str(canonical.get("locale") or "") if isinstance(canonical, dict) else ""
+        return Dnd2024AdvancementEngine(
+            self.load_bundle(locale)
+        ).missing_choices(character)
+
+    def repair_advancement(
+        self,
+        rule: Any,
+        character: dict[str, Any],
+        repairs: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Fill a character's outstanding choices without moving its level."""
+
+        del rule
+        canonical = character.get("ruleset_character")
+        locale = str(canonical.get("locale") or "") if isinstance(canonical, dict) else ""
+        bundle = self.load_bundle(locale)
+        repaired = Dnd2024AdvancementEngine(bundle).repair_choices(character, repairs)
+        repaired = self._sync_class_resources(bundle, repaired)
+        return self._live_projection(character, repaired, bundle)
+
+    def prepared_spell_options(
+        self, rule: Any, character: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Read-only: what this character may prepare right now."""
+
+        del rule
+        canonical = character.get("ruleset_character")
+        if not isinstance(canonical, dict):
+            canonical = character
+        locale = str(canonical.get("locale") or "")
+        bundle = self.load_bundle(locale)
+        return Dnd2024SpellSelection(bundle).preparation_options(canonical)
+
     def complete_rest(
         self, rule: Any, character: dict[str, Any], rest: str,
         hit_die_rolls: dict[str, list[int]] | None = None,
         attunement: dict[str, Any] | None = None,
+        prepared_spells: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         del rule
         canonical = character.get("ruleset_character")
@@ -854,6 +896,8 @@ class Dnd2024Runtime:
             raise ValueError("attunement must be an object")
         engine = Dnd2024RestEngine(bundle)
         if rest == "short":
+            if prepared_spells is not None:
+                raise ValueError("prepared spells can only be changed on a long rest")
             result = engine.complete_short_rest(
                 character, hit_die_rolls, attunement=attunement,
             )
@@ -862,7 +906,12 @@ class Dnd2024Runtime:
                 raise ValueError("hit_die_rolls are only valid for a short rest")
             if attunement is not None:
                 raise ValueError("attunement changes are only valid during a short rest")
-            result = engine.complete_long_rest(character)
+            change = (
+                engine.parse_prepared_spells(character, prepared_spells)
+                if prepared_spells is not None
+                else None
+            )
+            result = engine.complete_long_rest(character, prepared_spells=change)
         else:
             raise ValueError("rest must be short or long")
         result["character"] = self._live_projection(character, result["character"], bundle)
@@ -878,10 +927,16 @@ class Dnd2024Runtime:
         this stays a D&D capability rather than a branch in the generic path.
         """
 
-        if not isinstance(options, dict) or "attunement" not in options:
+        if not isinstance(options, dict) or not options:
             return
-        if rest != "short":
+        # 每个声明项自己校验时机，新增选项不需要再改这个控制流。
+        if "attunement" in options and rest != "short":
             raise ValueError("attunement changes are only valid during a short rest")
+        if "prepared_spells" in options and rest != "long":
+            raise ValueError("prepared spells can only be changed on a long rest")
+        checked = {"attunement", "prepared_spells"} & set(options)
+        if not checked:
+            return
         uid = str(actor_id).removeprefix("player:")
         if uid not in instance.players:
             return
@@ -891,9 +946,14 @@ class Dnd2024Runtime:
             raise ValueError("character is missing ruleset_character")
         locale = str(canonical.get("locale") or "")
         bundle = self.load_bundle(locale)
-        Dnd2024RestEngine(bundle).validate_attunement(
-            canonical, character, options["attunement"],
-        )
+        engine = Dnd2024RestEngine(bundle)
+        if "attunement" in checked:
+            engine.validate_attunement(
+                canonical, character, options["attunement"],
+            )
+        if "prepared_spells" in checked:
+            # 存入队伍会话之前就拒绝非法值，避免把坏 payload 带到结算阶段。
+            engine.parse_prepared_spells(canonical, options["prepared_spells"])
 
     @staticmethod
     def validate_rest_context(instance: Any, actor_id: str, rest: str) -> None:

@@ -126,7 +126,23 @@ def apply(
     }
 
 
-def _card_context(dependencies: CardAdvancementDependencies, card_id: str):
+# A ruleset runtime may speak the upgrade path without speaking the repair
+# path: catching up is a newer capability, and a plugin bundle written before
+# it exists still has preview/apply.  Name the methods each caller needs so a
+# missing one becomes a normal 422 instead of an AttributeError.
+_UPGRADE_METHODS = ("preview_advancement", "apply_advancement")
+_REPAIR_METHODS = ("missing_advancement_choices", "repair_advancement")
+_MISSING_UPGRADE = "该规则尚未提供专业升级流程"
+_MISSING_REPAIR = "该规则尚未提供补齐流程"
+
+
+def _card_context(
+    dependencies: CardAdvancementDependencies,
+    card_id: str,
+    *,
+    required: tuple[str, ...] = _UPGRADE_METHODS,
+    missing_message: str = _MISSING_UPGRADE,
+):
     cards = dedupe_cards(dependencies.read_cards())
     for index, card in enumerate(cards):
         if str(card.get("id") or "") != card_id:
@@ -142,13 +158,12 @@ def _card_context(dependencies: CardAdvancementDependencies, card_id: str):
                 "error": "角色卡绑定的专业规则不可用",
             }
         if not all(
-            callable(getattr(runtime, name, None))
-            for name in ("preview_advancement", "apply_advancement")
+            callable(getattr(runtime, name, None)) for name in required
         ):
             return cards, index, card, rule, runtime, {
                 "ok": False,
                 "code": "RULESET_ADVANCEMENT_UNAVAILABLE",
-                "error": "该规则尚未提供专业升级流程",
+                "error": missing_message,
             }
         return cards, index, card, rule, runtime, None
     return cards, -1, None, None, None, {
@@ -271,6 +286,132 @@ def apply_card(
     operation_log.append({
         "operation_id": operation_id,
         "kind": "advancement",
+        "revision": revision + 1,
+    })
+    updated["ruleset_operation_log"] = operation_log[-32:]
+    cards[index] = updated
+    dependencies.write_cards(cards)
+    return {
+        "ok": True,
+        "rule_id": rule.rule_id,
+        "card_id": card_id,
+        "revision": revision + 1,
+        "duplicate": False,
+        "character": deepcopy(updated),
+        "card": deepcopy(updated),
+    }
+
+
+def pending_card_choices(
+    dependencies: CardAdvancementDependencies,
+    card_id: str,
+) -> dict[str, Any]:
+    """What this card still owes, without changing anything."""
+
+    _cards, _index, card, rule, runtime, error = _card_context(
+        dependencies, card_id,
+        required=_REPAIR_METHODS, missing_message=_MISSING_REPAIR,
+    )
+    if error:
+        return error
+    return {
+        "ok": True,
+        "rule_id": rule.rule_id,
+        "card_id": card_id,
+        "revision": int(card.get("ruleset_revision", 0) or 0),
+        "missing": runtime.missing_advancement_choices(rule, card),
+    }
+
+
+def complete_card_choices(
+    dependencies: CardAdvancementDependencies,
+    card_id: str,
+    body: Any,
+) -> dict[str, Any]:
+    """Fill outstanding choices, reusing the upgrade write contract.
+
+    Idempotency and the optimistic lock are the same two fields the upgrade
+    commit uses.  A repair can move hit points, so a retried request must not
+    pay them twice.
+    """
+
+    cards, index, card, rule, runtime, error = _card_context(
+        dependencies, card_id,
+        required=_REPAIR_METHODS, missing_message=_MISSING_REPAIR,
+    )
+    if error:
+        return error
+    parsed = validate_draft_shape(body)
+    repairs = parsed.get("repairs")
+    if not isinstance(repairs, dict):
+        return {
+            "ok": False,
+            "code": "INVALID_REPAIRS",
+            "error": "choice repairs must be a JSON object",
+        }
+    operation_id = str(parsed.get("operation_id") or "").strip()
+    if not operation_id or len(operation_id) > 160:
+        return {
+            "ok": False,
+            "code": "INVALID_OPERATION_ID",
+            "error": "补齐操作必须提供有效的 operation_id",
+        }
+    revision = int(card.get("ruleset_revision", 0) or 0)
+    operation_log = card.get("ruleset_operation_log")
+    operation_log = deepcopy(operation_log) if isinstance(operation_log, list) else []
+    previous = next(
+        (
+            entry for entry in operation_log
+            if isinstance(entry, dict) and entry.get("operation_id") == operation_id
+        ),
+        None,
+    )
+    if previous is not None:
+        return {
+            "ok": True,
+            "rule_id": rule.rule_id,
+            "card_id": card_id,
+            "revision": revision,
+            "duplicate": True,
+            "character": deepcopy(card),
+            "card": deepcopy(card),
+        }
+    raw_expected = parsed.get("expected_revision")
+    if isinstance(raw_expected, bool):
+        raw_expected = None
+    try:
+        expected_revision = int(raw_expected)
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "code": "INVALID_CHARACTER_REVISION",
+            "error": "补齐操作必须提供有效的 expected_revision",
+        }
+    if expected_revision != revision:
+        return {
+            "ok": False,
+            "code": "STALE_CHARACTER_REVISION",
+            "error": "角色卡已在其他位置更新，请刷新后重试",
+            "revision": revision,
+        }
+
+    try:
+        repaired = runtime.repair_advancement(rule, card, repairs)
+    except ValueError as exc:
+        return {
+            "ok": False,
+            "code": "ADVANCEMENT_NOT_READY",
+            "error": str(exc),
+            "revision": revision,
+        }
+    updated = deepcopy(card)
+    updated.update(repaired)
+    updated["id"] = card_id
+    updated["schema_version"] = max(2, int(card.get("schema_version", 2) or 2))
+    updated["ruleset_revision"] = revision + 1
+    operation_log.append({
+        "operation_id": operation_id,
+        "kind": "choice_repair",
         "revision": revision + 1,
     })
     updated["ruleset_operation_log"] = operation_log[-32:]

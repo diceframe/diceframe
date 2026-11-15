@@ -165,7 +165,7 @@ async function deleteProjectFromList(id: string) {
   } catch { /* silent */ }
 }
 
-// Cards (for the collapsed tools section)
+
 const routeFor: Partial<Record<CreatorCardId, string>> = {
   adventures: 'adventures', worlds: 'worlds', lorebook: 'lorebook',
   rules: 'rules', modules: 'modules', exportAdventureBundle: 'adventures',

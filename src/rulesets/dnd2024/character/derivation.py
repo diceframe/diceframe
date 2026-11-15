@@ -35,10 +35,68 @@ def _bound_refs(refs: Collection[str]) -> set[str]:
 PLAIN_SHIELD_AC_BONUS = 2
 
 
-def _feature_proxy(class_ref: str, level: int) -> dict[str, Any]:
-    """The minimal canonical shape ``features_for`` needs to resolve ownership."""
+def _feature_proxy(
+    class_ref: str, level: int, feature_state: Mapping[str, Any] | None = None,
+    equipped_refs: Iterable[str] = (),
+) -> dict[str, Any]:
+    """The minimal canonical shape ``features_for`` needs to resolve ownership.
 
-    return {"build": {"class_levels": [{"class_ref": class_ref, "level": level}]}}
+    Subclass features are owned only through a persisted selection, so the
+    proxy carries ``subclass_ref`` when the caller has one.  A draft built at
+    level 1 has none and correctly owns no subclass feature.
+
+    ``equipped_refs`` carries the character's canonical equipment so that an
+    ``equipment_requirement`` is answered against what is actually worn.  Without
+    it every equipment-gated benefit reads as satisfied at creation time, and a
+    Monk holding a Shield would keep the unarmored formula the SRD denies.
+    """
+
+    proxy: dict[str, Any] = {
+        "build": {"class_levels": [{"class_ref": class_ref, "level": level}]},
+    }
+    if isinstance(feature_state, Mapping):
+        subclass_ref = feature_state.get("subclass_ref")
+        if isinstance(subclass_ref, str) and subclass_ref:
+            proxy["features"] = {"subclass_ref": subclass_ref}
+    refs = [str(ref) for ref in equipped_refs if str(ref)]
+    if refs:
+        proxy["equipment"] = {"item_refs": refs}
+    return proxy
+
+
+def _passive_armor_class_bonus(bundle: Any, feat_refs: Collection[str]) -> int:
+    """The flat AC bonus owned advancement feats declare for worn armor.
+
+    Every number comes from the feat's own ``passive_effects`` declaration, so
+    the formula holds no magic constant.  A duplicated ref adds its value once,
+    and an effect without ``requires_armor`` never lands here at all.
+    """
+
+    if not feat_refs:
+        return 0
+    catalog = bundle.get("advancement_feat_catalog", "srd_advancement_feats")
+    feats = catalog.get("feats") if isinstance(catalog, Mapping) else None
+    if not isinstance(feats, Mapping):
+        return 0
+    total = 0
+    for ref in {str(raw) for raw in feat_refs}:
+        feat = feats.get(ref.removeprefix("feat:"))
+        if not isinstance(feat, Mapping):
+            continue
+        effects = feat.get("passive_effects")
+        if not isinstance(effects, list):
+            continue
+        for effect in effects:
+            if not isinstance(effect, Mapping):
+                continue
+            if effect.get("kind") != "armor_class_bonus":
+                continue
+            if effect.get("requires_armor") is not True:
+                continue
+            value = effect.get("value")
+            if isinstance(value, int) and not isinstance(value, bool):
+                total += value
+    return total
 
 
 def derive_armor_class(
@@ -50,6 +108,7 @@ def derive_armor_class(
     warnings: list[str] | None = None,
     unarmored_ability_bonuses: Iterable[str] = (),
     attuned_refs: Collection[str] = (),
+    feat_refs: Collection[str] = (),
 ) -> int:
     """The one and only D&D 2024 armor class formula.
 
@@ -74,6 +133,11 @@ def derive_armor_class(
     is used, so a feature formula never competes with the armor's own AC.  Each
     named ability is an alternative candidate, and the best candidate wins --
     ability modifiers are never summed.
+
+    ``feat_refs`` names the advancement feats the character owns.  Only a flat
+    ``armor_class_bonus`` effect that declares ``requires_armor`` is consumed
+    here, and only while an armor was actually selected: Defense-style bonuses
+    never apply unarmored, and a shield is not armor for this purpose.
     """
 
     dex_modifier = ability_modifier(int(abilities["dex"]))
@@ -136,11 +200,43 @@ def derive_armor_class(
                 unarmored,
                 10 + dex_modifier + ability_modifier(int(abilities[str(ability)])),
             )
-    return max(unarmored, best_armor if best_armor is not None else unarmored) + shield_bonus
+    base = max(unarmored, best_armor if best_armor is not None else unarmored)
+    if best_armor is not None:
+        # "While you're wearing Light, Medium, or Heavy armor" 是硬前提：没有
+        # 选中任何护甲时，被动加值一律不加，也不看是否持盾。
+        base += _passive_armor_class_bonus(bundle, feat_refs)
+    return base + shield_bonus
+
+
+def derive_speed(
+    base_speed: int,
+    *,
+    feature_bonus: int = 0,
+    armor_training: Mapping[str, Any] | None = None,
+) -> int:
+    """The one and only derived Speed formula.
+
+    Character creation, advancement, and live equipment reconciliation all call
+    this, so the rule exists exactly once.  ``base_speed`` is the species value;
+    ``feature_bonus`` is the sum the feature resolver reports for *active*
+    declarations only, so an equipment-gated bonus is already gone when its
+    precondition fails.  ``armor_training`` contributes the "-10 feet" a worn
+    armor imposes when the wearer's Strength is below its requirement.
+
+    Speed never goes negative, and no rule number lives here: both the bonus and
+    the penalty arrive from their own declarations.
+    """
+
+    penalty = 0
+    if isinstance(armor_training, Mapping):
+        raw = armor_training.get("speed_penalty", 0)
+        if isinstance(raw, int) and not isinstance(raw, bool):
+            penalty = raw
+    bonus = feature_bonus if isinstance(feature_bonus, int) else 0
+    return max(0, int(base_speed) + bonus - penalty)
 
 
 _ARMOR_CATEGORIES = frozenset({"light", "medium", "heavy"})
-
 
 def derive_armor_training_state(
     abilities: Mapping[str, int],
@@ -276,7 +372,9 @@ class CharacterDerivationMixin:
             # 建卡阶段仍要求装备包里每个引用都真实存在（validation 已保证）。
             self._required_entity(ref, "item")
         features = Dnd2024ClassFeatureResolver(self.bundle)
-        feature_proxy = _feature_proxy(draft["class_ref"], level)
+        feature_proxy = _feature_proxy(
+            draft["class_ref"], level, draft.get("features"), item_refs,
+        )
         armor_category_refs = [
             f"armor_category:{item}"
             for item in class_entity.get("armor_proficiencies", [])
@@ -287,6 +385,10 @@ class CharacterDerivationMixin:
             unarmored_ability_bonuses=features.unarmored_ac_bonus_abilities(
                 feature_proxy
             ),
+            # 建卡已经能选 1 级 Fighting Style（Defense 是合法选项），这条
+            # 路径必须与 live 协调一致：否则同一张卡在建卡时有 +1、换装后
+            # 才出现，等于两套公式。
+            feat_refs=feat_refs,
         )
         armor_training = derive_armor_training_state(
             abilities, item_refs, armor_category_refs, self.bundle,
@@ -440,7 +542,11 @@ class CharacterDerivationMixin:
                 "proficiency_bonus": prof,
                 "armor_class": armor_class,
                 "initiative": initiative,
-                "speed": int(species["speed"]),
+                "speed": derive_speed(
+                    int(species["speed"]),
+                    feature_bonus=features.speed_bonus(feature_proxy),
+                    armor_training=armor_training,
+                ),
                 "armor_training": armor_training,
                 "passive_perception": passive_perception,
                 "saving_throws": saving_throws,

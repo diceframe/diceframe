@@ -262,6 +262,34 @@ async def api_live_character_rest(request: web.Request) -> web.Response:
     return web.json_response(result, status=status)
 
 
+async def api_live_character_spells(request: web.Request) -> web.Response:
+    """Read-only preparation candidates for the rest panel."""
+
+    gk = request.match_info["game_key"]
+    uid = request.match_info["user_id"]
+    api = _get_api(request)
+    inst = api.get_game_instance(gk)
+    if not inst:
+        return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
+    if not can_modify_character(
+        request.get("user_id", ""),
+        uid,
+        inst.gm_uid,
+        owner=bool(request.get("owner_authenticated", False)),
+    ):
+        return web.json_response({"ok": False, "error": "无权查看他人角色卡"}, status=403)
+    result = api.live_character_spell_options(gk, uid)
+    code = str(result.get("code") or "")
+    status = (
+        200
+        if result.get("ok")
+        else 404
+        if code in {"GAME_NOT_FOUND", "CHARACTER_NOT_FOUND", "RULE_NOT_FOUND"}
+        else 422
+    )
+    return web.json_response(result, status=status)
+
+
 async def api_char_delete(request: web.Request) -> web.Response:
     denied = _require_confirmed_request(request)
     if denied is not None:

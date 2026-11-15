@@ -177,7 +177,11 @@ class WebAPI:
                  assistant_agent_max_tokens: int = 4096,
                  assistant_agent_task_max_tokens: int = DEFAULT_TASK_MAX_TOKENS):
         self._reg = registry
-        self._creator_projects = CreatorProjectStore(self._reg.save_dir.parent / "creator-projects.json")
+        self._creator_projects = CreatorProjectStore(
+            self._reg.save_dir.parent / "creator-projects.json",
+            # P1-03：Creator 验证/构建复用与安装同源的深度校验器。
+            package_checker=self._creator_package_checker,
+        )
         self._creator_worker_jobs = WorkerJobStore(self._reg.save_dir.parent / "creator-worker-jobs.json")
         self._lore = lorebook
         self._mem = memory
@@ -1306,6 +1310,26 @@ class WebAPI:
             self._module_dependencies, directory, manifest,
             require_content_pack=False,
         )
+
+    def _creator_package_checker(self, payload: bytes) -> list[str]:
+        """Creator 构建/验证回调：对 .dfplugin 字节跑与安装同源的深度校验。"""
+
+        errors: list[str] = []
+
+        def collect(directory: Any, manifest: dict[str, Any]) -> None:
+            try:
+                self.validate_module_package(directory, manifest)
+            except ValueError as exc:
+                errors.append(str(exc))
+
+        if getattr(self, "_plugins", None) is None:
+            # 测试构造未接宿主：没有可用的深度校验器，不阻塞构建。
+            return errors
+        try:
+            self._plugins.validate_package(payload, collect)
+        except ValueError as exc:
+            errors.append(str(exc))
+        return errors
 
     def guard_module_mutation(self, plugin_id: str, action: str) -> None:
         """Package-mutation hook shared by every install/uninstall path."""
@@ -2709,6 +2733,18 @@ class WebAPI:
             self._card_advancement_dependencies, card_id, body,
         )
 
+    def pending_character_card_choices(self, card_id: str) -> dict[str, Any]:
+        return ruleset_advancement.pending_card_choices(
+            self._card_advancement_dependencies, card_id,
+        )
+
+    def complete_character_card_choices(
+        self, card_id: str, body: dict[str, Any],
+    ) -> dict[str, Any]:
+        return ruleset_advancement.complete_card_choices(
+            self._card_advancement_dependencies, card_id, body,
+        )
+
     # ---- 世界编辑器 ----
 
     def list_worlds(self) -> dict[str, Any]:
@@ -2973,6 +3009,13 @@ class WebAPI:
     ) -> dict[str, Any]:
         return ruleset_advancement.preview_live(
             self._live_advancement_dependencies, game_key, user_id, body,
+        )
+
+    def live_character_spell_options(
+        self, game_key: str, user_id: str,
+    ) -> dict[str, Any]:
+        return ruleset_rest.prepared_spell_options(
+            self._live_ruleset_rest_dependencies, game_key, user_id,
         )
 
     async def apply_live_character_advancement(

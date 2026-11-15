@@ -35,7 +35,8 @@ export const creatorApi = {
       body: JSON.stringify(body),
     }),
   validate: (projectId: string) =>
-    api<{ ok: boolean; errors?: string[]; revision?: number; digest?: string }>('/creator/projects/' + encodeURIComponent(projectId) + '/validate', {
+    api<{ ok: boolean; errors?: string[]; revision?: number; digest?: string;
+      package_check?: { ok: boolean; errors: string[] } | null; installable?: boolean }>('/creator/projects/' + encodeURIComponent(projectId) + '/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
