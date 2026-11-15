@@ -248,9 +248,9 @@ class PluginHost:
         for plugin_id in graph:
             walk(plugin_id)
         for plugin_id in cyclic:
-            runtime = self.plugins.get(plugin_id)
-            if runtime is not None:
-                runtime.status, runtime.error = "failed", "plugin dependency cycle detected"
+            stale_runtime = self.plugins.get(plugin_id)
+            if stale_runtime is not None:
+                stale_runtime.status, stale_runtime.error = "failed", "plugin dependency cycle detected"
 
         for plugin_id, runtime in self.plugins.items():
             if runtime.status == "failed":
@@ -516,7 +516,7 @@ class PluginHost:
                 value = runtime.secrets.get(key, "")
                 public_config[key] = {"configured": bool(value), "masked": f"***{value[-4:]}" if value else ""}
         min_app_version = str(runtime.manifest.get("min_app_version") or "").strip()
-        dependency_projection = next(
+        dependency_projection: dict[str, Any] = next(
             (row for row in self.dependency_plan() if row["id"] == plugin_id),
             {"dependencies": [], "dependents": []},
         )
@@ -1141,10 +1141,10 @@ class PluginHost:
                     if target.exists():
                         self._guard_package_mutation(plugin_id, "overwrite")
                     shutil.copytree(source_dir, staging)
+                    existing_runtime = self.plugins.get(plugin_id)
+                    existing_process = existing_runtime.process if existing_runtime else None
                     was_running[plugin_id] = bool(
-                        self.plugins.get(plugin_id)
-                        and self.plugins[plugin_id].process
-                        and self.plugins[plugin_id].process.returncode is None
+                        existing_process and existing_process.returncode is None
                     )
                     entries.append({
                         "plugin_id": plugin_id,
@@ -1972,7 +1972,7 @@ class PluginHost:
         self._atomic_json(folder / "marketplace.json", metadata)
 
     @staticmethod
-    def _manifest_digest(manifest: dict[str, Any]) -> str:
+    def _manifest_digest(manifest: Mapping[str, Any]) -> str:
         encoded = json.dumps(
             manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
         ).encode("utf-8")
@@ -2016,7 +2016,7 @@ class PluginHost:
     def _save_install_receipt(
         self,
         plugin_id: str,
-        manifest: dict[str, Any],
+        manifest: Mapping[str, Any],
         *,
         artifact_hash: str = "",
         source: str = "zip",
@@ -2431,7 +2431,7 @@ class PluginHost:
             raise ValueError("路径越界")
 
     @staticmethod
-    def _atomic_json(path: Path, value: dict[str, Any]) -> None:
+    def _atomic_json(path: Path, value: Mapping[str, Any] | list[dict[str, Any]]) -> None:
         temp = path.with_suffix(path.suffix + ".tmp")
         temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
         temp.replace(path)

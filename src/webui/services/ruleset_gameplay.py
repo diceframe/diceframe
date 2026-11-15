@@ -566,6 +566,7 @@ async def submit_intent(
                     if isinstance(batch, dict)
                 ]
                 applied = {"ok": True, "applied": bool(batches)}
+                batch: dict[str, Any] | None = None
                 for batch in batches:
                     _project_public_batch(runtime, instance, batch, applied)
                 batch = None
