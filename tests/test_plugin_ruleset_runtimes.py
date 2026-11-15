@@ -110,6 +110,8 @@ def handle(op, payload):
         return {"ok": True, "event_batch": {
             "batch_id": "t3-step-%s-%d" % (step.get("step_id"), version + 1),
             "intent_id": step.get("intent_id"),
+            "expected_version": version,
+            "result_version": version + 1,
             "events": [{"type": "t3.step_resolved", "step_id": step.get("step_id")}],
         }}
     if op == "resolve_intent":
@@ -835,11 +837,12 @@ async def test_ledger_history_tampering_is_rejected(tmp_path):
 
 @pytest.mark.asyncio
 async def test_sequential_step_receipts_scoped_by_plan(tmp_path):
-    """复审 P1-01：步骤收据身份 = 游戏/Run + 计划 intent_id + step_id。
+    """复审 P1-01/TEST-01：同一局、同一 step_id、两个不同计划必须独立结算。
 
-    同局两个不同计划的 step-1 必须各自结算（旧实现会把第二个计划串到
-    第一个计划的收据上）；同计划重试与跨重启恢复命中同一收据；跨游戏
-    同计划/步骤也不冲突。
+    收据身份 = 游戏/Run + 计划 intent_id + step_id。两个计划都在同一
+    GameInstance 上提交 step-1：若收据只按 step_id（旧实现）第二次会
+    重放第一次的 batch 或直接冲突；plan_id 生效时第二次按推进后的版本
+    独立结算。同计划重试、跨重启恢复与跨游戏隔离同时覆盖。
     """
     plugins, data_dir = tmp_path / "plugins", tmp_path / "data"
     host = PluginHost(plugins, data_dir)
@@ -850,50 +853,57 @@ async def test_sequential_step_receipts_scoped_by_plan(tmp_path):
     await host.start("t3-pack", require_enabled=False)
     runtime = registry.get(RUNTIME_ID, minimum_version=1)
 
-    game_a = GameInstance(game_key=("web", "room-a", "alice"), world_id="w",
-                          rule_id="r", gm_uid="gm", language="en")
-    game_b = GameInstance(game_key=("web", "room-b", "bob"), world_id="w",
-                          rule_id="r", gm_uid="gm", language="en")
-    for game in (game_a, game_b):
-        game.modules["ruleset_runtime"] = ruleset_runtime.fresh()
-        ruleset_runtime.replace_binding(game, {"id": RUNTIME_ID, "runtime_version": 1})
-    # A 推进一个版本：同 step_id 在 A 上结算 batch-2；B（v0）应是 batch-1。
-    ruleset_runtime.replace_state(game_a, {"version": 1})
-    step_a = {"step_id": "step-1", "order": 1}
-    step_b = {"step_id": "step-1", "order": 1}
+    game = GameInstance(game_key=("web", "room-a", "alice"), world_id="w",
+                        rule_id="r", gm_uid="gm", language="en")
+    other_game = GameInstance(game_key=("web", "room-b", "bob"), world_id="w",
+                              rule_id="r", gm_uid="gm", language="en")
+    for item in (game, other_game):
+        item.modules["ruleset_runtime"] = ruleset_runtime.fresh()
+        ruleset_runtime.replace_binding(item, {"id": RUNTIME_ID, "runtime_version": 1})
+    # 同局从 v1 开始：第一个计划结算出 batch-2。
+    ruleset_runtime.replace_state(game, {"version": 1})
+    step = {"step_id": "step-1", "order": 1}
 
     resolved_a = runtime.resolve_sequential_step(
-        game_a, dict(step_a), random.Random(secrets.randbits(128)), "plan-a",
+        game, dict(step), random.Random(secrets.randbits(128)), "plan-a",
     )
     assert resolved_a["event_batch"]["batch_id"] == "t3-step-step-1-2"
-    applied = runtime.apply_event_batch(game_a, resolved_a["event_batch"])
-    assert applied.get("applied") is True
+    applied = runtime.apply_event_batch(game, resolved_a["event_batch"])
+    assert applied.get("applied") is True  # 版本推进到 2
 
-    # 同计划同步骤重试：收据命中，结果与首次完全一致（不产生新骰面）。
+    # 同局第二个计划、同样 step-1：独立结算（version 2 → batch-3）。
+    # 旧实现会在这里复用 plan-a 的收据：相同 payload 重放 batch-2，
+    # 不同 payload 则抛 "same receipt id with different payload"。
+    resolved_b = runtime.resolve_sequential_step(
+        game, dict(step), random.Random(secrets.randbits(128)), "plan-b",
+    )
+    assert resolved_b["event_batch"]["batch_id"] == "t3-step-step-1-3"
+
+    # 两个计划的各自重试：分别命中自己的收据，互不污染。
     retry_a = runtime.resolve_sequential_step(
-        game_a, dict(step_a), random.Random(secrets.randbits(128)), "plan-a",
+        game, dict(step), random.Random(secrets.randbits(128)), "plan-a",
+    )
+    retry_b = runtime.resolve_sequential_step(
+        game, dict(step), random.Random(secrets.randbits(128)), "plan-b",
     )
     assert retry_a == resolved_a
+    assert retry_b == resolved_b
 
-    # 不同计划的 step-1：独立结算（若串收据会错误重放 batch-2）。
-    resolved_b = runtime.resolve_sequential_step(
-        game_b, dict(step_b), random.Random(secrets.randbits(128)), "plan-b",
-    )
-    assert resolved_b["event_batch"]["batch_id"] == "t3-step-step-1-1"
-
-    # 重启：关闭并重建同步桥（同一持久账本），同计划步骤仍命中收据。
+    # 重启：关闭并重建同步桥（同一持久账本），两个计划的收据都仍可恢复。
     source.close()
     registry_restart = RulesetRuntimeRegistry([])
     source_restart = _make_source(registry_restart, host)
     source_restart.sync(host)
     restarted = registry_restart.get(RUNTIME_ID, minimum_version=1)
-    replayed = restarted.resolve_sequential_step(
-        game_a, dict(step_a), random.Random(secrets.randbits(128)), "plan-a",
-    )
-    assert replayed == resolved_a
-    # 跨游戏使用相同计划/步骤 ID：按游戏隔离，互不冲突。
+    assert restarted.resolve_sequential_step(
+        game, dict(step), random.Random(secrets.randbits(128)), "plan-a",
+    ) == resolved_a
+    assert restarted.resolve_sequential_step(
+        game, dict(step), random.Random(secrets.randbits(128)), "plan-b",
+    ) == resolved_b
+    # 跨游戏使用相同计划/步骤 ID：按游戏隔离，各自按自己的版本结算。
     cross_game = restarted.resolve_sequential_step(
-        game_b, dict(step_b), random.Random(secrets.randbits(128)), "plan-a",
+        other_game, dict(step), random.Random(secrets.randbits(128)), "plan-a",
     )
     assert cross_game["event_batch"]["batch_id"] == "t3-step-step-1-1"
     source_restart.close()
