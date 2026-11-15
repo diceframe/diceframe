@@ -13,13 +13,36 @@ import json
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
 from src.memory.embedding_profile import PROFILE_ALGORITHM_VERSION
 
 
 class LocalModelError(ValueError):
     """Raised when a local model is absent, invalid, or cannot be loaded."""
+
+
+# numpy / onnxruntime / tokenizers are optional heavy dependencies: the plain
+# web app must import and start without them (default installs and CI), so
+# every import happens at first real use and carries an actionable hint.
+def _numpy():
+    try:
+        import numpy as np
+    except ImportError as exc:
+        raise LocalModelError(
+            "本地向量推理需要可选依赖 numpy：pip install numpy（或改用外部 Embedding 服务商）",
+        ) from exc
+    return np
+
+
+def _tokenizer_runtime():
+    try:
+        import onnxruntime as ort
+        from tokenizers import Tokenizer
+    except ImportError as exc:
+        raise LocalModelError(
+            "本地向量推理需要可选依赖 onnxruntime 和 tokenizers："
+            "pip install onnxruntime tokenizers（或改用外部 Embedding 服务商）",
+        ) from exc
+    return ort, Tokenizer
 
 
 def _safe_relative(value: object) -> Path:
@@ -121,8 +144,7 @@ class LocalOnnxEmbeddingBackend:
         self._session = None
         self._tokenizer = None
 
-        import onnxruntime as ort
-        from tokenizers import Tokenizer
+        ort, Tokenizer = _tokenizer_runtime()
 
         onnx_path = self.root / _safe_relative(self.manifest.get("onnx_file") or "model.onnx")
         tokenizer_path = self.root / _safe_relative(self.manifest.get("tokenizer_file") or "tokenizer.json")
@@ -150,6 +172,7 @@ class LocalOnnxEmbeddingBackend:
     def _embed_sync(self, texts: list[str]) -> list[list[float]]:
         if self._session is None or self._tokenizer is None:
             raise LocalModelError("local embedding model is closed")
+        np = _numpy()
         clipped = [str(text or "")[: self.max_input_chars] for text in texts]
         max_tokens = max(1, int(self.manifest.get("max_input_tokens") or 256))
         self._tokenizer.enable_truncation(max_length=max_tokens)
