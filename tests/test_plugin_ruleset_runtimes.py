@@ -39,7 +39,7 @@ RUNTIME_ID = "external:t3-sample"
 
 
 def _runtime_server_script(*, broken: bool = False, slow_resolve: float = 0.0,
-                           sequential_ops: bool = True) -> str:
+                           sequential_ops: bool = True, forge_history: bool = False) -> str:
     """A minimal RuntimeProbe JSON-lines server shipped inside the package.
 
     stateless：所有以 payload 提供的 instance 状态为准，子进程不持有跨请求
@@ -50,7 +50,10 @@ def _runtime_server_script(*, broken: bool = False, slow_resolve: float = 0.0,
 
     if broken:
         return "import sys\nsys.exit(3)\n"
-    slow_prefix = f"import time\nSLOW_RESOLVE = {slow_resolve!r}\nSEQ_OPS = {sequential_ops!r}\n\n"
+    slow_prefix = (
+        f"import time\nSLOW_RESOLVE = {slow_resolve!r}\nSEQ_OPS = {sequential_ops!r}\n"
+        f"FORGE_HISTORY = {forge_history!r}\n\n"
+    )
     return slow_prefix + """
 import json
 import sys
@@ -133,8 +136,13 @@ def handle(op, payload):
             return {"ok": True, "applied": False, "replayed": True,
                     "state": state, "event_ledger": ledger}
         new_state = {**state, "version": batch.get("result_version", state.get("version", 0))}
+        out_ledger = [*ledger, batch]
+        # 仅当存在既有历史时改写：保证第一次 apply 干净落账，
+        # 第二次 apply（历史非空）才触发"内容改写"的篡改场景。
+        if FORGE_HISTORY and ledger:
+            out_ledger = [{**out_ledger[0], "events": [{"type": "forged"}]}, *out_ledger[1:]]
         return {"ok": True, "applied": True,
-                "state": new_state, "event_ledger": [*ledger, batch]}
+                "state": new_state, "event_ledger": out_ledger}
     if op == "memory_deltas_from_event_batch":
         return []
     if op == "gameplay_view":
@@ -180,7 +188,7 @@ def _write_runtime_package(root: Path, plugin_id: str, *, broken: bool = False,
                            runtime_id: str = RUNTIME_ID, entrypoint: list[str] | None = None,
                            slow_resolve: float = 0.0, rule_id: str = "t3sample",
                            sequential_checks: bool = False,
-                           sequential_ops: bool = True) -> Path:
+                           sequential_ops: bool = True, forge_history: bool = False) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     package_dir = root / plugin_id
     package_dir.mkdir(exist_ok=True)
@@ -217,7 +225,8 @@ def _write_runtime_package(root: Path, plugin_id: str, *, broken: bool = False,
     runtime_dir.mkdir(exist_ok=True)
     (runtime_dir / "server.py").write_text(
         _runtime_server_script(broken=broken, slow_resolve=slow_resolve,
-                               sequential_ops=sequential_ops), encoding="utf-8")
+                               sequential_ops=sequential_ops, forge_history=forge_history),
+        encoding="utf-8")
     rules_dir = package_dir / "rules"
     rules_dir.mkdir(exist_ok=True)
     (rules_dir / f"{rule_id}.json").write_text(json.dumps({
@@ -325,7 +334,8 @@ async def test_resolve_intent_accepts_default_serializable_rng(tmp_path):
     await host.start("t3-pack", require_enabled=False)
     runtime = registry.get(RUNTIME_ID, minimum_version=1)
 
-    instance = {"modules": {"ruleset_runtime": {"state": {"version": 0}, "event_ledger": []}}}
+    instance = {"game_key": ["web", "room-a", "alice"], "run_id": "run-a",
+                "modules": {"ruleset_runtime": {"state": {"version": 0}, "event_ledger": []}}}
     intent = {"intent_id": "t3-intent-1", "type": "t3.check"}
     rng = random.Random(secrets.randbits(128))  # 与 ruleset_gameplay._default_rng 同形
     resolved = runtime.resolve_intent(instance, intent, rng)
@@ -406,11 +416,13 @@ async def test_declared_sequential_capability_survives_and_serves(tmp_path):
     assert runtime.capabilities.composite_action is True
 
     validated = runtime.validate_sequential_plan(
-        {}, {"intent_id": "seq-1", "steps": [{"step_id": "s1"}]}, "p1", False,
+        {"game_key": ["web", "room-a", "alice"], "run_id": "run-a"},
+        {"intent_id": "seq-1", "steps": [{"step_id": "s1"}]}, "p1", False,
     )
     assert validated.get("validated") is True
     resolved = runtime.resolve_sequential_step(
-        {}, {"step_id": "s1", "intent_id": "seq-1"}, random.Random(secrets.randbits(128)),
+        {"game_key": ["web", "room-a", "alice"], "run_id": "run-a"},
+        {"step_id": "s1", "intent_id": "seq-1"}, random.Random(secrets.randbits(128)),
     )
     assert resolved["event_batch"]["intent_id"] == "seq-1"
     source.close()
@@ -454,7 +466,8 @@ async def test_slow_remote_resolve_keeps_event_loop_responsive(tmp_path):
     await host.install_from_zip(package.read_bytes())
     await host.start("t3-pack", require_enabled=False)
     runtime = registry.get(RUNTIME_ID, minimum_version=1)
-    instance = {"modules": {"ruleset_runtime": {"state": {"version": 0}, "event_ledger": []}}}
+    instance = {"game_key": ["web", "room-slow", "alice"], "run_id": "run-slow",
+                "modules": {"ruleset_runtime": {"state": {"version": 0}, "event_ledger": []}}}
     intent = {"intent_id": "t3-slow-1", "type": "t3.check"}
 
     slow_task = asyncio.create_task(asyncio.to_thread(
@@ -733,3 +746,88 @@ async def test_authoritative_intent_and_restart_recovery(tmp_path):
     assert replayed == reapplied
     assert ruleset_runtime.state(restarted_instance)["version"] == 2
     restarted_source.close()
+
+
+@pytest.mark.asyncio
+async def test_real_gameinstance_receipts_isolated_across_games_and_restarts(tmp_path):
+    """复审 P1-01：真实 GameInstance 生产入口 + 跨重启恢复。
+
+    - 两局真实聚合用同 intent_id：各按自己的状态版本结算，不串收据；
+    - 同局同 intent 重试命中收据（幂等）；
+    - 关闭并重建同步桥（模拟重启）后，同局重试经由持久账本恢复同一结果。
+    """
+    plugins, data_dir = tmp_path / "plugins", tmp_path / "data"
+    host = PluginHost(plugins, data_dir)
+    registry = RulesetRuntimeRegistry([])
+    source = _make_source(registry, host)
+    package = _write_runtime_package(tmp_path, "t3-pack")
+    await host.install_from_zip(package.read_bytes())
+    await host.start("t3-pack", require_enabled=False)
+    runtime = registry.get(RUNTIME_ID, minimum_version=1)
+
+    game_a = GameInstance(game_key=("web", "room-a", "alice"), world_id="w",
+                          rule_id="r", gm_uid="gm", language="en")
+    game_b = GameInstance(game_key=("web", "room-b", "bob"), world_id="w",
+                          rule_id="r", gm_uid="gm", language="en")
+    for game in (game_a, game_b):
+        game.modules["ruleset_runtime"] = ruleset_runtime.fresh()
+        ruleset_runtime.replace_binding(game, {"id": RUNTIME_ID, "runtime_version": 1})
+    # A 推进一个版本：同 intent 在 A 上结算 batch-2；B（v0）应是 batch-1，
+    # 若收据按旧实现落到共享 unknown 桶，B 会错误拿到 A 的 batch-2。
+    ruleset_runtime.replace_state(game_a, {"version": 1})
+
+    intent = {"intent_id": "shared-intent", "type": "t3.check"}
+    resolved_a = runtime.resolve_intent(game_a, dict(intent), random.Random(secrets.randbits(128)))
+    assert resolved_a["event_batch"]["batch_id"] == "t3-batch-2"
+
+    applied = runtime.apply_event_batch(game_a, resolved_a["event_batch"])
+    assert applied.get("applied") is True
+
+    # 重启：关闭同步桥并重建（同一持久账本路径）。
+    source.close()
+    registry_restart = RulesetRuntimeRegistry([])
+    source_restart = _make_source(registry_restart, host)
+    source_restart.sync(host)
+    restarted = registry_restart.get(RUNTIME_ID, minimum_version=1)
+    replayed = restarted.resolve_intent(game_a, dict(intent), random.Random(secrets.randbits(128)))
+    assert replayed == resolved_a  # 同局重试跨重启命中持久收据
+
+    resolved_b = restarted.resolve_intent(game_b, dict(intent), random.Random(secrets.randbits(128)))
+    assert resolved_b["event_batch"]["batch_id"] == "t3-batch-1"  # B 按 v0 结算，没撞 A 的收据
+    source_restart.close()
+
+
+@pytest.mark.asyncio
+async def test_ledger_history_tampering_is_rejected(tmp_path):
+    """复审 P1-02：子进程回写的历史行 ID 不变但内容被改写 → 拒绝且不写入状态。"""
+    plugins, data_dir = tmp_path / "plugins", tmp_path / "data"
+    host = PluginHost(plugins, data_dir)
+    registry = RulesetRuntimeRegistry([])
+    source = _make_source(registry, host)
+    package = _write_runtime_package(tmp_path, "t3-pack", forge_history=True)
+    await host.install_from_zip(package.read_bytes())
+    await host.start("t3-pack", require_enabled=False)
+    runtime = registry.get(RUNTIME_ID, minimum_version=1)
+
+    game = GameInstance(game_key=("web", "room-a", "alice"), world_id="w",
+                        rule_id="r", gm_uid="gm", language="en")
+    game.modules["ruleset_runtime"] = ruleset_runtime.fresh()
+    ruleset_runtime.replace_binding(game, {"id": RUNTIME_ID, "runtime_version": 1})
+    resolved = runtime.resolve_intent(
+        game, {"intent_id": "tamper-1", "type": "t3.check"}, random.Random(secrets.randbits(128)),
+    )
+    applied = runtime.apply_event_batch(game, resolved["event_batch"])
+    assert applied.get("applied") is True
+    assert len(ruleset_runtime.event_ledger(game)) == 1
+
+    resolved_next = runtime.resolve_intent(
+        game, {"intent_id": "tamper-2", "type": "t3.check"}, random.Random(secrets.randbits(128)),
+    )
+    from src.rulesets.runtime_probe import RuntimeProbeError
+
+    with pytest.raises(RuntimeProbeError, match="rewrote persisted history"):
+        runtime.apply_event_batch(game, resolved_next["event_batch"])
+    # 拒绝时状态与账本都保持原样：不写入追加行。
+    assert len(ruleset_runtime.event_ledger(game)) == 1
+    assert ruleset_runtime.state(game).get("version") == 1
+    source.close()

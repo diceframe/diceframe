@@ -90,8 +90,11 @@ async function runPublish() {
   publishValidate.value = 'running'; publishBuild.value = 'idle'; publishSubmit.value = 'idle'; publishErrors.value = []
   try {
     const r = await creatorApi.validate(project.value.id)
-    if (r.ok) { publishValidate.value = 'ok'; projectStage.value = 'validated' }
-    else { publishValidate.value = 'fail'; publishErrors.value = r.errors || []; return }
+    const packageErrors = r.package_check && !r.package_check.ok
+      ? r.package_check.errors.map(item => `${locale.value === 'zh-CN' ? '安装前检查' : 'Pre-install check'}：${item}`)
+      : []
+    if (r.ok && !packageErrors.length) { publishValidate.value = 'ok'; projectStage.value = 'validated' }
+    else { publishValidate.value = 'fail'; publishErrors.value = packageErrors.length ? packageErrors : (r.errors || []); return }
   } catch (e) { publishValidate.value = 'fail'; publishErrors.value = [String(e)]; return }
   publishBuild.value = 'running'
   try {

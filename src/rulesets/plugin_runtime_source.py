@@ -187,7 +187,9 @@ class PluginRulesetRuntimeSource:
             return
         try:
             probed = adapter.validate_sequential_plan(
-                {}, {"intent_id": "capability-probe", "steps": []}, "probe", True,
+                # fail-closed 收据身份（复审 P1-01）要求探针也携带显式身份。
+                {"game_key": ["capability-probe"], "run_id": "capability-probe"},
+                {"intent_id": "capability-probe", "steps": []}, "probe", True,
             )
             supported = isinstance(probed, dict)
         except Exception as exc:  # noqa: BLE001 - 探针失败即视为能力不可用

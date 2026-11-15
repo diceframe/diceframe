@@ -99,14 +99,16 @@ def test_remote_mutation_identity_replays_from_ledger_after_adapter_restart(tmp_
     first = RemoteRulesetRuntimeAdapter(
         "external:demo", 1, RulesetCapabilities(), transport, ledger_path=ledger,
     )
-    first.resolve_intent({}, {"intent_id": "i1"}, type("Rng", (), {"getstate": lambda self: ("s", 1)})())
+    # P1-01 复审：收据身份需要服务器权威的 (game_key, run_id)——空实例会被 fail closed。
+    instance = {"game_key": ["web", "room-a", "alice"], "run_id": "run-a"}
+    first.resolve_intent(instance, {"intent_id": "i1"}, type("Rng", (), {"getstate": lambda self: ("s", 1)})())
     second = RemoteRulesetRuntimeAdapter(
         "external:demo", 1, RulesetCapabilities(),
         lambda _request: (_ for _ in ()).throw(AssertionError("ledger replay must avoid transport")),
         ledger_path=ledger,
     )
     replayed = second.resolve_intent(
-        {}, {"intent_id": "i1"}, type("Rng", (), {"getstate": lambda self: ("s", 1)})(),
+        instance, {"intent_id": "i1"}, type("Rng", (), {"getstate": lambda self: ("s", 1)})(),
     )
     assert replayed["event_batch"]["batch_id"] == "b1"
     assert len(calls) == 1

@@ -20,22 +20,28 @@ MAX_EVENT_BATCH_ID_LENGTH = 200
 
 
 def _game_scope(instance: Any) -> str:
-    """收据请求身份里的服务器权威游戏/Run 隔离段（P1-03）。
+    """收据请求身份里的服务器权威游戏/Run 隔离段（P1-03；复审 P1-01 收紧）。
 
-    instance 持久投影的顶层携带 game_key 与 run_id（GameStateCodec.encode）；
-    二者都由服务端持有，客户端不能伪造。缺失时归入 unknown 段——宁可显式
-    隔离桶，也不让两场游戏共用一份收据。
+    生产入口传入真实的 GameInstance 聚合（game_key / run_id 属性）；测试与
+    DTO 路径允许顶层携带这两个键的字典。缺失身份时 fail closed
+    （RuntimeProbeError）——绝不静默落到跨游戏共享的 unknown 桶。
     """
     if isinstance(instance, dict):
         game_key = instance.get("game_key")
-        parts = [str(part) for part in (game_key if isinstance(game_key, (list, tuple)) else [])]
         run_id = str(instance.get("run_id") or "")
-        if run_id:
-            parts.append(run_id)
-        scope = "|".join(part for part in parts if part)
-        if scope:
-            return scope
-    return "unknown"
+    else:
+        game_key = getattr(instance, "game_key", None)
+        run_id = str(getattr(instance, "run_id", "") or "")
+    parts = [str(part) for part in (game_key if isinstance(game_key, (list, tuple)) else [])]
+    if run_id:
+        parts.append(run_id)
+    scope = "|".join(part for part in parts if part)
+    if not scope:
+        raise RuntimeProbeError(
+            "external ruleset receipts require server-authoritative game identity "
+            "(game_key and run_id on the instance)",
+        )
+    return scope
 
 
 class RemoteRulesetRuntimeAdapter:
@@ -293,6 +299,12 @@ class RemoteRulesetRuntimeAdapter:
             current_ids.append(row_id)
         if ids[: len(current_ids)] != current_ids:
             raise RuntimeProbeError("remote event ledger must preserve host history")
+        # 复审 P1-02：历史前缀必须与宿主持久账本**逐字段一致**——ID 不变而
+        # 内容被改写同样属于篡改，拒绝写入任何状态。（状态对宿主是不透明
+        # DTO，"无事件却推进状态"无法在桥上判定，由运行时侧的版本化状态
+        # 契约与存档投影负责。）
+        if ledger[: len(current)] != deepcopy(current):
+            raise RuntimeProbeError("remote event ledger rewrote persisted history")
         if len(ids) > len(current_ids):
             expected_batch_id = str(batch.get("batch_id") or "").strip()
             if expected_batch_id and ids[-1] != expected_batch_id:
