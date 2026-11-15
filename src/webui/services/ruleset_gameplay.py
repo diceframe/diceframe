@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+import secrets
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass
@@ -40,6 +41,14 @@ from src.webui.services import hosted_combat, adventure_commands
 logger = logging.getLogger("trpg")
 
 
+def _RNG_UNSET() -> Any:  # pragma: no cover - identity sentinel, never called
+    raise NotImplementedError
+
+
+def _default_rng() -> Any:
+    return random.Random(secrets.randbits(128))
+
+
 @dataclass(frozen=True)
 class RulesetGameplayDependencies:
     get_instance: Callable[[tuple[str, ...]], Any | None]
@@ -56,11 +65,19 @@ class RulesetGameplayDependencies:
     complete_adventure_node: Callable[[Any, str, str, str], dict[str, Any]] | None = None
     request_adventure_choice: Callable[[Any, str, str, str], dict[str, Any]] | None = None
     seat_runtime: SeatRuntime | None = None
-    # The default keeps the existing secure host RNG.  External runtimes may
-    # inject a serializable RNG factory so R00/R02 can bind deterministic state
-    # to the request receipt without making the generic service know the
-    # provider implementation.
-    rng_factory: Callable[[], Any] = random.SystemRandom
+    # 服务端权威 RNG 工厂。默认每个意图从 OS 熵取 128bit 种子的 random.Random：
+    # - 可序列化（getstate DTO）：外部 ruleset runtime 的 stdio 适配器必须能
+    #   把 rng 传给子进程——SystemRandom 显式不支持 getstate，直接崩溃（P0）；
+    # - 不可预测：种子完全来自服务端熵，客户端选择的 intent_id 无法预知骰面；
+    # - 幂等重试：收据身份只含规范化的 intent payload（不含 rng 状态），
+    #   同 intent 重试命中同一收据，不重算也不产生"新骰面"。
+    # 需要确定性回放的部署可显式注入 rng_factory。
+    rng_factory: Callable[[], Any] = _RNG_UNSET
+
+    def __post_init__(self) -> None:
+        if self.rng_factory is _RNG_UNSET:
+            # 构造期才解析模块接缝：测试可以 monkeypatch _default_rng。
+            object.__setattr__(self, "rng_factory", _default_rng)
 
 
 def _error(code: str, message: str) -> dict[str, Any]:
