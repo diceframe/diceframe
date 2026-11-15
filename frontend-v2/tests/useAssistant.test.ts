@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   agentStream: vi.fn(),
-  confirm: vi.fn(),
-  resume: vi.fn(),
+  confirmStream: vi.fn(),
+  resumeStream: vi.fn(),
   review: vi.fn(),
   session: vi.fn(),
   authorize: vi.fn(),
@@ -13,8 +13,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../src/api/assistant', () => ({
   streamAssistantAgent: mocks.agentStream,
-  confirmAssistantAgent: mocks.confirm,
-  resumeAssistantAgent: mocks.resume,
+  streamAssistantAgentConfirm: mocks.confirmStream,
+  streamAssistantAgentResume: mocks.resumeStream,
   reviewAssistantAgent: mocks.review,
   getAssistantAgentSession: mocks.session,
   authorizeAssistantAgent: mocks.authorize,
@@ -23,12 +23,30 @@ vi.mock('../src/api/assistant', () => ({
 
 import { useAssistant } from '../src/composables/useAssistant'
 
+// SSE 迁移：confirm/resume 走流式封装，结果经 onConfirmResult 交付。
+function streamConfirmResult(result: Record<string, unknown>) {
+  mocks.confirmStream.mockImplementationOnce(async (
+    _sessionId: string, _approvalId: string, _digest: string, _approved: boolean,
+    handlers: { onConfirmResult?: (value: unknown) => void },
+  ) => {
+    handlers.onConfirmResult?.(result)
+  })
+}
+function streamResumeResult(result: Record<string, unknown>) {
+  mocks.resumeStream.mockImplementationOnce(async (
+    _sessionId: string, _approvalId: string, _digest: string,
+    handlers: { onConfirmResult?: (value: unknown) => void },
+  ) => {
+    handlers.onConfirmResult?.(result)
+  })
+}
+
 describe('useAssistant request history', () => {
   beforeEach(() => {
     mocks.agentStream.mockReset()
     mocks.agentStream.mockResolvedValue(undefined)
-    mocks.confirm.mockReset()
-    mocks.resume.mockReset()
+    mocks.confirmStream.mockReset()
+    mocks.resumeStream.mockReset()
     mocks.review.mockReset()
     mocks.session.mockReset()
     mocks.authorize.mockReset()
@@ -224,7 +242,7 @@ describe('useAssistant request history', () => {
       handlers.onAgentEvent?.('task', { status: 'approval_required', completed_steps: 1, total_steps: 3 })
       handlers.onAgentEvent?.('approval', { approval_id: 'a-1', plan_digest: 'digest-1', tool: 'write_book' })
     })
-    mocks.confirm.mockResolvedValueOnce({ ok: true, result: { changed: true } })
+    streamConfirmResult({ ok: true, result: { changed: true } })
     const assistant = useAssistant()
     await assistant.send('执行一步', 'zh-CN')
     await assistant.confirmApproval(true)
@@ -234,7 +252,7 @@ describe('useAssistant request history', () => {
       handlers.onAgentEvent?.('task', { status: 'approval_required', completed_steps: 2, total_steps: 3 })
       handlers.onAgentEvent?.('approval', { approval_id: 'a-2', plan_digest: 'digest-2', tool: 'write_book' })
     })
-    mocks.confirm.mockResolvedValueOnce({ ok: true, cancelled: true })
+    streamConfirmResult({ ok: true, cancelled: true })
     await assistant.send('拒绝一步', 'zh-CN')
     await assistant.confirmApproval(false)
     expect(assistant.task.value).toMatchObject({ status: 'cancelled', completed_steps: 2 })
@@ -246,7 +264,7 @@ describe('useAssistant request history', () => {
       handlers.onAgentEvent?.('task', { status: 'approval_required', completed_steps: 0, total_steps: 2 })
       handlers.onAgentEvent?.('approval', { approval_id: 'a-fail', plan_digest: 'digest-fail', tool: 'write_book' })
     })
-    mocks.confirm.mockResolvedValueOnce({ ok: false, error: 'write failed' })
+    streamConfirmResult({ ok: false, error: 'write failed' })
     const assistant = useAssistant()
     await assistant.send('失败一步', 'zh-CN')
     await assistant.confirmApproval(true)
@@ -264,8 +282,8 @@ describe('useAssistant request history', () => {
       handlers.onAgentEvent?.('task', { status: 'approval_required', completed_steps: 0, total_steps: 1 })
       handlers.onAgentEvent?.('approval', { approval_id: 'a-batch', plan_digest: 'digest-batch', tool: 'write_lorebook_entries', preview: pending.preview })
     })
-    mocks.confirm.mockResolvedValueOnce({ ok: true, partial: true, pending })
-    mocks.resume.mockResolvedValueOnce({ ok: true, result: { status: 'completed' } })
+    streamConfirmResult({ ok: true, partial: true, pending })
+    streamResumeResult({ ok: true, result: { status: 'completed' } })
     const assistant = useAssistant()
 
     await assistant.send('批量执行', 'zh-CN')
@@ -274,8 +292,8 @@ describe('useAssistant request history', () => {
     expect(assistant.task.value).toMatchObject({ status: 'paused' })
 
     await assistant.resumeApproval()
-    expect(mocks.confirm).toHaveBeenCalledOnce()
-    expect(mocks.resume).toHaveBeenCalledWith('s-batch', 'a-batch', 'digest-batch')
+    expect(mocks.confirmStream).toHaveBeenCalledOnce()
+    expect(mocks.resumeStream).toHaveBeenCalledWith('s-batch', 'a-batch', 'digest-batch', expect.any(Object))
     expect(assistant.task.value).toMatchObject({ status: 'completed', completed_steps: 1 })
     expect(assistant.pendingApproval.value).toBeNull()
   })
@@ -290,7 +308,7 @@ describe('useAssistant request history', () => {
       handlers.onAgentEvent?.('session', { session_id: 's-expired-resume' })
       handlers.onAgentEvent?.('approval', pending)
     })
-    mocks.resume.mockResolvedValueOnce({ ok: true, result: { status: 'completed' } })
+    streamResumeResult({ ok: true, result: { status: 'completed' } })
     const assistant = useAssistant()
 
     await assistant.send('继续暂停批量', 'zh-CN')
@@ -298,7 +316,7 @@ describe('useAssistant request history', () => {
     expect(assistant.pendingApproval.value?.expired).not.toBe(true)
 
     await assistant.resumeApproval()
-    expect(mocks.resume).toHaveBeenCalledWith('s-expired-resume', pending.approval_id, pending.plan_digest)
+    expect(mocks.resumeStream).toHaveBeenCalledWith('s-expired-resume', pending.approval_id, pending.plan_digest, expect.any(Object))
   })
 
   it('caches an ok-false partial response with pending state without retrying confirm', async () => {
@@ -307,14 +325,14 @@ describe('useAssistant request history', () => {
       handlers.onAgentEvent?.('session', { session_id: 's-ok-false' })
       handlers.onAgentEvent?.('approval', { approval_id: pending.approval_id, plan_digest: pending.plan_digest, tool: pending.tool })
     })
-    mocks.confirm.mockResolvedValueOnce({ ok: false, pending, result: { status: 'partial' } })
+    streamConfirmResult({ ok: false, pending, result: { status: 'partial' } })
     const assistant = useAssistant()
     await assistant.send('保留部分结果', 'zh-CN')
     const first = await assistant.confirmApproval(true)
     const second = await assistant.confirmApproval(true)
     expect(first).toMatchObject({ ok: false, pending: { resumable: true } })
     expect(second).toMatchObject({ ok: false, pending: { resumable: true } })
-    expect(mocks.confirm).toHaveBeenCalledOnce()
+    expect(mocks.confirmStream).toHaveBeenCalledOnce()
     expect(assistant.pendingApproval.value).toMatchObject({ approval_id: pending.approval_id, resumable: true })
   })
 
@@ -327,11 +345,11 @@ describe('useAssistant request history', () => {
       handlers.onAgentEvent?.('session', { session_id: 's-retry' })
       handlers.onAgentEvent?.('approval', pending)
     })
-    mocks.resume.mockRejectedValueOnce(new Error('resume offline'))
+    mocks.resumeStream.mockRejectedValueOnce(new Error('resume offline'))
     const assistant = useAssistant()
     await assistant.send('重试批量', 'zh-CN')
     await assistant.resumeApproval()
-    expect(mocks.confirm).not.toHaveBeenCalled()
+    expect(mocks.confirmStream).not.toHaveBeenCalled()
     expect(assistant.pendingApproval.value).toMatchObject({ approval_id: 'a-retry', execution_state: pending.execution_state })
     expect(assistant.actionError.value).toBe('resume offline')
   })
@@ -342,12 +360,13 @@ describe('useAssistant request history', () => {
       handlers.onAgentEvent?.('session', { session_id: 's-cancel' })
       handlers.onAgentEvent?.('approval', pending)
     })
-    mocks.confirm.mockResolvedValueOnce({ ok: true, partial: true, pending }).mockResolvedValueOnce({ ok: true, cancelled: true })
+    streamConfirmResult({ ok: true, partial: true, pending })
+    streamConfirmResult({ ok: true, cancelled: true })
     const assistant = useAssistant()
     await assistant.send('取消暂停批量', 'zh-CN')
     await assistant.confirmApproval(true)
     await assistant.confirmApproval(false)
-    expect(mocks.confirm).toHaveBeenNthCalledWith(2, 's-cancel', 'a-cancel', 'digest-cancel', false)
+    expect(mocks.confirmStream).toHaveBeenNthCalledWith(2, 's-cancel', 'a-cancel', 'digest-cancel', false, expect.any(Object))
     expect(assistant.pendingApproval.value).toBeNull()
   })
 
@@ -397,13 +416,13 @@ describe('useAssistant request history', () => {
     const assistant = useAssistant()
     await assistant.send('draft', 'en')
     await assistant.invalidateApproval('d-dirty')
-    expect(mocks.confirm).toHaveBeenCalledWith('s-dirty', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', false)
+    expect(mocks.confirmStream).toHaveBeenCalledWith('s-dirty', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', false, expect.any(Object))
     await assistant.send('rerun', 'en')
     expect(assistant.pendingApproval.value).toMatchObject({ approval_id: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', recovery_required: true, expired: true })
     await assistant.confirmApproval(true)
     await assistant.resumeApproval()
-    expect(mocks.confirm).toHaveBeenCalledTimes(1)
-    expect(mocks.resume).not.toHaveBeenCalled()
+    expect(mocks.confirmStream).toHaveBeenCalledTimes(1)
+    expect(mocks.resumeStream).not.toHaveBeenCalled()
   })
 
   it('restores a failed receipt response after a confirmation network failure', async () => {
@@ -411,7 +430,7 @@ describe('useAssistant request history', () => {
       handlers.onAgentEvent?.('session', { session_id: 's-receipt' })
       handlers.onAgentEvent?.('approval', { approval_id: 'cccccccccccccccccccccccccccccccc', plan_digest: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', tool: 'save_content' })
     })
-    mocks.confirm.mockRejectedValueOnce(new Error('offline'))
+    mocks.confirmStream.mockRejectedValueOnce(new Error('offline'))
     mocks.session.mockResolvedValueOnce({ session_id: 's-receipt', pending: null, drafts: {}, status: 'idle', receipts: [{ approval_id: 'cccccccccccccccccccccccccccccccc', plan_digest: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', result: { partial: true }, response: { ok: false, error: 'server failed', result: { partial: true } } }] })
     const assistant = useAssistant()
     await assistant.send('save', 'en')

@@ -32,5 +32,7 @@ def test_document_reader_rejects_escape_symlink_and_bad_pdf(tmp_path: Path):
         link.symlink_to(outside)
     except OSError:
         pytest.skip("symlinks unavailable")
-    with pytest.raises(DocumentReadError, match="symlink"):
+    # 符号链接指向目录外：无论先命中 escape 校验还是 symlink 校验，
+    # 都必须安全拒绝（Linux/Windows 的 symlink 语义差异见审查 P1-05）。
+    with pytest.raises(DocumentReadError):
         read_document(tmp_path, "link.md", kind="markdown")

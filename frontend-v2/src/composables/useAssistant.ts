@@ -1,6 +1,5 @@
 import { ref } from 'vue'
 import {
-  confirmAssistantAgent,
   streamAssistantAgentConfirm,
   streamAssistantAgentResume,
   authorizeAssistantAgent,
@@ -503,7 +502,11 @@ async function invalidateApproval(draftId?: string) {
   if (!pending || !currentSession) return
   const generation = requestGeneration
   actionBusy.value = true
-  try { await confirmAssistantAgent(currentSession, pending.approval_id, pending.plan_digest, false) } catch { /* The local dirty fence still prevents confirming the stale proposal. */ }
+  try {
+    await streamAssistantAgentConfirm(currentSession, pending.approval_id, pending.plan_digest, false, {
+      onDelta() { /* 拒绝不产生流式增量展示 */ },
+    })
+  } catch { /* The local dirty fence still prevents confirming the stale proposal. */ }
   finally { if (generation === requestGeneration) actionBusy.value = false }
 }
 function resetRuntime() {

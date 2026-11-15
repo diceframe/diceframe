@@ -380,7 +380,7 @@ watch(projectId, load)
 .studio-body.mode-edit { grid-template-columns: 1fr; }
 .studio-body.mode-edit:has(.studio-files) { grid-template-columns: 1fr 320px; }
 
-/* Chat — full height, let CreatorAiPanel handle its own scrolling */
+/* Chat — full height; the assistant panel manages its own scrolling */
 .studio-chat { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 
 /* Content overview */
