@@ -3,7 +3,11 @@ import pytest
 from pathlib import Path
 import random
 
-from src.rulesets.contracts import RulesetCapabilities
+from src.rulesets.contracts import (
+    AutomaticIntentRuntime,
+    RulesetCapabilities,
+    VersionedStateRuntime,
+)
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.rulesets.remote_adapter import RemoteRulesetRuntimeAdapter
 from src.rulesets.runtime_probe import RuntimeProbeError
@@ -241,6 +245,8 @@ async def test_remote_runtime_uses_gameplay_authority_for_two_submissions_and_pe
                 "ok": True, "applied": True, "state": next_state,
                 "event_ledger": [*ledger, batch],
             }}
+        if operation == "next_automatic_intent":
+            return {"request_id": request["request_id"], "ok": True, "result": None}
         if operation == "memory_deltas_from_event_batch":
             return {"request_id": request["request_id"], "ok": True, "result": []}
         raise AssertionError(operation)
@@ -304,6 +310,8 @@ async def test_remote_runtime_concurrent_submissions_serialize_state_and_event_l
         operation = request["operation"]
         if operation == "prepare_intent_submission":
             return {"request_id": request["request_id"], "ok": True, "result": request["payload"]["intent"]}
+        if operation == "next_automatic_intent":
+            return {"request_id": request["request_id"], "ok": True, "result": None}
         if operation in {"available_intents", "gameplay_view", "memory_deltas_from_event_batch"}:
             result = [] if operation in {"available_intents", "memory_deltas_from_event_batch"} else {}
             return {"request_id": request["request_id"], "ok": True, "result": result}
@@ -389,3 +397,129 @@ async def test_remote_runtime_concurrent_submissions_serialize_state_and_event_l
         int(request["payload"]["instance"]["modules"]["ruleset_runtime"]["state"].get("version", 0))
         for request in resolves
     ) == [0, 1]
+
+
+def test_remote_adapter_satisfies_versioned_state_binding():
+    """Remote runtimes that own versioned state must answer the save binding.
+
+    The binding is a protocol obligation rather than a per-ruleset special
+    case: the host refuses to write ruleset state until it knows which runtime
+    owns it, so an external runtime declaring ``versioned_state`` needs this
+    exactly like a built-in one.
+    """
+
+    seen = []
+
+    def transport(request):
+        seen.append(request)
+        return {
+            "request_id": request["request_id"],
+            "ok": True,
+            "result": {
+                "rule_id": "remote-rule",
+                "runtime_id": "external:demo",
+                "runtime_version": 1,
+                "content_version": 3,
+                "state_schema_version": 2,
+            },
+        }
+
+    runtime = RemoteRulesetRuntimeAdapter(
+        "external:demo", 1, RulesetCapabilities(versioned_state=True), transport,
+    )
+    assert isinstance(runtime, VersionedStateRuntime)
+    binding = runtime.game_binding({"rule_id": "remote-rule"}, "zh-CN")
+    assert binding["runtime_id"] == "external:demo"
+    assert seen[0]["operation"] == "game_binding"
+    assert seen[0]["payload"] == {"rule": {"rule_id": "remote-rule"}, "locale": "zh-CN"}
+
+
+def test_remote_adapter_rejects_non_object_game_binding():
+    runtime = RemoteRulesetRuntimeAdapter(
+        "external:demo", 1, RulesetCapabilities(versioned_state=True),
+        lambda request: {"request_id": request["request_id"], "ok": True, "result": []},
+    )
+    with pytest.raises(RuntimeProbeError, match="game_binding"):
+        runtime.game_binding({"rule_id": "remote-rule"}, "en")
+
+
+def test_remote_adapter_serves_automatic_intents_until_exhausted():
+    """Enemy and AI-seat turns stay server-owned for remote runtimes too."""
+
+    seen = []
+
+    def transport(request):
+        seen.append(request)
+        step = len(seen)
+        intent = None if step == 2 else {"type": "remote.enemy", "intent_id": f"auto-{step}"}
+        return {"request_id": request["request_id"], "ok": True, "result": intent}
+
+    runtime = RemoteRulesetRuntimeAdapter(
+        "external:demo", 1, RulesetCapabilities(deterministic_combat=True), transport,
+    )
+    assert isinstance(runtime, AutomaticIntentRuntime)
+    assert runtime.next_automatic_intent({"hp": 3})["intent_id"] == "auto-1"
+    assert runtime.next_automatic_intent({"hp": 3}) is None
+    assert [request["operation"] for request in seen] == [
+        "next_automatic_intent",
+        "next_automatic_intent",
+    ]
+
+
+def test_remote_adapter_rejects_non_object_automatic_intent():
+    runtime = RemoteRulesetRuntimeAdapter(
+        "external:demo", 1, RulesetCapabilities(),
+        lambda request: {"request_id": request["request_id"], "ok": True, "result": ["nope"]},
+    )
+    with pytest.raises(RuntimeProbeError, match="next_automatic_intent"):
+        runtime.next_automatic_intent({})
+
+
+def test_remote_adapter_sends_rule_templates_not_host_objects():
+    """Call sites pass ``RuleSystem``; only its template crosses the wire."""
+
+    from src.rules.rule_system import RuleSystem
+
+    seen = []
+
+    def transport(request):
+        seen.append(request)
+        return {"request_id": request["request_id"], "ok": True, "result": {}}
+
+    rule = RuleSystem({"rule_id": "remote-rule", "rule_name": "Remote", "dice_system": "d20"})
+    runtime = RemoteRulesetRuntimeAdapter("external:demo", 1, RulesetCapabilities(), transport)
+    runtime.describe_experience(rule, "en")
+    runtime.game_binding(rule, "en")
+    assert [request["payload"]["rule"]["rule_id"] for request in seen] == [
+        "remote-rule", "remote-rule",
+    ]
+
+
+def test_remote_adapter_binds_versioned_state_for_new_game():
+    """The creation phase accepts a remote binding rather than rolling back."""
+
+    from src.engine.game_instance import GameInstance
+    from src.rules.rule_system import RuleSystem
+    from src.webui.services.game_creation_phases import bind_ruleset_runtime
+
+    def transport(request):
+        assert request["operation"] == "game_binding"
+        return {"request_id": request["request_id"], "ok": True, "result": {
+            "rule_id": "remote-rule",
+            "runtime_id": "external:demo",
+            "runtime_version": 1,
+            "content_version": "1",
+            "state_schema_version": 1,
+        }}
+
+    runtime = RemoteRulesetRuntimeAdapter(
+        "external:demo", 1, RulesetCapabilities(versioned_state=True), transport,
+    )
+    instance = GameInstance(game_key=("test", "group", "remote-binding"), run_id="run-binding")
+    rule = RuleSystem({"rule_id": "remote-rule", "dice_system": "d20"})
+
+    class Transaction:
+        def rollback(self):
+            raise AssertionError("creation must not roll back")
+
+    assert bind_ruleset_runtime(Transaction(), instance, runtime, rule, "zh-CN") is None
