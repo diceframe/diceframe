@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -109,16 +111,150 @@ def test_no_op_cases_never_touch_the_installed_launcher(tmp_path, setup):
         assert not (root / "DiceFrame.exe.old").exists()
 
 
-def test_restores_the_original_launcher_if_the_copy_fails(tmp_path, monkeypatch):
-    data, root, staged = _layout(tmp_path)
-    staged.write_bytes(b"fixed-launcher")
-    _signal(staged.parent, staged)
+def _no_leftovers(root: Path) -> bool:
+    # 失败路径不能留下临时文件，也不能留下指向错误内容的备份。
+    return not list(root.glob(".DiceFrame.exe.*.tmp"))
 
-    def fail(*args, **kwargs):
+
+def _big_layout(tmp_path: Path) -> tuple[Path, Path, Path, bytes, bytes]:
+    data, root, staged = _layout(tmp_path)
+    original = os.urandom(64 * 1024)
+    fixed = os.urandom(64 * 1024)
+    (root / "DiceFrame.exe").write_bytes(original)
+    staged.write_bytes(fixed)
+    _signal(staged.parent, staged)
+    return data, root, staged, original, fixed
+
+
+def test_a_copy_that_fails_after_writing_part_of_the_file_leaves_the_launcher_intact(tmp_path, monkeypatch):
+    """复制写到一半失败（磁盘满、读写错误）：DiceFrame.exe 必须与原文件逐字节一致。"""
+    data, root, _staged, original, fixed = _big_layout(tmp_path)
+    real_copy = shutil.copyfileobj
+
+    def partial(reader, writer, *args, **kwargs):
+        writer.write(reader.read(1024))
+        writer.flush()
         raise OSError("disk full")
 
-    monkeypatch.setattr(shutil, "copy2", fail)
-
+    monkeypatch.setattr(shutil, "copyfileobj", partial)
     assert _promote(data, root) is False
-    assert (root / "DiceFrame.exe").read_bytes() == b"old-launcher"
+    assert (root / "DiceFrame.exe").read_bytes() == original
     assert not (root / "DiceFrame.exe.old").exists()
+    assert _no_leftovers(root)
+
+    # 重试幂等：故障消失后照常提升，之后再调用是 no-op。
+    monkeypatch.setattr(shutil, "copyfileobj", real_copy)
+    assert _promote(data, root) is True
+    assert (root / "DiceFrame.exe").read_bytes() == fixed
+    assert (root / "DiceFrame.exe.old").read_bytes() == original
+    assert _promote(data, root) is False
+    assert _no_leftovers(root)
+
+
+def test_a_copy_that_silently_differs_from_the_staged_file_is_rejected(tmp_path, monkeypatch):
+    data, root, _staged, original, _fixed = _big_layout(tmp_path)
+
+    def truncated(reader, writer, *args, **kwargs):
+        writer.write(reader.read(1024))
+
+    monkeypatch.setattr(shutil, "copyfileobj", truncated)
+    assert _promote(data, root) is False
+    assert (root / "DiceFrame.exe").read_bytes() == original
+    assert not (root / "DiceFrame.exe.old").exists()
+    assert _no_leftovers(root)
+
+
+def test_a_failed_switch_that_left_a_partial_launcher_is_restored_from_the_backup(tmp_path, monkeypatch):
+    """最后一步 rename 失败且目标位置已经出现残缺文件：必须按原哈希恢复备份。"""
+    data, root, _staged, original, _fixed = _big_layout(tmp_path)
+    launcher = root / "DiceFrame.exe"
+    real_replace = os.replace
+
+    def flaky(source, target):
+        if Path(target) == launcher and Path(source).name.endswith(".tmp"):
+            launcher.write_bytes(b"MZ" + b"\0" * 100)
+            raise OSError("sharing violation")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(os, "replace", flaky)
+    assert _promote(data, root) is False
+    assert launcher.read_bytes() == original
+    assert not (root / "DiceFrame.exe.old").exists()
+    assert _no_leftovers(root)
+
+
+def test_a_backup_that_cannot_be_moved_aside_aborts_before_touching_the_launcher(tmp_path, monkeypatch):
+    data, root, _staged, original, _fixed = _big_layout(tmp_path)
+    real_replace = os.replace
+
+    def locked(source, target):
+        if Path(target).name == "DiceFrame.exe.old":
+            raise PermissionError("in use")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(os, "replace", locked)
+    assert _promote(data, root) is False
+    assert (root / "DiceFrame.exe").read_bytes() == original
+    assert _no_leftovers(root)
+
+
+_SLEEPER_SOURCE = r"""
+internal static class Sleeper
+{
+    private static void Main()
+    {
+        // MARKER 只为让两份 exe 内容不同。
+        System.Console.WriteLine("MARKER");
+        System.Threading.Thread.Sleep(60000);
+    }
+}
+"""
+
+
+def _compile_sleeper(tmp_path: Path, marker: str) -> Path:
+    from scripts import build_launcher
+
+    source = tmp_path / f"sleeper-{marker}.cs"
+    source.write_text(_SLEEPER_SOURCE.replace("MARKER", marker), encoding="utf-8")
+    output = tmp_path / f"sleeper-{marker}.exe"
+    subprocess.run(
+        [str(build_launcher.find_csc()), "/nologo", "/target:exe", f"/out:{output}", str(source)],
+        check=True,
+        capture_output=True,
+    )
+    return output
+
+
+@pytest.mark.skipif(os.name != "nt", reason="运行中 exe 的改名约束只在 Windows 上存在")
+def test_promotes_over_a_running_launcher_on_windows(tmp_path):
+    """真实 Windows 语义：运行中的 exe 能改名、不能覆写；提升后原进程继续运行。"""
+    data, root, staged = _layout(tmp_path)
+    launcher = root / "DiceFrame.exe"
+    shutil.copyfile(_compile_sleeper(tmp_path, "old"), launcher)
+    shutil.copyfile(_compile_sleeper(tmp_path, "new"), staged)
+    _signal(staged.parent, staged)
+    original = launcher.read_bytes()
+
+    running = subprocess.Popen([str(launcher)], stdout=subprocess.DEVNULL)
+    try:
+        # 运行中的 exe 不能就地覆写：这正是要先复制到临时文件再 rename 的原因。
+        with pytest.raises(PermissionError):
+            launcher.open("r+b").close()
+
+        assert promote_pending_launcher(data, root) is True
+        assert running.poll() is None
+        assert launcher.read_bytes() == staged.read_bytes()
+        assert (root / "DiceFrame.exe.old").read_bytes() == original
+        assert _no_leftovers(root)
+
+        # 备份就是正在运行的旧 exe，删不掉：再来一次提升必须原样放弃，不能把
+        # 已经提升好的 DiceFrame.exe 弄坏。
+        newest = _compile_sleeper(tmp_path, "newest")
+        shutil.copyfile(newest, staged)
+        assert promote_pending_launcher(data, root) is False
+        assert launcher.read_bytes() != original
+        assert (root / "DiceFrame.exe.old").read_bytes() == original
+        assert _no_leftovers(root)
+    finally:
+        running.kill()
+        running.wait()

@@ -99,3 +99,44 @@ def test_removed_history_and_extreme_context_shrinking_drop_private_records(game
     parts = [text]
     _shrink_to_window(parts, {"private_perceptions": 0}, len(text) - 1)
     assert parts == [""]
+
+
+@pytest.mark.asyncio
+async def test_long_session_recalls_only_the_asking_actors_older_notes(game):
+    for uid, value in (("alice", "Cobalt"), ("bob", "Ochre")):
+        game.append_private_message(uid, {"round": 2, "text": f"Prism spindle engraving: {value}."})
+        for number in range(4, 17):
+            game.append_private_message(uid, {"round": number, "text": f"Bell toll {number}."})
+    game.log.extend({"round": n, "gm_response": "The bells ring."} for n in range(4, 17))
+    game.action_queue = [
+        {"user_id": "alice", "text": "Inspect the prism spindle engraving."},
+        {"user_id": "alice", "text": "Listen."},
+    ]
+
+    context = await build_context(game, "GM", [], "Proceed.", context_recent_rounds=1)
+    assert "Cobalt" in context and "Ochre" not in context
+
+    # Historical requests must never use today's queue as a search query.
+    historical = await build_context(game, "GM", [], "Proceed.", history_override=game.log)
+    assert "Cobalt" not in historical and "Ochre" not in historical
+    historical = await build_context(
+        game, "GM", [], "Proceed.", history_override=game.log,
+        perception_actions=[{"user_id": "bob", "text": "Prism spindle engraving"}],
+    )
+    assert "Ochre" in historical and "Cobalt" not in historical
+
+    # Rewriting the round of the observation invalidates it as a recall source.
+    game.log[1]["swipes"] = ["First narration", "Rewritten narration"]
+    assert "Cobalt" not in await build_context(game, "GM", [], "Proceed.")
+
+
+@pytest.mark.asyncio
+async def test_equal_matches_keep_the_first_and_latest_source(game):
+    for number, value in enumerate(("Amber", "Basalt", "Calcite"), start=1):
+        game.append_private_message("alice", {"round": number, "text": f"星盘刻度：{value}"})
+    for number in range(4, 17):
+        game.log.append({"round": number, "gm_response": "Rain."})
+        game.append_private_message("alice", {"round": number, "text": "Rain continues."})
+    game.action_queue = [{"user_id": "alice", "text": "星盘刻度"}]
+    context = await build_context(game, "GM", [], "Proceed.")
+    assert "Amber" in context and "Calcite" in context

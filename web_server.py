@@ -29,6 +29,7 @@ from src.tts import SpeechService
 from src.asr import AsrService
 from src.imagegen import ImageGenerationService
 from src.webui.api import WebAPI
+from src.webui.services.launcher_link import record_restart_intent
 from src.webui.services.launcher_promotion import promote_pending_launcher
 from src.webui.composition import (
     RuntimeComposition,
@@ -351,7 +352,13 @@ async def _serve(loop: asyncio.AbstractEventLoop) -> bool:
         await stop_event.wait()
     finally:
         await runner.cleanup()
-    return bool(app["runtime_control"]["restart_requested"])
+    return _restart_requested()
+
+
+def _restart_requested() -> bool:
+    # 启动器经握手要求停止（更新切换前）时，即便同时有重启请求也不再 execv。
+    control = app["runtime_control"]
+    return bool(control["restart_requested"]) and not control.get("stop_requested")
 
 
 async def _align_internal_api(started: list) -> None:
@@ -396,10 +403,17 @@ if __name__ == "__main__":
         restart_requested = run_with_graceful_shutdown(
             runtime_loop,
             serve_task,
-            lambda: bool(app["runtime_control"]["restart_requested"]),
+            _restart_requested,
         )
     finally:
         runtime_loop.close()
     if restart_requested:
         logger.info("DiceFrame 清理完成，正在重新启动")
+        # Windows 上 execv 会换 PID、原进程以 0 退出：先留下重启意图，便携版启动器
+        # 据此等新后端证明归属后重新接管，而不是把这次重启当成崩溃。
+        record_restart_intent(
+            CONFIG_FILE.parent,
+            boot_id=str(app["runtime_control"]["boot_id"]),
+            pid=os.getpid(),
+        )
         os.execv(sys.executable, [sys.executable, *sys.argv])

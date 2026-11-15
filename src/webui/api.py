@@ -2645,6 +2645,18 @@ class WebAPI:
             self._card_advancement_dependencies, card_id, body,
         )
 
+    def pending_character_card_choices(self, card_id: str) -> dict[str, Any]:
+        return ruleset_advancement.pending_card_choices(
+            self._card_advancement_dependencies, card_id,
+        )
+
+    def complete_character_card_choices(
+        self, card_id: str, body: dict[str, Any],
+    ) -> dict[str, Any]:
+        return ruleset_advancement.complete_card_choices(
+            self._card_advancement_dependencies, card_id, body,
+        )
+
     # ---- 世界编辑器 ----
 
     def list_worlds(self) -> dict[str, Any]:
@@ -2909,6 +2921,13 @@ class WebAPI:
     ) -> dict[str, Any]:
         return ruleset_advancement.preview_live(
             self._live_advancement_dependencies, game_key, user_id, body,
+        )
+
+    def live_character_spell_options(
+        self, game_key: str, user_id: str,
+    ) -> dict[str, Any]:
+        return ruleset_rest.prepared_spell_options(
+            self._live_ruleset_rest_dependencies, game_key, user_id,
         )
 
     async def apply_live_character_advancement(

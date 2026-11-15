@@ -60,7 +60,11 @@ def _fighter_sheet(runtime: Dnd2024Runtime, *, level: int = 2) -> dict:
         item for item in choices["quick_presets"] if item["id"] == "stalwart_guardian"
     )
     sheet = runtime.finalize_character(
-        None, {**preset["draft"], "locale": "en", "name": "Fighter"},
+        None, {
+            **preset["draft"], "locale": "en", "name": "Fighter",
+            # 与其它高等级夹具一致：1 级取 Archery，避免 7 级选项槽无解。
+            "class_feature_feat_choices": {"fighting_style": "feat:archery"},
+        },
     )
     return _advance(runtime, sheet, level) if level > 1 else sheet
 

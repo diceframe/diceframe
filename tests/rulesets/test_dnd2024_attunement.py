@@ -40,7 +40,13 @@ def _runtime() -> tuple[Dnd2024Runtime, dict]:
         item for item in choices["quick_presets"] if item["id"] == "stalwart_guardian"
     )
     sheet = runtime.finalize_character(
-        None, {**preset["draft"], "locale": "en", "name": "Arden"},
+        None, {
+            **preset["draft"], "locale": "en", "name": "Arden",
+            # 1 级 Fighting Style 取 Archery：该预设原本占用 Defense，而本
+            # 切片只实现 Defense 的效果，7 级的 Additional Fighting Style 就会
+            # 没有任何可提交选项，高等级夹具无法通过真实升级链构造。
+            "class_feature_feat_choices": {"fighting_style": "feat:archery"},
+        },
     )
     return runtime, sheet
 
@@ -492,7 +498,13 @@ def _combat_instance() -> tuple[Dnd2024CombatEngine, GameInstance]:
         item for item in choices["quick_presets"] if item["id"] == "stalwart_guardian"
     )
     sheet = runtime.finalize_character(
-        None, {**preset["draft"], "locale": "en", "name": "Arden"},
+        None, {
+            **preset["draft"], "locale": "en", "name": "Arden",
+            # 1 级 Fighting Style 取 Archery：该预设原本占用 Defense，而本
+            # 切片只实现 Defense 的效果，7 级的 Additional Fighting Style 就会
+            # 没有任何可提交选项，高等级夹具无法通过真实升级链构造。
+            "class_feature_feat_choices": {"fighting_style": "feat:archery"},
+        },
     )
     ref = _install_item(runtime, "combat_attuned_armor")
     _set_equipment(sheet, [ref])

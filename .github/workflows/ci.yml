@@ -104,7 +104,14 @@ jobs:
         run: python -c "from scripts import build_launcher; print(build_launcher.ensure_webview2_sdk())"
 
       - name: Run launcher regression tests
-        run: python -m pytest tests/test_build_launcher.py -q
+        # test_launcher_promotion：运行中 exe 的改名/覆写约束只有真实 Windows 才有；
+        # test_launcher_lifecycle：真实编译的启动器 + 假后端，覆盖接管、更新/回滚、
+        # 停止超时、运行中自重启与双安装冲突。
+        run: >-
+          python -m pytest -q
+          tests/test_build_launcher.py
+          tests/test_launcher_promotion.py
+          tests/test_launcher_lifecycle.py
 
   frontend:
     name: Frontend checks

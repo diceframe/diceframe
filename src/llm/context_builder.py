@@ -599,6 +599,7 @@ async def build_context(
     authoritative_events_text: str = "",
     context_recent_rounds: int = 0,
     scene_objective_view: dict[str, Any] | None = None,
+    perception_actions: list[dict] | None = None,
 ) -> str:
     """将游戏状态拼接为完整的 LLM 上下文。
 
@@ -855,9 +856,11 @@ async def build_context(
         except Exception:
             logger.warning("长期记忆召回失败，已降级为无记忆上下文", exc_info=True)
 
+    if perception_actions is None and history_override is None:
+        perception_actions = getattr(instance, "action_queue", None)
     private_perceptions = format_gm_private_perceptions(
         instance, instance.log if history_override is None else history_override,
-        language, max_chars=min(3000, max_total // 20),
+        language, max_chars=min(3000, max_total // 20), actions=perception_actions,
     )
     if private_perceptions:
         parts.append(private_perceptions)

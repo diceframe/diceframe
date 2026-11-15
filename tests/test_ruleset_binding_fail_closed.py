@@ -294,7 +294,8 @@ async def test_party_rest_rejects_bad_attunement_before_joining(context, rest):
     assert ruleset_runtime.state(context.instance).get("rest_session") is None
 
 
-def test_the_dnd2024_runtime_declares_the_attunement_option() -> None:
+def test_the_dnd2024_runtime_declares_its_rest_options() -> None:
+    # 这份声明就是服务层的白名单：多一个不多余，少一个就把合法选项挡在门外。
     assert build_default_ruleset_registry().get(RUNTIME_ID).rest_option_names == frozenset(
-        {"attunement"}
+        {"attunement", "prepared_spells"}
     )

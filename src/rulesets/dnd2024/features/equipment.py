@@ -68,23 +68,32 @@ class Dnd2024EquipmentCatalog:
     """Read-only canonical item / weapon metadata the feature boundary reads."""
 
     item_types: Mapping[str, str]
+    armor_categories: Mapping[str, str]
     weapons: Mapping[str, Mapping[str, Any]]
 
     @classmethod
     def from_bundle(cls, bundle: LoadedRulesetBundle) -> Dnd2024EquipmentCatalog:
         item_types: dict[str, str] = {}
+        armor_categories: dict[str, str] = {}
         for item in bundle.list("item"):
             # 同调声明是物品 schema 的一部分；非 bool 必须在这里就炸掉，
             # 而不是被下游当作 truthy 使用。
             validate_item_declaration(item)
             item_id = str(item.get("id") or "")
-            if item_id:
-                item_types[item_id] = str(item.get("item_type") or "")
+            if not item_id:
+                continue
+            item_type = str(item.get("item_type") or "")
+            item_types[item_id] = item_type
+            # Heavy 是 Fast Movement / Roving 的前提，必须来自物品自身的
+            # canonical category，不能从 display name 反推。
+            if item_type == "armor" and isinstance(item.get("category"), str):
+                armor_categories[item_id] = str(item["category"])
         combat = bundle.get("combat_catalog", "srd_combat_core") or {}
         raw_weapons = combat.get("weapons")
         weapons = raw_weapons if isinstance(raw_weapons, Mapping) else {}
         return cls(
             item_types=item_types,
+            armor_categories=armor_categories,
             weapons=deepcopy(dict(weapons)),
         )
 
@@ -100,6 +109,11 @@ class Dnd2024EquipmentCatalog:
 
     def item_type(self, ref: str) -> str:
         return str(self.item_types.get(canonical_item_id(ref), ""))
+
+    def armor_category(self, ref: str) -> str:
+        """The canonical ``light``/``medium``/``heavy`` category of one item."""
+
+        return str(self.armor_categories.get(canonical_item_id(ref), ""))
 
     def is_monk_weapon(self, ref: str) -> bool:
         """The SRD 5.2.1 Monk Weapon test for one equipped ref."""
@@ -134,6 +148,11 @@ class Dnd2024EquipmentCatalog:
         if requirement.unarmored and "armor" in types:
             return False
         if requirement.no_shield and "shield" in types:
+            return False
+        if requirement.no_heavy_armor and any(
+            self.armor_category(ref) == "heavy" for ref in refs
+        ):
+            # Light / Medium / 无甲都保留收益；Shield 不参与这个判定。
             return False
         if requirement.weapon_kinds and len(
             self.weapon_refs_of_kinds(character, requirement.weapon_kinds)

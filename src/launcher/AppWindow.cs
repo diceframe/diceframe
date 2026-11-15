@@ -58,8 +58,16 @@ internal static partial class DiceFrameLauncher
     private static Action<string> appWindowNavigate;
 
     // 打开界面：应用窗口已开就加载页面；还没开就试着开；都不行就用默认浏览器。
-    private static void OpenUi(string url, string payloadDir)
+    // 只接受已验证的目标——本启动器亲自启动的后端（健康检查 pid 与子进程一致），或经实例
+    // 握手证明属于本安装的后端：首次访问密码会随页面注入，绝不能送给端口上的别的服务。
+    private static void OpenUi(ServerIdentity verified, string payloadDir)
     {
+        if (verified == null || string.IsNullOrEmpty(verified.Url))
+        {
+            Console.WriteLine("Refusing to open an unverified backend address.");
+            return;
+        }
+        string url = verified.Url;
         if (appWindowNavigate == null && !preferBrowser && StartAppWindow(payloadDir))
         {
             DetachConsole(launcherLogsDir);
