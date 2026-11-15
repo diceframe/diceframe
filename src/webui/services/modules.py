@@ -21,6 +21,7 @@ lifecycle**。本模块只做三件事：
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -171,6 +172,42 @@ def _inventory_projection(runtime: Any, adventure_registry: Any) -> tuple[int | 
         "disabled" if str(getattr(runtime, "status", "")) == "disabled" else "available"
     )
     return adventure_count, counts, status
+
+
+def _required_runtimes(runtime: Any) -> list[dict[str, Any]]:
+    """每个冒险包 manifest.json 声明的 required_runtime 去重汇总。
+
+    与安装深校验（module_validation 的 adventure_runtime_missing blocker）
+    同一个事实来源；读不到就返回空，绝不猜。
+    """
+    root = getattr(runtime, "adventure_packages_root", None)
+    directories = tuple(getattr(runtime, "adventure_package_directories", ()) or ())
+    if not root or not directories:
+        return []
+    runtimes: dict[str, dict[str, Any]] = {}
+    try:
+        root_path = Path(root)
+        for directory in directories:
+            manifest_path = root_path / directory / "manifest.json"
+            if not manifest_path.is_file():
+                continue
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            required = manifest.get("required_runtime") if isinstance(manifest, dict) else None
+            if not isinstance(required, dict):
+                continue
+            runtime_id = str(required.get("id") or "").strip()
+            if not runtime_id:
+                continue
+            try:
+                minimum = int(required.get("minimum_version") or 1)
+            except (TypeError, ValueError):
+                minimum = 1
+            existing = runtimes.get(runtime_id)
+            if existing is None or minimum > int(existing.get("minimum_version") or 1):
+                runtimes[runtime_id] = {"id": runtime_id, "minimum_version": minimum}
+    except Exception:  # noqa: BLE001 - unreadable declaration is unknown, never guessed
+        return []
+    return list(runtimes.values())
 
 
 def _book_entry_count(store: Any, book_id: str, *, viewer_is_gm: bool = True) -> int | None:
@@ -344,6 +381,7 @@ def list_modules(deps: ModuleDependencies) -> dict[str, Any]:
             "adventure_count": adventure_count,
             "content_counts": counts,
             "inventory_status": inventory_status,
+            "required_runtimes": _required_runtimes(runtime),
             "lorebook_count": len(lorebooks),
             # 能力名牌：只声明包真实提供的东西（W1）。
             "capabilities": _installed_module_capabilities(
@@ -541,6 +579,7 @@ def module_detail(deps: ModuleDependencies, module_id: str, *, viewer_is_gm: boo
             "adventure_count": adventure_count,
             "content_counts": content_counts,
             "inventory_status": inventory_status,
+            "required_runtimes": _required_runtimes(runtime),
             "content": grouped,
             "adventures": adventures,
             "lorebooks": lorebooks,

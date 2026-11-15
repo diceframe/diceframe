@@ -13,7 +13,7 @@ import {
 import { useConfirm } from '@/composables/useConfirm'
 import { useLocale } from '@/composables/useLocale'
 import ModuleResourceBrowser from './resources/ModuleResourceBrowser.vue'
-import { contentKindLabel, moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
+import { contentKindLabel, formatModuleBlocker, moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
 import type { MessageKey } from '@/i18n'
 
 const route = useRoute()
@@ -355,7 +355,7 @@ async function run(action: ModuleAction) {
           <!-- 兼容性 -->
           <div class="mod-side-card" data-testid="module-compatibility">
             <h3 class="mod-side-title">{{ t('modulesCompatibility') }}</h3>
-            <p v-if="compatibility?.blockers?.length" class="error-text">{{ compatibility.blockers.join(', ') }}</p>
+            <p v-if="compatibility?.blockers?.length" class="error-text">{{ compatibility.blockers.map(blocker => formatModuleBlocker(blocker, locale)).join(locale === 'zh-CN' ? '；' : '; ') }}</p>
             <p v-else class="mod-compat-ok">{{ t('modulesCompatible') }}</p>
             <p v-if="compatibility?.warnings?.length" class="muted">{{ compatibility.warnings.join(', ') }}</p>
           </div>
@@ -368,6 +368,10 @@ async function run(action: ModuleAction) {
               <div><dt>{{ t('modulesVersionLabel') }}</dt><dd>{{ module.version }}</dd></div>
               <div><dt>{{ t('modulesStatus') }}</dt><dd>{{ statusLabel(module.status) }}</dd></div>
               <div><dt>{{ t('modulesContentDelivery') }}</dt><dd>{{ deliveryLabel(module.content_delivery_mode) }}</dd></div>
+              <div v-for="runtime in module.required_runtimes || []" :key="runtime.id">
+                <dt>{{ locale === 'zh-CN' ? '需要运行时' : 'Requires runtime' }}</dt>
+                <dd>{{ runtime.id }} ≥{{ runtime.minimum_version }}</dd>
+              </div>
             </dl>
           </details>
 

@@ -23,7 +23,7 @@ import { promptEnableAfterInstall } from '@/features/plugins/installEnable'
 import { useHubDetail } from '@/features/plugins/useHubDetail'
 import { contentPackSubmissionUrl } from '@/features/creator/submission'
 import { localeLabel } from '@/utils/contentLanguage'
-import { moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
+import { formatModuleBlocker, moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
 
 type RecoveryAdventure = {
   binding?: {
@@ -519,8 +519,8 @@ async function installFromMarketplace(item: ModuleMarketplaceItem) {
     await checkRecovery()
     installFeedback.value = { id: item.id, kind: 'success', message: t('modulesInstalledRefreshed') }
   } catch (cause: unknown) {
-    error.value = errorMessage(cause)
-    installFeedback.value = { id: item.id, kind: 'error', message: errorMessage(cause) }
+    error.value = formatModuleBlocker(errorMessage(cause), locale.value)
+    installFeedback.value = { id: item.id, kind: 'error', message: error.value }
   } finally {
     installBusy.value = ''
   }
@@ -618,6 +618,13 @@ async function checkRecovery() {
                 <span class="modules-my-row-copy">
                   <strong>{{ module.name }}</strong>
                   <span class="muted">v{{ module.version }} · {{ inventorySummary(module) }}</span>
+                  <span
+                    v-for="runtime in module.required_runtimes || []"
+                    :key="runtime.id"
+                    class="modules-my-row-runtime"
+                  >
+                    {{ locale === 'zh-CN' ? `需要运行时 ${runtime.id} ≥${runtime.minimum_version}` : `Requires runtime ${runtime.id} >=${runtime.minimum_version}` }}
+                  </span>
                 </span>
                 <span v-if="updateBusy === module.id || updateAllBusy" class="modules-my-row-updating">
                   <span class="modules-my-update-spinner" />
@@ -638,7 +645,7 @@ async function checkRecovery() {
                 <button v-if="preview" type="button" :disabled="Boolean(preview.blockers.length) || importBusy" @click="importModule">{{ t('modulesInstall') }}</button>
               </template>
               <div v-if="preview && (preview.blockers.length || preview.warnings.length)" class="module-import-preview" data-testid="module-import-preview">
-                <p v-if="preview.blockers.length" class="error-text">{{ preview.blockers.join(', ') }}</p>
+                <p v-if="preview.blockers.length" class="error-text">{{ preview.blockers.map(blocker => formatModuleBlocker(blocker, locale)).join(locale === 'zh-CN' ? '；' : '; ') }}</p>
                 <p v-if="preview.warnings.length" class="muted">{{ preview.warnings.join(', ') }}</p>
               </div>
             </div>
@@ -929,6 +936,7 @@ async function checkRecovery() {
 .modules-my-row-copy { flex: 1; min-width: 0; display: grid; gap: .1rem; }
 .modules-my-row-copy strong { font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .modules-my-row-copy span { font-size: .76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modules-my-row-runtime { color: var(--df-warn-strong, #c97b22); font-size: .72rem; font-weight: 600; }
 .modules-my-panel-footer { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .65rem 1rem; border-top: 1px solid var(--df-border-soft); font-size: .84rem; }
 .module-import-file { display: inline-flex; align-items: center; gap: .4rem; color: var(--df-text-muted); cursor: pointer; }
 .module-import-file input[type="file"] { max-width: 160px; }

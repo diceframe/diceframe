@@ -122,3 +122,14 @@ const contentKindLabels: Record<string, Record<Locale, string>> = {
 export function contentKindLabel(kind: string, locale: Locale): string {
   return contentKindLabels[kind]?.[locale] || kind
 }
+
+// 安装深校验的机器可读 blocker（module_validation）翻成用户能懂的话；
+// 未识别的 blocker 原样透出，绝不吞掉或改写语义。
+export function formatModuleBlocker(blocker: string, locale: Locale): string {
+  const match = /adventure_runtime_missing:([^:]+):([^:>]+)>=(\d+)/.exec(blocker)
+  if (!match) return blocker
+  const [, adventure, runtimeId, minimum] = match
+  return locale === 'zh-CN'
+    ? `冒险「${adventure}」需要规则运行时 ${runtimeId}（≥ ${minimum}），请先安装对应的规则运行时插件再导入。`
+    : `Adventure "${adventure}" requires ruleset runtime ${runtimeId} (>= ${minimum}). Install the matching ruleset-runtime plugin first.`
+}

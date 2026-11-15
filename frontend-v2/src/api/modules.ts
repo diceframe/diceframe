@@ -20,6 +20,8 @@ export type ModuleSummary = {
   cover?: string
   // 能力名牌（W1）：服务端按包的真实贡献推导；在线卡只给 profile 级事实。
   capabilities?: ModuleCapability[]
+  // 包内冒险 manifest 声明的 required_runtime 去重汇总；缺省/空 = 未声明或读不到。
+  required_runtimes?: Array<{ id: string; minimum_version: number }>
 }
 
 export type ModulesResponse = {
