@@ -63,6 +63,11 @@ class DiceResolver:
         uid = str(action.get("user_id") or request.get("actor_uid") or "")
         if uid not in instance.players:
             return ""
+        resolved = action.get("check_result")
+        if isinstance(resolved, dict):
+            # 规则运行时已结算（非 d20/d100 骰制）：核心不再重算阈值。
+            instance.record_check(resolved)
+            return self._format_constraint(instance, rule, resolved)
         if not action.get("dice_value"):
             if rule:
                 return self.roll_rule_check(instance, str(action.get("text") or ""), rule)
@@ -211,6 +216,8 @@ class DiceResolver:
         check: dict[str, Any],
     ) -> str:
         verdict = str(check.get("verdict") or "")
+        if check.get("dice") == "runtime" or check.get("constraint"):
+            return DiceResolver._format_runtime_constraint(instance, check)
         if check.get("dice") == "d100":
             threshold = int(check.get("threshold", 1) or 1)
             if check.get("skill"):
@@ -298,6 +305,53 @@ class DiceResolver:
                 "\n[Systemseitige Probe - Muss befolgt werden]\n"
                 f"Probe: {roll_label} + {attribute} {modifier:+d} = {total} vs SG {dc}\n"
                 f"Ergebnis: {_verdict_text(verdict, True, 'de')}\n"
+                "Anforderung: Erzähle dieses vom Server ermittelte Ergebnis, ohne Wurf oder Ausgang zu ändern.\n"
+            ),
+        })
+
+    @staticmethod
+    def _format_runtime_constraint(instance: GameInstance, check: dict[str, Any]) -> str:
+        """Render a runtime-resolved check for the GM prompt.
+
+        The ruleset may hand over finished wording; otherwise the platform
+        formats only what it actually knows - the dice, the total and the
+        verdict - so no ruleset math leaks into the engine.
+        """
+        body = str(check.get("constraint") or "").strip()
+        if not body:
+            subject = str(
+                check.get("label") or check.get("skill") or check.get("attribute") or ""
+            )
+            faces = "+".join(str(int(value)) for value in (check.get("rolls") or []))
+            dice = str(check.get("dice") or "")
+            detail = f"{subject} {dice}={faces}" if faces else f"{subject} {dice}={check.get('roll')}"
+            total = check.get("total")
+            if isinstance(total, int) and not isinstance(total, bool):
+                detail += f" = {total}"
+            target = check.get("dc", check.get("threshold"))
+            if isinstance(target, int) and not isinstance(target, bool):
+                detail += f" vs {target}"
+            body = f"{detail.strip()} → {check.get('verdict')}"
+        return localized_text(instance.language, {
+            "en": (
+                "\n[System Check - Must Follow]\n"
+                f"{body}\n"
+                "Requirement: narrate this server-resolved result without changing the roll or outcome.\n"
+            ),
+            "zh-CN": (
+                "\n【系统检定·必须遵循】\n"
+                f"{body}\n"
+                "要求: 这是服务端已结算结果，只按结果叙事，不得重掷或改判。\n"
+            ),
+            "ja": (
+                "\n【システム判定・必ず従うこと】\n"
+                f"{body}\n"
+                "要求: これはサーバー側で確定した結果。この結果に沿って叙述し、"
+                "振り直しや改変をしてはならない。\n"
+            ),
+            "de": (
+                "\n[Systemseitige Probe - Muss befolgt werden]\n"
+                f"{body}\n"
                 "Anforderung: Erzähle dieses vom Server ermittelte Ergebnis, ohne Wurf oder Ausgang zu ändern.\n"
             ),
         })
