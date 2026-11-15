@@ -135,8 +135,17 @@ async function validateProject() {
   projectError.value = ''
   try {
     const result = await creatorApi.validate(selectedProject.value.id)
-    if (result.ok) projectStage.value = 'validated'
-    projectError.value = result.ok ? copy.value.projectValidated : (result.errors || []).join('；') || copy.value.projectInvalid
+    const packageErrors = result.package_check?.errors?.length
+      ? result.package_check.errors.map(item => `${locale.value === 'zh-CN' ? '安装前检查' : 'Pre-install check'}：${item}`)
+      : []
+    if (result.installable) projectStage.value = 'validated'
+    if (!result.ok) {
+      projectError.value = (result.errors || []).join('；') || copy.value.projectInvalid
+    } else if (packageErrors.length) {
+      projectError.value = packageErrors.join('；')
+    } else {
+      projectError.value = copy.value.projectValidated
+    }
   } catch (error: unknown) {
     projectError.value = error instanceof Error ? error.message : String(error)
   } finally {

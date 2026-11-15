@@ -38,8 +38,12 @@ def _digest(value: Any) -> str:
 
 
 class CreatorProjectStore:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, package_checker: Any = None) -> None:
         self.path = Path(path)
+        # P1-03：可选的"安装前深度校验"回调——输入构建好的 .dfplugin 字节，
+        # 返回阻断安装的错误列表（空列表 = 可安装）。由组合根注入与
+        # PluginHost 安装完全同源的校验器，Creator 不复制简化校验。
+        self._package_checker = package_checker
 
     def _load(self) -> dict[str, Any]:
         if not self.path.exists():
@@ -203,6 +207,10 @@ class CreatorProjectStore:
             if not title or len(title) > 160:
                 raise ValueError("Creator 工程名称不能为空且不能超过 160 个字符")
             project["name"] = title
+        # 合并后的最终集合必须整体重新校验：多次合法的小批次写入
+        # 不能绕过总文件数 / 总大小上限（P2-01）。校验失败时在写入前抛出，
+        # 项目内容与 revision 完全不变。
+        current = self._normalize_files(current)
         project["files"] = current
         project["revision"] = current_revision + 1
         project["updated_at"] = _now()
@@ -222,6 +230,18 @@ class CreatorProjectStore:
         del state["projects"][normalized_id]
         self._save(state)
         return {"ok": True, "project_id": normalized_id, "deleted": True}
+
+    @staticmethod
+    def _package_payload(plugin_id: str, files: dict[str, str]) -> bytes:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for relative_path in sorted(files):
+                info = zipfile.ZipInfo(f"{plugin_id}/{relative_path}")
+                info.date_time = (1980, 1, 1, 0, 0, 0)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.external_attr = 0o100644 << 16
+                archive.writestr(info, str(files[relative_path]).encode("utf-8"))
+        return buffer.getvalue()
 
     def validate(self, owner_id: str, project_id: str) -> dict[str, Any]:
         project = self.read(owner_id, project_id)["project"]
@@ -243,6 +263,19 @@ class CreatorProjectStore:
                 for field in ("schema_version", "id", "name", "version", "plugin_type"):
                     if field not in manifest or manifest[field] in ("", None):
                         errors.append("plugin.json 缺少 " + field)
+        # P1-03：结构检查通过后，再用与安装同源的深度校验器检查整个包；
+        # 两层结果分开上报（工程文件结构检查 / 生成可安装内容包检查）。
+        package_check: dict[str, Any] | None = None
+        if self._package_checker is not None and not errors:
+            plugin_id = str(manifest.get("id") or "").strip()
+            try:
+                package_errors = list(self._package_checker(
+                    self._package_payload(plugin_id, files)) or [])
+            except ValueError as exc:
+                package_errors = [str(exc)]
+            except Exception as exc:  # noqa: BLE001 - 校验器故障也视为不可安装
+                package_errors = [f"安装前校验失败: {exc}"]
+            package_check = {"ok": not package_errors, "errors": package_errors}
         return {
             "ok": not errors,
             "project_id": project["id"],
@@ -250,6 +283,8 @@ class CreatorProjectStore:
             "digest": project["digest"],
             "manifest": manifest,
             "errors": errors,
+            "package_check": package_check,
+            "installable": not errors and (package_check is None or package_check["ok"]),
         }
 
     def preview(self, owner_id: str, project_id: str) -> dict[str, Any]:
@@ -307,21 +342,18 @@ class CreatorProjectStore:
         if checked["revision"] != expected_revision:
             raise ValueError("工程版本已变化，请重新读取后再构建")
         if not checked["ok"]:
-            return {"ok": False, **checked}
+            return {**checked, "ok": False}
+        package_check = checked.get("package_check")
+        if package_check is not None and not package_check["ok"]:
+            # P1-03：Build 必须报告完整安装约束——"验证通过"不等于可安装。
+            # 注意：checked 展开放在前面，显式 ok=False 放最后，避免被覆盖。
+            return {**checked, "ok": False}
         project = self.read(owner_id, project_id)["project"]
         plugin_id = str(checked["manifest"].get("id") or "").strip()
         version = str(checked["manifest"].get("version") or "0.0.0").strip()
         receipt_id = f"build:{project['revision']}:{project['digest']}"
         files = project.get("files") or {}
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for relative_path in sorted(files):
-                info = zipfile.ZipInfo(f"{plugin_id}/{relative_path}")
-                info.date_time = (1980, 1, 1, 0, 0, 0)
-                info.compress_type = zipfile.ZIP_DEFLATED
-                info.external_attr = 0o100644 << 16
-                archive.writestr(info, str(files[relative_path]).encode("utf-8"))
-        payload = buffer.getvalue()
+        payload = self._package_payload(plugin_id, files)
         artifact_sha256 = hashlib.sha256(payload).hexdigest()
         state = self._load()
         stored = self._owned(state, owner_id, project_id)
