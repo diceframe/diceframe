@@ -34,3 +34,29 @@ def test_document_reader_rejects_escape_symlink_and_bad_pdf(tmp_path: Path):
         pytest.skip("symlinks unavailable")
     with pytest.raises(DocumentReadError, match="symlink"):
         read_document(tmp_path, "link.md", kind="markdown")
+
+
+def test_document_reader_rejects_in_package_symlink(tmp_path: Path):
+    """SECURITY-01：指向包内文件的符号链接同样必须拒绝（不许穿链接读取）。"""
+    (tmp_path / "secret.md").write_text("inner", encoding="utf-8")
+    outside = tmp_path / "link.md"
+    try:
+        outside.symlink_to(tmp_path / "secret.md")
+    except OSError:
+        pytest.skip("symlinks unavailable")
+    with pytest.raises(DocumentReadError, match="symlink"):
+        read_document(tmp_path, "link.md", kind="markdown")
+
+
+def test_document_reader_rejects_symlinked_nested_directory(tmp_path: Path):
+    """嵌套目录里的符号链接组件也要在 resolve 之前被拒绝。"""
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "doc.md").write_text("nested", encoding="utf-8")
+    gateway = tmp_path / "docs"
+    try:
+        gateway.symlink_to(nested, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks unavailable")
+    with pytest.raises(DocumentReadError, match="symlink"):
+        read_document(tmp_path, "docs/doc.md", kind="markdown")
