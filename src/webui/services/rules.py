@@ -252,8 +252,11 @@ def get_rule_template(
         return {"ok": False, "error": f"规则不存在: {rule_id}"}
     template = json.loads(rule_path.read_text(encoding="utf-8"))
     if language and int(template.get("rule_schema_version", 1) or 1) >= 2:
+        # Bundle 的根目录必须跟着解析到的文件走：插件贡献的规则住在包自己的
+        # rules/ 目录，拿 dependencies.rules_dir 去拼会指向一个不存在的同名
+        # 文件，带 language 的详情请求直接 500。
         rule = RuleSystem(
-            RuleBundleLoader().load_rule(dependencies.rules_dir, rule_id, language)
+            RuleBundleLoader().load_rule(rule_path.parent, rule_id, language)
         )
     else:
         rule = RuleSystem.load(rule_path)
