@@ -220,7 +220,12 @@ def build_dice_constraint_block(
     skip_action_indexes: set[int] | None = None,
 ) -> str:
     """逐个结算玩家行动中的 CheckRequest；原始骰值只生成一次。"""
-    if dice_system == "none":
+    # 无骰规则默认没有任何检定可结算；但声明了叙事检定的 runtime 已经把结果
+    # 写在行动上，这时要照常产出「必须遵循」约束块，否则 GM 看不到结果。
+    has_runtime_checks = any(
+        isinstance(action.get("check_result"), dict) for action in instance.action_queue
+    )
+    if dice_system == "none" and not has_runtime_checks:
         return ""
     blocks: list[str] = []
     legacy_roll_re = re.compile(r"\(系统掷骰:\s*(d20|d100)=(\d+)\)")
@@ -228,6 +233,7 @@ def build_dice_constraint_block(
     for action_index, action in enumerate(instance.action_queue):
         if action_index in skipped:
             action.pop("check_request", None)
+            action.pop("check_result", None)
             action.pop("dice_value", None)
             action.pop("dice_rolls", None)
             action.pop("dice_system", None)
