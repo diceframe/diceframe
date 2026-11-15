@@ -45,7 +45,7 @@ async function load(): Promise<void> {
 
 <template>
   <div class="view rules-gameplay-view">
-    <ContentPageHeader class="view-title rules-gameplay-heading" kicker="RULES & GAMEPLAY" :title="t('rulesGameplayTitle')" :description="t('rulesGameplaySubtitle')">
+    <ContentPageHeader compact class="view-title rules-gameplay-heading" kicker="RULES & GAMEPLAY" :title="t('rulesGameplayTitle')" :description="t('rulesGameplaySubtitle')">
       <template #actions>
         <div class="rules-gameplay-tabs" role="tablist">
           <button type="button" role="tab" :aria-selected="activeTab === 'editor'" :class="{ active: activeTab === 'editor' }" @click="activeTab = 'editor'">
@@ -107,6 +107,7 @@ async function load(): Promise<void> {
 .rules-runtime-binding { margin: .15rem 0 0; font-size: .78rem; font-family: var(--df-font-mono, monospace); overflow-wrap: anywhere; }
 .rules-card-icon { display: inline-flex; margin-top: .15rem; color: var(--df-interactive-strong); }
 .rules-gameplay-editor-embed { margin-top: 1rem; max-width: 100%; }
+.rules-gameplay-editor-embed :deep(.view.rules-page) { padding-top: 0; }
 .rules-gameplay-cta { display: flex; align-items: center; gap: .8rem; margin-top: .6rem; padding: .55rem .8rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); font-size: .84rem; }
 .rules-gameplay-cta span { color: var(--df-text-muted); }
 .rules-gameplay-cta-link { color: var(--df-interactive-strong); font-weight: 700; text-decoration: none; white-space: nowrap; }

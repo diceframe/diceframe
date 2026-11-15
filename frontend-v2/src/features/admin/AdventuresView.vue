@@ -512,7 +512,7 @@ function policyLabel(policy: string) {
 
 <template>
   <section class="view archive-page rules-page adventures-page">
-    <ContentPageHeader
+    <ContentPageHeader compact
       kicker="ADVENTURE COLLECTION"
       :title="t('adventurePackageManagement')"
       :description="t('adventurePackageManagementHint')"

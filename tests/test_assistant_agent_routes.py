@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -6,6 +7,19 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from src.webui.routes.assistant_agent import register_agent
+
+
+def sse_events(text):
+    """Parse an SSE body into {event_name: data} pairs (last value wins)."""
+    events = {}
+    name = None
+    for line in text.splitlines():
+        if line.startswith("event: "):
+            name = line[len("event: "):]
+        elif line.startswith("data: ") and name:
+            events[name] = line[len("data: "):]
+            name = None
+    return events
 
 
 async def client_for(owner, api):
@@ -74,7 +88,9 @@ async def test_resume_route_uses_server_owner_and_real_checkpointed_execution(tm
         response = await client.post('/api/assistant/agent/resume', json={
             'session_id': sid, 'approval_id': plan['approval_id'], 'plan_digest': plan['plan_digest']})
         assert response.status == 200
-        assert (await response.json())['result']['status'] == 'completed'
+        events = sse_events(await response.text())
+        assert json.loads(events['confirm_result'])['result']['status'] == 'completed'
+        assert 'done' in events
         assert writes == ['a', 'b']
     finally:
         await client.close()
@@ -145,7 +161,7 @@ async def test_first_stream_sets_session_cookie_before_headers_so_confirmation_k
     async def run(owner, messages, language, context, sid, emit):
         owners.append(owner)
         await emit("session", {"session_id": "a" * 32})
-    async def confirm(owner, *args):
+    async def confirm(owner, *args, **kwargs):
         owners.append(owner)
         return {"ok": True}
     app = web.Application(middlewares=[session_middleware, auth])

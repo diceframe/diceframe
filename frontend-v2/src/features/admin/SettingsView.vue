@@ -1193,7 +1193,7 @@ function redownloadUpdatePackage() {
   <section class="view settings-page reference-settings-page">
     <p v-if="store.error" class="error-banner">{{ store.error }}</p>
     <div class="settings-overview-grid">
-      <ContentPageHeader class="settings-page-heading" kicker="CONTROL ROOM" :title="t('settingsTitle')" :description="t('settingsSubtitle')">
+      <ContentPageHeader compact class="settings-page-heading" kicker="CONTROL ROOM" :title="t('settingsTitle')" :description="t('settingsSubtitle')">
         <template #actions>
           <NButton :loading="store.loading" @click="store.load()">{{ t('refresh') }}</NButton>
         </template>

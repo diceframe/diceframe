@@ -73,6 +73,7 @@ export const ja = {
   modulesSubmitGoCreator: '制作スタジオで作る',
   modulesSubmitDirect: '直接投稿',
   contentPackSubmitTitle: 'オンラインコンテンツパックへ投稿',
+  creatorHeroTitle: 'あなただけの世界を作ろう',
   creatorExportResourceTitle: 'リソースパックを書き出す',
   creatorExportResourceIntro: '冒険を含めず、世界・ルール・ロアブック・キャラクターカードをまとめます。データのみの書き出しで、インストール後に「コンテンツパック」ページで有効化します。',
   creatorExportAdventureTitle: 'コンテンツパッケージを書き出す',

@@ -318,7 +318,7 @@ async function deleteRule(rule: RuleSummary) {
 
 <template>
   <section class="view archive-page rules-page">
-    <ContentPageHeader v-if="!props.embedded" class="view-title archive-hero rules-page-heading" kicker="RULE COMPENDIUM" :title="t('ruleSystem')" :description="t('ruleSystemSubtitle')">
+    <ContentPageHeader compact v-if="!props.embedded" class="view-title rules-page-heading" kicker="RULE COMPENDIUM" :title="t('ruleSystem')" :description="t('ruleSystemSubtitle')">
     </ContentPageHeader>
 
     <p v-if="error" class="error-banner">{{ error }}</p>

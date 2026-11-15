@@ -1399,8 +1399,8 @@ class WebAPI:
     async def assistant_agent_run(self, owner, messages, language, context, session_id, emit):
         return await self._assistant_agent.run(owner, messages, language, context, session_id, emit)
 
-    async def assistant_agent_confirm(self, owner, session_id, approval_id, plan_digest, approved):
-        return await self._assistant_agent.confirm(owner, session_id, approval_id, plan_digest, approved)
+    async def assistant_agent_confirm(self, owner, session_id, approval_id, plan_digest, approved, emit=None):
+        return await self._assistant_agent.confirm(owner, session_id, approval_id, plan_digest, approved, emit=emit)
 
     async def assistant_agent_review(self, owner, session_id, draft_id, draft):
         return await self._assistant_agent.review(owner, session_id, draft_id, draft)
@@ -1411,8 +1411,8 @@ class WebAPI:
     def assistant_agent_capabilities(self, owner, query='', domain='', offset=0):
         return self._assistant_agent.capabilities(owner, query, domain, offset)
 
-    async def assistant_agent_resume(self, owner, session_id, approval_id, plan_digest):
-        return await self._assistant_agent.resume(owner, session_id, approval_id, plan_digest)
+    async def assistant_agent_resume(self, owner, session_id, approval_id, plan_digest, emit=None):
+        return await self._assistant_agent.resume(owner, session_id, approval_id, plan_digest, emit=emit)
 
     def assistant_agent_authorize(self, owner, session_id, mode, scope, domains, max_steps):
         return self._assistant_agent.authorize(owner, session_id, mode, scope, domains, max_steps)

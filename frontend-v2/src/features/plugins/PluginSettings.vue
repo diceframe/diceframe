@@ -181,7 +181,7 @@ onMounted(async () => {
 
 <template>
   <section class="plugin-workspace">
-    <ContentPageHeader class="archive-hero" kicker="EXTENSIONS" :title="t('settingsSectionPlugins')" :description="t('pluginWorkspaceSubtitle')">
+    <ContentPageHeader compact class="" kicker="EXTENSIONS" :title="t('settingsSectionPlugins')" :description="t('pluginWorkspaceSubtitle')">
       <template #actions>
         <div class="plugin-header-actions">
           <NButton size="small" :loading="busy !== ''" @click="refreshPluginSurfaces">{{ t('refresh') }}</NButton>

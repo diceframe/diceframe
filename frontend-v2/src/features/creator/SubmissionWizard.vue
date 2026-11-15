@@ -4,7 +4,7 @@ import { useLocale } from '@/composables/useLocale'
 import { contentPackSubmissionUrl } from './submission'
 
 const props = defineProps<{ pluginId: string; version: string; fileName: string }>()
-const { t } = useLocale()
+const { t, locale } = useLocale()
 
 const STORAGE_KEY = 'diceframe:submission-repository-url'
 const repoUrl = ref(readStored())
@@ -98,6 +98,28 @@ const steps = computed(() => [
 
 <template>
   <div class="submission-wizard" data-testid="submission-wizard">
+    <details class="submission-wizard-no-github">
+      <summary>{{ locale === 'zh-CN' ? '没有 GitHub 账号？' : 'No GitHub account?' }}</summary>
+      <div class="submission-wizard-no-github-body">
+        <p v-if="locale === 'zh-CN'">GitHub 是免费的代码托管平台，注册只需要邮箱。内容包的源码需要放在那里才能被收录。</p>
+        <p v-else>GitHub is a free code hosting platform. You only need an email to sign up. Your pack's source code needs to be there to be listed.</p>
+        <a href="https://github.com/signup" target="_blank" rel="noopener" class="submission-wizard-action">
+          {{ locale === 'zh-CN' ? '免费注册 GitHub →' : 'Sign up for GitHub (free) →' }}
+        </a>
+      </div>
+    </details>
+    <!-- OAuth 授权轨占位（后端配合后启用） -->
+    <div class="submission-wizard-oauth-track">
+      <div class="submission-wizard-oauth-head">
+        <strong>{{ locale === 'zh-CN' ? '一键授权，自动完成所有步骤' : 'Authorize GitHub to do it automatically' }}</strong>
+        <span class="submission-wizard-oauth-badge">{{ locale === 'zh-CN' ? '即将推出' : 'Coming soon' }}</span>
+      </div>
+      <p class="submission-wizard-oauth-desc">
+        {{ locale === 'zh-CN'
+          ? 'DiceFrame 仅申请「公开仓库」权限（无法访问私有仓库），帮你完成建仓库、上传文件、发 Release、提交投稿，全程无需手动操作。Token 存在服务端，不会下发到浏览器。'
+          : 'DiceFrame only requests "public repositories" permission and handles repo creation, file upload, Release, and submission automatically. Token is stored server-side only.' }}
+      </p>
+    </div>
     <p class="submission-wizard-intro">{{ t('submitWizardIntro') }}</p>
     <label class="submission-wizard-repo">
       <span>{{ t('submitWizardRepoLabel') }}</span>
@@ -126,6 +148,17 @@ const steps = computed(() => [
 
 <style scoped>
 .submission-wizard { display: grid; gap: .8rem; }
+.submission-wizard-no-github { padding: .6rem .75rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); font-size: .82rem; }
+.submission-wizard-no-github summary { cursor: pointer; color: var(--df-text-muted); font-weight: 600; list-style: none; }
+.submission-wizard-no-github summary::-webkit-details-marker { display: none; }
+.submission-wizard-no-github[open] summary { color: var(--df-text); margin-bottom: .4rem; }
+.submission-wizard-no-github-body { display: grid; gap: .4rem; }
+.submission-wizard-no-github-body p { margin: 0; color: var(--df-text-muted); line-height: 1.5; }
+.submission-wizard-oauth-track { padding: .65rem .75rem; border: 1px solid color-mix(in srgb, var(--df-interactive) 35%, var(--df-border-soft)); border-radius: var(--df-radius-md); background: color-mix(in srgb, var(--df-interactive) 6%, var(--df-surface-1)); display: grid; gap: .35rem; }
+.submission-wizard-oauth-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.submission-wizard-oauth-head strong { font-size: .88rem; }
+.submission-wizard-oauth-badge { padding: .1rem .45rem; border-radius: 999px; background: color-mix(in srgb, var(--df-warning) 18%, var(--df-surface-2)); color: var(--df-warning); font-size: .7rem; font-weight: 700; }
+.submission-wizard-oauth-desc { margin: 0; color: var(--df-text-muted); font-size: .78rem; line-height: 1.5; }
 .submission-wizard-intro { margin: 0; color: var(--df-text-muted); font-size: .85rem; line-height: 1.5; }
 .submission-wizard-repo { display: grid; gap: .3rem; font-size: .85rem; }
 .submission-wizard-repo input { box-sizing: border-box; width: 100%; min-width: 0; padding: .5rem .6rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: var(--df-control-bg); color: var(--df-text); }

@@ -1,7 +1,7 @@
 import { ref, watch, type Ref } from 'vue'
 import {
   cancelAssistantAgent,
-  confirmAssistantAgent,
+  streamAssistantAgentConfirm,
   getAssistantAgentSession,
   streamAssistantAgent,
   type AgentApproval,
@@ -91,6 +91,10 @@ export function useCreatorAssistant(scope: Ref<string | undefined>) {
   const pendingApproval = ref<AgentApproval | null>(null)
   const actionBusy = ref(false)
   const sessionId = ref<string | null>(null)
+  // Auto-approve: when true, mutation proposals are confirmed without user interaction
+  const autoApprove = ref((() => {
+    try { return localStorage.getItem('diceframe_creator_auto_approve') === '1' } catch { return false }
+  })())
   let activeScope = ''
   let controller: AbortController | null = null
   let switchGeneration = 0
@@ -156,6 +160,8 @@ export function useCreatorAssistant(scope: Ref<string | undefined>) {
     }
     const assistant: AssistantMessage = { role: 'assistant', content: '', events: [] }
     messages.value.push({ role: 'user', content: value }, assistant)
+    // Keep a stable index so onDelta mutations trigger Vue reactivity
+    const assistantIdx = messages.value.length - 1
     streaming.value = true
     status.value = ''
     actionError.value = ''
@@ -163,12 +169,16 @@ export function useCreatorAssistant(scope: Ref<string | undefined>) {
     const generation = switchGeneration
     try {
       await streamAssistantAgent(requestMessages, locale, {
-        onDelta(delta) { if (generation === switchGeneration) assistant.content += delta },
+        onDelta(delta) {
+          if (generation === switchGeneration) {
+            messages.value[assistantIdx] = { ...messages.value[assistantIdx], content: messages.value[assistantIdx].content + delta }
+          }
+        },
         onAgentEvent(event, payload) {
           if (generation !== switchGeneration) return
-          assistant.events = assistant.events || []
-          assistant.events.push({ event, payload })
-          if (assistant.events.length > 40) assistant.events.splice(0, assistant.events.length - 40)
+          const current = messages.value[assistantIdx]
+          const events = [...(current.events || []), { event, payload }]
+          messages.value[assistantIdx] = { ...current, events: events.length > 40 ? events.slice(-40) : events }
           if (event === 'session' && typeof payload.session_id === 'string') sessionId.value = payload.session_id
           if (event === 'status') status.value = typeof payload.message === 'string' ? payload.message : ''
           if (event === 'approval') pendingApproval.value = normaliseApproval(payload)
@@ -194,13 +204,51 @@ export function useCreatorAssistant(scope: Ref<string | undefined>) {
     if (current) void cancelAssistantAgent(current).catch(() => undefined)
   }
 
+  function addResult(result: AgentConfirmResult, tool = ''): void {
+    const message = [...messages.value].reverse().find(item => item.role === 'assistant')
+    if (!message) return
+    const idx = messages.value.lastIndexOf(message)
+    if (idx < 0) return
+    const events = [...(message.events || []), { event: 'tool_result', payload: { ok: result.ok, tool, result: result.result, error: result.error } }]
+    messages.value[idx] = { ...message, events }
+  }
+
   async function confirmApproval(approved = true): Promise<AgentConfirmResult | undefined> {
     const approval = pendingApproval.value
     if (!approval || !sessionId.value || actionBusy.value) return undefined
     actionBusy.value = true
     actionError.value = ''
     try {
-      const result = await confirmAssistantAgent(sessionId.value, approval.approval_id, approval.plan_digest, approved)
+      let confirmResult: AgentConfirmResult | undefined
+
+      // Ensure there's an assistant message to append delta/events to
+      if (!messages.value.length || messages.value[messages.value.length - 1].role !== 'assistant') {
+        messages.value.push({ role: 'assistant', content: '', events: [] })
+      }
+      const assistantIdx = messages.value.length - 1
+
+      await streamAssistantAgentConfirm(
+        sessionId.value, approval.approval_id, approval.plan_digest, approved,
+        {
+          onDelta(delta) {
+            messages.value[assistantIdx] = {
+              ...messages.value[assistantIdx],
+              content: messages.value[assistantIdx].content + delta,
+            }
+          },
+          onAgentEvent(event, payload) {
+            const current = messages.value[assistantIdx]
+            const events = [...(current.events || []), { event, payload }]
+            messages.value[assistantIdx] = { ...current, events }
+          },
+          onConfirmResult(result) {
+            confirmResult = result
+          },
+        },
+      )
+
+      const result = confirmResult ?? { ok: false, error: 'No result received' }
+      if (approved) addResult(result, approval.tool)
       pendingApproval.value = result.pending ? normaliseApproval(result.pending) : null
       if (!result.ok && !result.pending) actionError.value = result.error || 'Assistant action failed.'
       persist()
@@ -213,5 +261,31 @@ export function useCreatorAssistant(scope: Ref<string | undefined>) {
     }
   }
 
-  return { messages, streaming, status, task, actionError, pendingApproval, actionBusy, send, stop, confirmApproval }
+  function toggleAutoApprove(): void {
+    autoApprove.value = !autoApprove.value
+    try { localStorage.setItem('diceframe_creator_auto_approve', autoApprove.value ? '1' : '0') } catch { /* ignore */ }
+  }
+
+  // When auto-approve is on, silently confirm any incoming approval
+  watch(pendingApproval, (approval) => {
+    if (approval && autoApprove.value && !actionBusy.value) {
+      void confirmApproval(true)
+    }
+  })
+
+  return { messages, streaming, status, task, actionError, pendingApproval, actionBusy, autoApprove, toggleAutoApprove, send, stop, confirmApproval,
+    // Stubs to match useAssistant interface (not needed in creator context)
+    drafts: ref<Record<string, import('./useAssistant').AssistantDraft>>({}),
+    navigation: ref<import('./useAssistant').AssistantNavigation | null>(null),
+    authorization: ref<import('@/api/assistant').AgentAuthorization | null>(null),
+    authorizationBusy: ref(false),
+    authorizationError: ref(''),
+    retryLast: async (_locale: string) => { /* no-op */ },
+    resumeApproval: async () => undefined,
+    cancelApproval: () => { /* no-op */ },
+    invalidateApproval: () => { /* no-op */ },
+    reviewDraft: async (_draftId: string, _draft: import('@/api/assistant').AgentDraftReview) => { /* no-op */ },
+    saveDraft: async (_draftId: string, _locale: string) => { /* no-op */ },
+    authorize: async (_mode: import('@/api/assistant').AgentAuthorizationMode, _scope?: Record<string, string>, _domains?: string[], _maxSteps?: number) => { /* no-op */ },
+  }
 }

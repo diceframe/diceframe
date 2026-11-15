@@ -318,6 +318,73 @@ export function confirmAssistantAgent(
   })
 }
 
+export async function streamAssistantAgentConfirm(
+  sessionId: string,
+  approvalId: string,
+  planDigest: string,
+  approved: boolean,
+  handlers: AssistantStreamHandlers & { onConfirmResult?: (result: AgentConfirmResult) => void },
+): Promise<void> {
+  return _streamConfirmOrResume('/assistant/agent/confirm',
+    { session_id: sessionId, approval_id: approvalId, plan_digest: planDigest, approved },
+    handlers)
+}
+
+async function _streamConfirmOrResume(
+  path: string,
+  body: Record<string, unknown>,
+  handlers: AssistantStreamHandlers & { onConfirmResult?: (result: AgentConfirmResult) => void },
+): Promise<void> {
+  const resp = await fetch(apiUrl(path), {
+    method: 'POST',
+    headers: authHeaders(undefined, true),
+    body: JSON.stringify(body),
+    credentials: 'include',
+  })
+  if (!resp.ok || !resp.body) {
+    throw new AssistantStreamError(await responseError(resp), `HTTP_${resp.status}`)
+  }
+  const reader = resp.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const consume = (final = false): boolean => {
+    while (true) {
+      const sep = buffer.match(/\r?\n\r?\n/)
+      if (!sep || sep.index === undefined) break
+      const block = buffer.slice(0, sep.index)
+      buffer = buffer.slice(sep.index + sep[0].length)
+      const lines = block.split(/\r?\n/)
+      const event = lines.find(l => l.startsWith('event:'))?.slice(6).trim() || 'message'
+      const data = lines.filter(l => l.startsWith('data:')).map(l => l.slice(5).replace(/^ /, '')).join('\n')
+      if (event === 'done') return true
+      if (!data) continue
+      let payload: Record<string, unknown>
+      try { payload = JSON.parse(data) } catch { continue }
+      if (event === 'confirm_result') {
+        handlers.onConfirmResult?.(payload as unknown as AgentConfirmResult)
+      } else if (event === 'error') {
+        throw new AssistantStreamError(
+          typeof payload.error === 'string' ? payload.error : 'Operation failed',
+          typeof payload.code === 'string' ? payload.code : 'AGENT_FAILED',
+        )
+      } else {
+        if (event === 'message' && typeof payload.delta === 'string') handlers.onDelta(payload.delta)
+        handlers.onAgentEvent?.(event, payload)
+      }
+    }
+    if (final && buffer.trim()) { consume(false); buffer = '' }
+    return false
+  }
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) { buffer += decoder.decode(); consume(true); return }
+      buffer += decoder.decode(value, { stream: true })
+      if (consume()) { await reader.cancel(); return }
+    }
+  } finally { reader.releaseLock() }
+}
+
 export function resumeAssistantAgent(
   sessionId: string,
   approvalId: string,
@@ -328,6 +395,17 @@ export function resumeAssistantAgent(
     approval_id: approvalId,
     plan_digest: planDigest,
   })
+}
+
+export async function streamAssistantAgentResume(
+  sessionId: string,
+  approvalId: string,
+  planDigest: string,
+  handlers: AssistantStreamHandlers & { onConfirmResult?: (result: AgentConfirmResult) => void },
+): Promise<void> {
+  return _streamConfirmOrResume('/assistant/agent/resume',
+    { session_id: sessionId, approval_id: approvalId, plan_digest: planDigest },
+    handlers)
 }
 
 export function reviewAssistantAgent(

@@ -1,8 +1,5 @@
 <script setup lang="ts">
-// W3 拍板 G：AI 许愿面板 MVP —— 「AI 提议 + 用户确认 + diff 展示」。
-// 复用 useAssistant（/api/assistant/agent/* 全契约）与 creator 域工具；
-// 工具写入后由本面板重新读取工程并给出逐文件差异摘要。
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { NButton, NTag } from 'naive-ui'
 import { useCreatorAssistant } from '@/composables/useCreatorAssistant'
 import { useLocale } from '@/composables/useLocale'
@@ -10,20 +7,22 @@ import type { MessageKey } from '@/i18n'
 import { creatorApi, type CreatorProject } from '@/api/creator'
 import { assistantToolLabel } from '@/features/assistant/copy'
 import AgentExecutionSummary from '@/components/assistant/AgentExecutionSummary.vue'
+import { renderSafeMarkdown } from '@/utils/markdown'
 
 type DiffRow = { path: string; status: 'added' | 'removed' | 'changed'; added: number; removed: number }
 
-const props = defineProps<{ project: CreatorProject | null }>()
-const emit = defineEmits<{ 'files-changed': [paths: string[]] }>()
+const props = defineProps<{ project: CreatorProject | null; initialMessage?: string }>()
+const emit = defineEmits<{ 'files-changed': [paths: string[]]; 'message-sent': [] }>()
 const { t, locale } = useLocale()
 const projectScope = computed(() => props.project?.id)
-const { messages, streaming, status, task, actionError, send, stop, pendingApproval, confirmApproval, actionBusy } = useCreatorAssistant(projectScope)
+const { messages, streaming, status, actionError, send, stop, pendingApproval, confirmApproval, actionBusy, autoApprove, toggleAutoApprove } = useCreatorAssistant(projectScope)
 
-const wish = ref('')
+const draft = ref('')
+const transcriptEl = ref<HTMLElement | null>(null)
 const snapshot = ref<Array<[string, string]>>([])
 const diffRows = ref<DiffRow[]>([])
 const diffVisible = ref(false)
-const noChangeVisible = ref(false)
+let initialSent = false
 
 type CreatorKind = 'adventure' | 'rule' | 'gameplay' | 'toolkit'
 const WISH_CHIP_KEYS: Record<CreatorKind, MessageKey[]> = {
@@ -43,12 +42,9 @@ const creatorKind = computed<CreatorKind>(() => {
   try {
     const manifest = JSON.parse(files['plugin.json'] || '{}') as Record<string, unknown>
     if (manifest.plugin_type === 'tool') return 'toolkit'
-    if (manifest.content_profile === 'adventure-module' || Object.keys(files).some(path => path.startsWith('adventures/'))) return 'adventure'
-  } catch {
-    // The editor will show malformed plugin.json; keep the generic adventure
-    // actions available so the user can ask the agent to repair it.
-  }
-  if (Object.keys(files).some(path => path.startsWith('content/rules/') || path.startsWith('rules/'))) return 'rule'
+    if (manifest.content_profile === 'adventure-module' || Object.keys(files).some(p => p.startsWith('adventures/'))) return 'adventure'
+  } catch { /* keep adventure as default */ }
+  if (Object.keys(files).some(p => p.startsWith('content/rules/') || p.startsWith('rules/'))) return 'rule'
   if (files['docs/gameplay-design.md']) return 'gameplay'
   return 'adventure'
 })
@@ -56,24 +52,30 @@ const creatorKind = computed<CreatorKind>(() => {
 const wishChipKeys = computed(() => WISH_CHIP_KEYS[creatorKind.value])
 
 watch(() => props.project?.id, () => {
-  wish.value = ''
+  draft.value = ''
   snapshot.value = []
   diffRows.value = []
   diffVisible.value = false
-  noChangeVisible.value = false
+  initialSent = false
 })
 
+function scrollToBottom() {
+  void nextTick(() => {
+    const el = transcriptEl.value
+    if (el && el.clientHeight > 0) el.scrollTop = el.scrollHeight
+  })
+}
+watch(messages, scrollToBottom, { deep: true })
+watch(streaming, scrollToBottom)
+
 function bagLineDiff(oldText: string, newText: string): { added: number; removed: number } {
-  // 行袋差（非 LCS）：足够回答「改了多少」，不承诺精确补丁语义。
   const counts = (text: string) => {
     const result = new Map<string, number>()
     for (const line of text.split('\n')) result.set(line, (result.get(line) || 0) + 1)
     return result
   }
-  const oldBag = counts(oldText)
-  const newBag = counts(newText)
-  let added = 0
-  let removed = 0
+  const oldBag = counts(oldText), newBag = counts(newText)
+  let added = 0, removed = 0
   for (const [line, count] of newBag) added += Math.max(0, count - (oldBag.get(line) || 0))
   for (const [line, count] of oldBag) removed += Math.max(0, count - (newBag.get(line) || 0))
   return { added, removed }
@@ -108,174 +110,223 @@ async function refreshDiff(): Promise<void> {
     }
     diffRows.value = rows
     diffVisible.value = rows.length > 0
-    noChangeVisible.value = !rows.length && !pendingApproval.value
-    if (rows.length) emit('files-changed', rows.map(row => row.path))
-  } catch {
-    // 读取失败不打扰对话；用户可在编辑器里手动刷新。
-  }
+    if (rows.length) emit('files-changed', rows.map(r => r.path))
+  } catch { /* silent */ }
 }
 
-watch(streaming, (active, previous) => {
-  if (previous && !active) void refreshDiff()
-})
-watch(pendingApproval, (value, previous) => {
-  if (previous && !value) void refreshDiff()
-})
+watch(streaming, (active, previous) => { if (previous && !active) void refreshDiff() })
+watch(pendingApproval, (value, previous) => { if (previous && !value) void refreshDiff() })
 
-async function sendWish(text?: string): Promise<void> {
-  const value = (text ?? wish.value).trim()
+async function sendMessage(text?: string): Promise<void> {
+  const value = (text ?? draft.value).trim()
   if (!value || streaming.value) return
-  wish.value = ''
-  noChangeVisible.value = false
+  draft.value = ''
   await snapshotProject()
   const contextNote = props.project
     ? `（当前工程：${props.project.name}，工程 id ${props.project.id}，当前 revision ${props.project.revision}。` +
       `这是执行型请求，不要只给建议：先用 creator_project_read 读取工程；需要改变内容时必须调用 creator_project_update，携带 expected_revision=${props.project.revision}；` +
-      `当前工程类型是 ${creatorKind.value}，只修改与该类型对应的源文件；修改完成后返回实际改动文件，并继续等待用户确认执行计划。）`
+      `当前工程类型是 ${creatorKind.value}，只修改与该类型对应的源文件。）`
     : ''
+  emit('message-sent')
   await send(value, locale.value, contextNote)
 }
 
-const displayMessages = computed(() => messages.value.filter(message => message.content.trim() || message.error || message.stopped))
-const agentEvents = computed(() => messages.value
-  .flatMap(message => message.events || [])
-  .filter(event => ['tool_start', 'tool_result', 'approval', 'status', 'task'].includes(event.event))
-  .slice(-8))
-function agentEventLabel(event: { event: string; payload: Record<string, unknown> }): string {
-  if (event.event === 'tool_start') return String(event.payload.label || event.payload.tool || 'Agent tool')
-  if (event.event === 'approval') return t('creatorAiEventApproval')
-  if (event.event === 'status') return String(event.payload.message || t('creatorAiEventStatus'))
-  if (event.event === 'task') return String(event.payload.status || t('creatorAiEventTask'))
-  return String(event.payload.tool || t('creatorAiEventResult'))
-}
-const hasLiveExecutionState = computed(() => {
-  const taskStatus = task.value?.status
-  return streaming.value
-    || !!actionError.value
-    || (!!status.value && status.value !== 'idle')
-    || (!!taskStatus && !['completed', 'idle'].includes(taskStatus))
+onMounted(async () => {
+  if (props.initialMessage?.trim() && !initialSent) {
+    initialSent = true
+    await sendMessage(props.initialMessage)
+  }
 })
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    event.preventDefault()
+    void sendMessage()
+  }
+}
+
+const displayMessages = computed(() => messages.value.filter(m => m.content?.trim() || m.error || m.stopped || (streaming.value && m.role === 'assistant')))
+
+function messageActions(message: { events?: { event: string; payload: Record<string, unknown> }[] }) {
+  return (message.events || []).filter(e => e.event === 'tool_result')
+}
+function actionLabel(event: { payload: Record<string, unknown> }): string {
+  const label = assistantToolLabel(locale.value, event.payload.tool)
+  if (event.payload.ok === false) return `${label} · 失败`
+  return event.payload.partial ? `${label} · 部分完成` : label
+}
 </script>
 
 <template>
-  <div class="creator-ai-panel" data-testid="creator-ai-panel">
-    <header class="creator-ai-heading">
-      <strong>{{ t('creatorAiTitle') }}</strong>
-      <p class="muted">{{ t('creatorAiHint') }}</p>
-    </header>
-
-    <div class="creator-ai-transcript">
-      <template v-for="(message, index) in displayMessages" :key="index">
-        <p class="creator-ai-message" :class="`is-${message.role}`">
-          <span class="creator-ai-role">{{ message.role === 'user' ? t('creatorAiRoleYou') : 'DF Agent' }}</span>
-          <span v-if="message.content" class="creator-ai-text">{{ message.content }}</span>
-          <span v-else-if="message.error" class="creator-ai-text error-text">{{ message.error }}</span>
-          <span v-else-if="message.stopped" class="creator-ai-text muted">{{ t('creatorAiStopped') }}</span>
-          <span v-else class="creator-ai-text">{{ t('creatorAiWorking') }}</span>
-        </p>
-      </template>
-      <p v-if="!displayMessages.length" class="muted">{{ t('creatorAiEmpty') }}</p>
-    </div>
-
-    <div v-if="agentEvents.length" class="creator-ai-events" data-testid="creator-ai-events">
-      <strong>{{ t('creatorAiEventsTitle') }}</strong>
-      <p v-for="(event, index) in agentEvents" :key="`${event.event}-${index}`">
-        <span class="creator-ai-event-dot" aria-hidden="true"></span>{{ agentEventLabel(event) }}
-      </p>
-    </div>
-
-    <div v-if="pendingApproval" class="creator-ai-approval" data-testid="creator-ai-approval">
-      <strong>{{ t('creatorAiApprovalTitle') }}</strong>
-      <span class="creator-ai-approval-tool">{{ assistantToolLabel(locale, pendingApproval.tool) }}</span>
-      <AgentExecutionSummary :approval="pendingApproval" :locale="locale" />
-      <details v-if="pendingApproval.preview || pendingApproval.arguments" class="creator-ai-approval-details">
-        <summary>{{ t('creatorAiApprovalDetails') }}</summary>
-        <pre class="creator-ai-args">{{ JSON.stringify(pendingApproval.preview || pendingApproval.arguments, null, 2).slice(0, 1800) }}</pre>
-      </details>
-      <div class="creator-ai-approval-actions">
-        <NButton size="small" type="primary" :loading="actionBusy" :disabled="pendingApproval.expired" data-testid="creator-ai-approve" @click="confirmApproval(true)">
-          {{ t('creatorAiApprove') }}
-        </NButton>
-        <NButton size="small" secondary :disabled="actionBusy" data-testid="creator-ai-reject" @click="confirmApproval(false)">
-          {{ t('creatorAiReject') }}
-        </NButton>
+  <div class="cai-panel">
+    <!-- Transcript -->
+    <div ref="transcriptEl" class="cai-transcript">
+      <!-- Empty state -->
+      <div v-if="!displayMessages.length && !streaming" class="cai-empty">
+        <strong>{{ t('creatorStudioWelcome') }}</strong>
+        <p class="muted">{{ project ? (locale === 'zh-CN' ? `工程：${project.name}` : `Project: ${project.name}`) : '' }}</p>
+        <div class="cai-quick-grid">
+          <button v-for="chipKey in wishChipKeys" :key="chipKey" type="button" :disabled="streaming" @click="sendMessage(t(chipKey))">
+            {{ t(chipKey) }}
+          </button>
+        </div>
       </div>
+
+      <!-- Messages -->
+      <article
+        v-for="(message, index) in displayMessages"
+        :key="index"
+        class="cai-message"
+        :class="`cai-message-${message.role}`"
+      >
+        <span v-if="message.role === 'assistant'" class="cai-avatar" aria-hidden="true">DF</span>
+        <div class="cai-message-stack">
+          <div v-if="message.content || (streaming && message.role === 'assistant' && index === displayMessages.length - 1)" class="cai-bubble" :class="message.role">
+            <span v-if="streaming && index === displayMessages.length - 1 && !message.content && message.role === 'assistant'" class="cai-thinking">
+              <i /><i /><i />
+            </span>
+            <div v-else-if="message.role === 'assistant'" class="safe-markdown" v-html="renderSafeMarkdown(message.content)" />
+            <span v-else>{{ message.content }}</span>
+          </div>
+          <span v-if="message.error" class="cai-inline-error">{{ message.error }}</span>
+          <!-- Tool results -->
+          <ul v-if="messageActions(message).length" class="cai-actions">
+            <li v-for="(event, ei) in messageActions(message)" :key="ei" class="cai-action" :class="{ failed: event.payload.ok === false }">
+              <span class="cai-action-mark">{{ event.payload.ok === false ? '✕' : '✓' }}</span>
+              <span>{{ actionLabel(event) }}</span>
+            </li>
+          </ul>
+        </div>
+      </article>
     </div>
 
-    <div v-if="hasLiveExecutionState" class="creator-ai-execution" data-testid="creator-ai-execution" role="status">
-      <strong>{{ streaming ? t('creatorAiExecuting') : task?.status || status || t('creatorAiWaiting') }}</strong>
-      <span v-if="status" class="muted">{{ status }}</span>
-      <span v-if="task?.total_steps" class="muted">{{ task.completed_steps || 0 }} / {{ task.total_steps }}</span>
-      <p v-if="actionError" class="error-text">{{ actionError }}</p>
-    </div>
+    <!-- Workspace (approval / status / diff) -->
+    <section v-if="pendingApproval || actionError || diffVisible || (streaming && status)" class="cai-workspace">
+      <!-- Status -->
+      <div v-if="streaming && status" class="cai-status" role="status">{{ status }}</div>
+      <!-- Error -->
+      <div v-if="actionError" class="cai-inline-error" role="alert">{{ actionError }}</div>
+      <!-- Approval -->
+      <article v-if="pendingApproval" class="cai-approval">
+        <div class="cai-approval-head">
+          <strong>{{ t('creatorAiApprovalTitle') }}</strong>
+          <span class="cai-approval-tool">{{ assistantToolLabel(locale, pendingApproval.tool) }}</span>
+        </div>
+        <AgentExecutionSummary :approval="pendingApproval" :locale="locale" />
+        <details v-if="pendingApproval.preview || pendingApproval.arguments">
+          <summary>{{ t('creatorAiApprovalDetails') }}</summary>
+          <pre class="cai-args">{{ JSON.stringify(pendingApproval.preview || pendingApproval.arguments, null, 2).slice(0, 1800) }}</pre>
+        </details>
+        <div class="cai-approval-actions">
+          <NButton size="small" type="primary" :loading="actionBusy" :disabled="pendingApproval.expired" @click="confirmApproval(true)">
+            {{ t('creatorAiApprove') }}
+          </NButton>
+          <NButton size="small" secondary :disabled="actionBusy" @click="confirmApproval(false)">
+            {{ t('creatorAiReject') }}
+          </NButton>
+        </div>
+      </article>
+      <!-- Diff -->
+      <div v-if="diffVisible" class="cai-diff">
+        <strong>{{ t('creatorAiDiffTitle') }}</strong>
+        <p v-for="row in diffRows" :key="row.path" class="cai-diff-row">
+          <NTag size="small" :type="row.status === 'removed' ? 'error' : row.status === 'added' ? 'success' : 'warning'">
+            {{ t(DIFF_STATUS_KEYS[row.status]) }}
+          </NTag>
+          <code>{{ row.path }}</code>
+          <span v-if="row.status === 'changed'" class="muted">+{{ row.added }} / -{{ row.removed }}</span>
+        </p>
+      </div>
+    </section>
 
-    <div v-if="diffVisible" class="creator-ai-diff" data-testid="creator-ai-diff">
-      <strong>{{ t('creatorAiDiffTitle') }}</strong>
-      <p v-for="row in diffRows" :key="row.path" class="creator-ai-diff-row">
-        <NTag size="small" :type="row.status === 'removed' ? 'error' : row.status === 'added' ? 'success' : 'warning'">
-          {{ t(DIFF_STATUS_KEYS[row.status]) }}
-        </NTag>
-        <code>{{ row.path }}</code>
-        <span v-if="row.status === 'changed'" class="muted">+{{ row.added }} / -{{ row.removed }}</span>
-      </p>
-    </div>
-    <p v-if="noChangeVisible" class="creator-ai-no-change" data-testid="creator-ai-no-change" role="status">{{ t('creatorAiNoFileChange') }}</p>
-
-    <div class="creator-ai-chips">
-      <button v-for="chipKey in wishChipKeys" :key="chipKey" type="button" class="creator-ai-chip" :disabled="streaming" @click="sendWish(t(chipKey))">
-        {{ t(chipKey) }}
-      </button>
-    </div>
-
-    <div class="creator-ai-input">
-      <textarea
-        v-model="wish"
-        class="creator-ai-textarea"
-        rows="2"
+    <!-- Composer -->
+    <footer class="cai-composer">
+      <NInput
+        v-model:value="draft"
+        type="textarea"
+        class="cai-input"
         :placeholder="t('creatorAiPlaceholder')"
-        :data-testid="`creator-ai-input`"
-        @keydown.enter.exact.prevent="sendWish()"
+        :autosize="{ minRows: 1, maxRows: 5 }"
+        @keydown="onKeydown"
       />
-      <div class="creator-ai-input-actions">
-        <NButton v-if="streaming" size="small" secondary @click="stop">{{ t('creatorAiStop') }}</NButton>
-        <NButton v-else size="small" type="primary" :disabled="!wish.trim()" data-testid="creator-ai-send" @click="sendWish()">
+      <div class="cai-composer-actions">
+        <NButton
+          v-if="messages.length"
+          size="small"
+          secondary
+          :disabled="streaming"
+          @click="() => { messages.splice(0); diffRows = []; diffVisible = false }"
+        >
+          {{ locale === 'zh-CN' ? '新对话' : 'New chat' }}
+        </NButton>
+        <button type="button" :class="['cai-auto-btn', { active: autoApprove }]" :title="locale === 'zh-CN' ? (autoApprove ? '自动确认已开启' : '开启自动确认') : (autoApprove ? 'Auto-approve on' : 'Auto-approve')" @click="toggleAutoApprove">
+          {{ locale === 'zh-CN' ? (autoApprove ? '✓ 自动' : '自动') : (autoApprove ? '✓ Auto' : 'Auto') }}
+        </button>
+        <NButton v-if="streaming" type="warning" @click="stop">
+          {{ t('creatorAiStop') }}
+        </NButton>
+        <NButton v-else type="primary" :disabled="!draft.trim()" @click="sendMessage()">
           {{ t('creatorAiSend') }}
         </NButton>
       </div>
-    </div>
-    <p class="muted creator-ai-note">{{ t('creatorAiBoundary') }}</p>
+      <span class="cai-hint muted">{{ t('creatorAiBoundary') }}</span>
+    </footer>
   </div>
 </template>
 
 <style scoped>
-.creator-ai-panel { display: grid; gap: .7rem; }
-.creator-ai-heading strong { font-size: .95rem; }
-.creator-ai-transcript { display: grid; gap: .5rem; max-height: 260px; overflow: auto; padding: .6rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); }
-.creator-ai-message { display: grid; gap: .15rem; margin: 0; }
-.creator-ai-role { font-size: .72rem; font-weight: 700; color: var(--df-text-muted); }
-.creator-ai-message.is-user .creator-ai-role { color: var(--df-interactive-strong); }
-.creator-ai-text { white-space: pre-wrap; font-size: .85rem; line-height: 1.5; }
-.creator-ai-events { display: grid; gap: .3rem; padding: .55rem .7rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); font-size: .78rem; }
-.creator-ai-events strong { font-size: .76rem; color: var(--df-text-muted); }
-.creator-ai-events p { display: flex; align-items: center; gap: .4rem; margin: 0; color: var(--df-text-secondary); }
-.creator-ai-event-dot { width: .4rem; height: .4rem; flex: 0 0 auto; border-radius: 50%; background: var(--df-interactive-strong); }
-.creator-ai-approval { display: grid; gap: .45rem; padding: .65rem; border: 1px solid color-mix(in srgb, var(--df-warning) 55%, var(--df-border-soft)); border-radius: var(--df-radius-md); background: color-mix(in srgb, var(--df-warning) 8%, var(--df-surface-1)); }
-.creator-ai-approval-tool { color: var(--df-text-secondary); font-size: .82rem; font-weight: 700; }
-.creator-ai-approval-details { color: var(--df-text-muted); font-size: .78rem; }
-.creator-ai-approval-details summary { cursor: pointer; }
-.creator-ai-args { max-height: 9rem; overflow: auto; margin: 0; padding: .5rem; border-radius: var(--df-radius-sm); background: var(--df-surface-2); font: .72rem/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
-.creator-ai-approval-actions { display: flex; gap: .5rem; }
-.creator-ai-execution { display: grid; gap: .25rem; padding: .6rem .7rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); font-size: .8rem; }
-.creator-ai-execution p { margin: 0; }
-.creator-ai-diff { display: grid; gap: .3rem; padding: .6rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); font-size: .82rem; }
-.creator-ai-diff-row { display: flex; align-items: center; gap: .5rem; margin: 0; }
-.creator-ai-diff-row code { font-size: .78rem; }
-.creator-ai-no-change { margin: 0; padding: .55rem .7rem; border: 1px solid color-mix(in srgb, var(--df-warning) 45%, var(--df-border-soft)); border-radius: var(--df-radius-md); color: var(--df-warning); background: color-mix(in srgb, var(--df-warning) 8%, transparent); font-size: .8rem; }
-.creator-ai-chips { display: flex; flex-wrap: wrap; gap: .4rem; }
-.creator-ai-chip { padding: .25rem .6rem; border: 1px solid var(--df-border-soft); border-radius: 999px; background: transparent; color: var(--df-text-muted); font-size: .78rem; cursor: pointer; }
-.creator-ai-chip:hover { color: var(--df-text); border-color: var(--df-interactive); }
-.creator-ai-input { display: grid; gap: .4rem; }
-.creator-ai-textarea { width: 100%; box-sizing: border-box; resize: vertical; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); padding: .55rem; color: var(--df-text); background: var(--df-surface-2); font: .85rem/1.5 inherit; }
-.creator-ai-input-actions { display: flex; justify-content: flex-end; }
-.creator-ai-note { margin: 0; font-size: .74rem; }
+/* Panel shell */
+.cai-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; color: var(--df-text); background: radial-gradient(circle at 100% 0, color-mix(in srgb, var(--df-interactive) 10%, transparent), transparent 26%), var(--df-surface-1); }
+
+/* Transcript */
+.cai-transcript { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 18px 15px; scroll-behavior: smooth; }
+
+/* Empty state */
+.cai-empty { display: grid; width: min(100%, 360px); margin: auto; justify-items: center; gap: 9px; padding: 24px 6px; text-align: center; }
+.cai-empty strong { color: var(--df-accent-strong); font-size: 15px; }
+.cai-quick-grid { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 8px 0 2px; }
+.cai-quick-grid button { min-height: 54px; padding: 9px 10px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); color: var(--df-text-secondary); background: color-mix(in srgb, var(--df-control-bg) 82%, transparent); font-size: 12px; line-height: 1.4; text-align: left; cursor: pointer; }
+.cai-quick-grid button:hover { border-color: var(--df-interactive); }
+
+/* Messages */
+.cai-message { display: flex; align-items: flex-start; gap: 8px; }
+.cai-message-user { justify-content: flex-end; }
+.cai-avatar { flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%; background: var(--df-interactive); color: #fff; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.cai-message-stack { display: grid; grid-template-columns: minmax(0, 1fr); max-width: 88%; min-width: 0; gap: 6px; }
+.cai-bubble { min-width: 0; padding: 10px 12px; border: 1px solid var(--df-border-soft); border-radius: 14px; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.cai-bubble.user { border-radius: 14px 14px 4px 14px; border-color: color-mix(in srgb, var(--df-interactive) 50%, var(--df-border-soft)); background: color-mix(in srgb, var(--df-interactive) 15%, var(--df-surface-1)); white-space: pre-wrap; }
+.cai-bubble.assistant { border-radius: 4px 14px 14px 14px; background: linear-gradient(155deg, var(--df-surface-1), var(--df-surface-2)); }
+.cai-thinking { display: inline-flex; align-items: center; gap: 4px; min-height: 20px; }
+.cai-thinking i { width: 5px; height: 5px; border-radius: 50%; background: var(--df-interactive-strong); animation: cai-pulse 1s ease-in-out infinite; }
+.cai-thinking i:nth-child(2) { animation-delay: .14s; }
+.cai-thinking i:nth-child(3) { animation-delay: .28s; }
+@keyframes cai-pulse { 0%, 70%, 100% { opacity: .25; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-3px); } }
+.cai-inline-error { font-size: 11px; color: var(--df-danger-strong); padding: 6px 9px; border: 1px solid color-mix(in srgb, var(--df-danger) 38%, var(--df-border-soft)); border-radius: var(--df-radius-sm); background: color-mix(in srgb, var(--df-danger) 8%, transparent); }
+.cai-actions { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.cai-action { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 9px; border: 1px solid color-mix(in srgb, var(--df-success, #6fbf8a) 35%, var(--df-border-soft)); border-radius: 999px; color: var(--df-text-muted); background: color-mix(in srgb, var(--df-success, #6fbf8a) 8%, transparent); font-size: 12px; width: fit-content; }
+.cai-action.failed { border-color: color-mix(in srgb, var(--df-danger) 45%, var(--df-border-soft)); background: color-mix(in srgb, var(--df-danger) 8%, transparent); }
+.cai-action-mark { color: var(--df-success, #6fbf8a); font-weight: 700; }
+.cai-action.failed .cai-action-mark { color: var(--df-danger); }
+
+/* Workspace */
+.cai-workspace { flex: 0 1 auto; display: flex; flex-direction: column; gap: 10px; max-height: 40%; overflow-y: auto; border-top: 1px solid var(--df-border-soft); padding: 12px 15px; background: var(--df-surface-1); }
+.cai-status { font-size: 12px; color: var(--df-text-muted); }
+.cai-approval { display: grid; gap: 7px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--df-warning) 50%, var(--df-border-soft)); border-radius: var(--df-radius-sm); background: color-mix(in srgb, var(--df-warning) 8%, var(--df-surface-1)); font-size: 12px; }
+.cai-approval-head { display: flex; align-items: center; gap: 8px; }
+.cai-approval-tool { color: var(--df-text-muted); font-size: 11px; }
+.cai-approval-actions { display: flex; gap: 7px; }
+.cai-args { max-height: 10rem; overflow: auto; margin: 0; padding: .5rem; border-radius: var(--df-radius-sm); background: var(--df-surface-2); font: .72rem/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
+.cai-diff { display: grid; gap: .3rem; }
+.cai-diff-row { display: flex; align-items: center; gap: .5rem; margin: 0; font-size: .82rem; }
+.cai-diff-row code { font-size: .78rem; }
+
+/* Composer */
+.cai-composer { flex: 0 0 auto; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--df-border-soft); background: color-mix(in srgb, var(--df-surface-1) 94%, transparent); }
+.cai-input { width: 100%; min-height: 36px; }
+.cai-input :deep(.n-input__textarea-el) { min-height: 36px !important; }
+.cai-composer-actions { display: flex; justify-content: flex-end; gap: 8px; align-items: center; }
+.cai-hint { font-size: 10px; color: var(--df-text-muted); }
+.cai-auto-btn { padding: .25rem .6rem; border: 1px solid var(--df-border-soft); border-radius: 999px; background: transparent; color: var(--df-text-muted); font-size: .76rem; cursor: pointer; white-space: nowrap; }
+.cai-auto-btn:hover { border-color: var(--df-interactive); color: var(--df-text); }
+.cai-auto-btn.active { border-color: var(--df-success); color: var(--df-success-strong); background: color-mix(in srgb, var(--df-success) 10%, transparent); }
 </style>

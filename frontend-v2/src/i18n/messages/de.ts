@@ -73,6 +73,7 @@ export const de = {
   modulesSubmitGoCreator: 'In der Werkstatt erstellen',
   modulesSubmitDirect: 'Direkt einreichen',
   contentPackSubmitTitle: 'Bei Online-Inhaltspaketen einreichen',
+  creatorHeroTitle: 'Erschaffe deine eigene Welt',
   creatorExportResourceTitle: 'Ressourcenpaket exportieren',
   creatorExportResourceIntro: 'Bündelt Welten, Regelsysteme, Lorebücher und Charakterkarten ohne Abenteuer. Der Export enthält nur Daten; nach der Installation auf der Seite „Inhaltspakete“ aktivieren.',
   creatorExportAdventureTitle: 'Inhaltspaket exportieren',

@@ -340,7 +340,10 @@ class AgentRuntime:
                     " Creator Studio workflow is active. For a creator request, first call creator_project_read for the selected project. "
                     "If the user asks to change project content, use creator_project_update with the revision returned by that read; "
                     "do not answer with a suggested patch only. Summarize the exact files and intent before the approval boundary. "
-                    "After an approved update, let the client refresh the project and show the diff. Use creator_project_validate, "
+                    "After an approved update, always reply with a natural-language summary of what was changed (e.g. which scenes, NPCs or rules were added or modified) "
+                    "before waiting for further input — never leave the user with only tool-result pills and no text. "
+                    "If the user sends a casual or conversational message (not a project-editing request), respond conversationally in plain text without calling any tools. "
+                    "Let the client refresh the project and show the diff. Use creator_project_validate, "
                     "creator_project_preview, creator_project_build, or creator_project_submission only when the user asks for that step. "
                     "Never claim that a gameplay design document is a runnable gameplay provider unless a registered capability says so."
                     if context.get('route') == 'creator' else ""
@@ -648,22 +651,49 @@ class AgentRuntime:
             self._write(session)
             return {"ok": True, "draft_id": draft_id, "review": deepcopy(checked)}
 
-    async def confirm(self, owner: str, session_id: str, approval_id: str, plan_digest: str, approved: bool) -> dict:
+    async def confirm(self, owner: str, session_id: str, approval_id: str, plan_digest: str, approved: bool,
+                      emit: Callable | None = None) -> dict:
         session = self._session(owner, session_id)
         if not isinstance(approved, bool):
             raise ValueError("approved must be boolean")
         # A disconnected browser must not cancel an authoritative mutation in
         # flight. Keep the task alive and expose its receipt through snapshot.
-        task = asyncio.create_task(self._confirm(session, owner, approval_id, plan_digest, approved))
+        task = asyncio.create_task(self._confirm(session, owner, approval_id, plan_digest, approved, emit=emit))
         self.executions.add(task)
         task.add_done_callback(self._execution_done)
         return await asyncio.shield(task)
 
-    async def _confirm(self, session: _Session, owner: str, approval_id: str, plan_digest: str, approved: bool) -> dict:
+    async def _confirm(self, session: _Session, owner: str, approval_id: str, plan_digest: str, approved: bool,
+                       emit: Callable | None = None) -> dict:
         async with session.lock:
-            return await self._execute_plan(session, owner, approval_id, plan_digest, approved)
+            response = await self._execute_plan(session, owner, approval_id, plan_digest, approved)
+            if emit and approved and response.get('ok') and self.deps.llm_client() is not None:
+                await self._emit_confirm_summary(session, response, emit)
+            return response
 
-    async def resume(self, owner: str, session_id: str, approval_id: str, plan_digest: str) -> dict:
+    async def _emit_confirm_summary(self, session: _Session, response: dict, emit: Callable) -> None:
+        """Run one lightweight AI turn after a confirmed mutation to summarise what changed."""
+        try:
+            client = self.deps.llm_client()
+            if client is None:
+                return
+            result_summary = json.dumps(safe_data(response.get('result', {})), ensure_ascii=False)[:1500]
+            system = (
+                "A project mutation just completed. Write 1-3 sentences in the conversation language "
+                "summarising what changed. Be specific: name files, scenes, NPCs, rules or tools added/modified. "
+                "No tools. No questions."
+            )
+            user_msg = f"Tool result: {result_summary}\n\nSummarise the completed change."
+            # Use a plain LLM call — no agent loop, no tool budget, no token accumulation
+            resp = await client.call_tools(system, user_msg, tools=[], max_tokens=512, force_tool_choice=False)
+            text = getattr(resp, 'content', '') or ''
+            if isinstance(text, str) and text.strip():
+                await emit('delta', {'delta': text.strip()})
+        except Exception:
+            pass  # summary is best-effort; never fail the confirmation
+
+    async def resume(self, owner: str, session_id: str, approval_id: str, plan_digest: str,
+                     emit: Callable | None = None) -> dict:
         """Explicit owner intent continues only the reviewed, remaining targets."""
         session = self._session(owner, session_id)
         async def resume_locked():
@@ -673,7 +703,10 @@ class AgentRuntime:
                         or not isinstance(plan.get('execution_state'), dict)):
                     raise ValueError('No paused execution matches this plan')
                 session.stop.clear()
-                return await self._execute_plan(session, owner, approval_id, plan_digest, True, resume=True)
+                response = await self._execute_plan(session, owner, approval_id, plan_digest, True, resume=True)
+                if emit and response.get('ok') and self.deps.llm_client() is not None:
+                    await self._emit_confirm_summary(session, response, emit)
+                return response
         task = asyncio.create_task(resume_locked())
         self.executions.add(task)
         task.add_done_callback(self._execution_done)

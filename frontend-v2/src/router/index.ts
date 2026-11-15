@@ -19,6 +19,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/characters', name: 'characters', component: () => import('@/features/admin/CharactersView.vue') },
   { path: '/library', name: 'library', component: () => import('@/features/library/ContentLibraryView.vue') },
   { path: '/creator', name: 'creator', component: () => import('@/features/creator/CreatorView.vue') },
+  { path: '/creator/studio/:projectId', name: 'creator-studio', component: () => import('@/features/creator/CreatorStudioView.vue') },
   { path: '/map', name: 'map', component: () => import('@/features/maps/MapView.vue') },
   { path: '/lorebook', name: 'lorebook', component: () => import('@/features/lorebook/LorebookView.vue') },
   { path: '/worlds', name: 'worlds', component: () => import('@/features/worlds/WorldsView.vue') },

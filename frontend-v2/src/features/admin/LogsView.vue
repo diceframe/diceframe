@@ -218,7 +218,7 @@ function exportLog() {
       </aside>
 
       <main class="logs-document">
-    <ContentPageHeader class="view-title archive-hero logs-document-head" kicker="ACTIVITY LOG" :title="t('gameLogs')" :description="game ? `${gameDetail?.world_name || game} · ${gameDetail?.scene || t('notStarted')}` : t('noAdventureLogsHint')">
+    <ContentPageHeader compact class="view-title logs-document-head" kicker="ACTIVITY LOG" :title="t('gameLogs')" :description="game ? `${gameDetail?.world_name || game} · ${gameDetail?.scene || t('notStarted')}` : t('noAdventureLogsHint')">
       <template #actions>
         <div class="actions">
           <button @click="load">{{ t('refresh') }}</button>

@@ -45,6 +45,7 @@ export const ru = {
   modulesSubmitGoCreator: 'Создать в мастерской',
   modulesSubmitDirect: 'Отправить напрямую',
   contentPackSubmitTitle: 'Отправить в онлайн-пакеты содержимого',
+  creatorHeroTitle: 'Создай свой собственный мир',
   creatorExportResourceTitle: 'Экспорт пакета ресурсов',
   creatorExportResourceIntro: 'Мир, своды правил, книги знаний и карточки персонажей без приключений. Экспорт содержит только данные; после установки включите его на странице «Пакеты содержимого».',
   creatorExportAdventureTitle: 'Экспортировать пакет содержимого',
