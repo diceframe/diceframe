@@ -202,13 +202,18 @@ class RemoteRulesetRuntimeAdapter:
             raise RuntimeProbeError("remote sequential plan validation must be an object")
         return result
 
-    def resolve_sequential_step(self, instance: Any, step: dict[str, Any], rng: Any) -> dict[str, Any]:
+    def resolve_sequential_step(
+        self, instance: Any, step: dict[str, Any], rng: Any, plan_id: str = "",
+    ) -> dict[str, Any]:
+        # 复审 P1-01：步骤 ID（step-1/step-2）只在单个计划内唯一——收据身份
+        # 必须携带父计划的 intent_id，否则同局连续两个计划会互串步骤结果。
         return self._call(
             "resolve_sequential_step",
-            {"instance": self._dto(instance, "instance"), "step": step, "rng": self._dto(rng, "rng")},
-            request_id=(f"seq-resolve:{_game_scope(instance)}:{step['step_id']}"
+            {"instance": self._dto(instance, "instance"), "step": step,
+             "rng": self._dto(rng, "rng"), "plan_id": plan_id},
+            request_id=(f"seq-resolve:{_game_scope(instance)}:{plan_id}:{step['step_id']}"
                         if isinstance(step.get("step_id"), str) and step["step_id"] else None),
-            receipt_payload={"step": deepcopy(step)},
+            receipt_payload={"plan_id": plan_id, "step": deepcopy(step)},
         )
 
     def resolve_intent(self, instance: Any, intent: dict[str, Any], rng: Any) -> dict[str, Any]:

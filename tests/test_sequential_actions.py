@@ -29,7 +29,7 @@ class FakeSequentialRuntime:
         self.validated.append(deepcopy(plan))
         return {"ok": self.valid}
 
-    def resolve_sequential_step(self, instance, step, rng):
+    def resolve_sequential_step(self, instance, step, rng, plan_id=""):
         del rng
         version = int(ruleset_runtime.state(instance).get("version", 0) or 0)
         step_id = str(step["step_id"])

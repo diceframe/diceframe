@@ -182,7 +182,7 @@ class SequentialActionRuntime(Protocol):
     ) -> dict[str, Any]: ...
 
     def resolve_sequential_step(
-        self, instance: Any, step: dict[str, Any], rng: Any,
+        self, instance: Any, step: dict[str, Any], rng: Any, plan_id: str = "",
     ) -> dict[str, Any]: ...
 
     def apply_event_batch(
