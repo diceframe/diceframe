@@ -38,7 +38,12 @@ def project_document(
 ) -> DocumentProjection:
     path = str(relative_path or "").replace("\\", "/").strip("/")
     normalized_kind = str(kind or "").strip().lower()
-    if normalized_kind not in {"markdown", "pdf"}:
+    document_kind: DocumentKind
+    if normalized_kind == "markdown":
+        document_kind = "markdown"
+    elif normalized_kind == "pdf":
+        document_kind = "pdf"
+    else:
         raise DocumentReadError("document kind is unsupported")
     if not path or path.startswith("/") or any(part in {"", ".", ".."} for part in path.split("/")):
         raise DocumentReadError("document path is invalid")
@@ -47,10 +52,27 @@ def project_document(
         raise DocumentReadError("document visibility is unsupported")
     if normalized_visibility == "gm" and not viewer_is_gm:
         return DocumentProjection(
-            path, normalized_kind, False, normalized_visibility,
+            path, document_kind, False, normalized_visibility,
             "GM-only labels do not make a public package confidential",
         )
-    return DocumentProjection(path, normalized_kind, True, normalized_visibility)
+    return DocumentProjection(path, document_kind, True, normalized_visibility)
+
+
+def _reject_symlink_components(root: Path, relative: str) -> None:
+    """Reject symlinks on the *unresolved* path, component by component.
+
+    ``Path.resolve()`` dereferences symlinks before any check can see them:
+    a link pointing inside the package would be read through silently, and
+    one pointing outside would surface as a boundary error instead of the
+    symlink contract violation.  Checking the raw components first keeps
+    the "never follows symlinks" promise honest (review SECURITY-01).
+    """
+
+    current = root
+    for part in relative.split("/"):
+        current = current / part
+        if current.is_symlink():
+            raise DocumentReadError("document path contains a symlink")
 
 
 def _ensure_inside(root: Path, target: Path) -> None:
@@ -73,6 +95,7 @@ def read_document(
 ) -> bytes | str:
     root = Path(package_root).resolve()
     projection = project_document(relative_path, kind=kind)
+    _reject_symlink_components(root, projection.path)
     target = (root / projection.path).resolve()
     _ensure_inside(root, target)
     if not target.is_file() or target.is_symlink():

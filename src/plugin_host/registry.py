@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from src.content.contracts import ResourceRef, asset_local_id, canonical_id
@@ -94,7 +95,7 @@ class ContributionRegistry:
         for item in kept:
             self._add(item)
 
-    def register_static_plugin(self, manifest: PluginManifest, plugin_dir: Path) -> list[PluginContribution]:
+    def register_static_plugin(self, manifest: Mapping[str, Any], plugin_dir: Path) -> list[PluginContribution]:
         plugin_type = str(manifest.get("plugin_type") or "")
         mapping = plugin_type_descriptor(plugin_type).get("contributes")
         if not mapping:
@@ -208,7 +209,7 @@ def _validate_pattern(pattern: str) -> None:
 
 
 def _contribution_from_path(
-    manifest: PluginManifest,
+    manifest: Mapping[str, Any],
     plugin_dir: Path,
     kind: str,
     path: Path,
