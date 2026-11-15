@@ -325,3 +325,289 @@ async def test_the_package_stays_inside_the_transport_budget(tmp_path):
             assert len(encoded) < MAX_PROBE_BYTES
     finally:
         source.close()
+
+
+@pytest.mark.asyncio
+async def test_attack_checks_use_the_rules_declared_attribute_pair(tmp_path):
+    """武器攻击用模板的 attack_pair，而不是"另一项里骰面最大的那个"。
+
+    角色的意志（d12）比力量（d10）大。直觉实现会拿意志配敏捷，一次挥剑就变成
+    了规则里不存在的组合；模板已经声明近战是敏捷+力量。
+    """
+
+    host, registry, source = await _install(tmp_path)
+    try:
+        template = _template(tmp_path / "plugins")
+        runtime = registry.resolve(template)
+        instance = _bound_instance(("alice", "human"))
+        sheet = instance.get_character_sheet("alice")
+        sheet["attributes"] = {"dex": 8, "ins": 8, "mig": 10, "wlp": 12}
+        instance.set_character_sheet("alice", sheet)
+
+        results = runtime.resolve_narrative_checks(instance, [{
+            "check_id": "atk", "actor_uid": "alice", "actor_ref": "player:alice",
+            "attribute": "dex", "kind": "attack", "label": "挥剑", "dc": 9,
+        }])
+
+        assert results[0]["dice"] == "d8+d10"
+    finally:
+        source.close()
+
+
+ADVENTURES_PACKAGE = os.environ.get("FU_ADVENTURES_PLUGIN", "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not ADVENTURES_PACKAGE or not Path(ADVENTURES_PACKAGE).is_file(),
+    reason="set FU_ADVENTURES_PLUGIN to the built fu-adventures .dfplugin",
+)
+async def test_the_adventure_graph_reaches_the_runtime_as_a_projection(tmp_path):
+    """冒险包由宿主安装，运行时只拿到只读投影。
+
+    这条验收的意思是：节点名、可选分支、遭遇引用真的过了进程边界，而不是运行时
+    自己去翻宿主的冒险目录。
+    """
+
+    from src.adventures import AdventureResolver, AdventureBundleLoader
+    from src.adventures.progress import new_progress
+    from src.engine.modules import adventure_runtime_state
+
+    host, registry, source = await _install(tmp_path)
+    try:
+        await host.install_from_zip(Path(ADVENTURES_PACKAGE).read_bytes())
+        await host.update_config("fu-adventures", {"enabled": True})
+
+        plugins = tmp_path / "plugins"
+        bundles = AdventureBundleLoader(plugins / "fu-adventures" / "adventures").list()
+        assert bundles, "adventure package did not load"
+        bundle = bundles[0]
+        resolver = AdventureResolver.single_directory(plugins / "fu-adventures" / "adventures")
+
+        template = _template(tmp_path / "plugins")
+        runtime = registry.resolve(template)
+        runtime.set_adventure_resolver(resolver)
+        instance = _bound_instance(("alice", "human"))
+        instance.adventure_binding = {"adventure_id": bundle.manifest.adventure_id}
+        adventure_runtime_state.replace_progress(
+            instance, new_progress(bundle.adventure),
+        )
+
+        view = runtime.gameplay_view(instance, "alice", viewer_is_gm=True)
+
+        public = view["public"]["adventure"]
+        assert public["id"] == bundle.manifest.adventure_id
+        assert public["active"], "运行时应读到投影里的当前节点"
+
+        nodes = {
+            node.get("label"): node
+            for panel in view["panels"]
+            for node in [panel, *(panel.get("children") or [])]
+        }
+        assert nodes["冒险进度"]["component"] == "group"
+        expected = {str(node.get("name")) for node in public["active"] if node.get("name")}
+        assert expected
+        assert any(
+            name in label
+            for label in nodes["当前节点"]["value"]
+            for name in expected
+        )
+    finally:
+        source.close()
+
+
+@pytest.mark.asyncio
+async def test_attack_checks_use_the_rules_declared_attribute_pair(tmp_path):
+    """武器攻击用模板的 attack_pair，而不是"另一项里骰面最大的那个"。
+
+    角色的意志（d12）比力量（d10）大。直觉实现会拿意志配敏捷，一次挥剑就变成
+    了规则里不存在的组合；模板已经声明近战是敏捷+力量。
+    """
+
+    host, registry, source = await _install(tmp_path)
+    try:
+        template = _template(tmp_path / "plugins")
+        runtime = registry.resolve(template)
+        instance = _bound_instance(("alice", "human"))
+        sheet = instance.get_character_sheet("alice")
+        sheet["attributes"] = {"dex": 8, "ins": 8, "mig": 10, "wlp": 12}
+        instance.set_character_sheet("alice", sheet)
+
+        results = runtime.resolve_narrative_checks(instance, [{
+            "check_id": "atk", "actor_uid": "alice", "actor_ref": "player:alice",
+            "attribute": "dex", "kind": "attack", "label": "挥剑", "dc": 9,
+        }])
+
+        assert results[0]["dice"] == "d8+d10"
+    finally:
+        source.close()
+
+
+ADVENTURES_PACKAGE = os.environ.get("FU_ADVENTURES_PLUGIN", "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not ADVENTURES_PACKAGE or not Path(ADVENTURES_PACKAGE).is_file(),
+    reason="set FU_ADVENTURES_PLUGIN to the built fu-adventures .dfplugin",
+)
+async def test_the_adventure_graph_reaches_the_runtime_as_a_projection(tmp_path):
+    """冒险包由宿主安装，运行时只拿到只读投影。
+
+    这条验收的意思是：节点名、可选分支、遭遇引用真的过了进程边界，而不是运行时
+    自己去翻宿主的冒险目录。
+    """
+
+    from src.adventures import AdventureResolver, AdventureBundleLoader
+    from src.adventures.progress import new_progress
+    from src.engine.modules import adventure_runtime_state
+
+    host, registry, source = await _install(tmp_path)
+    try:
+        await host.install_from_zip(Path(ADVENTURES_PACKAGE).read_bytes())
+        await host.update_config("fu-adventures", {"enabled": True})
+
+        plugins = tmp_path / "plugins"
+        bundles = AdventureBundleLoader(plugins / "fu-adventures" / "adventures").list()
+        assert bundles, "adventure package did not load"
+        bundle = bundles[0]
+        resolver = AdventureResolver.single_directory(plugins / "fu-adventures" / "adventures")
+
+        template = _template(tmp_path / "plugins")
+        runtime = registry.resolve(template)
+        runtime.set_adventure_resolver(resolver)
+        instance = _bound_instance(("alice", "human"))
+        instance.adventure_binding = {"adventure_id": bundle.manifest.adventure_id}
+        adventure_runtime_state.replace_progress(
+            instance, new_progress(bundle.adventure),
+        )
+
+        view = runtime.gameplay_view(instance, "alice", viewer_is_gm=True)
+
+        public = view["public"]["adventure"]
+        assert public["id"] == bundle.manifest.adventure_id
+        assert public["active"], "运行时应读到投影里的当前节点"
+
+        nodes = {
+            node.get("label"): node
+            for panel in view["panels"]
+            for node in [panel, *(panel.get("children") or [])]
+        }
+        assert nodes["冒险进度"]["component"] == "group"
+        expected = {str(node.get("name")) for node in public["active"] if node.get("name")}
+        assert expected
+        assert any(
+            name in label
+            for label in nodes["当前节点"]["value"]
+            for name in expected
+        )
+    finally:
+        source.close()
+
+
+@pytest.mark.asyncio
+async def test_rule_specific_panels_cover_clocks_merchant_opportunity_and_items(tmp_path):
+    """FU 侧栏里那几块"规则专属"信息，全部用声明式节点表达。
+
+    插件带不了 Vue 组件，所以命刻只能是进度条、商人只能是列表、机会只能是加值。
+    能表达的部分就必须表达：玩家不该为了看"目标条推到几"去翻角色卡。
+    """
+
+    from src.engine.modules import ruleset_runtime
+
+    host, registry, source = await _install(tmp_path)
+    try:
+        template = _template(tmp_path / "plugins")
+        runtime = registry.resolve(template)
+        instance = _bound_instance(("alice", "human"))
+        started = runtime.resolve_intent(instance, {
+            "intent_id": "v1", "type": "conflict.start",
+            "enemies": [{"template_id": "goblin"}],
+        }, __import__("random").Random(5))
+        runtime.apply_event_batch(instance, started["event_batch"])
+
+        state = ruleset_runtime.state(instance)
+        fu = state.setdefault("fabula_ultima", {})
+        conflict = fu.get("conflict") or {}
+        conflict["clocks"] = {"gate": {"name": "破门", "segments": 6, "filled": 2}}
+        fu["conflict"] = conflict
+        fu["merchant"] = {
+            "active": True,
+            "goods": [{"name": "治疗药水", "price": 50, "stock": 2}],
+            "order": ["alice"], "index": 0, "round": 1, "skipped": [],
+        }
+        ruleset_runtime.replace_state(instance, state)
+
+        sheet = instance.get_character_sheet("alice")
+        sheet["pending_check_bonus"] = 3
+        sheet["inventory"] = [{"name": "短剑", "type": "武器"}]
+        instance.set_character_sheet("alice", sheet)
+
+        view = runtime.gameplay_view(instance, "alice", viewer_is_gm=False)
+        nodes = {
+            node.get("label"): node
+            for panel in view["panels"]
+            for node in [panel, *(panel.get("children") or [])]
+        }
+
+        assert nodes["命刻"]["children"][0]["max"] == 6
+        assert nodes["命刻"]["children"][0]["value"] == 2
+        assert "治疗药水" in nodes["货物"]["value"][0]
+        assert nodes["机会加成"]["value"] == ["Alice：+3"]
+        assert nodes["随身物品"]["value"] == ["短剑（武器）"]
+    finally:
+        source.close()
+
+
+@pytest.mark.asyncio
+async def test_rule_specific_panels_cover_clocks_merchant_opportunity_and_items(tmp_path):
+    """FU 侧栏里那几块"规则专属"信息，全部用声明式节点表达。
+
+    插件带不了 Vue 组件，所以命刻只能是进度条、商人只能是列表、机会只能是加值。
+    能表达的部分就必须表达：玩家不该为了看"目标条推到几"去翻角色卡。
+    """
+
+    from src.engine.modules import ruleset_runtime
+
+    host, registry, source = await _install(tmp_path)
+    try:
+        template = _template(tmp_path / "plugins")
+        runtime = registry.resolve(template)
+        instance = _bound_instance(("alice", "human"))
+        started = runtime.resolve_intent(instance, {
+            "intent_id": "v1", "type": "conflict.start",
+            "enemies": [{"template_id": "goblin"}],
+        }, __import__("random").Random(5))
+        runtime.apply_event_batch(instance, started["event_batch"])
+
+        state = ruleset_runtime.state(instance)
+        fu = state.setdefault("fabula_ultima", {})
+        conflict = fu.get("conflict") or {}
+        conflict["clocks"] = {"gate": {"name": "破门", "segments": 6, "filled": 2}}
+        fu["conflict"] = conflict
+        fu["merchant"] = {
+            "active": True,
+            "goods": [{"name": "治疗药水", "price": 50, "stock": 2}],
+            "order": ["alice"], "index": 0, "round": 1, "skipped": [],
+        }
+        ruleset_runtime.replace_state(instance, state)
+
+        sheet = instance.get_character_sheet("alice")
+        sheet["pending_check_bonus"] = 3
+        sheet["inventory"] = [{"name": "短剑", "type": "武器"}]
+        instance.set_character_sheet("alice", sheet)
+
+        view = runtime.gameplay_view(instance, "alice", viewer_is_gm=False)
+        nodes = {
+            node.get("label"): node
+            for panel in view["panels"]
+            for node in [panel, *(panel.get("children") or [])]
+        }
+
+        assert nodes["命刻"]["children"][0]["max"] == 6
+        assert nodes["命刻"]["children"][0]["value"] == 2
+        assert "治疗药水" in nodes["货物"]["value"][0]
+        assert nodes["机会加成"]["value"] == ["Alice：+3"]
+        assert nodes["随身物品"]["value"] == ["短剑（武器）"]
+    finally:
+        source.close()
