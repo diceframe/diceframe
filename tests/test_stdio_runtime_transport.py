@@ -1,6 +1,7 @@
 import json
 import sys
 import textwrap
+import time
 
 import pytest
 from pathlib import Path
@@ -77,6 +78,61 @@ def test_stdio_transport_bounds_one_response_line():
             transport({"request_id": "r1", "operation": "large"})
     finally:
         transport.close(force=True)
+
+
+def test_stdio_transport_reopens_a_child_that_died_on_a_timeout(tmp_path: Path):
+    """一次超时不能把整条规则永久变成不可用。
+
+    子进程第一代在启动时故意卡住（模拟冷启动里卡死的 runtime），被超时杀掉之后
+    第二代应当重新拉起并正常应答。
+    """
+
+    marker = tmp_path / "spawned"
+    child = _child(
+        f"""
+        import json, sys, time
+        from pathlib import Path
+        marker = Path({str(marker)!r})
+        if not marker.exists():
+            marker.write_text("1", encoding="utf-8")
+            time.sleep(2)
+        for line in sys.stdin:
+            request = json.loads(line)
+            print(json.dumps({{"request_id": request["request_id"], "ok": True,
+                              "result": {{"operation": request["operation"]}}}}), flush=True)
+        """
+    )
+    transport = StdioRuntimeTransport(child, timeout_seconds=0.4)
+    try:
+        with pytest.raises(RuntimeProbeError, match="timed out"):
+            transport({"request_id": "r1", "operation": "slow"})
+        assert marker.exists()
+        answered = transport({"request_id": "r2", "operation": "fast"})
+        assert answered["result"]["operation"] == "fast"
+    finally:
+        transport.close(force=True)
+
+
+def test_stdio_transport_forwards_child_stderr_to_the_host():
+    seen: list[str] = []
+    transport = StdioRuntimeTransport(
+        _child("""
+        import sys
+        sys.stderr.write("boom from child\\n")
+        sys.stderr.flush()
+        """),
+        stderr_sink=seen.append,
+    )
+    try:
+        with pytest.raises(RuntimeProbeError, match="closed stdout"):
+            transport({"request_id": "r1", "operation": "dying"})
+        for _ in range(50):
+            if any("boom from child" in line for line in seen):
+                break
+            time.sleep(0.02)
+    finally:
+        transport.close(force=True)
+    assert any("boom from child" in line for line in seen)
 
 
 def test_stdio_runtime_restart_reuses_host_state_and_request_receipts(tmp_path: Path):

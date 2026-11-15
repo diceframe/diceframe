@@ -9,19 +9,24 @@ service after its own installation and permission checks.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import subprocess
 import threading
 import re
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from src.rulesets.runtime_probe import MAX_PROBE_BYTES, RuntimeProbeError
 
+logger = logging.getLogger("trpg.rulesets")
 
 MAX_ARGUMENTS = 64
 MAX_ARGUMENT_BYTES = 4096
+# 子进程 stderr 只做诊断用：留够定位问题的行，但不让它把宿主日志淹掉。
+MAX_STDERR_LINES = 64
+MAX_STDERR_LINE_CHARS = 400
 _SHELL_EXECUTABLES = frozenset({"cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe", "sh", "bash", "zsh"})
 _SAFE_ENV_KEYS = frozenset({
     "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TZ",
@@ -41,6 +46,7 @@ class StdioRuntimeTransport:
         cwd: Path | None = None,
         env: dict[str, str] | None = None,
         timeout_seconds: float = 5.0,
+        stderr_sink: Callable[[str], None] | None = None,
     ) -> None:
         self.command = self._validate_command(command)
         if timeout_seconds <= 0 or timeout_seconds > 30:
@@ -60,14 +66,25 @@ class StdioRuntimeTransport:
         self._closed = False
         self._lock = threading.RLock()
         self._responses: queue.Queue[tuple[dict[str, Any] | None, BaseException | None]] = queue.Queue()
+        self._stderr_sink = stderr_sink
+        self._stderr_seen = 0
+        self._stderr_dropped = 0
+        self._cwd = Path(cwd) if cwd is not None else None
         child_env = {key: value for key, value in os.environ.items() if key.upper() in _SAFE_ENV_KEYS}
         if env:
             child_env.update({key.upper(): value for key, value in env.items()})
+        self._child_env = child_env
+        # 故障关闭（超时/协议错）与生命周期关闭要分开：前者允许下一次调用
+        # 重新拉起子进程，后者（宿主停用插件）之后一律拒绝。
+        self._restartable = True
+        self._spawn()
+
+    def _spawn(self) -> None:
         try:
             self.process = subprocess.Popen(
                 self.command,
-                cwd=str(cwd) if cwd is not None else None,
-                env=child_env,
+                cwd=str(self._cwd) if self._cwd is not None else None,
+                env=self._child_env,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -98,7 +115,11 @@ class StdioRuntimeTransport:
             self._responses.put((None, RuntimeProbeError("runtime process has no stdout")))
             return
         while True:
-            raw = stream.readline(MAX_PROBE_BYTES + 1)
+            try:
+                raw = stream.readline(MAX_PROBE_BYTES + 1)
+            except (OSError, ValueError):  # 关闭与读并发时按 EOF 处理
+                self._responses.put((None, RuntimeProbeError("runtime process closed stdout")))
+                return
             if not raw:
                 self._responses.put((None, RuntimeProbeError("runtime process closed stdout")))
                 return
@@ -116,14 +137,49 @@ class StdioRuntimeTransport:
             self._responses.put((value, None))
 
     def _drain_stderr(self) -> None:
+        """Forward the child's stderr to the host log instead of swallowing it.
+
+        以前这里读到即丢。外部 runtime 崩在 import、协议解析或规则加载里时，
+        宿主只看得到「进程超时」——真正的原因全在这一侧，等于没有可诊断性。
+        """
+
         stream = self.process.stderr
-        if stream is not None:
-            while stream.read(4096):
-                pass
+        if stream is None:
+            return
+        pending = b""
+        while True:
+            try:
+                chunk = stream.read(4096)
+            except (OSError, ValueError):
+                return
+            if not chunk:
+                break
+            pending += chunk
+            while b"\n" in pending:
+                line, pending = pending.split(b"\n", 1)
+                self._emit_stderr(line)
+        if pending:
+            self._emit_stderr(pending)
+
+    def _emit_stderr(self, raw: bytes) -> None:
+        text = raw.decode("utf-8", "replace").strip()
+        if not text:
+            return
+        if self._stderr_seen >= MAX_STDERR_LINES:
+            self._stderr_dropped += 1
+            return
+        self._stderr_seen += 1
+        if len(text) > MAX_STDERR_LINE_CHARS:
+            text = text[:MAX_STDERR_LINE_CHARS] + "…"
+        if self._stderr_sink is not None:
+            try:
+                self._stderr_sink(text)
+            except Exception:  # noqa: BLE001 - 诊断输出不能反噬传输
+                logger.debug("runtime stderr sink failed", exc_info=True)
+            return
+        logger.warning("外部规则 runtime stderr: %s", text)
 
     def __call__(self, request: dict[str, Any]) -> dict[str, Any]:
-        if self._closed:
-            raise RuntimeProbeError("runtime transport is closed")
         try:
             encoded = (json.dumps(request, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
         except (TypeError, ValueError) as exc:
@@ -131,8 +187,15 @@ class StdioRuntimeTransport:
         if len(encoded) > MAX_PROBE_BYTES:
             raise RuntimeProbeError("runtime request is too large")
         with self._lock:
+            if self._closed:
+                # 上一次请求把子进程拖死了。插件仍在启用状态，能力还在，
+                # 所以这里重新拉起一次，而不是让整条规则永久不可用。
+                if not self._restartable:
+                    raise RuntimeProbeError("runtime transport is closed")
+                logger.warning("外部规则 runtime 子进程已终止，重新拉起")
+                self._reopen()
             if self.process.poll() is not None:
-                raise RuntimeProbeError("runtime process exited")
+                self._reopen()
             if self.process.stdin is None:
                 raise RuntimeProbeError("runtime process has no stdin")
             try:
@@ -143,10 +206,17 @@ class StdioRuntimeTransport:
             try:
                 response, error = self._responses.get(timeout=self.timeout_seconds)
             except queue.Empty as exc:
-                self.close(force=True)
+                logger.warning(
+                    "外部规则 runtime 未在 %.1fs 内响应（请求 %d 字节，操作 %s，子进程%s）",
+                    self.timeout_seconds,
+                    len(encoded),
+                    str(request.get("operation") or "?"),
+                    "已退出" if self.process.poll() is not None else "仍在运行",
+                )
+                self._terminate(force=True)
                 raise RuntimeProbeError("runtime process timed out") from exc
             if error is not None:
-                self.close(force=True)
+                self._terminate(force=True)
                 if isinstance(error, RuntimeProbeError):
                     raise error
                 raise RuntimeProbeError("runtime process transport failed") from error
@@ -154,7 +224,18 @@ class StdioRuntimeTransport:
                 raise RuntimeProbeError("runtime returned no response")
             return response
 
+    def _reopen(self) -> None:
+        self._responses = queue.Queue()
+        self._stderr_seen = 0
+        self._stderr_dropped = 0
+        self._closed = False
+        self._spawn()
+
     def close(self, *, force: bool = False) -> None:
+        self._restartable = False
+        self._terminate(force=force)
+
+    def _terminate(self, *, force: bool) -> None:
         if self._closed:
             return
         self._closed = True
@@ -171,12 +252,13 @@ class StdioRuntimeTransport:
                     process.kill()
                 except OSError:
                     pass
-        for stream in (process.stdin, process.stdout, process.stderr):
-            if stream is not None:
-                try:
-                    stream.close()
-                except OSError:
-                    pass
+        # stdout/stderr 交给两个读线程收尾：子进程退出后管道 EOF，线程自己结束。
+        # 在这里抢着 close 会和读线程撞车，把最后几行诊断输出吞掉。
+        if process.stdin is not None:
+            try:
+                process.stdin.close()
+            except OSError:
+                pass
 
     def __enter__(self) -> "StdioRuntimeTransport":
         return self
