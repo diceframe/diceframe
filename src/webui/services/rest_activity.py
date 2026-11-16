@@ -104,9 +104,11 @@ def _recovery_activity(instance: Any) -> list[dict[str, Any]]:
     return projected
 
 
-def _session_identity(instance: Any, started_at: str, rest: str) -> str:
+def _session_identity(instance: Any, started_tick: int, rest: str) -> str:
     game_key = "|".join(str(part) for part in (getattr(instance, "game_key", ()) or ()))
-    raw = "\x1f".join((game_key, str(getattr(instance, "run_id", "") or ""), started_at, rest))
+    raw = "\x1f".join(
+        (game_key, str(getattr(instance, "run_id", "") or ""), str(started_tick), rest)
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
@@ -132,10 +134,17 @@ def _dnd_activity(instance: Any) -> list[dict[str, Any]]:
 
     status = public.get("status")
     rest = public.get("rest")
-    started_at = session.get("started_at")
-    if status not in {"collecting", "resolving", "completed", "error"}:
+    started_tick = session.get("started_tick")
+    if status not in {
+        "collecting", "awaiting_approval", "resolving", "completed", "error", "rejected",
+    }:
         return []
-    if rest not in _DND_RESTS or not isinstance(started_at, str) or not started_at.strip():
+    if (
+        rest not in _DND_RESTS
+        or isinstance(started_tick, bool)
+        or not isinstance(started_tick, int)
+        or started_tick < 0
+    ):
         return []
 
     participants = public.get("participants")
@@ -154,10 +163,12 @@ def _dnd_activity(instance: Any) -> list[dict[str, Any]]:
     if not actors:
         return []
 
-    base = "rest:" + _session_identity(instance, started_at, rest)
+    base = "rest:" + _session_identity(instance, started_tick, rest)
     projected = [_activity_item(base + ":requested", rest, "requested", actors)]
     if status == "completed":
         projected.append(_activity_item(base + ":settled", rest, "settled", actors))
+    elif status == "rejected":
+        projected.append(_activity_item(base + ":rejected", rest, "rejected", actors))
     elif status == "error":
         projected.append(_activity_item(base + ":error", rest, "error", actors))
     return projected

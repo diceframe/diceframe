@@ -252,14 +252,16 @@ class Dnd2024CombatCatalog:
             if set(entry) - {
                 "attack_modes", "resist_damage_types", "implies_incapacitated",
                 "speed_zero", "auto_fail_saves", "crit_on_hit_within_5",
-                "speed_modifier", "check_bonus_dice", "initiative_advantage",
+                "speed_modifier", "speed_halved", "check_bonus_dice",
+                "initiative_advantage", "cannot_attack_source", "cannot_approach_source",
             }:
                 raise CombatCatalogError(
                     f"combat condition has unknown fields: {condition_id}"
                 )
             for flag in (
                 "implies_incapacitated", "speed_zero", "crit_on_hit_within_5",
-                "initiative_advantage",
+                "initiative_advantage", "cannot_attack_source", "cannot_approach_source",
+                "speed_halved",
             ):
                 if flag in entry and not isinstance(entry[flag], bool):
                     raise CombatCatalogError(
@@ -334,6 +336,7 @@ class Dnd2024CombatCatalog:
                     key in entry for key in (
                         "implies_incapacitated", "speed_zero",
                         "auto_fail_saves", "crit_on_hit_within_5", "speed_modifier",
+                        "speed_halved", "cannot_attack_source", "cannot_approach_source",
                     )
                 )
             ):

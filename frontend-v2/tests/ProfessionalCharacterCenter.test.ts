@@ -331,4 +331,149 @@ describe('ProfessionalCharacterCenter', () => {
     expect(wrapper.findAll('.spell-slot-card')).toHaveLength(1)
     expect(wrapper.get('.magic-panel').text()).not.toContain('专注点')
   })
+
+  const longRestOptions = {
+    ok: true,
+    rest_options: {
+      land_terrain: {
+        owner: 'subclass:circle_of_the_land',
+        feature_id: 'circle_of_the_land_spells',
+        current: 'polar',
+        options: ['arid', 'polar', 'temperate', 'tropical'],
+        required: true,
+      },
+      free_cast: [{
+        slot_id: 'spell_mastery_1',
+        feature_id: 'spell_mastery',
+        spell_level: 1,
+        recharge: 'unlimited',
+        spell_ref: 'spell:magic_missile',
+        spell_name: 'Magic Missile',
+        rest_replace: 1,
+        valid: true,
+        options: [
+          { ref: 'spell:magic_missile', name: 'Magic Missile', level: 1 },
+          { ref: 'spell:burning_hands', name: 'Burning Hands', level: 1 },
+        ],
+      }],
+    },
+  }
+
+  function mountLongRest() {
+    mocks.api.mockImplementation((path: string) => {
+      if (String(path).endsWith('/rest/options')) return Promise.resolve(longRestOptions)
+      return Promise.resolve({
+        ok: true, character: { ...character, ruleset_revision: 4 }, events: [],
+      })
+    })
+    return mount(ProfessionalCharacterCenter, {
+      props: {
+        character: { ...character, ruleset_revision: 3 },
+        target: 'game', gameKey: 'web|room|bot', userId: 'player/1',
+        ruleId: 'dnd2024_srd', language: 'zh-CN',
+      },
+      global: { stubs: { PortraitPicker: true } },
+    })
+  }
+
+  it('asks for the long-rest choices only once a long rest is selected', async () => {
+    const wrapper = mountLongRest()
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    // 短休没有任何声明：打开面板不发请求。
+    expect(mocks.api).not.toHaveBeenCalled()
+    await wrapper.findAll('.rest-type-option')[1].get('input').setValue(true)
+    await flushPromises()
+    expect(mocks.api.mock.calls[0][0]).toBe(
+      '/games/web%7Croom%7Cbot/character/player%2F1/rest/options',
+    )
+    expect(wrapper.find('.rest-terrain').exists()).toBe(true)
+    expect(wrapper.find('.rest-study').exists()).toBe(true)
+    // 地形预填当前值，研究默认"不替换"：不选就什么都不改。
+    expect((wrapper.find('.rest-terrain-option.selected').text())).toContain('polar')
+    expect(wrapper.findAll('.rest-study-row')).toHaveLength(1)
+  })
+
+  it('submits the terrain and the studied spell with a long rest', async () => {
+    const wrapper = mountLongRest()
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    await wrapper.findAll('.rest-type-option')[1].get('input').setValue(true)
+    await flushPromises()
+
+    await wrapper.findAll('.rest-terrain-option input')[0].setValue(true)
+    const selects = wrapper.findAll('.rest-study-row select')
+    await selects[0].setValue('spell_mastery_1')
+    await flushPromises()
+    await wrapper.findAll('.rest-study-row select')[1].setValue('spell:burning_hands')
+    await wrapper.get('.rest-confirm input').setValue(true)
+    await wrapper.get('.rest-center > button').trigger('click')
+    await flushPromises()
+
+    const submit = mocks.api.mock.calls.find(([path]) => String(path).endsWith('/character/player%2F1/rest'))
+    expect(submit).toBeTruthy()
+    const body = JSON.parse(submit![1].body)
+    expect(body).toMatchObject({ rest: 'long' })
+    // 空值一律不发：只有真的选了地形与研究才出现在请求里。
+    expect(body.land_terrain).toBe('arid')
+    expect(body.free_cast).toEqual({ spell_mastery_1: 'spell:burning_hands' })
+    expect(body.hit_dice).toEqual({})
+  })
+
+  const awaitingPartyRest = {
+    active: true,
+    status: 'awaiting_approval',
+    rest: 'long',
+    ready_count: 2,
+    active_count: 2,
+    participants: [
+      { user_id: 'player/1', character_name: 'Arden', status: 'submitted' },
+      { user_id: 'player/2', character_name: 'Bree', status: 'submitted' },
+    ],
+    duration_minutes: 480,
+  }
+
+  function mountAwaiting(isGm: boolean) {
+    mocks.api.mockImplementation(() => Promise.resolve({ ok: true, rest_session: awaitingPartyRest }))
+    return mount(ProfessionalCharacterCenter, {
+      props: {
+        character: { ...character, ruleset_revision: 3 },
+        target: 'game', gameKey: 'web|room|bot', userId: 'player/1',
+        ruleId: 'dnd2024_srd', language: 'zh-CN',
+        restSession: awaitingPartyRest, isGm,
+      },
+      global: { stubs: { PortraitPicker: true } },
+    })
+  }
+
+  it('tells a player the party is waiting for the GM instead of resolving', async () => {
+    const wrapper = mountAwaiting(false)
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.party-rest-status').text()).toContain('等待 DM 裁决')
+    expect(wrapper.get('.rest-center > button').text()).toContain('等待 DM 裁决')
+    // 玩家没有裁决权：连按钮都不呈现，而不是呈现一个点了会 403 的按钮。
+    expect(wrapper.find('[data-testid="rest-approve"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="rest-reject"]').exists()).toBe(false)
+    // 面板仍会按会话把休息类型锁到长休并读一次选项（既有行为），
+    // 但绝不能出现裁决请求。
+    expect(mocks.api.mock.calls.some(([path]) => String(path).endsWith('/rest/decide'))).toBe(false)
+  })
+
+  it('lets the GM approve a waiting rest and reports the elapsed time', async () => {
+    const wrapper = mountAwaiting(true)
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.rest-decision').text()).toContain('8 小时')
+    await wrapper.get('[data-testid="rest-approve"]').trigger('click')
+    await flushPromises()
+
+    const decide = mocks.api.mock.calls.find(([path]) => String(path).endsWith('/rest/decide'))
+    expect(decide).toBeTruthy()
+    expect(String(decide![0])).toBe('/games/web%7Croom%7Cbot/rest/decide')
+    const body = JSON.parse(decide![1].body)
+    expect(body.approve).toBe(true)
+    expect(body.operation_id).toBeTruthy()
+    expect(wrapper.emitted('rest-pending')).toHaveLength(1)
+  })
 })
