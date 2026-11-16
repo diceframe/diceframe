@@ -42,6 +42,8 @@ pip install -r requirements.txt
 python web_server.py
 ```
 
+Use a virtualenv for these dependencies: `py -3 -m venv .venv` then `.venv\Scripts\activate` on Windows, or `python3 -m venv .venv` then `source .venv/bin/activate` elsewhere. `web_ui.bat` prefers `.venv314` or `.venv` in the repository root and otherwise falls back to the interpreter the `py` launcher picks. Without a virtualenv the dependencies go into the global Python, and if that version has no matching wheels the first start can take several minutes.
+
 Open:
 
 ```text

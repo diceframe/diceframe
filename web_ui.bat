@@ -10,6 +10,11 @@ echo.
 
 if exist ".venv314\Scripts\python.exe" goto run_venv314
 if exist ".venv\Scripts\python.exe" goto run_venv
+rem No virtualenv: prefer the py launcher, which picks a real interpreter.
+rem Bare "python" on Windows may be the Store alias or a version whose
+rem dependencies have no wheels, and then startup spends minutes in pip.
+py -3 -c "import sys" >nul 2>nul
+if not errorlevel 1 goto run_py
 goto run_system_python
 
 :run_venv314
@@ -19,6 +24,11 @@ goto finished
 
 :run_venv
 ".venv\Scripts\python.exe" scripts\start_webui.py
+set "WEBUI_EXIT_CODE=%ERRORLEVEL%"
+goto finished
+
+:run_py
+py -3 scripts\start_webui.py
 set "WEBUI_EXIT_CODE=%ERRORLEVEL%"
 goto finished
 
