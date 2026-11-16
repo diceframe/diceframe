@@ -175,6 +175,9 @@ class PluginHost:
         self.content = PluginContentCatalog(self.contributions, self.logger)
         self._api_tokens: dict[str, str] = {}
         self._install_locks: dict[str, asyncio.Lock] = {}
+        # Every package publisher shares one group recovery journal. Serialize
+        # group and single-package publication, including awaits in stop/start.
+        self._package_publish_lock = asyncio.Lock()
         self._auto_update_task: asyncio.Task[Any] | None = None
         # 宿主世代标识：每个主进程实例一个随机值。spawn 插件前写入插件 runtime 目录，
         # 插件进程启动时捕获并轮询；主进程被重启（含 os.execv 保 PID 重启）后重新生成，
@@ -1047,6 +1050,16 @@ class PluginHost:
         allow_any_root: bool = False,
         expected_plugin_type: str = "",
     ) -> PluginPublicDetail:
+        async with self._package_publish_lock:
+            return await self._install_from_zip_locked(
+                payload, overwrite=overwrite, allow_any_root=allow_any_root,
+                expected_plugin_type=expected_plugin_type,
+            )
+
+    async def _install_from_zip_locked(
+        self, payload: bytes, *, overwrite: bool, allow_any_root: bool,
+        expected_plugin_type: str,
+    ) -> PluginPublicDetail:
         if not payload:
             raise ValueError(t("plugin_host.host.package_empty"))
         if len(payload) > MAX_PLUGIN_PACKAGE_BYTES:
@@ -1157,6 +1170,12 @@ class PluginHost:
     ) -> list[PluginPublicDetail]:
         """Publish a preflighted package group as one recoverable transaction."""
 
+        async with self._package_publish_lock:
+            return await self._install_group_from_zips_locked(payloads, overwrite=overwrite)
+
+    async def _install_group_from_zips_locked(
+        self, payloads: list[bytes], *, overwrite: bool,
+    ) -> list[PluginPublicDetail]:
         plan = self.plan_install_group(payloads, overwrite=overwrite)
         if not plan.get("ok"):
             reasons = "; ".join(
