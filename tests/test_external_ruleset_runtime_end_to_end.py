@@ -300,6 +300,7 @@ def write_fu_package(root: Path, plugin_id: str = "fu-core") -> Path:
             "capabilities": {
                 "character_builder": "professional",
                 "authoritative_intents": True,
+                "automatic_intents": True,
                 "versioned_state": True,
                 "narrative_checks": True,
             },
