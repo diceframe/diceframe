@@ -910,6 +910,8 @@ class Dnd2024Runtime:
             raise ValueError("recovery must be an object keyed by feature id")
         engine = Dnd2024RestEngine(bundle)
         if rest == "short":
+            if free_cast is not None:
+                raise ValueError("free_cast can only be changed on a long rest")
             if prepared_spells is not None:
                 raise ValueError("prepared spells can only be changed on a long rest")
             if land_terrain is not None:

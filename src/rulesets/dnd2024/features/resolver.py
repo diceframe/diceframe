@@ -860,17 +860,20 @@ class Dnd2024ClassFeatureResolver:
     def jump_ability(self, character: Mapping[str, Any] | None) -> str:
         """The ability that sets jump distance; default is Strength.
 
-        Second-Story Work lets the Thief *replace* Strength with Dexterity --
-        the substitution changes which score is read, it never adds a second
-        modifier.  Exactly one owned declaration may name it, so the first is
-        authoritative and the default stays Strength.
+        Second-Story Work permits Dexterity instead of Strength (SRD p64).
+        The derived profile reports the largest legal jump, not a forced
+        substitution that could reduce the character's normal jump distance.
         """
 
+        abilities = (character or {}).get("abilities") or {}
+        best = "str"
         for definition in self.features_for(character):
             ability = definition.parameters.get("jump_ability")
-            if isinstance(ability, str) and ability:
-                return ability
-        return "str"
+            if isinstance(ability, str) and ability and int(
+                abilities.get(ability, 10)
+            ) > int(abilities.get(best, 10)):
+                best = ability
+        return best
 
     def feature_max_hp_bonus(self, character: Mapping[str, Any] | None) -> int:
         """The Hit Point maximum increase granted by owned features.
@@ -1905,19 +1908,24 @@ class Dnd2024ClassFeatureResolver:
         level, which resolves to a silently wrong or inert feature -- so a
         partial set is rejected at load time rather than at settlement.
 
-        The set carries no distance, share, resource, cooldown or visibility
-        knob, because the rule it encodes has none: only the source's own kill
-        triggers it.
+        Optional other_defeat_range_ft also grants the benefit for someone
+        else's kill measured from the defeated enemy to the feature owner
+        (Dark One's Blessing, SRD 5.2.1 p76).
         """
 
         parameters = definition.parameters
         retired = [key for key in _RETIRED_DEFEAT_KEYS if key in parameters]
         if retired:
-            # 旧载荷带着“他人击杀 10 尺共享”与“加职业等级”开关。它们不是
-            # SRD 5.2.1 的 Dark One's Blessing，静默忽略等于把已删除的规则
-            # 留在目录里，因此这里显式拒绝。
+            # Retired formula keys remain rejected at the catalog boundary.
             raise ClassFeatureError(
                 f"{definition.id} declares the retired parameter {retired[0]}"
+            )
+        radius = parameters.get("other_defeat_range_ft")
+        if "other_defeat_range_ft" in parameters and (
+            isinstance(radius, bool) or not isinstance(radius, int) or radius <= 0
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.other_defeat_range_ft must be a positive integer"
             )
         keys = _DEFEAT_TRIGGER_KEYS
         # Only claim a ``trigger`` key this payload actually owns.  Another
