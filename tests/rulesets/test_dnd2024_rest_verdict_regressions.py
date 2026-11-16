@@ -73,3 +73,24 @@ async def test_failed_final_save_leaves_no_partial_party_or_consumed_verdict(pro
     result = await WebAPI.ruleset_rest_decide(api, KEY, "gm", True, verdict)
     assert result["ok"] and not result.get("duplicate")
     assert _revision(instance, "gm") == _revision(instance, "ally") == 1
+
+
+@pytest.mark.asyncio
+async def test_time_hook_failure_discards_module_side_effects(professional_context, monkeypatch):
+    api, instance = _party(professional_context)
+    await _both_submit(api, instance, "long", tag="module-rollback")
+    before = deepcopy(instance.to_dict())
+
+    def fail_advance(_dependencies, staged, _minutes):
+        ruleset_runtime.state(staged)["abandoned_time_hook_effect"] = True
+        raise ValueError("adventure time hook failed")
+
+    monkeypatch.setattr(ruleset_rest, "_advance_rest_time", fail_advance)
+    result = await WebAPI.ruleset_rest_decide(
+        api, KEY, "gm", True, {"approve": True, "operation_id": "failed-hook"},
+    )
+    assert not result["ok"] and result["code"] == "PARTY_REST_FAILED"
+    assert instance.players == before["players"]
+    assert instance.world_state == before["world_state"]
+    assert "abandoned_time_hook_effect" not in ruleset_runtime.state(instance)
+    assert ruleset_runtime.state(instance)["rest_session"]["status"] == "error"
