@@ -51,6 +51,7 @@ from .primitives import (
     CombatIntentError,
     actor_kind as _actor_kind,
     canonical as _canonical,
+    rider_attack_kind,
 )
 from .check_modes import condition_flags
 from .check_windows import (
@@ -358,7 +359,9 @@ class CombatValidationMixin:
             self._validate_lucky_spend(instance, intent, actor)
         # 失能族只禁"动作"（动作/附赠动作/反应），移动不是动作：纯 incapacitated
         # （睡眠术）的单位仍可移动，只有 speed_zero（麻痹/昏迷）才门控 move。
-        flags = condition_flags(self.catalog.conditions, actor["conditions"])
+        # 读的是有效条件：被光环抑制的 Frightened 不能继续禁动作。
+        conditions = self._effective_conditions(instance, combat, actor)
+        flags = condition_flags(self.catalog.conditions, conditions)
         if flags["incapacitated"] and intent_type in {
             "attack", "cast_spell", "activate_item", "class_capability", "dash", "dodge",
             "disengage", "hide", "stabilize",
@@ -384,8 +387,19 @@ class CombatValidationMixin:
                 raise CombatIntentError("movement distance must be a non-zero integer")
             if abs(distance) > int(economy.get("movement", 0) or 0):
                 raise CombatIntentError("movement exceeds the remaining speed")
+            for source_id in self._restriction_sources(conditions, "cannot_approach_source"):
+                before = self._distance(combat, actor["actor_id"], source_id)
+                after = self._distance_after_move(
+                    combat, actor["actor_id"], source_id, distance,
+                )
+                if after < before:
+                    raise CombatIntentError(
+                        "a frightened creature cannot move closer to the source of its fear"
+                    )
         if intent_type == "attack":
             self._validate_attack(instance, combat, intent, actor)
+        if intent_type == "end_turn":
+            self._validate_self_restoration(actor, intent)
         if intent_type == "class_capability":
             self._validate_class_capability(instance, combat, intent, actor, economy)
         if intent_type == "cast_spell":
@@ -432,6 +446,26 @@ class CombatValidationMixin:
                     f"{self.features.catalog.label(capability_id, capability_id)} cannot be "
                     f"used while {self.features.catalog.label(forbidden, forbidden)} is active"
                 )
+        choice = intent.get("open_hand_choice")
+        if choice is not None:
+            # Open Hand Technique 只在 Flurry of Blows 授予的攻击上成立；把它
+            # 挂在普通徒手攻击上等于凭空多出一个免费 rider。
+            if capability_id != "flurry_of_blows":
+                raise CombatIntentError(
+                    "open hand technique applies only to Flurry of Blows attacks"
+                )
+            character = self._feature_character(actor)
+            if not self.features.has_feature(character, "open_hand_technique"):
+                raise CombatIntentError(
+                    "open hand technique is not available to this actor"
+                )
+            allowed = self.features.feature_value(
+                character, "open_hand_technique", "flurry_hit_choices", [],
+            ) or []
+            if choice not in allowed:
+                raise CombatIntentError(
+                    "the declared open hand technique choice is not available"
+                )
         views = {
             view.id: view
             for view in self._available_class_capabilities(
@@ -454,10 +488,20 @@ class CombatValidationMixin:
         if has_unarmed_strike:
             # 复用 canonical 徒手打击校验：目标必须存活且敌对、射程由同一份
             # 攻击档案决定，Combat 不自己算命中/伤害。
+            rider_actor = deepcopy(actor)
+            # The capability's own spend precedes every granted hit. Validate
+            # rider affordability against that balance, not the original pool.
+            for cost in capability.cost.resources:
+                for pool in rider_actor.get("class_resources") or []:
+                    if pool.get("id") == cost.resource_id:
+                        pool["current"] = int(pool.get("current", 0)) - cost.amount
             self._validate_attack(instance, combat, {
                 "target_id": str(intent.get("target_id") or ""),
                 "weapon_ref": UNARMED_STRIKE_REF,
-            }, actor)
+                **{key: intent[key] for key in (
+                    "unarmed_damage_type", "rider_damage_type", "stunning_strike",
+                ) if key in intent},
+            }, rider_actor)
         elif has_bardic_grant:
             # 授予目标是另一位、能看见或听见你、且在 60 尺内的友方活体，并且
             # 对方此刻没有一枚未过期的骰。这些事实在校验期就能用同一组权威
@@ -580,6 +624,64 @@ class CombatValidationMixin:
         ):
             raise CombatIntentError("lucky pool is empty")
 
+    def _validate_self_restoration(
+        self, actor: dict[str, Any], intent: dict[str, Any],
+    ) -> None:
+        """The turn-end removal is a choice, and a choice has to be legal.
+
+        Absent means "not used": the engine never picks a condition for the
+        player, and it never removes two.  A declared value must name one of
+        the feature's own conditions *and* be one the actor actually has -- a
+        stale client must not be able to delete a condition that is not there,
+        nor one that arrived after the panel was rendered.
+        """
+
+        if "self_restoration_condition" not in intent:
+            return
+        requested = intent["self_restoration_condition"]
+        if requested is None:
+            return
+        chosen = self._self_restoration_choice(actor)
+        if chosen is None:
+            raise CombatIntentError(
+                "this actor has no feature that removes a condition at turn end"
+            )
+        feature_id, allowed = chosen
+        if not isinstance(requested, str) or not requested:
+            raise CombatIntentError("self_restoration_condition must be a condition id")
+        if requested not in allowed:
+            raise CombatIntentError(
+                f"{feature_id} cannot remove the {requested} condition"
+            )
+        if requested not in (actor.get("conditions") or {}):
+            raise CombatIntentError(f"the actor does not have the {requested} condition")
+
+    def _restriction_sources(
+        self, conditions: dict[str, Any], flag: str,
+    ) -> list[str]:
+        """Actor ids named by the conditions that declare ``flag``.
+
+        A condition such as Frightened restricts behaviour *towards its own
+        source*, so the restriction is data on the stored entry, not a branch
+        on the condition id.  An entry without a recorded source cannot be
+        scoped to anyone and is therefore not enforced -- blocking every
+        direction would be a worse answer than a restriction that visibly does
+        nothing, and the settlement paths always record the source.
+        """
+
+        sources: list[str] = []
+        for condition_id, entry in self.catalog.conditions.items():
+            if not entry.get(flag) or condition_id not in conditions:
+                continue
+            stored = conditions.get(condition_id)
+            source = (
+                str(stored.get("source_actor_id") or "")
+                if isinstance(stored, dict) else ""
+            )
+            if source and source not in sources:
+                sources.append(source)
+        return sources
+
     def _validate_attack(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], actor: dict[str, Any],
     ) -> None:
@@ -590,6 +692,11 @@ class CombatValidationMixin:
         target_side = str(target.get("side") or "")
         if target_side == actor_side or target["hp"] <= 0:
             raise CombatIntentError("attack target must be a living hostile actor")
+        conditions = self._effective_conditions(instance, combat, actor)
+        if target_id in self._restriction_sources(conditions, "cannot_attack_source"):
+            raise CombatIntentError(
+                "a charmed creature cannot attack the creature that charmed it"
+            )
         weapon = self._declared_attack(actor, intent)
         if weapon is None:
             # 一个 lookup 同时覆盖装备武器、徒手打击与敌人 attack profile：
@@ -603,6 +710,99 @@ class CombatValidationMixin:
         long_range = int(weapon.get("long_range") or normal_range)
         if distance > long_range:
             raise CombatIntentError(f"target is out of range ({distance} > {long_range} feet)")
+        self._validate_hit_riders(actor, intent, combat)
+
+    def _validate_hit_riders(
+        self, actor: dict[str, Any], intent: dict[str, Any], combat: dict[str, Any],
+    ) -> None:
+        """Reject a rider choice the actor cannot legally make right now.
+
+        Every rejection happens here rather than being silently ignored at
+        resolve time: a submitted ``stunning_strike`` the actor cannot pay for
+        must fail the intent, not quietly produce a plain hit.
+        """
+
+        unarmed_type = intent.get("unarmed_damage_type")
+        rider_type = intent.get("rider_damage_type")
+        stunning = intent.get("stunning_strike")
+        if intent.get("open_hand_choice") is not None:
+            raise CombatIntentError(
+                "open hand technique applies only to Flurry of Blows attacks"
+            )
+        if unarmed_type is None and rider_type is None and stunning is None:
+            return
+        weapon = self._declared_attack(actor, intent)
+        if weapon is None:
+            raise CombatIntentError("attack profile is not available to the actor")
+        character = self._feature_character(actor)
+
+        if unarmed_type is not None:
+            if not weapon.get("unarmed"):
+                raise CombatIntentError(
+                    "an unarmed damage type applies to Unarmed Strikes only"
+                )
+            allowed = self.features.feature_value(
+                character, "empowered_strikes", "unarmed_damage_type_choices", [],
+            ) or []
+            if unarmed_type not in allowed:
+                raise CombatIntentError(
+                    "the declared unarmed damage type is not available"
+                )
+
+        if rider_type is not None:
+            allowed_types: set[str] = set()
+            kind = rider_attack_kind(weapon)
+            for feature_id in ("divine_strike", "primal_strike"):
+                if not self.features.has_feature(character, feature_id):
+                    continue
+                kinds = {
+                    str(value) for value in self.features.feature_value(
+                        character, feature_id, "attack_kinds", [],
+                    ) or []
+                }
+                if kind not in kinds and not (
+                    kind != "unarmed_strike" and "weapon" in kinds
+                ):
+                    # 这一击不在该 rider 的 attack_kinds 里：声明它就是声明了一件
+                    # 结算期会静默丢掉的事，必须当场拒绝。
+                    continue
+                values = self.features.feature_value(
+                    character, feature_id, "damage_types", [],
+                ) or []
+                allowed_types.update(str(value) for value in values)
+            if rider_type not in allowed_types:
+                raise CombatIntentError(
+                    "the declared rider damage type is not available"
+                )
+
+        if stunning is not None:
+            if not isinstance(stunning, bool):
+                raise CombatIntentError("stunning_strike must be a boolean")
+            if not stunning:
+                return
+            if not self.features.has_feature(character, "stunning_strike"):
+                raise CombatIntentError("stunning strike is not available to this actor")
+            if not (weapon.get("unarmed") or weapon.get("ability_choice")):
+                raise CombatIntentError(
+                    "stunning strike requires a Monk weapon or an Unarmed Strike"
+                )
+            if self._feature_used_this_turn(
+                combat, str(actor["actor_id"]), "stunning_strike",
+            ):
+                raise CombatIntentError("stunning strike was already used this turn")
+            cost = int(
+                self.features.feature_value(
+                    character, "stunning_strike", "focus_cost", 0,
+                ) or 0
+            )
+            current = 0
+            for entry in actor.get("class_resources") or []:
+                if isinstance(entry, dict) and str(entry.get("id")) == "focus_points":
+                    current = int(entry.get("current", 0) or 0)
+            if cost and current < cost:
+                raise CombatIntentError(
+                    "not enough Focus Points for a stunning strike"
+                )
 
     def _canonical_actor(self, instance: Any, actor: dict[str, Any]) -> dict[str, Any]:
         if actor["kind"] == "player":
@@ -816,7 +1016,12 @@ class CombatValidationMixin:
             if allowed_types and str(target.get("creature_type") or "") not in allowed_types:
                 raise CombatIntentError("the spell target's creature type is not eligible")
             if effect["mode"] != "triggered_damage":
-                self._require_range(combat, actor["actor_id"], target_id, int(effect["range"]))
+                # 射程是特性可能改写过的值（德鲁伊 15 的元素之怒），不是目录原文。
+                self._require_range(
+                    combat, actor["actor_id"], target_id,
+                    self._spell_effective_range(actor, spell, effect),
+                )
+        self._validate_cantrip_temp_hp_target(instance, combat, intent, actor, spell, effect)
         damage_choices = effect.get("damage_type_choice")
         if damage_choices and intent.get("damage_type") not in damage_choices:
             raise CombatIntentError("spell damage_type choice is required")
@@ -864,6 +1069,52 @@ class CombatValidationMixin:
                 raise CombatIntentError("teleport distance exceeds the spell range")
         elif intent.get("teleport_distance") is not None:
             raise CombatIntentError("teleport distance is not valid for this spell")
+
+    def _validate_cantrip_temp_hp_target(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor: dict[str, Any], spell: dict[str, Any], effect: dict[str, Any],
+    ) -> None:
+        """Improved Blessed Strikes' temp HP grant, checked before any dice roll.
+
+        Every clause of "when you cast a Cleric cantrip that deals damage, you
+        can grant ... to yourself or one creature you can see within 60 feet"
+        is a separate gate: the feature, the Potent Spellcasting option being
+        the one actually chosen, a damaging cantrip, an ally, and the range.
+        Granting on a hostile is refused: temporary hit points are a benefit,
+        and "one creature" is never read as "any creature, including the one I
+        am shooting".
+        """
+
+        raw = intent.get("cantrip_temp_hp_target_id")
+        if raw is None:
+            return
+        if not isinstance(raw, str) or not raw:
+            raise CombatIntentError("cantrip_temp_hp_target_id must be an actor id")
+        character = self._feature_character(actor)
+        if not self.features.has_feature(character, "improved_blessed_strikes"):
+            raise CombatIntentError(
+                "improved blessed strikes is required to grant temporary hit points"
+            )
+        if int(spell.get("level", 0) or 0) != 0 or not effect.get("damage"):
+            raise CombatIntentError("the temporary hit points require a damaging cantrip")
+        if self._potent_spellcasting_owner(actor, spell) != "class:cleric":
+            raise CombatIntentError(
+                "cleric potent spellcasting is required to grant the temporary hit points"
+            )
+        target = self._actor_view(instance, combat, raw)
+        if str(target.get("side") or "") != str(actor.get("side") or ""):
+            raise CombatIntentError(
+                "the temporary hit points must go to the caster or an ally"
+            )
+        if "dead" in (target.get("conditions") or {}):
+            raise CombatIntentError("the temporary hit point target is not active")
+        if raw != str(actor["actor_id"]):
+            self._require_range(
+                combat, str(actor["actor_id"]), raw,
+                int(self.features.feature_value(
+                    character, "improved_blessed_strikes", "temp_hp_range_ft", 0,
+                ) or 0),
+            )
 
     @staticmethod
     def _validate_player_positions(instance: Any, positions: Any) -> None:
