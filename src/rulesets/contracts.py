@@ -48,6 +48,10 @@ class RulesetCapabilities:
     session_zero: bool = False
     tutorial_coach: bool = False
     narrative_turns: bool = False
+    # 只有 runtime 显式声明时，宿主才会把自由叙事里规划出的检定交给它结算
+    # （见 NarrativeCheckResolverRuntime）。声明与实现必须同时具备：宿主按
+    # 这个位来调用，不靠 isinstance 猜。
+    narrative_checks: bool = False
     adventure_formats: tuple[str, ...] = ()
     # 通用战斗扩展（Issue 212）：只有规则 runtime 显式声明才会启用；
     # 前端据此展示动作/资源条/行动条，不自行推断。
@@ -229,6 +233,26 @@ class NarrativeCheckPolicyRuntime(Protocol):
     """Optional policy for actions whose checks belong to a structured runtime."""
 
     def deferred_narrative_check_action_ids(self, instance: Any) -> list[str]: ...
+
+
+@runtime_checkable
+class NarrativeCheckResolverRuntime(Protocol):
+    """Optional resolver for free-text checks the core cannot roll itself.
+
+    The core only knows d20 and d100.  A ruleset whose checks use another shape
+    (attribute dice added together, dice pools, draws) declares
+    ``RulesetCapabilities.narrative_checks`` and answers this call instead, so
+    the dice stay inside the ruleset rather than being special-cased in the
+    engine.  ``requests`` are the planner's accepted CheckRequests; results
+    must come back in the same order, one per request.
+    """
+
+    def resolve_narrative_checks(
+        self,
+        instance: Any,
+        requests: list[dict[str, Any]],
+        rng: Any = None,
+    ) -> list[dict[str, Any]]: ...
 
 
 @runtime_checkable

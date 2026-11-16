@@ -583,3 +583,38 @@ def test_remote_adapter_binds_versioned_state_for_new_game():
             raise AssertionError("creation must not roll back")
 
     assert bind_ruleset_runtime(Transaction(), instance, runtime, rule, "zh-CN") is None
+
+
+def test_remote_adapter_forwards_a_narrative_check_batch():
+    """One round trip carries every free-text check the planner accepted."""
+
+    seen = []
+
+    def transport(request):
+        seen.append(request)
+        assert request["operation"] == "resolve_narrative_checks"
+        return {"request_id": request["request_id"], "ok": True, "result": [
+            {"check_id": item["check_id"], "roll": 9, "verdict": "成功"}
+            for item in request["payload"]["requests"]
+        ]}
+
+    runtime = RemoteRulesetRuntimeAdapter(
+        "external:demo", 1, RulesetCapabilities(narrative_checks=True), transport,
+    )
+
+    result = runtime.resolve_narrative_checks({"run_id": "r"}, [{"check_id": "a"}, {"check_id": "b"}])
+
+    assert [item["check_id"] for item in result] == ["a", "b"]
+    assert seen[0]["payload"]["instance"] == {"run_id": "r"}
+
+
+def test_remote_adapter_rejects_a_non_list_check_reply():
+    def transport(request):
+        return {"request_id": request["request_id"], "ok": True, "result": {"checks": []}}
+
+    runtime = RemoteRulesetRuntimeAdapter(
+        "external:demo", 1, RulesetCapabilities(narrative_checks=True), transport,
+    )
+
+    with pytest.raises(RuntimeProbeError):
+        runtime.resolve_narrative_checks({"run_id": "r"}, [{"check_id": "a"}])
