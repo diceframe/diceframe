@@ -135,6 +135,7 @@ class Dnd2024Runtime:
         character_lifecycle="rules_aware",
         authoritative_intents=True,
         deterministic_combat=True,
+        automatic_intents=True,
         versioned_state=True,
         session_zero=True,
         tutorial_coach=True,
