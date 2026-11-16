@@ -585,9 +585,9 @@ async def _resolve_live_party_authority(
             old_decision = session.get("decision")
             if isinstance(old_decision, dict) and old_decision.get("operation_id"):
                 ruleset_runtime.require_writable(instance)
-                ruleset_runtime.state(instance).setdefault("rest_decision_receipts", []).append(
-                    {**deepcopy(old_decision), "session_id": session.get("session_id")},
-                )
+                receipts = ruleset_runtime.state(instance).setdefault("rest_decision_receipts", [])
+                if not any(row.get("operation_id") == old_decision["operation_id"] for row in receipts):
+                    receipts.append({**deepcopy(old_decision), "session_id": session.get("session_id")})
             session = {
                 "status": "collecting",
                 "session_id": secrets.token_hex(16),
@@ -719,6 +719,12 @@ async def _decide_authority(
         if result.get("duplicate") or transaction.matches(staged):
             return result
         session = saved_rest_session(staged)
+        if not result.get("ok"):
+            # A failed time hook may also have changed module-owned outboxes
+            # or adventure state. Publish only the failure session, not those
+            # effects from the abandoned plan.
+            staged.replace_persisted_state_from(transaction.before)
+            _set_rest_session(staged, session)
         if session.get("decision", {}).get("operation_id"):
             state = ruleset_runtime.state(staged)
             state.setdefault("rest_decision_receipts", []).append({
