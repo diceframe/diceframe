@@ -414,7 +414,9 @@ def _mutated_bundle(base, feature_id: str, mutate):
         ("aura_of_protection", lambda f: f["parameters"].pop("aura_range_ft")),
         ("aura_of_devotion", lambda f: f["parameters"].update({"aura_condition_immunities": []})),
         ("aura_of_devotion", lambda f: f["parameters"].update({"aura_condition_immunities": ["charmed", "charmed"]})),
-        ("aura_of_devotion", lambda f: f["parameters"].update({"aura_condition_immunities": ["frightened"]})),
+        # F13 把 frightened 纳入光环免疫白名单后，"不受支持的条件"改用一条
+        # 引擎确实没有机械建模的 id 来钉住同一条边界。
+        ("aura_of_devotion", lambda f: f["parameters"].update({"aura_condition_immunities": ["blinded"]})),
         ("aura_of_devotion", lambda f: f["parameters"].update({"aura_condition_immunities": "charmed"})),
         ("aura_of_devotion", lambda f: f["parameters"].update({"aura_source_feature_id": "no_such_aura"})),
         ("aura_of_devotion", lambda f: f["parameters"].pop("aura_source_feature_id")),

@@ -344,12 +344,91 @@
             "reroll_cost_resource": "focus_points",
             "reroll_cost": 1
           }
+        },
+        {
+          "id": "self_restoration",
+          "minimum_level": 10,
+          "source_ref": "srd-5.2.1:p52:self-restoration",
+          "summary": "At the end of each of your turns, you can remove one of the following conditions from yourself: Charmed, Frightened, or Poisoned. In addition, forgoing food and drink doesn't give you levels of Exhaustion.",
+          "parameters": {
+            "removable_conditions": ["charmed", "frightened", "poisoned"],
+            "removable_at": "own_turn_end",
+            "exhaustion_sources_ignored": ["food_drink"]
+          }
+        },
+        {
+          "id": "evasion",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p51:evasion",
+          "summary": "When you're subjected to an effect that allows you to make a Dexterity saving throw to take only half damage, you instead take no damage on a success and half damage on a failure. You don't benefit from this feature while Incapacitated.",
+          "parameters": {"half_on_success_save": "dex"}
+        },
+        {
+          "id": "stunning_strike",
+          "minimum_level": 5,
+          "resource_id": "focus_points",
+          "source_ref": "srd-5.2.1:p51:stunning-strike",
+          "summary": "Once per turn when you hit a creature with a Monk weapon or an Unarmed Strike, you can expend 1 Focus Point to attempt a stunning strike. The target makes a Constitution saving throw: on a failure it has the Stunned condition, on a success its Speed is halved and the next attack roll against it has Advantage, both until the start of your next turn.",
+          "parameters": {
+            "once_per_turn": true,
+            "focus_cost": 1,
+            "save_ability": "con",
+            "on_fail_condition": "stunned",
+            "on_success_condition": "staggered",
+            "on_success_attack_condition": "staggered_opening",
+            "condition_duration": "attacker_next_turn_start"
+          }
+        },
+        {
+          "id": "empowered_strikes",
+          "minimum_level": 6,
+          "source_ref": "srd-5.2.1:p51:empowered-strikes",
+          "summary": "Whenever you deal damage with your Unarmed Strike, it can deal your choice of Force damage or its normal damage type.",
+          "parameters": {
+            "unarmed_damage_type_choices": ["force"]
+          }
+        },
+        {
+          "id": "open_hand_technique",
+          "owner": "subclass:warrior_of_the_open_hand",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p52:open-hand-technique",
+          "summary": "Whenever you hit a creature with an attack granted by your Flurry of Blows, you can impose one of the following on that target: Addle (no Opportunity Attacks until the start of its next turn), Push (Strength save or pushed up to 15 feet away), or Topple (Dexterity save or Prone).",
+          "parameters": {
+            "flurry_hit_choices": ["addle", "push", "topple"],
+            "addle_condition": "reaction_blocked",
+            "push_distance_ft": 15,
+            "push_save_ability": "str",
+            "topple_save_ability": "dex",
+            "topple_condition": "prone"
+          }
         }
       ]
     },
     "paladin": {
       "source_ref": "srd-5.2.1:p54:paladins-smite",
       "features": [
+        {
+          "id": "oath_of_devotion_spells",
+          "owner": "subclass:oath_of_devotion",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p56:oath-of-devotion-spells",
+          "summary": "When you reach a Paladin level specified in the Oath of Devotion Spells table, you thereafter always have the listed spells prepared.",
+          "parameters": {
+            "always_prepared": [
+              "3:spell:protection_from_evil_and_good",
+              "3:spell:shield_of_faith",
+              "5:spell:aid",
+              "5:spell:zone_of_truth",
+              "9:spell:beacon_of_hope",
+              "9:spell:dispel_magic",
+              "13:spell:freedom_of_movement",
+              "13:spell:guardian_of_faith",
+              "17:spell:commune",
+              "17:spell:flame_strike"
+            ]
+          }
+        },
         {
           "id": "paladins_smite",
           "minimum_level": 2,
@@ -383,6 +462,17 @@
           }
         },
         {
+          "id": "aura_of_courage",
+          "owner": "class:paladin",
+          "minimum_level": 10,
+          "source_ref": "srd-5.2.1:p55:aura-of-courage",
+          "summary": "You and your allies have Immunity to the Frightened condition while in your Aura of Protection. If a Frightened ally enters the aura, that condition has no effect on that ally while there.",
+          "parameters": {
+            "aura_source_feature_id": "aura_of_protection",
+            "aura_condition_immunities": ["frightened"]
+          }
+        },
+        {
           "id": "aura_expansion",
           "owner": "class:paladin",
           "minimum_level": 18,
@@ -391,6 +481,18 @@
           "parameters": {
             "aura_expands_feature_id": "aura_of_protection",
             "aura_range_override_ft": 30
+          }
+        },
+        {
+          "id": "radiant_strikes",
+          "owner": "class:paladin",
+          "minimum_level": 11,
+          "source_ref": "srd-5.2.1:p55:radiant-strikes",
+          "summary": "When you hit a target with an attack roll using a Melee weapon or an Unarmed Strike, the target takes an extra 1d8 Radiant damage.",
+          "parameters": {
+            "extra_damage": "1d8",
+            "extra_damage_type": "radiant",
+            "attack_kinds": ["melee_weapon", "unarmed_strike"]
           }
         }
       ]
@@ -559,6 +661,13 @@
           "equipment_requirement": {"no_heavy_armor": true}
         },
         {
+          "id": "danger_sense",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p29:danger-sense",
+          "summary": "You have Advantage on Dexterity saving throws unless you have the Incapacitated condition.",
+          "parameters": {"save_advantage_abilities": ["dex"]}
+        },
+        {
           "id": "rage",
           "minimum_level": 1,
           "source_ref": "srd-5.2.1:p28:rage",
@@ -585,12 +694,37 @@
           ]
         },
         {
+          "id": "mindless_rage",
+          "owner": "subclass:path_of_the_berserker",
+          "minimum_level": 6,
+          "source_ref": "srd-5.2.1:p30:mindless-rage",
+          "summary": "You have Immunity to the Charmed and Frightened conditions while your Rage is active. If you are Charmed or Frightened when you enter your Rage, the condition ends on you.",
+          "parameters": {
+            "immune_conditions": ["charmed", "frightened"],
+            "immune_while_condition": "rage",
+            "removes_conditions_on_gaining_condition": "rage",
+            "removes_conditions_on_gaining": ["charmed", "frightened"]
+          }
+        },
+        {
           "id": "retaliation",
           "owner": "subclass:path_of_the_berserker",
           "minimum_level": 10,
           "source_ref": "srd-5.2.1:p30:retaliation",
           "summary": "When a creature within 5 feet of you deals damage to you, you can use your Reaction to make one melee attack against it using a weapon or an Unarmed Strike.",
           "parameters": {"counterattack_range": 5}
+        },
+        {
+          "id": "relentless_rage",
+          "minimum_level": 11,
+          "source_ref": "srd-5.2.1:p30:relentless-rage",
+          "summary": "If you drop to 0 Hit Points while your Rage is active and don't die outright, you can make a DC 10 Constitution saving throw. On a success, your Hit Points change to twice your Barbarian level instead. Each use after the first raises the DC by 5; a Short or Long Rest resets it to 10.",
+          "parameters": {
+            "save_ability": "con",
+            "base_dc": 10,
+            "dc_step": 5,
+            "hp_multiplier": 2
+          }
         }
       ]
     },
@@ -663,6 +797,13 @@
           "parameters": {
             "damage_multiplier": 0.5
           }
+        },
+        {
+          "id": "evasion",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p63:evasion",
+          "summary": "When you're subjected to an effect that allows you to make a Dexterity saving throw to take only half damage, you instead take no damage on a success and half damage on a failure. You can't use this feature while Incapacitated.",
+          "parameters": {"half_on_success_save": "dex"}
         },
         {
           "id": "reliable_talent",
@@ -796,6 +937,29 @@
           }
         },
         {
+          "id": "magical_discoveries",
+          "owner": "subclass:college_of_lore",
+          "minimum_level": 6,
+          "source_ref": "srd-5.2.1:p35:magical-discoveries",
+          "summary": "You learn two spells of your choice from the Cleric, Druid, or Wizard spell list. A chosen spell must be a cantrip or a spell for which you have spell slots. You always have them prepared and they don't count against your Prepared Spells number; whenever you gain a Bard level, you can replace one of them.",
+          "parameters": {
+            "spell_choice_count": 2,
+            "spell_choice_replacement": 1,
+            "spell_choice_lists": ["class:cleric", "class:druid", "class:wizard"]
+          }
+        },
+        {
+          "id": "magical_secrets",
+          "minimum_level": 10,
+          "source_ref": "srd-5.2.1:p33:magical-secrets",
+          "summary": "Whenever you reach a Bard level and the Prepared Spells number increases, you can choose any of your new prepared spells from the Bard, Cleric, Druid, and Wizard lists; those spells count as Bard spells. Whenever you replace a prepared spell, it can come from those lists too. This never changes how many spells you can prepare.",
+          "parameters": {
+            "prepared_list_expansion": [
+              "class:bard", "class:cleric", "class:druid", "class:wizard"
+            ]
+          }
+        },
+        {
           "id": "peerless_skill",
           "owner": "subclass:college_of_lore",
           "minimum_level": 14,
@@ -835,6 +999,64 @@
       "source_ref": "srd-5.2.1:p64:sorcerer-features",
       "features": [
         {
+          "id": "font_of_magic",
+          "minimum_level": 2,
+          "resource_id": "sorcery_points",
+          "source_ref": "srd-5.2.1:p66:font-of-magic",
+          "summary": "You can expend a spell slot to gain Sorcery Points equal to its level (no action required), or spend Sorcery Points as a Bonus Action to create one temporary spell slot of level 1 to 5. A created slot vanishes when you finish a Long Rest.",
+          "parameters": {
+            "created_slot_costs": [
+              [1, 2, 2],
+              [2, 3, 3],
+              [3, 5, 5],
+              [4, 6, 7],
+              [5, 7, 9]
+            ]
+          },
+          "capabilities": [
+            {
+              "id": "font_slot_to_points",
+              "cost": {},
+              "requires_hostile_target": false,
+              "actions": [{"kind": "font_slot_to_points", "count": 1}]
+            },
+            {
+              "id": "font_create_slot",
+              "cost": {"bonus_action": 1},
+              "requires_hostile_target": false,
+              "actions": [{"kind": "font_create_slot", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "sorcerous_restoration",
+          "minimum_level": 5,
+          "resource_id": "sorcerous_restoration",
+          "source_ref": "srd-5.2.1:p66:sorcerous-restoration",
+          "summary": "Once per Long Rest, when you finish a Short Rest, regain expended Sorcery Points, up to a number equal to half your Sorcerer level (round down)."
+        },
+        {
+          "id": "draconic_spells",
+          "owner": "subclass:draconic_sorcery",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p70:draconic-spells",
+          "summary": "When you reach a Sorcerer level specified in the Draconic Spells table, you thereafter always have the listed spells prepared.",
+          "parameters": {
+            "always_prepared": [
+              "3:spell:alter_self",
+              "3:spell:chromatic_orb",
+              "3:spell:command",
+              "3:spell:dragon_s_breath",
+              "5:spell:fear",
+              "5:spell:fly",
+              "7:spell:arcane_eye",
+              "7:spell:charm_monster",
+              "9:spell:legend_lore",
+              "9:spell:summon_dragon"
+            ]
+          }
+        },
+        {
           "id": "draconic_resilience",
           "owner": "subclass:draconic_sorcery",
           "minimum_level": 3,
@@ -851,6 +1073,27 @@
     "warlock": {
       "source_ref": "srd-5.2.1:p70:warlock-features",
       "features": [
+        {
+          "id": "fiend_spells",
+          "owner": "subclass:fiend_patron",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p76:fiend-spells",
+          "summary": "When you reach a Warlock level specified in the Fiend Spells table, you thereafter always have the listed spells prepared.",
+          "parameters": {
+            "always_prepared": [
+              "3:spell:burning_hands",
+              "3:spell:command",
+              "3:spell:scorching_ray",
+              "3:spell:suggestion",
+              "5:spell:fireball",
+              "5:spell:stinking_cloud",
+              "7:spell:fire_shield",
+              "7:spell:wall_of_fire",
+              "9:spell:geas",
+              "9:spell:insect_plague"
+            ]
+          }
+        },
         {
           "id": "dark_ones_blessing",
           "owner": "subclass:fiend_patron",
@@ -875,6 +1118,117 @@
           "parameters": {
             "die_sides": 10
           }
+        },
+        {
+          "id": "fiendish_resilience",
+          "owner": "subclass:fiend_patron",
+          "minimum_level": 10,
+          "source_ref": "srd-5.2.1:p76:fiendish-resilience",
+          "summary": "Choose one damage type other than Force whenever you finish a Short or Long Rest. You have Resistance to that damage type until you choose a different one with this feature.",
+          "parameters": {"excluded_damage_types": ["force"]}
+        },
+        {
+          "id": "magical_cunning",
+          "owner": "class:warlock",
+          "minimum_level": 2,
+          "resource_id": "magical_cunning",
+          "source_ref": "srd-5.2.1:p72:magical-cunning",
+          "summary": "Once per Long Rest you can perform an esoteric rite for 1 minute. At the end of it, you regain expended Pact Magic spell slots, up to half your maximum (round up)."
+        },
+        {
+          "id": "contact_patron",
+          "owner": "class:warlock",
+          "minimum_level": 9,
+          "source_ref": "srd-5.2.1:p72:contact-patron",
+          "summary": "You always have Contact Other Plane prepared. Once per Long Rest you can cast it without expending a spell slot, and you automatically succeed on that spell's saving throw.",
+          "parameters": {
+            "always_prepared": [
+              "9:spell:contact_other_plane"
+            ],
+            "free_cast_slots": [
+              "contact_patron:5:long_rest:1:spell:contact_other_plane"
+            ],
+            "free_cast_save_auto": true
+          }
+        },
+        {
+          "id": "mystic_arcanum_6",
+          "owner": "class:warlock",
+          "minimum_level": 11,
+          "source_ref": "srd-5.2.1:p72:mystic-arcanum",
+          "summary": "Choose one level 6 Warlock spell as this arcanum. You can cast it once without expending a spell slot, and regain the use when you finish a Long Rest.",
+          "parameters": {
+            "free_cast_slots": [
+              "mystic_arcanum_6:6:long_rest:1:-"
+            ],
+            "free_cast_source": "class_list",
+            "free_cast_lists": [
+              "class:warlock"
+            ],
+            "free_cast_replacement": 1,
+            "free_cast_replacement_group": "mystic_arcanum"
+          }
+        },
+        {
+          "id": "mystic_arcanum_7",
+          "owner": "class:warlock",
+          "minimum_level": 13,
+          "source_ref": "srd-5.2.1:p72:mystic-arcanum",
+          "summary": "Choose one level 7 Warlock spell as this arcanum. You can cast it once without expending a spell slot, and regain the use when you finish a Long Rest.",
+          "parameters": {
+            "free_cast_slots": [
+              "mystic_arcanum_7:7:long_rest:1:-"
+            ],
+            "free_cast_source": "class_list",
+            "free_cast_lists": [
+              "class:warlock"
+            ],
+            "free_cast_replacement": 1,
+            "free_cast_replacement_group": "mystic_arcanum"
+          }
+        },
+        {
+          "id": "mystic_arcanum_8",
+          "owner": "class:warlock",
+          "minimum_level": 15,
+          "source_ref": "srd-5.2.1:p72:mystic-arcanum",
+          "summary": "Choose one level 8 Warlock spell as this arcanum. You can cast it once without expending a spell slot, and regain the use when you finish a Long Rest.",
+          "parameters": {
+            "free_cast_slots": [
+              "mystic_arcanum_8:8:long_rest:1:-"
+            ],
+            "free_cast_source": "class_list",
+            "free_cast_lists": [
+              "class:warlock"
+            ],
+            "free_cast_replacement": 1,
+            "free_cast_replacement_group": "mystic_arcanum"
+          }
+        },
+        {
+          "id": "mystic_arcanum_9",
+          "owner": "class:warlock",
+          "minimum_level": 17,
+          "source_ref": "srd-5.2.1:p72:mystic-arcanum",
+          "summary": "Choose one level 9 Warlock spell as this arcanum. You can cast it once without expending a spell slot, and regain the use when you finish a Long Rest.",
+          "parameters": {
+            "free_cast_slots": [
+              "mystic_arcanum_9:9:long_rest:1:-"
+            ],
+            "free_cast_source": "class_list",
+            "free_cast_lists": [
+              "class:warlock"
+            ],
+            "free_cast_replacement": 1,
+            "free_cast_replacement_group": "mystic_arcanum"
+          }
+        },
+        {
+          "id": "eldritch_master",
+          "owner": "class:warlock",
+          "minimum_level": 20,
+          "source_ref": "srd-5.2.1:p72:eldritch-master",
+          "summary": "When you use your Magical Cunning feature, you regain all your expended Pact Magic spell slots instead of half of them."
         }
       ]
     },
@@ -882,18 +1236,193 @@
       "source_ref": "srd-5.2.1:p40:cleric-features",
       "features": [
         {
+          "id": "life_domain_spells",
+          "owner": "subclass:life_domain",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p40:life-domain-spells",
+          "summary": "When you reach a Cleric level specified in the Life Domain Spells table, you thereafter always have the listed spells prepared.",
+          "parameters": {
+            "always_prepared": [
+              "3:spell:aid",
+              "3:spell:bless",
+              "3:spell:cure_wounds",
+              "3:spell:lesser_restoration",
+              "5:spell:mass_healing_word",
+              "5:spell:revivify",
+              "7:spell:aura_of_life",
+              "7:spell:death_ward",
+              "9:spell:greater_restoration",
+              "9:spell:mass_cure_wounds"
+            ]
+          }
+        },
+        {
           "id": "supreme_healing",
           "owner": "subclass:life_domain",
           "minimum_level": 17,
           "source_ref": "srd-5.2.1:p40:supreme-healing",
           "summary": "Whenever you cast a spell or use Channel Divinity to restore Hit Points with a die roll, you can forgo rolling: each die instead contributes its maximum value.",
           "parameters": {}
+        },
+        {
+          "id": "blessed_strikes",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p41:blessed-strikes",
+          "summary": "You gain one of the following options of your choice: Divine Strike or Potent Spellcasting.",
+          "choice": {
+            "id": "blessed_strikes_option",
+            "kind": "feature_option",
+            "category": "feature",
+            "count": 1,
+            "enabled_options": ["feature:divine_strike", "feature:potent_spellcasting"]
+          }
+        },
+        {
+          "id": "divine_strike",
+          "option_of": "blessed_strikes",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p41:blessed-strikes",
+          "summary": "Once on each of your turns when you hit a creature with an attack roll using a weapon, you can cause the target to take an extra 1d8 Necrotic or Radiant damage (your choice).",
+          "parameters": {
+            "damage_dice": "1d8",
+            "damage_types": ["necrotic", "radiant"],
+            "once_per_turn": true,
+            "attack_kinds": ["weapon"]
+          }
+        },
+        {
+          "id": "potent_spellcasting",
+          "option_of": "blessed_strikes",
+          "owner": "class:cleric",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p41:blessed-strikes",
+          "summary": "Add your Wisdom modifier to the damage you deal with any Cleric cantrip.",
+          "parameters": {
+            "cantrip_source_class": "class:cleric",
+            "ability": "wis"
+          }
+        },
+        {
+          "id": "improved_blessed_strikes",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p41:improved-blessed-strikes",
+          "summary": "The option you chose for Blessed Strikes grows more powerful: Divine Strike's extra damage becomes 2d8, and Potent Spellcasting can grant Temporary Hit Points equal to twice your Wisdom modifier to yourself or a creature within 60 feet.",
+          "parameters": {
+            "divine_strike_dice": "2d8",
+            "temp_hp_ability_multiplier": 2,
+            "temp_hp_range_ft": 60
+          }
+        }
+      ]
+    },
+    "druid": {
+      "source_ref": "srd-5.2.1:p46:druid-features",
+      "features": [
+        {
+          "id": "natural_recovery",
+          "owner": "subclass:circle_of_the_land",
+          "minimum_level": 6,
+          "resource_id": "natural_recovery",
+          "source_ref": "srd-5.2.1:p46:natural-recovery",
+          "summary": "Once per Long Rest, when you finish a Short Rest, recover expended spell slots with a combined level no higher than half your Druid level (round up); none of them may be level 6 or higher."
+        },
+        {
+          "id": "circle_of_the_land_spells",
+          "owner": "subclass:circle_of_the_land",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p46:circle-of-the-land-spells",
+          "summary": "Whenever you finish a Long Rest, choose one type of land: arid, polar, temperate, or tropical; you have the spells listed for your Druid level and lower prepared. The choice replaces the previous land's list rather than adding to it.",
+          "parameters": {
+            "terrain_options": ["arid", "polar", "temperate", "tropical"],
+            "always_prepared_terrain": [
+              "arid:3:spell:blur",
+              "arid:3:spell:burning_hands",
+              "arid:3:spell:fire_bolt",
+              "arid:5:spell:fireball",
+              "arid:7:spell:blight",
+              "arid:9:spell:wall_of_stone",
+              "polar:3:spell:fog_cloud",
+              "polar:3:spell:hold_person",
+              "polar:3:spell:ray_of_frost",
+              "polar:5:spell:sleet_storm",
+              "polar:7:spell:ice_storm",
+              "polar:9:spell:cone_of_cold",
+              "temperate:3:spell:misty_step",
+              "temperate:3:spell:shocking_grasp",
+              "temperate:3:spell:sleep",
+              "temperate:5:spell:lightning_bolt",
+              "temperate:7:spell:freedom_of_movement",
+              "temperate:9:spell:tree_stride",
+              "tropical:3:spell:acid_splash",
+              "tropical:3:spell:ray_of_sickness",
+              "tropical:3:spell:web",
+              "tropical:5:spell:stinking_cloud",
+              "tropical:7:spell:polymorph",
+              "tropical:9:spell:insect_plague"
+            ]
+          }
+        },
+        {
+          "id": "elemental_fury",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p43:elemental-fury",
+          "summary": "You gain one of the following options of your choice: Potent Spellcasting or Primal Strike.",
+          "choice": {
+            "id": "elemental_fury_option",
+            "kind": "feature_option",
+            "category": "feature",
+            "count": 1,
+            "enabled_options": ["feature:potent_spellcasting", "feature:primal_strike"]
+          }
+        },
+        {
+          "id": "potent_spellcasting",
+          "option_of": "elemental_fury",
+          "owner": "class:druid",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p43:elemental-fury",
+          "summary": "Add your Wisdom modifier to the damage you deal with any Druid cantrip.",
+          "parameters": {
+            "cantrip_source_class": "class:druid",
+            "ability": "wis"
+          }
+        },
+        {
+          "id": "primal_strike",
+          "option_of": "elemental_fury",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p43:elemental-fury",
+          "summary": "Once on each of your turns when you hit a creature with an attack roll using a weapon or a Beast form's attack in Wild Shape, you can cause the target to take an extra 1d8 Cold, Fire, Lightning, or Thunder damage (your choice).",
+          "parameters": {
+            "damage_dice": "1d8",
+            "damage_types": ["cold", "fire", "lightning", "thunder"],
+            "once_per_turn": true,
+            "attack_kinds": ["weapon", "beast_form"]
+          }
+        },
+        {
+          "id": "improved_elemental_fury",
+          "minimum_level": 15,
+          "source_ref": "srd-5.2.1:p43:improved-elemental-fury",
+          "summary": "The option you chose for Elemental Fury grows more powerful: Primal Strike's extra damage becomes 2d8, and Potent Spellcasting increases the range of your Druid cantrips with a range of 10 feet or more by 300 feet.",
+          "parameters": {
+            "primal_strike_dice": "2d8",
+            "range_bonus_ft": 300,
+            "range_minimum_ft": 10
+          }
         }
       ]
     },
     "wizard": {
       "source_ref": "srd-5.2.1:p82:wizard-features",
       "features": [
+        {
+          "id": "arcane_recovery",
+          "minimum_level": 1,
+          "resource_id": "arcane_recovery",
+          "source_ref": "srd-5.2.1:p78:arcane-recovery",
+          "summary": "Once per Long Rest, when you finish a Short Rest, recover expended spell slots with a combined level no higher than half your Wizard level (round up); none of them may be level 6 or higher."
+        },
         {
           "id": "scholar",
           "minimum_level": 2,
@@ -928,6 +1457,38 @@
             "usage_scope": "long_rest",
             "self_damage_die": 12,
             "initial_self_damage_dice": 2
+          }
+        },
+        {
+          "id": "spell_mastery",
+          "minimum_level": 18,
+          "source_ref": "srd-5.2.1:p79:spell-mastery",
+          "summary": "Choose a level 1 and a level 2 spell in your spellbook that have a casting time of an action. You always have them prepared and can cast them at their lowest level without expending a spell slot. Each Long Rest you can study your spellbook and replace one of them with another eligible spell of the same level.",
+          "parameters": {
+            "free_cast_slots": [
+              "spell_mastery_1:1:unlimited:0:-",
+              "spell_mastery_2:2:unlimited:0:-"
+            ],
+            "free_cast_source": "spellbook",
+            "free_cast_casting_time": "Action",
+            "free_cast_prepares": true,
+            "free_cast_replacement": 0,
+            "free_cast_rest_replace": 1
+          }
+        },
+        {
+          "id": "signature_spells",
+          "minimum_level": 20,
+          "source_ref": "srd-5.2.1:p79:signature-spells",
+          "summary": "Choose two level 3 spells in your spellbook as your signature spells. You always have them prepared and can cast each once at level 3 without expending a spell slot, regaining both uses when you finish a Short or Long Rest.",
+          "parameters": {
+            "free_cast_slots": [
+              "signature_1:3:short_rest:1:-",
+              "signature_2:3:short_rest:1:-"
+            ],
+            "free_cast_source": "spellbook",
+            "free_cast_prepares": true,
+            "free_cast_replacement": 0
           }
         }
       ]

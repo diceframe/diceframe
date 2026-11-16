@@ -758,12 +758,8 @@ class CombatCheckWindowsMixin:
         order never hides a cheaper option -- it only fixes which one is asked
         first, which is what makes a replay reproducible.
 
-        A death save is the one surface that does not take the reroll faces:
-        its tally branches on the face alone and the death-save contract keeps
-        one settled result per turn (the deviation S0-E3 recorded).  A second
-        face would make that record ambiguous, so only the faces that do not
-        replay the roll are offered -- Stroke of Luck rewrites the d20 and
-        Dark One's Own Luck adds a die to the roll already made.
+        Death saves use the same reroll faces, but natural 1 remains a failure
+        regardless of the total. Only replacing the natural face can save it.
         """
 
         if roller.get("side") != "party":
@@ -772,11 +768,9 @@ class CombatCheckWindowsMixin:
             return []
         surface = str(settlement.get("surface") or "")
         failed = not self._nonattack_check_success(check)
-        reroll_faces = (
-            ("stroke_of_luck_save",)
-            if surface == "death_save"
-            else ("stroke_of_luck_save", "indomitable", "disciplined_survivor")
-        )
+        # Replacement/reroll faces can rescue a natural 1 even when its total
+        # reaches 10; adding a bonus die cannot change that natural face.
+        reroll_faces = ("stroke_of_luck_save", "indomitable", "disciplined_survivor")
         pairs: list[tuple[str, str]] = []
         if failed:
             for code in reroll_faces:
@@ -784,11 +778,11 @@ class CombatCheckWindowsMixin:
                 if owner_id:
                     pairs.append((code, owner_id))
             # A natural 1 on a death save is two failures no matter the total,
-            # so a die can never help it.  Stroke of Luck rewrites the face and
-            # therefore still can, which is why only Dark Luck is skipped.
+            # so adding a die can never help it.  Faces that *replace* the roll
+            # (Stroke of Luck, and now the rerolls above) still can, which is
+            # why only Dark One's Own Luck is skipped here.
             skip_dool = (
-                str(settlement.get("surface") or "") == "death_save"
-                and int(check.get("natural", 0) or 0) == 1
+                surface == "death_save" and int(check.get("natural", 0) or 0) == 1
             )
             owner_id = "" if skip_dool else self._dool_owner(instance, roller)
             if owner_id:
@@ -856,11 +850,12 @@ class CombatCheckWindowsMixin:
     ) -> dict[str, Any] | None:
         """The first window on a failing death save, or ``None``.
 
-        A decisive save (natural 20, or a total of 10+) opens nothing, and a
-        natural 1 cannot be rescued by a die -- it costs two failures whatever
-        the total.  Stroke of Luck still applies to either, because it rewrites
-        the face instead of adding to the total.  Reroll faces stay closed
-        here; see ``_save_window_candidates`` for why.
+        A decisive save (natural 20, or a total of 10+) opens nothing.  Every
+        legal face is available here, including the rerolls: a reroll discards
+        the old die, so a failed death save can be rerolled into a success and
+        a natural 1 stops being two failures once its face is gone.  Only
+        *adding* a die is skipped on a natural 1 -- see
+        ``_save_window_candidates``.
         """
 
         payload = dict(settlement or {})

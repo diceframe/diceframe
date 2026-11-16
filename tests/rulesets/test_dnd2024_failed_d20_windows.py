@@ -586,6 +586,65 @@ def test_dark_luck_can_rescue_a_death_save_without_double_counting(
     assert _pool(instance, "dark_ones_own_luck")["current"] == 1
 
 
+def _failed_death_save(engine, instance, rolls: list[int]) -> dict:
+    """Roll one failing death save and return the window it opened."""
+
+    _canonical(instance)["resources"]["hp"] = 0
+    _to_actor(engine, instance, "player:gm")
+    events = _apply(engine, instance, {
+        "intent_id": "death-save", "type": "death_save",
+        "expected_version": _state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+    }, SequenceRng(rolls))
+    assert events[-1]["type"] == "dnd2024.decision.pending", events
+    window = _pending(instance)
+    assert window["surface"] == "death_save"
+    return window
+
+
+def test_indomitable_rerolls_a_failed_death_save_and_lands_once(
+    runtime: Dnd2024Runtime, sheets: dict[str, dict],
+) -> None:
+    """Ruling: a death save offers the reroll faces, not just the die faces.
+
+    A reroll discards the old die rather than adding to it, so it can rescue a
+    death save even when a bonus die could not -- and the tally still lands
+    exactly once, after every legal face has had its turn.
+    """
+
+    engine, instance = _combat(runtime, {"gm": sheets["fighter9"]}, rolls=[20, 1])
+    window = _failed_death_save(engine, instance, [4])
+    assert window["window_code"] == "indomitable"
+    assert window["reroll_bonus"] == 9
+
+    resolved = _decide(engine, instance, window, "spend", [15])
+    check = _checked(_events(resolved), "death_save")
+    assert check["natural"] == 15
+    assert check["success"] is True
+    # The old face is kept for the audit trail, not as a second result.
+    assert check["rerolled_natural"] == 4
+    engine.apply_batch(instance, resolved["event_batch"])
+    death_saves = _canonical(instance)["conditions"]["death_saves"]
+    assert (death_saves["successes"], death_saves["failures"]) == (1, 0)
+    assert int(_canonical(instance)["resources"]["hp"]) == 0
+    assert _pool(instance, "indomitable")["current"] == 0
+
+
+def test_a_death_save_reroll_discards_the_natural_one(
+    runtime: Dnd2024Runtime, sheets: dict[str, dict],
+) -> None:
+    """A natural 1 costs two failures only while that face still exists."""
+
+    engine, instance = _combat(runtime, {"gm": sheets["fighter9"]}, rolls=[20, 1])
+    window = _failed_death_save(engine, instance, [1])
+    assert window["window_code"] == "indomitable"
+
+    resolved = _decide(engine, instance, window, "spend", [12])
+    engine.apply_batch(instance, resolved["event_batch"])
+    death_saves = _canonical(instance)["conditions"]["death_saves"]
+    assert (death_saves["successes"], death_saves["failures"]) == (1, 0)
+
+
 # --------------------------------------------------------------------------
 # matrix 9-11: Countercharm
 # --------------------------------------------------------------------------
