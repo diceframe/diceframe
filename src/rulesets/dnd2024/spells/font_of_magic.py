@@ -169,7 +169,7 @@ def declaring_class_level(character: Mapping[str, Any], class_id: str) -> int:
 
 def slot_to_points_plan(
     payload: Mapping[str, Any] | None, slot_level: int,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """Plan "expend a slot, gain its level in Sorcery Points"."""
 
     if isinstance(slot_level, bool) or not isinstance(slot_level, int):
@@ -179,7 +179,8 @@ def slot_to_points_plan(
     character = _canonical(payload)
     slots = _class_magic(character).get("slots_current")
     slots = slots if isinstance(slots, Mapping) else {}
-    if int(slots.get(str(slot_level), 0) or 0) < 1:
+    temporary = font_slots(character).get(str(slot_level), 0) > 0
+    if not temporary and int(slots.get(str(slot_level), 0) or 0) < 1:
         raise FontOfMagicError("the selected spell slot is already spent")
     current, maximum = sorcery_points(character)
     if current + slot_level > maximum:
@@ -188,6 +189,7 @@ def slot_to_points_plan(
         )
     return {
         "slot_level": slot_level,
+        "slot_source": "font" if temporary else "ordinary",
         "points": slot_level,
         "before": current,
         "after": current + slot_level,
@@ -227,15 +229,18 @@ def create_slot_plan(
 
 
 def apply_slot_to_points(
-    character: dict[str, Any], plan: Mapping[str, int],
+    character: dict[str, Any], plan: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     """Commit a planned conversion into ``character``; returns its events."""
 
     level = str(int(plan["slot_level"]))
-    slots = _class_magic(character).get("slots_current") or {}
+    temporary = plan["slot_source"] == "font"
+    slots = _font_storage(character) if temporary else (_class_magic(character).get("slots_current") or {})
     if int(slots.get(level, 0) or 0) < 1:  # pragma: no cover - planned above
         raise FontOfMagicError("the selected spell slot is already spent")
     slots[level] = int(slots[level]) - 1
+    if temporary and slots[level] == 0:
+        slots.pop(level)
     pool = dict(resource_state(character, POINTS_RESOURCE_ID))
     if not pool:  # pragma: no cover - planned above
         raise FontOfMagicError("Sorcery Points are not initialized")
@@ -243,7 +248,7 @@ def apply_slot_to_points(
     _set_points(character, pool)
     events = [
         {
-            "type": "dnd2024.spell.slot_spent",
+            "type": "dnd2024.spell.font_slot_spent" if temporary else "dnd2024.spell.slot_spent",
             "slot_level": int(plan["slot_level"]),
             # 槽换点不是施法：它既不用动作，也不占用本回合的"每回合一次施法位"。
             "exchange": True,
