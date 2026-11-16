@@ -220,7 +220,12 @@
     "wizard_subclass": "Wizard Subclass",
     "words_of_creation": "Words of Creation",
     "additional_fighting_style": "Additional Fighting Style",
-    "ranger": "Ranger"
+    "ranger": "Ranger",
+    "expertise": "Expertise",
+    "jack_of_all_trades": "Jack of All Trades",
+    "reliable_talent": "Reliable Talent",
+    "scholar": "Scholar",
+    "remarkable_athlete": "Remarkable Athlete"
   },
   "classes": {
     "monk": {
@@ -325,6 +330,20 @@
               "actions": [{"kind": "dash"}, {"kind": "disengage"}]
             }
           ]
+        },
+        {
+          "id": "disciplined_survivor",
+          "minimum_level": 14,
+          "resource_id": "focus_points",
+          "source_ref": "srd-5.2.1:p52:disciplined-survivor",
+          "summary": "You gain proficiency in all saving throws. In addition, when you fail a saving throw, you can expend 1 Focus Point to reroll it, and you must use the new roll.",
+          "parameters": {
+            "saving_throw_proficiency": "all",
+            "reroll": true,
+            "trigger": "save_failure",
+            "reroll_cost_resource": "focus_points",
+            "reroll_cost": 1
+          }
         }
       ]
     },
@@ -422,6 +441,18 @@
           ]
         },
         {
+          "id": "tactical_mind",
+          "minimum_level": 2,
+          "resource_id": "second_wind",
+          "source_ref": "srd-5.2.1:p48:tactical-mind",
+          "summary": "When you fail an ability check, you can expend a use of Second Wind to roll 1d10 and add the number rolled to the ability check, rather than regaining Hit Points. If the check still fails, this use of Second Wind isn't expended.",
+          "parameters": {
+            "die_sides": 10,
+            "trigger": "own_check_failure",
+            "refund_on_failure": true
+          }
+        },
+        {
           "id": "extra_attack",
           "minimum_level": 5,
           "summary": "When you take the Attack action, you can attack twice instead of once. Extra Attack never stacks: a character that gains it from a second class uses the highest value, not the sum.",
@@ -434,6 +465,18 @@
           "source_ref": "srd-5.2.1:p49:improved-critical",
           "summary": "Your attack rolls with weapons and Unarmed Strikes can score a Critical Hit on a roll of 19 or 20 on the d20.",
           "parameters": {"crit_threshold": 19}
+        },
+        {
+          "id": "remarkable_athlete",
+          "owner": "subclass:champion",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p49:remarkable-athlete",
+          "summary": "You have Advantage on Initiative rolls and Strength (Athletics) checks. In addition, immediately after you score a Critical Hit, you can move up to half your Speed without provoking Opportunity Attacks.",
+          "parameters": {
+            "initiative_advantage": true,
+            "skill_advantage_refs": ["skill:athletics"],
+            "critical_hit_move_speed_divisor": 2
+          }
         },
         {
           "id": "additional_fighting_style",
@@ -474,6 +517,18 @@
             "death_save_crit_threshold": 18,
             "turn_start_regen_base": 5,
             "turn_start_regen_ability": "con"
+          }
+        },
+        {
+          "id": "indomitable",
+          "minimum_level": 9,
+          "resource_id": "indomitable",
+          "source_ref": "srd-5.2.1:p48:indomitable",
+          "summary": "When you fail a saving throw, you can reroll it with a bonus equal to your Fighter level, and you must use the new roll. You have two uses at level 13 and three at level 17, and you regain all uses on a Long Rest.",
+          "parameters": {
+            "reroll": true,
+            "trigger": "save_failure",
+            "reroll_bonus_from_class_level": true
           }
         },
         {
@@ -543,6 +598,21 @@
       "source_ref": "srd-5.2.1:p61:rogue-features",
       "features": [
         {
+          "id": "expertise",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p62:rogue-expertise",
+          "summary": "Choose two of your skill proficiencies with which you lack Expertise. You gain Expertise in those skills. At Rogue level 6, choose two more.",
+          "choice": {
+            "id": "expertise_skills",
+            "kind": "skill_proficiency",
+            "category": "skill",
+            "grants": "expertise",
+            "count": 2,
+            "requires_proficiency": true,
+            "exclude_expertise": true
+          }
+        },
+        {
           "id": "sneak_attack",
           "minimum_level": 1,
           "source_ref": "srd-5.2.1:p61:sneak-attack",
@@ -593,12 +663,47 @@
           "parameters": {
             "damage_multiplier": 0.5
           }
+        },
+        {
+          "id": "reliable_talent",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p63:reliable-talent",
+          "summary": "Whenever you make an ability check that uses one of your skill or tool proficiencies, you can treat a d20 roll of 9 or lower as a 10.",
+          "parameters": {
+            "ability_check_floor": 10
+          }
+        },
+        {
+          "id": "stroke_of_luck",
+          "minimum_level": 20,
+          "resource_id": "stroke_of_luck",
+          "source_ref": "srd-5.2.1:p63:stroke-of-luck",
+          "summary": "When you fail a D20 Test, you can turn the roll into a 20. Once you use this feature, you can't use it again until you finish a Short or Long Rest.",
+          "parameters": {
+            "replace_natural_with": 20,
+            "trigger": "own_check_failure"
+          }
         }
       ]
     },
     "ranger": {
       "source_ref": "srd-5.2.1:p59:ranger-features",
       "features": [
+        {
+          "id": "expertise",
+          "minimum_level": 9,
+          "source_ref": "srd-5.2.1:p59:ranger-expertise",
+          "summary": "Choose two of your skill proficiencies with which you lack Expertise. You gain Expertise in those skills.",
+          "choice": {
+            "id": "expertise_skills",
+            "kind": "skill_proficiency",
+            "category": "skill",
+            "grants": "expertise",
+            "count": 2,
+            "requires_proficiency": true,
+            "exclude_expertise": true
+          }
+        },
         {
           "id": "roving",
           "minimum_level": 6,
@@ -617,6 +722,67 @@
       "source_ref": "srd-5.2.1:p31:bard-features",
       "features": [
         {
+          "id": "bardic_inspiration",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p31:bardic-inspiration",
+          "summary": "As a Bonus Action, you can inspire another creature within 60 feet of yourself who can see or hear you. That creature gains one of your Bardic Inspiration dice. Once within the next hour when the creature fails a D20 Test, it can roll the die and add the number rolled to the d20. A creature can have only one Bardic Inspiration die at a time.",
+          "parameters": {
+            "trigger": "grant",
+            "die_sides_track": "bardic_die",
+            "range_ft": 60
+          },
+          "resource_id": "bardic_inspiration",
+          "capabilities": [
+            {
+              "id": "bardic_inspiration",
+              "cost": {"bonus_action": 1, "resources": [{"id": "bardic_inspiration", "amount": 1}]},
+              "requires_hostile_target": false,
+              "actions": [{"kind": "bardic_grant", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "font_of_inspiration",
+          "minimum_level": 5,
+          "source_ref": "srd-5.2.1:p32:font-of-inspiration",
+          "summary": "You now regain all your expended uses of Bardic Inspiration when you finish a Short or Long Rest. In addition, you can expend a spell slot (no action required) to regain one expended use of Bardic Inspiration.",
+          "parameters": {
+            "slot_exchange_per_level": 1
+          },
+          "capabilities": [
+            {
+              "id": "font_slot_exchange",
+              "cost": {},
+              "requires_hostile_target": false,
+              "actions": [{"kind": "inspiration_slot_exchange", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "jack_of_all_trades",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p32:jack-of-all-trades",
+          "summary": "You can add half your Proficiency Bonus (round down) to any ability check you make that uses a skill proficiency you lack and that doesn't otherwise use your Proficiency Bonus.",
+          "parameters": {
+            "half_proficiency_bonus": true
+          }
+        },
+        {
+          "id": "expertise",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p32:bard-expertise",
+          "summary": "Choose two of your skill proficiencies with which you lack Expertise. You gain Expertise in those skills. At Bard level 9, choose two more.",
+          "choice": {
+            "id": "expertise_skills",
+            "kind": "skill_proficiency",
+            "category": "skill",
+            "grants": "expertise",
+            "count": 2,
+            "requires_proficiency": true,
+            "exclude_expertise": true
+          }
+        },
+        {
           "id": "cutting_words",
           "owner": "subclass:college_of_lore",
           "minimum_level": 3,
@@ -627,6 +793,40 @@
             "trigger": "attack_roll_success",
             "die_sides_track": "bardic_die",
             "range_ft": 60
+          }
+        },
+        {
+          "id": "peerless_skill",
+          "owner": "subclass:college_of_lore",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p35:peerless-skill",
+          "summary": "When you make an ability check or attack roll and fail, you can expend one use of Bardic Inspiration; roll the Bardic Inspiration die and add the number rolled to the d20, potentially turning the failure into a success. On a failure, the Bardic Inspiration isn't expended.",
+          "parameters": {
+            "own_check_failure": true,
+            "die_sides_track": "bardic_die"
+          },
+          "resource_id": "bardic_inspiration"
+        },
+        {
+          "id": "superior_inspiration",
+          "minimum_level": 18,
+          "source_ref": "srd-5.2.1:p33:superior-inspiration",
+          "summary": "When you roll Initiative, you regain expended uses of Bardic Inspiration until you have two if you have fewer than that.",
+          "parameters": {
+            "initiative_refill": 2
+          }
+        },
+        {
+          "id": "countercharm",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p33:countercharm",
+          "summary": "If you or a creature within 30 feet of you fails a saving throw against an effect that applies the Charmed or Frightened condition, you can take a Reaction to cause the save to be rerolled, and the new roll has Advantage.",
+          "parameters": {
+            "range_ft": 30,
+            "trigger": "save_failure",
+            "reroll": true,
+            "reroll_mode": "advantage",
+            "applies_conditions": ["charmed", "frightened"]
           }
         }
       ]
@@ -694,6 +894,29 @@
     "wizard": {
       "source_ref": "srd-5.2.1:p82:wizard-features",
       "features": [
+        {
+          "id": "scholar",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p78:scholar",
+          "summary": "Choose one of the following skills in which you have proficiency: Arcana, History, Investigation, Medicine, Nature, or Religion. You have Expertise in the chosen skill.",
+          "choice": {
+            "id": "scholar_skill",
+            "kind": "skill_proficiency",
+            "category": "skill",
+            "grants": "expertise",
+            "count": 1,
+            "requires_proficiency": true,
+            "exclude_expertise": true,
+            "enabled_options": [
+              "skill:arcana",
+              "skill:history",
+              "skill:investigation",
+              "skill:medicine",
+              "skill:nature",
+              "skill:religion"
+            ]
+          }
+        },
         {
           "id": "overchannel",
           "owner": "subclass:evoker",

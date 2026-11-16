@@ -351,6 +351,83 @@ class CombatReducerMixin:
                 raise EventBatchError(f"class resource is already spent: {resource_id}")
             state["current"] = current - amount
             return
+        if event_type == "dnd2024.bardic.granted":
+            # 激励骰实例是唯一的状态记录：授予时间与到期分钟由 resolution
+            # 从权威世界时钟算出写进事件，reducer 不读时钟。同一持有者的
+            # 有效骰至多一个，重复授予 fail closed；过期实例在这里顺带清理
+            # （读取/视图按同一谓词隐藏，无需后台任务）。
+            granted_at = int(event["granted_at_minute"])
+            instances = [
+                item for item in combat.get("bardic_instances") or []
+                if isinstance(item, dict)
+                and int(item.get("expires_at_minute", 0) or 0) > granted_at
+                and str(item.get("status") or "") == "active"
+            ]
+            holder_id = str(event["holder_id"])
+            if any(str(item.get("holder_id") or "") == holder_id for item in instances):
+                raise EventBatchError("the holder already has a Bardic Inspiration die")
+            instances.append({
+                "die_instance_id": str(event["die_instance_id"]),
+                "holder_id": holder_id,
+                "source_actor_id": str(event["actor_id"]),
+                "die_sides": int(event["die_sides"]),
+                "granted_at_minute": granted_at,
+                "expires_at_minute": int(event["expires_at_minute"]),
+                "status": "active",
+            })
+            combat["bardic_instances"] = instances
+            return
+        if event_type == "dnd2024.bardic.consumed":
+            # 掷过的骰实例留在列表里留痕（status "rolled"），但读取谓词只认
+            # "active"，所以它立即不可再用，也不会阻止新的授予。
+            holder_id = str(event["holder_id"])
+            combat["bardic_instances"] = [
+                item if not (
+                    isinstance(item, dict)
+                    and str(item.get("holder_id") or "") == holder_id
+                    and str(item.get("status") or "") == "active"
+                ) else {**item, "status": "rolled"}
+                for item in combat.get("bardic_instances") or []
+            ]
+            return
+        if event_type == "dnd2024.class_resource.refunded":
+            # 失败退款（Peerless Skill）：同一批次先扣后退，上限仍是目录
+            # 声明的最大值，不会退成超过上限。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion class resources are canonical")
+            character = (
+                snapshot["characters"][raw_id]
+                if kind == "player"
+                else self._companion_character(snapshot, raw_id)
+            )
+            class_state = character.setdefault("resources", {}).setdefault("class", {})
+            state = class_state.get(str(event["resource_id"]))
+            if not isinstance(state, dict):
+                raise EventBatchError("class resource is not initialized")
+            amount = int(event.get("amount", 1) or 1)
+            state["current"] = min(int(state.get("maximum", 0) or 0), int(state.get("current", 0) or 0) + amount)
+            return
+        if event_type == "dnd2024.class_resource.refilled":
+            # Superior Inspiration: "regain expended uses until you have two".
+            # The target is a floor, not a gift: never raise above the
+            # catalogue maximum (a +1 Charisma bard still caps at one use).
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion class resources are canonical")
+            character = (
+                snapshot["characters"][raw_id]
+                if kind == "player"
+                else self._companion_character(snapshot, raw_id)
+            )
+            class_state = character.setdefault("resources", {}).setdefault("class", {})
+            state = class_state.get(str(event["resource_id"]))
+            if not isinstance(state, dict):
+                raise EventBatchError("class resource is not initialized")
+            maximum = int(state.get("maximum", 0) or 0)
+            target = min(int(event["target"]), maximum)
+            state["current"] = max(int(state.get("current", 0) or 0), target)
+            return
         if event_type == "dnd2024.attack.spent":
             economy = combat["economy"]
             if int(economy.get("attacks_remaining", 0) or 0) > 0:
@@ -365,9 +442,13 @@ class CombatReducerMixin:
                 economy["attacks_remaining"] = max(0, int(event["attacks_per_action"]) - 1)
             return
         if event_type == "dnd2024.movement.granted":
-            combat["economy"]["movement"] = int(combat["economy"].get("movement", 0)) + int(
-                event["amount"]
-            )
+            amount = int(event["amount"])
+            combat["economy"]["movement"] = int(combat["economy"].get("movement", 0)) + amount
+            if str(event.get("reason") or "") == "critical_hit":
+                # 暴击后移动单独记账：它既进池（玩家仍要提交 move），又带着
+                # 一份"本次移动免借机攻击"的额度。下一次移动消费掉它，
+                # 不会延续到后续任何移动。
+                combat["economy"]["crit_move"] = amount
             return
         if event_type == "dnd2024.position.changed":
             actor_id = str(event["actor_id"])
@@ -380,6 +461,10 @@ class CombatReducerMixin:
                 if remaining < cost:
                     raise EventBatchError("movement resource is already spent")
                 combat["economy"]["movement"] = remaining - cost
+            if event.get("crit_move"):
+                # 额度只覆盖它自己这一次移动；消费后即失效，其他移动要按
+                # 常规规则判定借机攻击。
+                combat["economy"]["crit_move"] = 0
             return
         if event_type == "resource.changed":
             if str(event.get("resource") or "hp") == "temp_hp":
@@ -425,7 +510,9 @@ class CombatReducerMixin:
             if int(slots.get(level, 0) or 0) < 1:
                 raise EventBatchError("spell slot is already spent")
             slots[level] -= 1
-            combat["economy"]["slot_spell_cast"] = True
+            if not event.get("exchange"):
+                # Font 的"槽换次数"不是施法：不占用本回合的施法标记。
+                combat["economy"]["slot_spell_cast"] = True
             return
         if event_type == "dnd2024.feat_spell.free_cast_spent":
             kind, raw_id = _actor_kind(str(event["actor_id"]))

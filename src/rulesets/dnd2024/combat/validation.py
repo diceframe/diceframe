@@ -23,6 +23,7 @@ from ..features.resources import (
     OVERCHANNEL_OWNER,
     OVERCHANNEL_SPELL_CLASS,
     feature_usage_count,
+    resource_state,
 )
 from ..items.activation import (
     ItemActivationError,
@@ -419,6 +420,9 @@ class CombatValidationMixin:
         has_unarmed_strike = any(
             action.kind == "unarmed_strike" for action in capability.actions
         )
+        has_bardic_grant = any(
+            action.kind == "bardic_grant" for action in capability.actions
+        )
         if has_unarmed_strike:
             # 复用 canonical 徒手打击校验：目标必须存活且敌对、射程由同一份
             # 攻击档案决定，Combat 不自己算命中/伤害。
@@ -426,6 +430,46 @@ class CombatValidationMixin:
                 "target_id": str(intent.get("target_id") or ""),
                 "weapon_ref": UNARMED_STRIKE_REF,
             }, actor)
+        elif has_bardic_grant:
+            # 授予目标是另一位、能看见或听见你、且在 60 尺内的友方活体，并且
+            # 对方此刻没有一枚未过期的骰。这些事实在校验期就能用同一组权威
+            # 状态判定，所以非法提交在这里得到结构化拒绝，而不是等到结算时
+            # 抛异常；resolution 仍会重验一遍（纵深防御，且它要写缩略视图）。
+            target_id = str(intent.get("target_id") or "")
+            target = self._actor_view(instance, combat, target_id)
+            if target_id == actor["actor_id"]:
+                raise CombatIntentError("you cannot grant Bardic Inspiration to yourself")
+            if str(target.get("side") or "") != str(actor.get("side") or "") or target["hp"] <= 0:
+                raise CombatIntentError("Bardic Inspiration targets a living ally")
+            range_ft = self.features.feature_value(
+                self._feature_character(actor), "bardic_inspiration", "range_ft", 0,
+            )
+            if not isinstance(range_ft, int) or range_ft <= 0:
+                raise CombatIntentError("no Bardic Inspiration range is declared")
+            self._require_range(combat, actor["actor_id"], target_id, range_ft)
+            # "can see or hear you"：现有状态词表里能同时切断两条通道的只有
+            # 隐身施予者 + 目盲承受者；deafened 未建模，因此不参与判定。
+            if (
+                "invisible" in (actor.get("conditions") or {})
+                and "blinded" in (target.get("conditions") or {})
+            ):
+                raise CombatIntentError("the target can neither see nor hear you")
+            if self._active_bardic_instance(instance, combat, target_id) is not None:
+                raise CombatIntentError("the target already holds a Bardic Inspiration die")
+        elif any(action.kind == "inspiration_slot_exchange" for action in capability.actions):
+            # Font 的槽换次数：必须有已消耗次数、且该法术位仍然可用。
+            character = self._canonical_actor(instance, actor)
+            pool = dict(resource_state(character, "bardic_inspiration"))
+            if int(pool.get("current", 0) or 0) >= int(pool.get("maximum", 0) or 0):
+                raise CombatIntentError("no expended Bardic Inspiration use to regain")
+            slot_level = intent.get("slot_level")
+            if isinstance(slot_level, bool) or not isinstance(slot_level, int) or slot_level < 1:
+                raise CombatIntentError("a spell slot level is required")
+            slots = dict(
+                ((character.get("spellcasting") or {}).get("class") or {}).get("slots_current") or {}
+            )
+            if int(slots.get(str(slot_level), 0) or 0) < 1:
+                raise CombatIntentError("the spell slot is already spent")
         elif capability.requires_hostile_target:
             target = self._actor_view(
                 instance, combat, str(intent.get("target_id") or ""),

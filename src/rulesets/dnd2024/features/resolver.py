@@ -86,6 +86,8 @@ class Dnd2024ClassFeatureResolver:
         # 成长专长的 kind -> category 映射同样惰性：只有声明了 choice 的特性
         # 才需要它，普通特性投影不该为此读一遍专项目录。
         self._feat_categories: dict[str, str] | None = None
+        # 技能目录同样惰性：只有声明了技能选择的特性才需要它。
+        self._skill_id_set: set[str] | None = None
         # 与 ``Dnd2024Runtime._sync_class_resources`` 相同的边界：bundle 没有
         # 声明这套可选内容时，职业特性整体降级为「不存在」，而不是让每一个
         # 角色投影都失败。声明存在但格式非法时仍然 fail closed。
@@ -355,6 +357,22 @@ class Dnd2024ClassFeatureResolver:
             return default
         return self._value(definition, character, key, default)
 
+    def saving_throw_proficiency_all(
+        self, character: Mapping[str, Any] | None,
+    ) -> bool:
+        """Whether an owned feature grants proficiency in every saving throw.
+
+        Disciplined Survivor is the only declaration today.  The contract is
+        the declaration itself (``parameters.saving_throw_proficiency ==
+        "all"``), so a second feature that grants the same thing needs no new
+        code and no character-sheet branch.
+        """
+
+        return any(
+            str(definition.parameters.get("saving_throw_proficiency") or "") == "all"
+            for definition in self.features_for(character)
+        )
+
     def min_feature_value(
         self,
         character: Mapping[str, Any] | None,
@@ -574,6 +592,12 @@ class Dnd2024ClassFeatureResolver:
         empty selection rather than letting the last write win.  Nothing here
         grants a feature: ownership still comes only from the class and
         subclass grant tables, never from a submitted choice.
+
+        A ``skill_proficiency`` slot is projected against the *skill* catalog:
+        a ref the bundle does not define, or one left out of the declaration's
+        own whitelist, is not part of the selection.  The returned shape stays
+        ``{choice_id, selected_refs}`` for both kinds so a client reads one
+        contract.
         """
 
         choice = definition.choice
@@ -586,19 +610,182 @@ class Dnd2024ClassFeatureResolver:
             and record.get("feature_id") == definition.id
             and record.get("choice_id") == choice.id
         ]
+        # 同一个三元组可以合法地出现多次：Bard 的 Expertise 在 2 级与 9 级各选
+        # 两项，两级共用一个 (owner, feature_id, choice_id)。区分它们的是
+        # ``granted_level``，所以按等级分组：组内重复仍然是"写了两次"的歧义，
+        # 不同等级则是先后两次合法选择，合并成一份选择集。
+        groups: dict[Any, list[Mapping[str, Any]]] = {}
+        for record in matches:
+            groups.setdefault(record.get("granted_level"), []).append(record)
+        if any(len(group) > 1 for group in groups.values()):
+            return {"choice_id": choice.id, "selected_refs": []}
+        allowed = set(choice.enabled_options)
         selected: list[str] = []
-        if len(matches) == 1:
-            raw_refs = matches[0].get("selected_refs")
-            categories = self._advancement_feat_categories()
-            if isinstance(raw_refs, list):
-                for ref in raw_refs:
-                    if not isinstance(ref, str):
-                        continue
-                    if categories.get(ref.removeprefix("feat:")) != choice.category:
-                        continue
-                    if ref not in selected:
-                        selected.append(ref)
+        for group in groups.values():
+            raw_refs = group[0].get("selected_refs")
+            if not isinstance(raw_refs, list):
+                continue
+            for ref in raw_refs:
+                if not isinstance(ref, str):
+                    continue
+                if not self._choice_ref_is_valid(choice, ref, allowed):
+                    continue
+                if ref not in selected:
+                    selected.append(ref)
         return {"choice_id": choice.id, "selected_refs": selected}
+
+    def _choice_ref_is_valid(
+        self, choice: Any, ref: str, allowed: set[str],
+    ) -> bool:
+        """Whether one persisted ref belongs to this declared choice's pool."""
+
+        if choice.kind == "skill_proficiency":
+            if not ref.startswith("skill:"):
+                return False
+            if ref[6:] not in self._skill_ids():
+                return False
+            return ref in allowed if allowed else True
+        categories = self._advancement_feat_categories()
+        if categories.get(ref.removeprefix("feat:")) != choice.category:
+            return False
+        return True
+
+    def _skill_ids(self) -> set[str]:
+        """The skill catalog's ids, read once per resolver."""
+
+        if self._skill_id_set is None:
+            self._skill_id_set = {
+                str(entity.get("id")) for entity in self.bundle.list("skill")
+                if isinstance(entity, Mapping)
+            }
+        return self._skill_id_set
+
+    def expertise_skills(
+        self, character: Mapping[str, Any] | None,
+    ) -> list[dict[str, str]]:
+        """The skills this character holds Expertise in, with their sources.
+
+        Expertise is a property of the character, not of one class: a Bard /
+        Rogue multiclass has one pool and the SRD forbids the same skill twice
+        ("You can't have Expertise in the same skill proficiency more than
+        once").  The set is therefore the union over every *owned* declaration
+        that declares an Expertise-granting skill choice.
+
+        A persisted record whose ``(owner, feature_id)`` matches no owned
+        declaration contributes nothing, so a forged or stale slot cannot
+        turn a skill into a two-Proficiency-Bonus skill.  Each entry keeps the
+        declaring owner so two same-named ``expertise`` features stay
+        distinguishable in provenance.
+        """
+
+        seen: dict[str, dict[str, str]] = {}
+        for definition in self.features_for(character):
+            choice = definition.choice
+            if (
+                choice is None
+                or choice.kind != "skill_proficiency"
+                or choice.grants != "expertise"
+            ):
+                continue
+            selection = self.feature_selection(character, definition)
+            for ref in (selection or {}).get("selected_refs") or []:
+                skill_id = str(ref)[6:]
+                if skill_id in seen:
+                    continue
+                seen[skill_id] = {
+                    "skill_ref": f"skill:{skill_id}",
+                    "code": definition.id,
+                    "owner": definition.owner,
+                }
+        return [seen[key] for key in sorted(seen)]
+
+    def half_proficiency_bonus(
+        self, character: Mapping[str, Any] | None,
+    ) -> bool:
+        """Whether an owned declaration grants Jack of All Trades.
+
+        The flag is read from the declaration, never from a feature id: a second
+        class that later grants the same half-bonus needs no code change, and a
+        same-named feature that does *not* grant it stays inert.
+        """
+
+        return any(
+            definition.parameters.get("half_proficiency_bonus") is True
+            for definition in self.active_features_for(character)
+        )
+
+    def ability_check_floor(
+        self, character: Mapping[str, Any] | None,
+    ) -> tuple[int, list[dict[str, str]]]:
+        """The d20 floor an owned declaration puts on proficient checks.
+
+        Returns the highest declared floor and every declaration that states
+        it.  A floor of ``10`` means "treat a d20 roll of 9 or lower as a 10";
+        it is a substitution of the *face*, never a reroll, so the caller must
+        not draw a second d20.  The caller also owns the proficiency gate: this
+        method answers only "what floor does the character own".
+        """
+
+        floor = 0
+        sources: list[dict[str, str]] = []
+        for definition in self.active_features_for(character):
+            value = definition.parameters.get("ability_check_floor")
+            if isinstance(value, bool) or not isinstance(value, int):
+                continue
+            sources.append({"code": definition.id, "owner": definition.owner})
+            floor = max(floor, value)
+        return floor, sources
+
+    def initiative_advantage_sources(
+        self, character: Mapping[str, Any] | None,
+    ) -> list[dict[str, str]]:
+        """Owned declarations that grant Advantage on Initiative rolls."""
+
+        return [
+            {"code": definition.id, "owner": definition.owner}
+            for definition in self.active_features_for(character)
+            if definition.parameters.get("initiative_advantage") is True
+        ]
+
+    def skill_advantage_sources(
+        self, character: Mapping[str, Any] | None, skill_id: str,
+    ) -> list[dict[str, str]]:
+        """Owned declarations that grant Advantage on one named skill check.
+
+        ``skill_advantage_refs`` is an explicit list, so "Advantage on Strength
+        (Athletics)" never widens into every Strength check: a skill that no
+        declaration names answers with an empty list.
+        """
+
+        wanted = f"skill:{str(skill_id)}"
+        sources: list[dict[str, str]] = []
+        for definition in self.active_features_for(character):
+            refs = definition.parameters.get("skill_advantage_refs")
+            if not isinstance(refs, list) or wanted not in refs:
+                continue
+            sources.append({"code": definition.id, "owner": definition.owner})
+        return sources
+
+    def critical_hit_move(
+        self, character: Mapping[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """The post-critical movement an owned declaration grants, or ``None``.
+
+        The divisor is declared, so the "half your Speed" budget is computed
+        from the current Speed instead of being stored: a Speed change between
+        the hit and the move would otherwise pay out a stale number.
+        """
+
+        for definition in self.active_features_for(character):
+            divisor = definition.parameters.get("critical_hit_move_speed_divisor")
+            if isinstance(divisor, bool) or not isinstance(divisor, int) or divisor < 1:
+                continue
+            return {
+                "code": definition.id,
+                "owner": definition.owner,
+                "divisor": divisor,
+            }
+        return None
 
     @staticmethod
     def _feature_choice_records(
@@ -1288,6 +1475,39 @@ class Dnd2024ClassFeatureResolver:
             raise ClassFeatureError(
                 f"{definition.id} must declare turn_start_regen_base and "
                 "turn_start_regen_ability as a pair"
+            )
+        for flag in ("half_proficiency_bonus", "initiative_advantage"):
+            if flag in parameters and parameters[flag] is not True:
+                raise ClassFeatureError(
+                    f"{definition.id}.{flag} must be true when declared"
+                )
+        floor = parameters.get("ability_check_floor")
+        if "ability_check_floor" in parameters and (
+            isinstance(floor, bool) or not isinstance(floor, int)
+            or not 1 <= floor <= 20
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.ability_check_floor must be an integer from 1 to 20"
+            )
+        advantage_refs = parameters.get("skill_advantage_refs")
+        if "skill_advantage_refs" in parameters and (
+            not isinstance(advantage_refs, list)
+            or not advantage_refs
+            or any(
+                not isinstance(ref, str) or not ref.startswith("skill:")
+                for ref in advantage_refs
+            )
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.skill_advantage_refs must list skill refs"
+            )
+        divisor = parameters.get("critical_hit_move_speed_divisor")
+        if "critical_hit_move_speed_divisor" in parameters and (
+            isinstance(divisor, bool) or not isinstance(divisor, int) or divisor < 2
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.critical_hit_move_speed_divisor must be an "
+                "integer of at least 2"
             )
 
     def _validate_defeat_trigger_parameters(self, definition: ClassFeatureDefinition) -> None:

@@ -114,7 +114,7 @@
     "faerie_fire": {"attack_modes": [{"side": "target", "mode": "advantage"}]},
     "dodging": {"attack_modes": [{"side": "target", "mode": "disadvantage"}]},
     "blurred": {"attack_modes": [{"side": "target", "mode": "disadvantage", "negated_by": ["blindsight", "truesight"]}]},
-    "invisible": {"attack_modes": [
+    "invisible": {"initiative_advantage": true, "attack_modes": [
       {"side": "target", "mode": "disadvantage", "negated_by": ["see_invisibility", "truesight"]},
       {"side": "actor", "mode": "advantage", "negated_by": ["see_invisibility", "truesight"]}
     ]},

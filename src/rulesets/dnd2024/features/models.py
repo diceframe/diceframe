@@ -27,7 +27,7 @@ _OWNER_RE = re.compile(r"^(class|subclass):[a-z0-9][a-z0-9_.-]*$")
 # v1 只表达本 PR 真正实现的效果原语；未知 kind 必须 fail closed，而不是被静默忽略。
 ACTION_KINDS = frozenset({
     "unarmed_strike", "dash", "dodge", "disengage", "hide", "heal", "rage",
-    "rage_sustain", "action_surge",
+    "rage_sustain", "action_surge", "bardic_grant", "inspiration_slot_exchange",
 })
 ACTION_COST_KINDS = ("bonus_action", "action")
 # 装备前提里可声明的武器类别；同样 fail closed。``simple_melee`` 是 SRD 的
@@ -36,8 +36,14 @@ WEAPON_KINDS = frozenset({"simple_melee", "martial_melee_light"})
 EQUIPMENT_REQUIREMENT_KEYS = frozenset(
     {"unarmored", "no_shield", "no_heavy_armor", "weapon_kinds"}
 )
-# 本切片只支持成长专长选择；未知 kind 必须加载期拒绝，不能静默当成无选项特性。
-FEATURE_CHOICE_KINDS = frozenset({"advancement_feat"})
+# 本切片只支持成长专长选择与技能熟练类选择；未知 kind 必须加载期拒绝，
+# 不能静默当成无选项特性。``skill_proficiency`` 是 Expertise / Scholar 这类
+# "在已有技能熟练里再选几项"的选择：它的候选项来自技能目录而不是专长目录，
+# 且可以一次选多项（Expertise 一次两项）——用 ``advancement_feat`` 表达不了。
+FEATURE_CHOICE_KINDS = frozenset({"advancement_feat", "skill_proficiency"})
+# 技能选择最终"授予什么"的闭集。目前只有 Expertise；未知值必须加载期拒绝，
+# 否则选中一个技能却在运行时什么都不发生。
+SKILL_CHOICE_GRANTS = frozenset({"expertise"})
 # 特性参数的射程键统一以英尺计。``range_ft`` 是"该特性对目标生效的射程"，
 # 与前缀式 ``aura_range_ft``/``defeat_share_range_ft`` 并列：后者是"一个特性有
 # 多条射程"时才需要的消歧前缀，单条射程用裸键即可。
@@ -47,7 +53,9 @@ FEATURE_CHOICE_KINDS = frozenset({"advancement_feat"})
 # ``trigger`` 的闭集只在声明了 ``range_ft`` 时校验——其他机制（例如
 # Dark One's Blessing 的 defeat payload）有各自的 trigger 词汇，由各自的
 # 消费方校验，不能被这张表的闭集误伤。
-CHECK_WINDOW_TRIGGERS = frozenset({"attack_roll_success"})
+CHECK_WINDOW_TRIGGERS = frozenset({
+    "attack_roll_success", "grant", "own_check_failure", "save_failure",
+})
 
 
 class ClassFeatureError(ValueError):
@@ -178,6 +186,13 @@ class FeatureChoice:
     Every other option in the category is still projected, but marked
     unavailable with ``effect_not_implemented`` and rejected on commit --
     a selection that grants nothing must never look finished.
+
+    ``requires_proficiency`` / ``exclude_expertise`` are only meaningful for
+    ``skill_proficiency``: Expertise and Scholar both pick from skills the
+    character is already proficient in, and neither may re-pick a skill the
+    character already has Expertise in (SRD: "You can't have Expertise in the
+    same skill proficiency more than once").  An empty ``enabled_options`` means
+    "every skill in the catalog"; Scholar names its six explicitly.
     """
 
     id: str
@@ -185,6 +200,9 @@ class FeatureChoice:
     category: str
     count: int
     enabled_options: tuple[str, ...]
+    grants: str = ""
+    requires_proficiency: bool = True
+    exclude_expertise: bool = True
 
 
 def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
@@ -202,33 +220,78 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
         )
     category = _require_id(raw.get("category"), f"{feature_id}.choice.category")
     count = raw.get("count")
-    if isinstance(count, bool) or not isinstance(count, int) or count != 1:
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        raise ClassFeatureError(f"{feature_id}.choice.count must be a positive integer")
+    if kind == "advancement_feat" and count != 1:
         raise ClassFeatureError(f"{feature_id}.choice.count must be 1")
     raw_refs = raw.get("enabled_options")
-    if not isinstance(raw_refs, list) or not raw_refs:
+    if raw_refs is None and kind == "skill_proficiency":
+        # 空清单 = 技能目录全集；Expertise 只按"已有熟练"筛选，不点名具体技能。
+        raw_refs = []
+    if not isinstance(raw_refs, list):
+        raise ClassFeatureError(
+            f"{feature_id}.choice.enabled_options must be an array"
+        )
+    if not raw_refs and kind == "advancement_feat":
         raise ClassFeatureError(
             f"{feature_id}.choice.enabled_options must be a non-empty array"
         )
+    prefix = "feat:" if kind == "advancement_feat" else "skill:"
     refs: list[str] = []
     seen: set[str] = set()
     for raw_ref in raw_refs:
-        if not isinstance(raw_ref, str) or not raw_ref.startswith("feat:"):
+        if not isinstance(raw_ref, str) or not raw_ref.startswith(prefix):
             raise ClassFeatureError(
-                f"{feature_id}.choice.enabled_options must hold feat refs"
+                f"{feature_id}.choice.enabled_options must hold {prefix} refs"
             )
-        ref = f"feat:{_require_id(raw_ref[5:], f'{feature_id}.choice.enabled_options')}"
+        ref = f"{prefix}{_require_id(raw_ref[len(prefix):], f'{feature_id}.choice.enabled_options')}"
         if ref in seen:
             raise ClassFeatureError(
                 f"{feature_id}.choice.enabled_options repeats {ref}"
             )
         seen.add(ref)
         refs.append(ref)
+    flags: dict[str, bool] = {}
+    for key in ("requires_proficiency", "exclude_expertise"):
+        value = raw.get(key, True)
+        if not isinstance(value, bool):
+            raise ClassFeatureError(f"{feature_id}.choice.{key} must be a boolean")
+        flags[key] = value
+    if kind == "advancement_feat":
+        # 成长专长的两个约束是技能选择专有的；写在专长选择上会被静默忽略，
+        # 因此宁可加载期拒绝。
+        for key in ("requires_proficiency", "exclude_expertise"):
+            if key in raw and raw[key] is not True:
+                raise ClassFeatureError(
+                    f"{feature_id}.choice.{key} is only meaningful for a "
+                    "skill_proficiency choice"
+                )
+    if kind == "skill_proficiency" and category != "skill":
+        raise ClassFeatureError(
+            f"{feature_id}.choice.category must be 'skill' for a skill choice"
+        )
+    grants = str(raw.get("grants") or "")
+    if kind == "skill_proficiency":
+        # 选中的技能"得到什么"必须显式声明：Expertise 与"获得熟练"是两种不同
+        # 效果，靠 choice id 猜等于让命名承担语义。
+        if grants not in SKILL_CHOICE_GRANTS:
+            raise ClassFeatureError(
+                f"{feature_id}.choice.grants must be one of {sorted(SKILL_CHOICE_GRANTS)}"
+            )
+    elif grants:
+        raise ClassFeatureError(
+            f"{feature_id}.choice.grants is only meaningful for a "
+            "skill_proficiency choice"
+        )
     return FeatureChoice(
         id=choice_id,
         kind=kind,
         category=category,
         count=count,
         enabled_options=tuple(refs),
+        grants=grants,
+        requires_proficiency=flags["requires_proficiency"],
+        exclude_expertise=flags["exclude_expertise"],
     )
 
 
@@ -249,18 +312,38 @@ def _advancement_feat_categories(bundle: LoadedRulesetBundle) -> dict[str, str]:
 def _validate_feature_choices(
     features: list[ClassFeatureDefinition], bundle: LoadedRulesetBundle,
 ) -> None:
-    """Cross-check every declared choice against the advancement feat catalog.
+    """Cross-check every declared choice against the catalog it picks from.
 
     A choice naming a category nothing declares, or whitelisting a ref that is
     missing or belongs to another category, would offer a slot the runtime can
     never satisfy.  All three fail at load instead of on the player's turn.
+
+    A ``skill_proficiency`` choice is checked against the *skill* catalog: a
+    whitelisted skill that the bundle does not define could never be granted
+    Expertise, and the count must not exceed the number of skills that exist.
     """
 
     categories = _advancement_feat_categories(bundle)
     known = set(categories.values())
+    skill_ids = {
+        str(entity.get("id")) for entity in bundle.list("skill")
+        if isinstance(entity, Mapping)
+    }
     for definition in features:
         choice = definition.choice
         if choice is None:
+            continue
+        if choice.kind == "skill_proficiency":
+            for ref in choice.enabled_options:
+                if ref[6:] not in skill_ids:
+                    raise ClassFeatureError(
+                        f"{definition.id}.choice references an undeclared skill: {ref}"
+                    )
+            pool = len(choice.enabled_options) if choice.enabled_options else len(skill_ids)
+            if choice.count > pool:
+                raise ClassFeatureError(
+                    f"{definition.id}.choice.count exceeds the {choice.category} pool"
+                )
             continue
         if choice.category not in known:
             raise ClassFeatureError(

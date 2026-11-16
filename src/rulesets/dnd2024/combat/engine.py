@@ -1133,6 +1133,7 @@ class Dnd2024CombatEngine(
                 "origin_step_id": str(combat.get("origin_step_id") or ""),
                 "mode": str(combat.get("mode") or ""),
                 "adventure_binding": deepcopy(combat.get("adventure_binding")),
+                "bardic_instances": self._active_bardic_view(instance, combat),
                 "actors": actors,
             },
             "encounter_presets": self.encounter_presets(),
@@ -1364,6 +1365,7 @@ class Dnd2024CombatEngine(
             "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
             "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
             "total": total, "target": dc, "success": success,
+            "roll_id": f"concentration:{target['actor_id']}:1",
         }]
         if not success:
             events.append({

@@ -102,7 +102,7 @@ class CombatViewMixin:
                 "weapon_category_refs": [], "proficiency_bonus": 0,
                 "creature_type": str(enemy.get("creature_type") or ""),
                 "counterspell_dc": int(enemy.get("counterspell_dc", 0) or 0),
-                "skill_values": {}, "concentration": None,
+                "skill_values": {}, "skill_refs": [], "concentration": None,
             }
         raise CombatIntentError("actor_id is invalid")
 
@@ -161,6 +161,9 @@ class CombatViewMixin:
             "abilities": deepcopy(character.get("abilities") or {}),
             "saving_throws": deepcopy(character.get("derived", {}).get("saving_throws") or {}),
             "skill_values": deepcopy(character.get("proficiencies", {}).get("skill_values") or {}),
+            # 技能熟练本身也要投影：Reliable Talent 只对"使用技能熟练"的检定
+            # 生效，而加值数字分不清 "+2 因为熟练" 与 "+2 因为属性"。
+            "skill_refs": list(character.get("proficiencies", {}).get("skill_refs") or []),
             "proficiency_bonus": int(
                 character.get("derived", {}).get("proficiency_bonus", 2) or 2
             ),

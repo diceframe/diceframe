@@ -94,16 +94,18 @@ def advancement_choices(preview: dict[str, Any]) -> dict[str, Any]:
             choices[requirement_id] = str(available[0]["value"])
         elif requirement.get("kind") == "feature_choice":
             # 特性选项槽是必答的：不回答就无法构造任何一个经过该等级的
-            # 角色。这里只挑第一个 available 的具体选项，具体选中什么由
-            # 调用方自己的 preview 决定。
+            # 角色。这里只挑前几个 available 的具体选项，具体选中什么由
+            # 调用方自己的 preview 决定。槽可以要求多选（Expertise 一次两
+            # 项），所以按 ``count`` 取，而不是固定取一个。
             available = [
                 option for option in requirement["options"] if option.get("available")
             ]
+            count = int(requirement.get("count", 1) or 1)
             choices.setdefault("feature_choices", []).append({
                 "owner": str(requirement["owner"]),
                 "feature_id": str(requirement["feature_id"]),
                 "choice_id": str(requirement["choice_id"]),
-                "selected_refs": [str(available[0]["value"])],
+                "selected_refs": [str(option["value"]) for option in available[:count]],
             })
         elif requirement_id == "ability_score_increases":
             allowed = requirement.get("allowed", "any")
