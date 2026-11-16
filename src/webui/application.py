@@ -37,8 +37,10 @@ from src.webui.routes.bot import register_bot
 from src.webui.routes.character_cards import register_character_cards
 from src.webui.routes.content import register_content
 from src.webui.routes.content_review import register as register_content_review
+from src.webui.routes.creator import register_creator
 from src.webui.routes.games import register_games
 from src.webui.routes.generated_images import register_generated_images
+from src.webui.routes.embedding_models import register_embedding_models
 from src.webui.routes.generation import register_generation
 from src.webui.routes.hub import register_hub
 from src.webui.routes.launcher import LAUNCHER_DATA_DIR_KEY, register_launcher
@@ -58,6 +60,7 @@ from src.webui.routes.sse import register_sse
 from src.webui.routes.system import register_system
 from src.webui.routes.tunnel import register_tunnel
 from src.webui.routes.updater import register_updater
+from src.webui.routes.ui_actions import register_ui_actions
 from src.webui.routes.worlds import register_worlds
 from src.webui.services.security import SecurityTransportService
 from src.webui.session import SessionManager, session_middleware
@@ -133,6 +136,7 @@ def create_app(dependencies: ApplicationDependencies) -> web.Application:
     }
     application[LAUNCHER_DATA_DIR_KEY] = Path(host_data)
     application["web_transport"] = dependencies.transport
+    application["config_state"] = dependencies.config_state
     application["security_transport"] = SecurityTransportService(
         dependencies.config_state,
         dependencies.save_config,
@@ -163,9 +167,11 @@ def register_routes(
     register_system(application)
     register_updater(application)
     register_launcher(application)
+    register_ui_actions(application)
     register_speech(application)
     register_asr(application)
     register_generated_images(application)
+    register_embedding_models(application)
     register_worlds(application)
     register_lorebooks(application)
     register_rules(application)
@@ -173,6 +179,7 @@ def register_routes(
     register_modules(application)
     register_character_cards(application)
     register_content(application)
+    register_creator(application)
     register_content_review(application)
     register_avatars(application)
     register_scene_images(application)

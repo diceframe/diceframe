@@ -42,6 +42,7 @@ logger = logging.getLogger("trpg")
 @dataclass(frozen=True)
 class PluginHostDependencies:
     plugin_host: Any | None
+    describe_action: Callable[[str], dict[str, Any]] | None = None
 
 
 @dataclass(frozen=True)
@@ -182,6 +183,15 @@ def list_plugins(dependencies: PluginHostDependencies) -> dict[str, Any]:
     host = dependencies.plugin_host
     return {"ok": True, "plugins": host.list_public() if host else []}
 
+
+def list_plugin_dependencies(dependencies: PluginHostDependencies) -> dict[str, Any]:
+    """Return the host's read-only installed-package dependency plan."""
+
+    host = dependencies.plugin_host
+    if not host:
+        return {"ok": False, "error": "插件宿主未启用", "plugins": []}
+    return {"ok": True, "plugins": host.dependency_plan()}
+
 def list_plugin_types() -> dict[str, Any]:
     """插件类型清单（数据驱动前端筛选/展示）。"""
     return {"ok": True, "types": _support_plugin_types()}
@@ -210,6 +220,31 @@ def read_plugin_docs(
     if not host:
         return {"ok": False, "error": "插件宿主未启用"}
     return host.read_docs(plugin_id)
+
+
+def list_plugin_rulebooks(
+    dependencies: PluginHostDependencies,
+    plugin_id: str,
+    *,
+    viewer_is_gm: bool = False,
+) -> dict[str, Any]:
+    host = dependencies.plugin_host
+    if not host:
+        return {"ok": False, "error": "插件宿主未启用", "rulebooks": []}
+    return host.list_rulebooks(plugin_id, viewer_is_gm=viewer_is_gm)
+
+
+def read_plugin_rulebook(
+    dependencies: PluginHostDependencies,
+    plugin_id: str,
+    book_id: str,
+    *,
+    viewer_is_gm: bool = False,
+) -> dict[str, Any]:
+    host = dependencies.plugin_host
+    if not host:
+        return {"ok": False, "error": "插件宿主未启用", "found": False}
+    return host.read_rulebook(plugin_id, book_id, viewer_is_gm=viewer_is_gm)
 
 
 def sync_plugin_lorebooks(
@@ -612,6 +647,18 @@ async def install_plugin(
     _maybe_autoimport_after_install(dependencies, detail.get("id", ""))
     return {"ok": True, **detail}
 
+
+async def install_plugin_group(
+    dependencies: PluginLifecycleDependencies,
+    payloads: list[bytes],
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    host = dependencies.plugin_host
+    if not host:
+        return {"ok": False, "error": "插件宿主未启用"}
+    details = await host.install_group_from_zips(payloads, overwrite=overwrite)
+    return {"ok": True, "plugins": details}
+
 async def list_plugin_marketplace(
     dependencies: PluginHostDependencies,
 ) -> dict[str, Any]:
@@ -763,6 +810,122 @@ def list_plugin_contributions(
         return {"ok": False, "error": "插件宿主未启用", "contributions": []}
     contributions = host.list_contributions((kind or "").strip())
     return {"ok": True, "contributions": contributions, "total": len(contributions)}
+
+
+def list_plugin_ui(dependencies: PluginHostDependencies) -> dict[str, Any]:
+    """Return normalized declarative UI descriptors from active plugins.
+
+    U01 is read-only at this seam: action dispatch still has to go through an
+    owning service, and arbitrary plugin JavaScript is never loaded here.
+    """
+
+    host = dependencies.plugin_host
+    if not host:
+        return {"ok": False, "error": "插件宿主未启用", "views": []}
+    from src.webui.ui_extension_probe import DeclarativeUiError, normalize_declarative_descriptor
+
+    views: list[dict[str, Any]] = []
+    diagnostics: list[dict[str, str]] = []
+    def actions_in(node: Any) -> list[str]:
+        if not isinstance(node, dict):
+            return []
+        found = [str(node["action"])] if node.get("action") else []
+        for child in node.get("children") or []:
+            found.extend(actions_in(child))
+        return found
+
+    def action_contracts(descriptor: dict[str, Any], plugin_id: str) -> dict[str, dict[str, Any]]:
+        contracts: dict[str, dict[str, Any]] = {}
+        if dependencies.describe_action is None:
+            return contracts
+        for surface in descriptor.get("surfaces") or []:
+            for action_name in actions_in(surface.get("root")):
+                try:
+                    contract = dependencies.describe_action(action_name)
+                except (KeyError, ValueError) as exc:
+                    raise DeclarativeUiError(
+                        f"UI action {action_name!r} is not registered for {plugin_id}: {exc}",
+                    ) from exc
+                contracts[action_name] = contract
+        return contracts
+
+    for plugin_id, runtime in host.plugins.items():
+        if str(runtime.status or "") not in {"active", "running"}:
+            continue
+        raw = runtime.manifest.get("ui")
+        if raw is None:
+            continue
+        try:
+            descriptor = normalize_declarative_descriptor(raw)
+        except (DeclarativeUiError, TypeError, ValueError) as exc:
+            diagnostics.append({"plugin_id": str(plugin_id), "error": str(exc)})
+            continue
+        try:
+            contracts = action_contracts(descriptor, str(plugin_id))
+        except DeclarativeUiError as exc:
+            diagnostics.append({"plugin_id": str(plugin_id), "error": str(exc)})
+            continue
+        view = {
+            "plugin_id": str(plugin_id),
+            "plugin_name": str(runtime.manifest.get("name") or plugin_id),
+            "descriptor": descriptor,
+        }
+        if contracts:
+            view["action_contracts"] = contracts
+        views.append(view)
+    return {"ok": True, "views": views, "diagnostics": diagnostics, "total": len(views)}
+
+
+def prebuilt_ui_descriptor(
+    dependencies: PluginHostDependencies, plugin_id: str,
+) -> dict[str, Any]:
+    host = dependencies.plugin_host
+    if not host:
+        return {"ok": False, "error": "插件宿主未启用"}
+    return {"ok": True, **host.prebuilt_ui_descriptor(plugin_id)}
+
+
+def prebuilt_ui_asset_path(
+    dependencies: PluginHostDependencies, plugin_id: str, relative_path: str,
+) -> Path:
+    host = dependencies.plugin_host
+    if not host:
+        raise KeyError("插件宿主未启用")
+    return host.prebuilt_ui_asset_path(plugin_id, relative_path)
+
+
+def project_plugin_ui(
+    dependencies: PluginHostDependencies,
+    plugin_id: str,
+    projection: dict[str, Any],
+) -> dict[str, Any]:
+    """Project one active plugin descriptor through an owning ViewModel.
+
+    Callers must supply the already-authorized projection from the feature
+    owner.  This service only validates the descriptor and resolves its
+    ``view.*`` bindings; it never reads game state or exposes a service locator
+    to plugin UI code.
+    """
+
+    listed = list_plugin_ui(dependencies)
+    if not listed.get("ok"):
+        return listed
+    requested = str(plugin_id or "").strip()
+    view = next((item for item in listed.get("views", []) if item.get("plugin_id") == requested), None)
+    if view is None:
+        return {"ok": False, "error": "插件 UI 不存在或未启用", "plugin_id": requested}
+    from src.webui.ui_extension_probe import DeclarativeUiError, project_declarative_descriptor
+    try:
+        descriptor = project_declarative_descriptor(view["descriptor"], projection)
+    except (DeclarativeUiError, TypeError, ValueError) as exc:
+        return {"ok": False, "error": str(exc), "plugin_id": requested}
+    return {
+        "ok": True,
+        "plugin_id": requested,
+        "plugin_name": view.get("plugin_name", requested),
+        "descriptor": descriptor,
+        "action_contracts": view.get("action_contracts", {}),
+    }
 
 
 def list_plugin_themes(dependencies: PluginHostDependencies) -> dict[str, Any]:

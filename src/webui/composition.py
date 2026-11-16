@@ -130,7 +130,11 @@ class RuntimeComposition:
             embedding_base_url = ""
             embedding_api_key = ""
         embedding_enabled = bool(
-            runtime_config.get("embedding_enabled", False) and embedding_base_url
+            runtime_config.get("embedding_enabled", False)
+            and (
+                str(runtime_config.get("embedding_source") or "external") == "local"
+                or embedding_base_url
+            )
         )
         check_route = resolve_provider(runtime_config, runtime_config.get("check_provider_ref", ""))
         check_model = str(runtime_config.get("check_model") or "").strip()
@@ -161,6 +165,8 @@ class RuntimeComposition:
             generation_options=runtime_config.get("llm_generation_options", {}),
             context_recent_rounds=runtime_config.get("context_recent_rounds", 0),
             embedding_enabled=embedding_enabled,
+            embedding_source=str(runtime_config.get("embedding_source") or "external"),
+            embedding_local_model_id=str(runtime_config.get("embedding_local_model_id") or ""),
             embedding_base_url=embedding_base_url,
             embedding_api_key=embedding_api_key,
             embedding_model=runtime_config.get(

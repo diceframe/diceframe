@@ -1,0 +1,36 @@
+{
+  "catalog_version": 1,
+  "models": [
+    {
+      "id": "bge-small-zh-v1.5",
+      "display_name": "BGE Small 中文向量模型",
+      "kind": "embedding",
+      "backend": "onnxruntime",
+      "version": "1.0.0",
+      "revision": "75c43b069aac4d136ba6bc1122f995fedcfd2781",
+      "variant": "onnx-int8",
+      "dimension": 512,
+      "max_input_tokens": 512,
+      "max_input_chars": 2048,
+      "license": "mit",
+      "onnx_file": "model.onnx",
+      "tokenizer_file": "tokenizer.json",
+      "files": [
+        {
+          "path": "model.onnx",
+          "url": "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model_quantized.onnx",
+          "mirrors": ["https://hf-mirror.com/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model_quantized.onnx"],
+          "size": 24010842,
+          "sha256": "15b717c382bcb518ba457b93ea6850ede7f4f1cd8937454aa06972366cd19bcc"
+        },
+        {
+          "path": "tokenizer.json",
+          "url": "https://huggingface.co/Xenova/bge-small-zh-v1.5/resolve/main/tokenizer.json",
+          "mirrors": ["https://hf-mirror.com/Xenova/bge-small-zh-v1.5/resolve/main/tokenizer.json"],
+          "size": 439125,
+          "sha256": "48cea5d44424912a6fd1ea647bf4fe50b55ab8b1e5879c3275f80e339e8fae26"
+        }
+      ]
+    }
+  ]
+}

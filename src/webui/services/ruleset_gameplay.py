@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+import secrets
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass
@@ -28,14 +29,24 @@ from src.rulesets.contracts import (
     AutomaticIntentRuntime,
     IntentResultProjectionRuntime,
     HostedIntentChoiceRuntime,
+    SequentialActionRuntime,
     TemporaryEncounterPlannerRuntime,
 )
 from src.rulesets.registry import RulesetRuntimeRegistry
+from src.rulesets.sequential_actions import execute_sequential_plan
 from src.llm.seat_policy import SeatRuntime
 from src.webui.services import hosted_combat, adventure_commands
 
 
 logger = logging.getLogger("trpg")
+
+
+def _RNG_UNSET() -> Any:  # pragma: no cover - identity sentinel, never called
+    raise NotImplementedError
+
+
+def _default_rng() -> Any:
+    return random.Random(secrets.randbits(128))
 
 
 @dataclass(frozen=True)
@@ -54,6 +65,19 @@ class RulesetGameplayDependencies:
     complete_adventure_node: Callable[[Any, str, str, str], dict[str, Any]] | None = None
     request_adventure_choice: Callable[[Any, str, str, str], dict[str, Any]] | None = None
     seat_runtime: SeatRuntime | None = None
+    # 服务端权威 RNG 工厂。默认每个意图从 OS 熵取 128bit 种子的 random.Random：
+    # - 可序列化（getstate DTO）：外部 ruleset runtime 的 stdio 适配器必须能
+    #   把 rng 传给子进程——SystemRandom 显式不支持 getstate，直接崩溃（P0）；
+    # - 不可预测：种子完全来自服务端熵，客户端选择的 intent_id 无法预知骰面；
+    # - 幂等重试：收据身份只含规范化的 intent payload（不含 rng 状态），
+    #   同 intent 重试命中同一收据，不重算也不产生"新骰面"。
+    # 需要确定性回放的部署可显式注入 rng_factory。
+    rng_factory: Callable[[], Any] = _RNG_UNSET
+
+    def __post_init__(self) -> None:
+        if self.rng_factory is _RNG_UNSET:
+            # 构造期才解析模块接缝：测试可以 monkeypatch _default_rng。
+            object.__setattr__(self, "rng_factory", _default_rng)
 
 
 def _error(code: str, message: str) -> dict[str, Any]:
@@ -485,8 +509,9 @@ async def submit_intent(
     intent = runtime.prepare_intent_submission(
         intent, effective_requester, requester_is_gm,
     )
+    is_sequential_action = str(intent.get("type") or "") == "sequential_action"
 
-    if dependencies.seat_runtime is not None and isinstance(runtime, HostedIntentChoiceRuntime):
+    if dependencies.seat_runtime is not None and isinstance(runtime, HostedIntentChoiceRuntime) and not is_sequential_action:
         async def preflight() -> dict | None:
             if dependencies.get_instance(instance.game_key) is not instance:
                 return _error("GAME_CHANGED", "游戏已替换，请刷新")
@@ -539,14 +564,38 @@ async def submit_intent(
             and not module_hooks.seat_has_acted(instance, effective_requester)
         )
         try:
-            rng = random.SystemRandom()
-            resolved = runtime.resolve_intent(instance, intent, rng)
-            if not resolved.get("ok"):
-                return resolved
-            batch = resolved.get("event_batch")
-            if not isinstance(batch, dict):
-                return _error("INVALID_EVENT_BATCH", "规则运行时没有返回有效事件批次")
-            applied = runtime.apply_event_batch(instance, batch)
+            rng = dependencies.rng_factory()
+            if is_sequential_action:
+                if not isinstance(runtime, SequentialActionRuntime):
+                    return _error(
+                        "SEQUENTIAL_ACTION_UNAVAILABLE",
+                        "当前规则运行时没有提供顺序动作 authority",
+                    )
+                sequential = execute_sequential_plan(
+                    instance, runtime, intent, effective_requester,
+                    requester_is_gm, rng,
+                )
+                if not sequential.get("ok"):
+                    return sequential
+                resolved = sequential
+                batches = [
+                    batch for batch in sequential.get("resolved_event_batches") or []
+                    if isinstance(batch, dict)
+                ]
+                applied = {"ok": True, "applied": bool(batches)}
+                batch: dict[str, Any] | None = None
+                for batch in batches:
+                    _project_public_batch(runtime, instance, batch, applied)
+                batch = None
+            else:
+                resolved = runtime.resolve_intent(instance, intent, rng)
+                if not resolved.get("ok"):
+                    return resolved
+                batch = resolved.get("event_batch")
+                if not isinstance(batch, dict):
+                    return _error("INVALID_EVENT_BATCH", "规则运行时没有返回有效事件批次")
+                applied = runtime.apply_event_batch(instance, batch)
+                _project_public_batch(runtime, instance, batch, applied)
             if marks_seat:
                 # A player-side intent applied for its own seat: the seat has
                 # acted, so card adoption / deletion become GM-only for it.
@@ -554,7 +603,6 @@ async def submit_intent(
                     module_hooks.SEAT_ACTED, instance, effective_requester,
                     module_hooks.SEAT_SOURCE_INTENT,
                 )
-            _project_public_batch(runtime, instance, batch, applied)
             automatic_batches, automatic_results = _automatic_segment(
                 runtime, instance, rng,
             )
@@ -570,20 +618,32 @@ async def submit_intent(
             if marks_seat:
                 module_hooks.run(module_hooks.SEAT_FORGOTTEN, instance, effective_requester)
             raise
+        resolved_batches = [
+            item for item in (resolved.get("resolved_event_batches") or [batch])
+            if isinstance(item, dict)
+        ]
         await _project_batch_memory(
-            dependencies, runtime, instance, [batch, *automatic_batches],
+            dependencies, runtime, instance, [*resolved_batches, *automatic_batches],
         )
-        return _response(
-            dependencies, rule, runtime, instance, effective_requester,
-            requester_is_gm=requester_is_gm,
-            result={
+        if is_sequential_action:
+            result = {
+                **resolved,
+                "automatic_event_batches": automatic_batches,
+                "automatic_results": automatic_results,
+            }
+        else:
+            result = {
                 **applied,
                 "replayed": bool(resolved.get("replayed", False)),
                 "pending_decision": deepcopy(resolved.get("pending_decision")),
                 "automatic_event_batches": automatic_batches,
                 "automatic_results": automatic_results,
                 "resolved_event_batches": [batch, *automatic_batches],
-            },
+            }
+        return _response(
+            dependencies, rule, runtime, instance, effective_requester,
+            requester_is_gm=requester_is_gm,
+            result=result,
         )
 
 
@@ -698,7 +758,7 @@ async def resume_authoritative_combat(
             "round_number": progression_state.round_value(instance),
         }
         try:
-            rng = random.SystemRandom()
+            rng = dependencies.rng_factory()
             automatic_batches, automatic_results = _automatic_segment(
                 runtime, instance, rng,
             )

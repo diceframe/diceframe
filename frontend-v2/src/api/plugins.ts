@@ -13,6 +13,7 @@ import type {
   PluginMirrorTestResponse,
   PluginToolInvokeResponse,
   PluginToolsResponse,
+  PluginUiResponse,
   MapBackgroundSelection,
   SceneImageRef,
   WorldListResponse,
@@ -44,6 +45,7 @@ export const pluginApi = {
   list: () => api<{ plugins: PluginInfo[] }>('/plugins'),
   listTypes: () => api<{ ok: boolean; types: PluginTypeInfo[] }>('/plugins/types'),
   tools: () => api<PluginToolsResponse>('/plugins/tools'),
+  ui: () => api<PluginUiResponse>('/plugins/ui'),
   invokeTool: (pluginId: string, toolName: string, argumentsValue: Record<string, unknown>) =>
     api<PluginToolInvokeResponse>(
       `/plugins/tools/${encodeURIComponent(pluginId)}/${encodeURIComponent(toolName)}`,

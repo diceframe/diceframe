@@ -754,7 +754,7 @@ class AgentRuntime:
                             raise ActionExecutionStopped('Execution confirmation expired; confirm the remaining targets to resume')
                         if lease is not None:
                             current = session.data.get('authorization')
-                            keys = ('mode', 'scope', 'domains', 'expires_at', 'max_steps')
+                            keys = ('grant_id', 'mode', 'scope', 'domains', 'expires_at', 'max_steps')
                             if (not current or current['expires_at'] <= self.deps.clock()
                                     or any(current.get(key) != lease.get(key) for key in keys)
                                     or not permits(current, tool, args, stored_assessment(plan))):

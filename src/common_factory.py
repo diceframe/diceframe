@@ -58,6 +58,8 @@ def create_trpg_subsystems(
     *,
     adventures_dir: Path | None = None,
     embedding_enabled: bool = False,
+    embedding_source: str = "external",
+    embedding_local_model_id: str = "",
     embedding_base_url: str = "",
     embedding_api_key: str = "",
     embedding_model: str = "",
@@ -113,7 +115,18 @@ def create_trpg_subsystems(
         memory_store.open()
 
     embedding_client = None
-    if embedding_enabled and embedding_base_url:
+    if embedding_enabled and embedding_source == "local":
+        from src.memory.local_embedding import LocalModelError, LocalOnnxEmbeddingBackend
+
+        try:
+            embedding_client = LocalOnnxEmbeddingBackend(
+                data_dir / "models", embedding_local_model_id,
+            )
+        except LocalModelError as exc:
+            # 本地模型目录损坏或被删会让构造期校验抛 LocalModelError；
+            # 向量能力本次停用即可，不能让 build_subsystems 冒泡导致进程无法启动。
+            logger.warning("本地向量模型校验失败，向量能力本次停用: %s", exc)
+    elif embedding_enabled and embedding_base_url:
         from src.memory.embedding import EmbeddingClient
         emb_key = embedding_api_key
         embedding_client = EmbeddingClient(

@@ -39,6 +39,18 @@ const visibleRules = computed(() => {
   })
 })
 
+function runtimeCapabilityLabels(rule: RuleSummary): string[] {
+  const capabilities = rule.ruleset_runtime?.capabilities
+  if (!capabilities) return ['自由文本回合']
+  const labels: string[] = []
+  if (capabilities.authoritative_intents) labels.push('权威动作')
+  if (capabilities.deterministic_combat) labels.push('确定性战斗')
+  if (capabilities.sequential_checks) labels.push('顺序多检定')
+  if (capabilities.composite_action) labels.push('组合技能')
+  if (capabilities.versioned_state) labels.push('可恢复状态')
+  return labels.length ? labels : ['仅叙事投影']
+}
+
 const editorTitle = computed(() => {
   if (!ruleEdit.value) return t('ruleEditor')
   if (ruleEdit.value.mode === 'new') return t('newCustomRule')
@@ -339,6 +351,9 @@ async function deleteRule(rule: RuleSummary) {
             <span><strong>{{ t('attributes') }}</strong>{{ r.attr_count ?? '-' }} {{ t('itemsUnit') }}</span>
             <span v-if="r.file"><strong>{{ t('file') }}</strong>{{ r.file }}</span>
           </div>
+          <div class="rule-capability-row" aria-label="规则运行能力">
+            <span v-for="capability in runtimeCapabilityLabels(r)" :key="capability" class="rule-capability">{{ capability }}</span>
+          </div>
           <p :title="localizedField<string>(r, 'description') || ''">{{ localizedField<string>(r, 'description') || '' }}</p>
         </div>
         <div class="actions">
@@ -421,6 +436,8 @@ async function deleteRule(rule: RuleSummary) {
 .rules-toolbar input { flex: 1 1 16rem; min-width: 0; }
 .rules-toolbar select { min-height: 44px; }
 .rules-count { color: var(--df-text-muted); font-size: .85rem; }
+.rule-capability-row { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .65rem; }
+.rule-capability { border: 1px solid var(--df-border-soft); border-radius: 999px; padding: .2rem .55rem; color: var(--df-text-muted); font-size: .75rem; }
 @media (max-width: 480px) {
   .rules-toolbar input, .rules-toolbar select { width: 100%; }
   .rules-count { width: 100%; }

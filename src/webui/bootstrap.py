@@ -82,16 +82,15 @@ class WebUIBootstrap:
         if not subsystems or not subsystems.memory_store or not subsystems.memory_store.embedding_client:
             return
         try:
-            for instance in subsystems.registry.list_all():
-                count = await subsystems.memory_store.embed_all_pending(
-                    str(instance.game_key)
-                )
-                if count:
-                    self.logger.info(
-                        "[Embedding] %s: backfilled %d pending memories",
-                        instance.world_name,
-                        count,
-                    )
+            total = 0
+            while True:
+                count = await subsystems.memory_store.embed_all_pending()
+                total += count
+                if not count:
+                    break
+                await asyncio.sleep(0)
+            if total:
+                self.logger.info("[Embedding] rebuilt %d memory vectors", total)
         except asyncio.CancelledError:
             raise
         except Exception:

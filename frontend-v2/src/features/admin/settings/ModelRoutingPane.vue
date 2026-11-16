@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { NButton, NIcon, NInput, NInputNumber, NModal, NSwitch } from 'naive-ui'
 import { AlertCircleOutline, CheckmarkCircleOutline, CubeOutline, ImageOutline, MicOutline, ServerOutline, SparklesOutline, VolumeHighOutline } from '@vicons/ionicons5'
 import { api, errorMessage } from '@/api/client'
@@ -40,6 +40,14 @@ const providers = computed(() => store.config.ai_providers || [])
 const openAiProviders = computed(() => providers.value.filter(provider => provider.api_format === 'openai'))
 const ttsProvider = computed(() => String(store.config.tts_provider || 'browser'))
 const asrProvider = computed(() => String(store.config.asr_provider || 'disabled'))
+const embeddingStatus = computed(() => store.config.embedding_status || {})
+const embeddingSource = computed(() => String(store.config.embedding_source || 'external'))
+const localEmbeddingModels = computed(() => store.config.embedding_local_models || [])
+const localEmbeddingCatalog = computed(() => (store.config.embedding_model_catalog || []).filter(model => model.status !== 'installed'))
+const installingLocalModel = ref('')
+const localModelError = ref('')
+const rebuildBusy = ref(false)
+let rebuildTimer: number | undefined
 type ImagePromptField = 'style_prefix' | 'manual_rules' | 'manual_prompt' | 'auto_rules' | 'auto_prompt'
 type ImagePromptConfigKey = 'imagegen_style_prefix' | 'imagegen_manual_rules' | 'imagegen_manual_prompt' | 'imagegen_auto_rules' | 'imagegen_auto_prompt'
 const promptConfigKeys: Record<ImagePromptField, ImagePromptConfigKey> = {
@@ -163,6 +171,37 @@ function setAsrProvider(value: string) {
   setString('asr_provider', value)
   if (value === 'disabled') setString('asr_provider_ref', '')
 }
+async function installLocalModel(modelId: string) {
+  if (installingLocalModel.value) return
+  installingLocalModel.value = modelId; localModelError.value = ''
+  try {
+    await api(`/embedding/models/${encodeURIComponent(modelId)}/install`, { method: 'POST', body: '{}' })
+    await store.load()
+  } catch (error: unknown) {
+    localModelError.value = errorMessage(error)
+  } finally { installingLocalModel.value = '' }
+}
+async function rebuildEmbeddings() {
+  if (rebuildBusy.value) return
+  rebuildBusy.value = true
+  try {
+    await api('/embedding/rebuild', { method: 'POST', body: '{}' })
+    await store.load()
+    if (rebuildTimer) window.clearInterval(rebuildTimer)
+    rebuildTimer = window.setInterval(async () => {
+      await store.load()
+      if (store.config.embedding_status?.state !== 'rebuilding') {
+        if (rebuildTimer) window.clearInterval(rebuildTimer)
+        rebuildTimer = undefined
+        rebuildBusy.value = false
+      }
+    }, 1500)
+  } catch (error: unknown) {
+    localModelError.value = errorMessage(error)
+    rebuildBusy.value = false
+  }
+}
+onBeforeUnmount(() => { if (rebuildTimer) window.clearInterval(rebuildTimer) })
 </script>
 
 <template>
@@ -210,10 +249,30 @@ function setAsrProvider(value: string) {
           <article id="settings-embedding" class="model-role-card model-role-card-embedding">
             <header><NIcon :component="CubeOutline" /><div><h4>{{ t('modelRoleEmbedding') }}</h4><p>{{ t('modelRoleEmbeddingHint') }}</p></div><HelpButton :title="t('embeddingHelpTitle')"><h4>{{ t('embeddingHelpWhatTitle') }}</h4><p>{{ t('embeddingHelpWhatText') }}</p><h4>{{ t('embeddingHelpChooseTitle') }}</h4><p>{{ t('embeddingHelpChooseBefore') }} <code>bge-m3</code>{{ t('embeddingHelpChooseAfter') }} <code>text-embedding-3-small</code>, <code>gte-large</code>, <code>nomic-embed-text</code>{{ t('embeddingHelpChooseSuffix') }}</p><h4>{{ t('embeddingHelpConfigTitle') }}</h4><p>{{ t('embeddingHelpCentralized') }}</p><h4>{{ t('test') }}</h4><p>{{ t('embeddingHelpTest') }}</p></HelpButton></header>
             <label class="model-role-enabled"><span>{{ t('vectorMemory') }}</span><NSwitch :value="!!store.config.embedding_enabled" :disabled="saving" @update:value="emit('toggle-and-save', 'embedding_enabled', $event)" /></label>
-            <label><span>{{ t('providerName') }}</span><select :value="store.config.embedding_provider_ref || ''" :disabled="!store.config.embedding_enabled" @change="setRoleProvider('embedding_provider_ref', 'embedding_model', eventValue($event), 'embedding')"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name || provider.id }}</option></select></label>
-            <label><span>{{ t('model') }}</span><select :value="store.config.embedding_model || ''" :disabled="!store.config.embedding_enabled || !store.config.embedding_provider_ref" @change="setString('embedding_model', eventValue($event))"><option value="">{{ t('modelRoutingChooseModel') }}</option><option v-for="model in savedModels(String(store.config.embedding_provider_ref || ''), 'embedding')" :key="model" :value="model">{{ model }}</option></select></label>
+            <label><span>{{ locale === 'zh-CN' ? '模型来源' : 'Model source' }}</span><select :value="embeddingSource" :disabled="saving" @change="setString('embedding_source', eventValue($event))"><option value="external">{{ locale === 'zh-CN' ? '外部服务商' : 'External provider' }}</option><option value="local">{{ locale === 'zh-CN' ? '本地模型（管理员安装）' : 'Local model (admin installed)' }}</option></select></label>
+            <template v-if="embeddingSource === 'local'">
+              <label><span>{{ locale === 'zh-CN' ? '已安装本地模型' : 'Installed local model' }}</span><select :value="store.config.embedding_local_model_id || ''" :disabled="!store.config.embedding_enabled || !localEmbeddingModels.length" @change="setString('embedding_local_model_id', eventValue($event))"><option value="">{{ locale === 'zh-CN' ? '请选择模型' : 'Choose a model' }}</option><option v-for="model in localEmbeddingModels" :key="model.id" :value="model.id" :disabled="model.status !== 'installed'">{{ model.display_name || model.id }}<template v-if="model.version"> · {{ model.version }}</template></option></select></label>
+              <p v-if="!localEmbeddingModels.length" class="model-role-field-hint">{{ locale === 'zh-CN' ? '没有已安装模型。请把经过校验的 manifest 和权重放入 data/models，再刷新此页。' : 'No installed model. Add a verified manifest and weights under data/models, then refresh.' }}</p>
+              <div v-if="localEmbeddingCatalog.length" class="local-model-catalog">
+                <span>{{ locale === 'zh-CN' ? '目录中的可安装模型' : 'Available from catalog' }}</span>
+                <button v-for="model in localEmbeddingCatalog" :key="model.id" type="button" :disabled="!!installingLocalModel" @click="installLocalModel(model.id)">{{ installingLocalModel === model.id ? (locale === 'zh-CN' ? '校验下载中…' : 'Downloading…') : (model.display_name || model.id) }}</button>
+              </div>
+              <p v-if="localModelError" class="model-role-field-hint embedding-index-pending">{{ localModelError }}</p>
+            </template>
+            <template v-else>
+              <label><span>{{ t('providerName') }}</span><select :value="store.config.embedding_provider_ref || ''" :disabled="!store.config.embedding_enabled" @change="setRoleProvider('embedding_provider_ref', 'embedding_model', eventValue($event), 'embedding')"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name || provider.id }}</option></select></label>
+              <label><span>{{ t('model') }}</span><select :value="store.config.embedding_model || ''" :disabled="!store.config.embedding_enabled || !store.config.embedding_provider_ref" @change="setString('embedding_model', eventValue($event))"><option value="">{{ t('modelRoutingChooseModel') }}</option><option v-for="model in savedModels(String(store.config.embedding_provider_ref || ''), 'embedding')" :key="model" :value="model">{{ model }}</option></select></label>
+            </template>
             <label><span>{{ t('maxInput') }}</span><NInputNumber :value="store.config.embedding_max_input ?? 0" :min="0" :disabled="!store.config.embedding_enabled" @update:value="setNumber('embedding_max_input', $event)" /></label>
             <p class="model-role-field-hint">{{ t('maxInputHint') }}</p><div class="model-role-actions"><NButton :loading="embeddingTesting" :disabled="!store.config.embedding_enabled" @click="emit('test-embedding')">{{ t('testEmbeddingConnection') }}</NButton></div>
+            <div class="embedding-index-status" data-testid="embedding-index-status">
+              <strong>{{ locale === 'zh-CN' ? '长期记忆索引' : 'Long-term memory index' }}</strong>
+              <span>{{ locale === 'zh-CN' ? `当前模型已就绪 ${Number(embeddingStatus.ready_current_profile || 0)} / ${Number(embeddingStatus.total_active || 0)} 条` : `${Number(embeddingStatus.ready_current_profile || 0)} / ${Number(embeddingStatus.total_active || 0)} entries ready for the current model` }}</span>
+              <span v-if="Number(embeddingStatus.pending || 0) > 0" class="embedding-index-pending">{{ locale === 'zh-CN' ? `待重建 ${Number(embeddingStatus.pending)} 条；不影响关键词检索` : `${Number(embeddingStatus.pending)} pending; keyword search remains available` }}</span>
+              <span v-else class="embedding-index-ready">{{ locale === 'zh-CN' ? '已完成，旧模型向量不会混用' : 'Ready; vectors from another model are not mixed in' }}</span>
+              <NButton size="small" :loading="rebuildBusy || embeddingStatus.state === 'rebuilding'" :disabled="!store.config.embedding_enabled || Number(embeddingStatus.pending || 0) <= 0" @click="rebuildEmbeddings">{{ locale === 'zh-CN' ? '立即重建索引' : 'Rebuild now' }}</NButton>
+              <small>{{ locale === 'zh-CN' ? '向量来源、模型和本地模型选择修改后，点击本页右上角“保存”才会生效。' : 'Changes to source and model take effect after clicking Save in the top right.' }}</small>
+            </div>
             <TestResultCard v-if="embeddingResult" :result="embeddingResult" kind="embedding" />
           </article>
           <article id="settings-tts-model" class="model-role-card">
@@ -292,6 +351,12 @@ function setAsrProvider(value: string) {
 </template>
 
 <style scoped>
+.embedding-index-status { display: grid; gap: 3px; margin-top: 8px; padding: 9px 10px; border: 1px solid var(--df-border-soft); border-radius: 8px; color: var(--df-text-muted); font-size: 12px; }
+.embedding-index-status strong { color: var(--df-text); font-size: 13px; }
+.embedding-index-pending { color: var(--df-warning, #a16207); }
+.embedding-index-ready { color: var(--df-success, #15803d); }
+.local-model-catalog { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; color: var(--df-text-muted); font-size: 12px; }
+.local-model-catalog button { padding: 4px 7px; border: 1px solid var(--df-border-soft); border-radius: 6px; }
 .imagegen-style-field :deep(.n-input),
 .imagegen-style-field :deep(textarea) { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
 .imagegen-style-field { display: grid; gap: 6px; min-width: 0; }

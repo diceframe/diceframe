@@ -67,20 +67,29 @@ describe('CharactersView collection journey', () => {
     expect(mocks.api).not.toHaveBeenCalledWith('/games/local-game/characters')
   })
 
-  it('locks card creation to the loaded game rule binding', async () => {
+  it('keeps library card creation independent from the loaded game rule binding', async () => {
     mocks.route.query = { game: 'bound-game' }
     mocks.api.mockImplementation(async (path: string) => {
       const p = String(path)
       if (p === '/character-cards') return { cards: [card] }
       if (p === '/rules') return { rules: [{ rule_id: 'other', name: 'Other' }] }
       if (p.endsWith('/characters')) return { players: [], npcs: [], rule_meta: { rule_id: 'core', rule_name: 'Core' }, rule_attrs: [], rule_attrs_total: 60 }
-      if (p.includes('/character-schema')) return { ok: true, rule_meta: { rule_id: 'core' }, rule_attrs: [] }
+      if (p.includes('/character-schema')) {
+        const rule = p.includes('/rules/other/') ? 'other' : 'core'
+        return { ok: true, rule_meta: { rule_id: rule }, rule_attrs: [] }
+      }
       return { ok: true }
     })
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.get('select').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('select').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="new-character-card"]').attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('select').setValue('other')
+    await flushPromises()
+
+    expect(mocks.api).toHaveBeenCalledWith(expect.stringContaining('/rules/other/character-schema'))
     expect(wrapper.get('[data-testid="new-character-card"]').attributes('disabled')).toBeUndefined()
   })
 
