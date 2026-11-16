@@ -1,0 +1,4 @@
+# src/webui/routes/maps.py 返回给请求方的提示。
+"en":
+  background_gm_only: "Only the GM can change the map background"
+  background_missing: "The map background does not exist"

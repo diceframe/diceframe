@@ -1,0 +1,11 @@
+# src/webui/services/seat_tokens.py 返回给请求方的提示。
+"zh-CN":
+  game_restarted_refresh_and_retry: "对局已重开，请刷新后重试"
+  gm_seat_not_shareable: "GM 席位不能通过分享链接接管"
+  gm_seat_requires_host_login: "GM 席位需要房主登录"
+  rewriting_wait_and_retry: "GM 正在重写历史回合，请等待完成后重试"
+  seat_has_credential: "该席位已有凭证，请使用 GM 发出的链接"
+  seat_in_use: "该席位正在被设备使用；重新生成链接会让这些设备下线"
+  seat_link_gm_only: "仅 GM 可以生成席位链接"
+  seat_missing: "席位不存在"
+  session_without_seat: "当前会话没有绑定本局席位"

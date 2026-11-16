@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from PIL import Image, ImageOps, UnidentifiedImageError
+from src.localization.messages import t
 
 MAX_SCENE_IMAGE_UPLOAD_BYTES = 8 * 1024 * 1024
 MAX_SCENE_IMAGE_PIXELS = 24_000_000
@@ -82,15 +83,15 @@ def builtin_scene_image_ref(rule_id: str = "") -> dict[str, str]:
 
 def save_scene_image_upload(dependencies: SceneImageDependencies | None, file_data: str, file_name: str = "") -> dict[str, Any]:
     if not file_data:
-        return {"ok": False, "error": "未提供冒险头图文件"}
+        return {"ok": False, "error": t("webui.services.scene_images.file_missing")}
     if len(file_data) > (MAX_SCENE_IMAGE_UPLOAD_BYTES * 4 // 3) + 32:
-        return {"ok": False, "error": "冒险头图不能超过 8 MB"}
+        return {"ok": False, "error": t("webui.services.scene_images.file_too_large")}
     try:
         raw = base64.b64decode(file_data, validate=True)
     except (ValueError, binascii.Error):
-        return {"ok": False, "error": "冒险头图文件数据无效"}
+        return {"ok": False, "error": t("webui.services.scene_images.file_data_invalid")}
     if not raw or len(raw) > MAX_SCENE_IMAGE_UPLOAD_BYTES:
-        return {"ok": False, "error": "冒险头图不能超过 8 MB"}
+        return {"ok": False, "error": t("webui.services.scene_images.file_too_large")}
     try:
         payload = _normalized_scene_image(raw)
     except ValueError as exc:
@@ -121,36 +122,36 @@ def builtin_scene_image_file(image_id: str) -> Path | None:
 
 def validate_scene_image_ref(dependencies: SceneImageDependencies, reference: Any) -> dict[str, str]:
     if not isinstance(reference, dict):
-        raise ValueError("冒险头图引用必须是对象")
+        raise ValueError(t("webui.services.scene_images.reference_not_object"))
     kind = str(reference.get("kind") or "").strip()
     if kind == "builtin":
         image_id = str(reference.get("id") or "").strip()
         if not BUILTIN_ID_RE.fullmatch(image_id) or image_id not in BUILTIN_SCENE_IMAGE_PATHS:
-            raise ValueError("未知的内置冒险头图")
+            raise ValueError(t("webui.services.scene_images.unknown_builtin"))
         return {"kind": "builtin", "id": image_id}
     if kind == "upload":
         asset_id = str(reference.get("asset_id") or "").strip()
         if not scene_image_file(dependencies, asset_id):
-            raise ValueError("上传的冒险头图不存在")
+            raise ValueError(t("webui.services.scene_images.uploaded_missing"))
         return {"kind": "upload", "asset_id": asset_id}
     if kind == "generated":
         asset_id = str(reference.get("asset_id") or "").strip()
         if not dependencies.generated_image_file(asset_id):
-            raise ValueError("生成的冒险头图不存在")
+            raise ValueError(t("webui.services.scene_images.generated_missing"))
         return {"kind": "generated", "asset_id": asset_id}
     if kind == "plugin":
         plugin_id = str(reference.get("plugin_id") or "").strip()
         relative_path = str(reference.get("path") or "").replace("\\", "/").strip("/")
         if not plugin_id or not relative_path:
-            raise ValueError("内容包冒险头图引用不完整")
+            raise ValueError(t("webui.services.scene_images.content_pack_reference_incomplete"))
         try:
             path = dependencies.plugin_asset_path(plugin_id, relative_path)
         except (KeyError, ValueError) as exc:
-            raise ValueError("内容包冒险头图不存在或未声明") from exc
+            raise ValueError(t("webui.services.scene_images.content_pack_cover_missing")) from exc
         if path.stat().st_size > MAX_SCENE_IMAGE_UPLOAD_BYTES:
-            raise ValueError("内容包冒险头图不能超过 8 MB")
+            raise ValueError(t("webui.services.scene_images.content_pack_cover_too_large"))
         return {"kind": "plugin", "plugin_id": plugin_id, "path": relative_path}
-    raise ValueError("不支持的冒险头图引用类型")
+    raise ValueError(t("webui.services.scene_images.unsupported_reference_type"))
 
 
 def _template_scene_image_candidates(
@@ -309,12 +310,12 @@ def _normalized_scene_image(raw: bytes) -> bytes:
     try:
         with Image.open(io.BytesIO(raw)) as source:
             if source.format not in {"PNG", "JPEG", "WEBP"}:
-                raise ValueError("冒险头图仅支持 PNG、JPEG 或 WebP")
+                raise ValueError(t("webui.services.scene_images.unsupported_format"))
             width, height = source.size
             if width < 320 or height < 180:
-                raise ValueError("冒险头图尺寸不能小于 320×180")
+                raise ValueError(t("webui.services.scene_images.too_small"))
             if width > 8192 or height > 8192 or width * height > MAX_SCENE_IMAGE_PIXELS:
-                raise ValueError("冒险头图尺寸过大")
+                raise ValueError(t("webui.services.scene_images.dimensions_too_large"))
             image = ImageOps.exif_transpose(source).convert("RGB")
             image = ImageOps.fit(image, SCENE_IMAGE_SIZE, Image.Resampling.LANCZOS)
             output = io.BytesIO()
@@ -323,7 +324,7 @@ def _normalized_scene_image(raw: bytes) -> bytes:
     except ValueError:
         raise
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-        raise ValueError("无法读取该冒险头图") from exc
+        raise ValueError(t("webui.services.scene_images.unreadable")) from exc
 
 
 def _store_payload(dependencies: SceneImageDependencies, payload: bytes) -> dict[str, str]:

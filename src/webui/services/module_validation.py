@@ -41,6 +41,7 @@ from src.rulesets.module_catalogs import (
     ModuleCatalogError,
     load_declared_module_catalog,
 )
+from src.localization.messages import t
 
 MODULE_PLUGIN_TYPE = "content-pack"
 _PREVIEW_SUPPORTED_FORMATS = (

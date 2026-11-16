@@ -11,6 +11,7 @@ from src.engine.modules import ruleset_runtime
 from src.webui.character_card_projection import dedupe_cards
 from src.webui.ruleset_draft_validation import validate_draft_shape
 from src.rulesets.contracts import LiveAdvancementTransactionRuntime
+from src.localization.messages import t
 
 if TYPE_CHECKING:
     from src.rulesets.registry import RulesetRuntimeRegistry
@@ -49,7 +50,7 @@ def _context(
         return None, None, {
             "ok": False,
             "code": "RULE_NOT_FOUND",
-            "error": f"规则不存在: {rule_id}",
+            "error": t("webui.services.ruleset_advancement.rule_missing", rule_id=rule_id),
         }
     runtime = dependencies.ruleset_registry.resolve(rule.template)
     if not all(
@@ -59,7 +60,7 @@ def _context(
         return rule, runtime, {
             "ok": False,
             "code": "RULESET_ADVANCEMENT_UNAVAILABLE",
-            "error": "该规则尚未提供专业升级流程",
+            "error": t("webui.services.ruleset_advancement.no_professional_advancement"),
         }
     return rule, runtime, None
 
@@ -155,7 +156,7 @@ def _card_context(
             return cards, index, card, None, None, {
                 "ok": False,
                 "code": "RULESET_RUNTIME_UNAVAILABLE",
-                "error": "角色卡绑定的专业规则不可用",
+                "error": t("webui.services.ruleset_advancement.card_ruleset_unavailable"),
             }
         if not all(
             callable(getattr(runtime, name, None)) for name in required
@@ -169,7 +170,7 @@ def _card_context(
     return cards, -1, None, None, None, {
         "ok": False,
         "code": "CHARACTER_NOT_FOUND",
-        "error": f"角色卡不存在: {card_id}",
+        "error": t("webui.services.ruleset_advancement.card_missing", card_id=card_id),
     }
 
 
@@ -218,7 +219,7 @@ def apply_card(
         return {
             "ok": False,
             "code": "INVALID_OPERATION_ID",
-            "error": "升级操作必须提供有效的 operation_id",
+            "error": t("webui.services.ruleset_advancement.operation_id_required"),
         }
     revision = int(card.get("ruleset_revision", 0) or 0)
     operation_log = card.get("ruleset_operation_log")
@@ -249,13 +250,13 @@ def apply_card(
         return {
             "ok": False,
             "code": "INVALID_CHARACTER_REVISION",
-            "error": "升级操作必须提供有效的 expected_revision",
+            "error": t("webui.services.ruleset_advancement.expected_revision_required"),
         }
     if expected_revision != revision:
         return {
             "ok": False,
             "code": "STALE_CHARACTER_REVISION",
-            "error": "角色卡已在其他位置更新，请刷新后重试",
+            "error": t("webui.services.ruleset_advancement.card_updated_elsewhere"),
             "revision": revision,
         }
 
@@ -445,7 +446,7 @@ def _live_context(
     rule = dependencies.load_rule_for_game(instance)
     if rule is None:
         return instance, None, None, None, {
-            "ok": False, "code": "RULE_NOT_FOUND", "error": "当前游戏规则不存在",
+            "ok": False, "code": "RULE_NOT_FOUND", "error": t("webui.services.ruleset_advancement.game_rule_missing"),
         }
     try:
         runtime = dependencies.ruleset_registry.resolve(rule.template)
@@ -460,7 +461,7 @@ def _live_context(
         return instance, rule, runtime, None, {
             "ok": False,
             "code": "RULESET_ADVANCEMENT_UNAVAILABLE",
-            "error": "该规则尚未提供专业升级流程",
+            "error": t("webui.services.ruleset_advancement.no_professional_advancement"),
         }
     return instance, rule, runtime, instance.get_character_sheet(user_id), None
 
@@ -477,7 +478,7 @@ def _live_context_for_instance(
     rule = dependencies.load_rule_for_game(instance)
     if rule is None:
         return instance, None, None, None, {
-            "ok": False, "code": "RULE_NOT_FOUND", "error": "当前游戏规则不存在",
+            "ok": False, "code": "RULE_NOT_FOUND", "error": t("webui.services.ruleset_advancement.game_rule_missing"),
         }
     try:
         runtime = dependencies.ruleset_registry.resolve(rule.template)
@@ -487,7 +488,7 @@ def _live_context_for_instance(
         }
     if not all(callable(getattr(runtime, name, None)) for name in ("preview_advancement", "apply_advancement")):
         return instance, rule, runtime, None, {
-            "ok": False, "code": "RULESET_ADVANCEMENT_UNAVAILABLE", "error": "该规则尚未提供专业升级流程",
+            "ok": False, "code": "RULESET_ADVANCEMENT_UNAVAILABLE", "error": t("webui.services.ruleset_advancement.no_professional_advancement"),
         }
     return instance, rule, runtime, instance.get_character_sheet(user_id), None
 
@@ -539,10 +540,10 @@ async def apply_live(
         if not write_entered:
             return {
                 "ok": False, "code": "REWRITE_IN_PROGRESS",
-                "error": "GM 正在重写历史回合，请等待完成后重试",
+                "error": t("webui.services.ruleset_advancement.rewriting_wait_and_retry"),
             }
         if dependencies.get_instance(instance.game_key) is not instance:
-            return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
+            return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.ruleset_advancement.game_restarted_refresh_and_retry")}
         return await _apply_live_authority(dependencies, game_key, user_id, body, instance)
 
 
@@ -566,7 +567,7 @@ async def _apply_live_authority(
     if not operation_id or len(operation_id) > 160:
         return {
             "ok": False, "code": "INVALID_OPERATION_ID",
-            "error": "升级操作必须提供有效的 operation_id",
+            "error": t("webui.services.ruleset_advancement.operation_id_required"),
         }
     revision = int(character.get("ruleset_revision", 0) or 0)
     raw_log = character.get("ruleset_operation_log")
@@ -579,7 +580,7 @@ async def _apply_live_authority(
         if previous.get("kind") != "advancement":
             return {
                 "ok": False, "code": "OPERATION_ID_REUSED",
-                "error": "operation_id 已被其他角色操作使用，请重试",
+                "error": t("webui.services.ruleset_advancement.operation_id_reused"),
             }
         return {
             "ok": True, "rule_id": rule.rule_id, "game_key": game_key,
@@ -594,12 +595,12 @@ async def _apply_live_authority(
     except (TypeError, ValueError):
         return {
             "ok": False, "code": "INVALID_CHARACTER_REVISION",
-            "error": "升级操作必须提供有效的 expected_revision",
+            "error": t("webui.services.ruleset_advancement.expected_revision_required"),
         }
     if expected_revision != revision:
         return {
             "ok": False, "code": "STALE_CHARACTER_REVISION",
-            "error": "角色已在其他位置更新，请刷新后重试", "revision": revision,
+            "error": t("webui.services.ruleset_advancement.character_updated_elsewhere"), "revision": revision,
         }
 
     try:
@@ -688,7 +689,7 @@ def live_status(
     except (AttributeError, TypeError, ValueError):
         runtime = None
     if not isinstance(runtime, LiveAdvancementTransactionRuntime):
-        return {"ok": False, "code": "RULESET_ADVANCEMENT_UNAVAILABLE", "error": "当前规则不支持该升级控制"}
+        return {"ok": False, "code": "RULESET_ADVANCEMENT_UNAVAILABLE", "error": t("webui.services.ruleset_advancement.advancement_control_unsupported")}
     return {"ok": True, "advancement": runtime.live_advancement_status(instance)}
 
 
@@ -704,7 +705,7 @@ async def control_live(
         if not write_entered:
             return {
                 "ok": False, "code": "REWRITE_IN_PROGRESS",
-                "error": "GM 正在重写历史回合，请等待完成后重试",
+                "error": t("webui.services.ruleset_advancement.rewriting_wait_and_retry"),
             }
         return await _control_live_authority(dependencies, game_key, body)
 
@@ -723,7 +724,7 @@ async def _control_live_authority(
     except (AttributeError, TypeError, ValueError):
         runtime = None
     if not isinstance(runtime, LiveAdvancementTransactionRuntime):
-        return {"ok": False, "code": "RULESET_ADVANCEMENT_UNAVAILABLE", "error": "当前规则不支持该升级控制"}
+        return {"ok": False, "code": "RULESET_ADVANCEMENT_UNAVAILABLE", "error": t("webui.services.ruleset_advancement.advancement_control_unsupported")}
     parsed = validate_draft_shape(body)
     try:
         ruleset_runtime.require_binding(instance, runtime.runtime_id)

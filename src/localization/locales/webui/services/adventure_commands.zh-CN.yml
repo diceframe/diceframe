@@ -1,0 +1,7 @@
+# src/webui/services/adventure_commands.py 返回给请求方的提示。
+"zh-CN":
+  confirm_gm_only: "只有 GM 可以确认冒险节点完成"
+  dismiss_gm_only: "只有 GM 可以忽略冒险节点建议"
+  save_failed_suggestion_restored: "保存失败，建议状态已恢复，请重试"
+  settlement_failed_state_restored: "冒险结算失败，状态已恢复，请重试"
+  suggestion_handled_or_missing: "冒险节点建议已处理或不存在"

@@ -1,0 +1,3 @@
+# src/webui/update_admission.py 返回给请求方的提示。
+"en":
+  update_validating: "Update validation is in progress; retry shortly."

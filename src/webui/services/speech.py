@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from src.tts import SpeechRequest, VoiceProfile
 from src.llm.parser import sanitize_narration
+from src.localization.messages import t
 
 _OPENAI_BUILTIN_VOICES = (
     "alloy", "ash", "ballad", "coral", "echo", "fable",
@@ -143,9 +144,9 @@ async def synthesize(
     if inst is None:
         raise KeyError("游戏不存在")
     if not user_id or not (owner or user_id == inst.gm_uid or user_id in inst.players):
-        raise PermissionError("当前身份不属于本局游戏")
+        raise PermissionError(t("webui.services.speech.identity_not_in_game"))
     if not _is_public_game_text(inst, text):
-        raise PermissionError("只能朗读本局公开时间线中的内容")
+        raise PermissionError(t("webui.services.speech.public_timeline_only"))
     return await dependencies.backend.synthesize(
         SpeechRequest(text=text, voice=voice, language=language, speed=speed),
         _voice_profiles(dependencies),

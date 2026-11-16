@@ -1,0 +1,9 @@
+# src/webui/services/generation.py 返回给请求方的提示。
+"zh-CN":
+  character_parse_failed: "AI 返回内容解析失败，请重试"
+  llm_client_uninitialized: "LLM 客户端未初始化"
+  model_list_not_json: "模型列表响应不是有效 JSON"
+  model_list_unrecognized: "接口未返回可识别的模型列表"
+  rule_json_parse_failed: "AI 返回规则 JSON 解析失败，请重试"
+  rule_theme_required: "请输入规则题材描述"
+  source_rule_missing: "母版规则不存在: %{source_rule_id}"

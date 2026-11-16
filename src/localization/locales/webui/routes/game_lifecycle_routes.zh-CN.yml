@@ -1,0 +1,3 @@
+# src/webui/routes/game_lifecycle_routes.py 返回给请求方的提示。
+"zh-CN":
+  world_description_too_long: "世界描述过长（上限 %{max_seed_chars} 字）"

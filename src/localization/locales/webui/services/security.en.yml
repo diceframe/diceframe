@@ -1,0 +1,11 @@
+# src/webui/services/security.py 返回给请求方的提示。
+"en":
+  certificate_changed: "The certificate changed after the check; run the check again"
+  certificate_verification_failed: "Certificate verification failed: %{exc}"
+  lets_encrypt_request_failed: "Requesting the Let's Encrypt certificate failed: %{exc}"
+  local_certificate_verification_failed: "Verifying the local certificate failed: %{exc}"
+  prepare_token_expired: "The preparation token has expired; run the check again"
+  prepare_token_invalid: "The preparation token is invalid or already used; run the check again"
+  regenerate_failed: "Regenerating the local certificate failed: %{exc}"
+  tls_mode_managed_by_env: "TRPG_TLS_MODE is managed by an environment variable; change .env and restart the backend"
+  use_disable_action: "Use the disable action to turn connection security off"

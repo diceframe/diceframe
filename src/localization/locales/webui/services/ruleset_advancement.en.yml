@@ -1,0 +1,15 @@
+# src/webui/services/ruleset_advancement.py 返回给请求方的提示。
+"en":
+  advancement_control_unsupported: "The current rule does not support this level-up control"
+  card_missing: "The character card does not exist: %{card_id}"
+  card_ruleset_unavailable: "The professional ruleset bound to the character card is unavailable"
+  card_updated_elsewhere: "The character card was updated elsewhere; refresh and try again"
+  character_updated_elsewhere: "The character was updated elsewhere; refresh and try again"
+  expected_revision_required: "A level-up operation must provide a valid expected_revision"
+  game_restarted_refresh_and_retry: "The game was restarted; refresh and try again"
+  game_rule_missing: "The rule of the current game does not exist"
+  no_professional_advancement: "This rule does not provide a professional level-up flow yet"
+  operation_id_required: "A level-up operation must provide a valid operation_id"
+  operation_id_reused: "operation_id was already used by another character operation; try again"
+  rewriting_wait_and_retry: "The GM is rewriting an earlier round; wait for it to finish and try again"
+  rule_missing: "The rule does not exist: %{rule_id}"

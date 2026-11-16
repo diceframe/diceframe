@@ -1,0 +1,16 @@
+# src/webui/config_controller.py 返回给请求方的提示。
+"zh-CN":
+  base_url_invalid: "Base URL 非法或不允许"
+  base_url_param_invalid: "base_url 非法或不允许"
+  body_not_object: "配置请求必须是 JSON 对象"
+  bot_token_action_unsupported: "不支持的 Bot Token 操作"
+  bot_token_managed_by_env: "Bot API Token 由环境变量 TRPG_BOT_TOKEN 管理，请修改环境变量后重启"
+  config_save_failed: "配置保存失败：%{exc}"
+  config_update_invalid_response: "配置更新返回无效响应"
+  connection_error_see_logs: "连接异常，请查看服务器日志"
+  cors_origins_managed_by_env: "TRPG_WEB_CORS_ORIGINS 已由环境变量接管，请修改 .env 后重启后端"
+  embedding_api_unexpected: "Embedding API 返回异常"
+  model_endpoint_required: "请先配置有效的模型服务地址"
+  proxy_enabled_without_address: "已启用代理，但代理地址为空"
+  proxy_scheme_unsupported: "代理地址仅支持 http:// 或 https://"
+  runtime_reload_failed: "运行时重载失败，配置未保存：%{exc}"

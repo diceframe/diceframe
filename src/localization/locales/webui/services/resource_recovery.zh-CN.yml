@@ -1,0 +1,9 @@
+# src/webui/services/resource_recovery.py 返回给请求方的提示。
+"zh-CN":
+  claim_own_recovery_only: "只能领取自己的恢复 / Claim your own recovery"
+  no_recovery_policy: "此规则包未启用恢复策略 / No recovery policy declared"
+  recovery_changed_refresh: "恢复记录已更新，请刷新 / Recovery changed; refresh first"
+  request_own_character_only: "只能为自己的角色申请 / Request for your own character"
+  run_changed_refresh: "对局已改变，请刷新 / Run changed; refresh first"
+  run_read_only: "对局当前不可修改 / Run is read-only"
+  save_failed_state_retained: "保存失败，原状态已保留 / Save failed; original state retained"

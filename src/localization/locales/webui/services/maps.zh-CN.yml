@@ -1,0 +1,3 @@
+# src/webui/services/maps.py 返回给请求方的提示。
+"zh-CN":
+  content_pack_background_unavailable: "内容包地图背景不存在或不适用于当前世界"

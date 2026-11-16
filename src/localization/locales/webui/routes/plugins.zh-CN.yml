@@ -1,0 +1,9 @@
+# src/webui/routes/plugins.py 返回给请求方的提示。
+"zh-CN":
+  arguments_context_not_object: "arguments 和 context 必须是对象"
+  body_must_be_json_object: "请求体必须是 JSON 对象"
+  dfplugin_file_missing: "缺少 .dfplugin 插件文件"
+  install_dfplugin_only: "本地安装只接受 .dfplugin 文件；开源仓库请从插件商店安装"
+  install_multipart_required: "插件安装需要 multipart/form-data"
+  package_too_large: "插件包不能超过 20 MB"
+  plugin_id_missing: "缺少 plugin_id"

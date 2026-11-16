@@ -1,0 +1,4 @@
+# src/webui/routes/avatars.py 返回给请求方的提示。
+"en":
+  avatar_missing: "The avatar does not exist"
+  standing_portrait_missing: "The standing portrait does not exist"

@@ -1,0 +1,4 @@
+# src/webui/routes/system.py 返回给请求方的提示。
+"zh-CN":
+  admin_session_required: "需要管理员会话"
+  transport_not_ready: "传输层未就绪"

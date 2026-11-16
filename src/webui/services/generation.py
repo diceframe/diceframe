@@ -15,6 +15,7 @@ from src.generation import creator
 from src.llm.openai_transport import OpenAIChatTransport
 from src.rules.rule_system import RuleSystem
 from src.webui.config_update import connection_test_timeout
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
@@ -98,7 +99,7 @@ async def list_models(
     )
     try:
         if not dependencies.llm_client:
-            return {"ok": False, "error": "LLM 客户端未初始化", "models": []}
+            return {"ok": False, "error": t("webui.services.generation.llm_client_uninitialized"), "models": []}
         session = await dependencies.llm_client._get_session()
         active_proxy = proxy_url or dependencies.llm_client.proxy_url
         request_kwargs = {"proxy": active_proxy} if active_proxy else {}
@@ -116,10 +117,10 @@ async def list_models(
             try:
                 payload = await response.json()
             except (aiohttp.ContentTypeError, json.JSONDecodeError):
-                return {"ok": False, "error": "模型列表响应不是有效 JSON", "models": []}
+                return {"ok": False, "error": t("webui.services.generation.model_list_not_json"), "models": []}
             models = _extract_model_ids(payload)
             if not models:
-                return {"ok": False, "error": "接口未返回可识别的模型列表", "models": []}
+                return {"ok": False, "error": t("webui.services.generation.model_list_unrecognized"), "models": []}
             return {"ok": True, "models": models, "count": len(models)}
     except Exception as exc:
         return {"ok": False, "error": str(exc), "models": []}
@@ -169,7 +170,7 @@ async def _test_openai_connection(
     start = time.time()
     try:
         if not dependencies.llm_client:
-            return {"ok": False, "error": "LLM 客户端未初始化", "elapsed": 0}
+            return {"ok": False, "error": t("webui.services.generation.llm_client_uninitialized"), "elapsed": 0}
         session = await dependencies.llm_client._get_session()
         active_proxy = proxy_url or dependencies.llm_client.proxy_url
         request_kwargs = {"proxy": active_proxy} if active_proxy else {}
@@ -210,7 +211,7 @@ async def _test_anthropic_connection(
     start = time.time()
     try:
         if not dependencies.llm_client:
-            return {"ok": False, "error": "LLM 客户端未初始化", "elapsed": 0}
+            return {"ok": False, "error": t("webui.services.generation.llm_client_uninitialized"), "elapsed": 0}
         session = await dependencies.llm_client._get_session()
         active_proxy = proxy_url or dependencies.llm_client.proxy_url
         request_kwargs = {"proxy": active_proxy} if active_proxy else {}
@@ -310,13 +311,13 @@ async def generate_rule(
         return config_error
     prompt = (prompt or "").strip()
     if not prompt:
-        return {"ok": False, "error": "请输入规则题材描述"}
+        return {"ok": False, "error": t("webui.services.generation.rule_theme_required")}
     source_rule_id = (source_rule_id or "freeform_fantasy").strip()
     source_path = RuleSystem.path_for(
         dependencies.rules_dir, source_rule_id, language,
     )
     if not source_path.exists():
-        return {"ok": False, "error": f"母版规则不存在: {source_rule_id}"}
+        return {"ok": False, "error": t("webui.services.generation.source_rule_missing", source_rule_id=source_rule_id)}
     try:
         language = normalize_language(language)
         source_rule = json.loads(source_path.read_text(encoding="utf-8"))
@@ -331,7 +332,7 @@ async def generate_rule(
             language=language,
         )
         if not data:
-            return {"ok": False, "error": "AI 返回规则 JSON 解析失败，请重试"}
+            return {"ok": False, "error": t("webui.services.generation.rule_json_parse_failed")}
         data["rule_id"] = rule_id
         data["custom"] = True
         data["source_rule_id"] = source_rule_id
@@ -385,7 +386,7 @@ async def generate_character(
             language=resolved_language,
         )
         if not data:
-            return {"ok": False, "error": "AI 返回内容解析失败，请重试"}
+            return {"ok": False, "error": t("webui.services.generation.character_parse_failed")}
         return {"ok": True, "character": data}
     except Exception as e:
         logger.exception("AI 生成角色失败")
@@ -403,7 +404,7 @@ async def generate_text(
         return config_error
     llm_client = dependencies.llm_client
     if llm_client is None:
-        return {"ok": False, "error": "LLM 客户端未初始化"}
+        return {"ok": False, "error": t("webui.services.generation.llm_client_uninitialized")}
     language = normalize_language(language)
     system = system_hint or (
         "You are a TRPG character and setting assistant. Answer briefly and practically in natural English. Do not output JSON."

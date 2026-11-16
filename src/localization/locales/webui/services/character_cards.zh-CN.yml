@@ -1,0 +1,15 @@
+# src/webui/services/character_cards.py 返回给请求方的提示。
+"zh-CN":
+  card_missing: "角色卡不存在"
+  card_missing_with_id: "角色卡不存在: %{card_id}"
+  diceframe_card_not_npc: "DiceFrame 角色卡不支持导入为 NPC，请选择「导入为角色卡」"
+  duplicate_cards_unsafe_recovery: "角色卡库存在重复卡片，无法安全恢复"
+  file_data_missing: "未提供文件数据"
+  library_read_failed: "角色卡库读取失败"
+  lorebook_library_disabled: "世界书库未启用"
+  npc_import_needs_world: "导入为 NPC 需要选择目标世界"
+  professional_card_no_legacy_edit: "专业规则角色卡不能使用旧版通用编辑接口"
+  professional_card_no_narrative_recovery: "专业规则角色卡不能使用叙事元数据恢复"
+  select_cards_to_export: "请选择要导出的角色卡"
+  selected_cards_missing: "未找到所选角色卡"
+  target_world_missing: "目标世界不存在"

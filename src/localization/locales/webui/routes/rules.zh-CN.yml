@@ -1,0 +1,5 @@
+# src/webui/routes/rules.py 返回给请求方的提示。
+"zh-CN":
+  body_must_be_json_object: "请求正文必须是 JSON 对象"
+  draft_not_object: "角色草稿必须是 JSON 对象"
+  draft_too_large: "角色草稿过大"

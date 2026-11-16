@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from src.webui.config_update import prepare_config_update
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
@@ -80,10 +81,10 @@ def _valid_public_url(url: str) -> str:
     """校验并归一化公网 URL：必须 https、合法主机名、长度受限。"""
     text = str(url or "").strip().rstrip("/")
     if len(text) > 253:
-        raise ValueError("隧道地址过长")
+        raise ValueError(t("webui.services.tunnel.url_too_long"))
     parsed = urllib.parse.urlparse(text)
     if parsed.scheme != "https" or not parsed.hostname:
-        raise ValueError("隧道地址必须是有效的 https URL")
+        raise ValueError(t("webui.services.tunnel.url_not_https"))
     return text
 
 
@@ -129,7 +130,7 @@ def publish_tunnel_url(
             state["publisher_plugin_id"] = ""
             state["url"] = ""
         else:
-            raise ValueError(f"隧道已由插件 {current_publisher} 发布，需先停止后再发布")
+            raise ValueError(t("webui.services.tunnel.already_published", current_publisher=current_publisher))
     if "prev_url" not in state:
         state["prev_url"] = str(
             dependencies.config_state().get("public_base_url") or ""
@@ -150,7 +151,7 @@ def publish_tunnel_url(
         try:
             _commit_public_base_url(dependencies, previous_public_url)
         except Exception as rollback_error:
-            raise RuntimeError("隧道状态写入失败，且公网 URL 回滚失败") from rollback_error
+            raise RuntimeError(t("webui.services.tunnel.publish_state_and_rollback_failed")) from rollback_error
         raise
     logger.info("隧道已发布: plugin=%s url=%s", plugin_id, normalized)
     return {"ok": True, "public_base_url": normalized}
@@ -176,7 +177,7 @@ def release_tunnel_url(
         try:
             _commit_public_base_url(dependencies, previous_public_url)
         except Exception as rollback_error:
-            raise RuntimeError("隧道状态清理失败，且公网 URL 回滚失败") from rollback_error
+            raise RuntimeError(t("webui.services.tunnel.release_state_and_rollback_failed")) from rollback_error
         raise
     logger.info("隧道已释放: plugin=%s", plugin_id)
     return {"ok": True, "released": True, "restored": prev}

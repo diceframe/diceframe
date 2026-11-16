@@ -30,6 +30,7 @@ from src.engine.health import record_health_event
 from src.engine.modules import progression_state
 from src.rules.rule_system import RuleSystem
 from src.rulesets.contracts import CharacterDeathStateRuntime, CharacterRevivalRuntime
+from src.localization.messages import t
 
 GameKey = tuple[str, ...]
 RecapGenerator = Callable[[Any], Awaitable[dict[str, Any]]]
@@ -239,7 +240,7 @@ def _parse_gm_resource_change(
         resource_key not in allowed_resources
         and get_resource(character_sheet, resource_key) is None
     ):
-        return {"error": f"当前规则没有资源：{resource_alias}"}
+        return {"error": t("webui.services.game_master.resource_missing_in_rule", resource_alias=resource_alias)}
     before_resource = (
         None
         if resource_key == "currency"
@@ -420,7 +421,7 @@ class GameMasterService:
     async def _rollback_round_authority(self, instance: Any) -> dict[str, Any]:
         round_number = await instance.rollback_last_round()
         if round_number is None:
-            return {"ok": False, "error": "没有可撤回的上一轮"}
+            return {"ok": False, "error": t("webui.services.game_master.no_previous_round")}
         record_health_event(
             instance,
             component="gm_control",
@@ -440,7 +441,7 @@ class GameMasterService:
             )
         return {
             "ok": True,
-            "message": f"已撤回到第 {round_number} 轮开始前的玩家状态",
+            "message": t("webui.services.game_master.rolled_back_to_round", round_number=round_number),
             "external_effects_committed": external_effects_committed,
         }
 
@@ -451,7 +452,7 @@ class GameMasterService:
         if not instance:
             return {"ok": False, "error": "游戏不存在"}
         if self._dependencies.generate_recap is None:
-            return {"ok": False, "error": "系统未就绪"}
+            return {"ok": False, "error": t("webui.services.game_master.system_not_ready")}
         result = await self._dependencies.generate_recap(instance)
         if result.get("ok"):
             await self._dependencies.save_instance(instance)
@@ -551,7 +552,7 @@ class GameMasterService:
             )
             return {
                 "ok": True,
-                "message": f"{name} 已复活（{revive['method']}）",
+                "message": t("webui.services.game_master.revived", name=name, method=revive['method']),
                 "kind": "revive",
             }
 
@@ -579,7 +580,7 @@ class GameMasterService:
         return {
             "ok": True,
             "kind": "directive",
-            "message": "GM 私密指令已加入下一轮",
+            "message": t("webui.services.game_master.private_command_queued"),
         }
 
     async def private_message(
@@ -603,7 +604,7 @@ class GameMasterService:
         if user_id not in instance.players:
             return {"ok": False, "error": "目标玩家不存在"}
         if not text:
-            return {"ok": False, "error": "请输入悄悄话内容"}
+            return {"ok": False, "error": t("webui.services.game_master.whisper_required")}
         instance.append_private_message(user_id, {
             "round": progression_state.round_value(instance),
             "text": text,
@@ -611,16 +612,16 @@ class GameMasterService:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
         await self._dependencies.save_instance(instance)
-        return {"ok": True, "message": "悄悄话已发送"}
+        return {"ok": True, "message": t("webui.services.game_master.whisper_sent")}
 
     @staticmethod
     def _rewrite_conflict() -> dict[str, Any]:
         return {
             "ok": False,
             "code": "REWRITE_IN_PROGRESS",
-            "error": "GM 正在重写历史回合，请等待完成后重试",
+            "error": t("webui.services.game_master.rewriting_wait_and_retry"),
         }
 
     @staticmethod
     def _stale_run() -> dict[str, Any]:
-        return {"ok": False, "code": "STALE_RUN", "error": "对局已重开，请刷新后重试"}
+        return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.game_master.game_restarted_refresh_and_retry")}

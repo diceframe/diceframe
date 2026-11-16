@@ -1,0 +1,3 @@
+# src/webui/routes/_common.py 返回给请求方的提示。
+"en":
+  confirm_header_missing: "The confirmation header is missing"

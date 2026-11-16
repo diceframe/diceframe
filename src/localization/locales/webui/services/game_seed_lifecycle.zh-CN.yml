@@ -1,0 +1,13 @@
+# src/webui/services/game_seed_lifecycle.py 返回给请求方的提示。
+"zh-CN":
+  adventure_init_failed: "冒险初始化失败，未留下半成品存档：%{exc}"
+  narration_perspective_invalid: "叙事视角设置无效"
+  original_adventure_binding_invalid: "原存档的冒险绑定无效，未留下半成品存档。"
+  party_character_required: "请至少创建或选择 1 名队伍角色"
+  play_mode_invalid: "玩法模式无效"
+  restart_failed: "重开失败，未留下半成品存档，请重试。"
+  restart_opening_failed: "重开生成开场失败，未留下半成品存档，请检查模型设置后重试。"
+  save_restarted_game_failed: "保存重开游戏失败，未留下半成品存档，请重试。"
+  seed_game_missing: "未找到重开引用码 '%{seed_code}' 对应的游戏，请确认原存档仍然存在"
+  story_mode_invalid: "故事模式无效，仅支持 prose 或 dialogue"
+  system_not_ready: "系统未就绪"

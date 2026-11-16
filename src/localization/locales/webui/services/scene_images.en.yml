@@ -1,0 +1,17 @@
+# src/webui/services/scene_images.py 返回给请求方的提示。
+"en":
+  content_pack_cover_missing: "The content pack adventure cover does not exist or is not declared"
+  content_pack_cover_too_large: "A content pack adventure cover cannot exceed 8 MB"
+  content_pack_reference_incomplete: "The content pack adventure cover reference is incomplete"
+  dimensions_too_large: "The adventure cover dimensions are too large"
+  file_data_invalid: "The adventure cover file data is invalid"
+  file_missing: "No adventure cover file was provided"
+  file_too_large: "An adventure cover cannot exceed 8 MB"
+  generated_missing: "The generated adventure cover does not exist"
+  reference_not_object: "The adventure cover reference must be an object"
+  too_small: "An adventure cover cannot be smaller than 320×180"
+  unknown_builtin: "Unknown built-in adventure cover"
+  unreadable: "The adventure cover could not be read"
+  unsupported_format: "Adventure covers must be PNG, JPEG or WebP"
+  unsupported_reference_type: "Unsupported adventure cover reference type"
+  uploaded_missing: "The uploaded adventure cover does not exist"

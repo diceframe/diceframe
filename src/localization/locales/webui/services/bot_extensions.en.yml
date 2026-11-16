@@ -1,0 +1,9 @@
+# src/webui/services/bot_extensions.py 返回给请求方的提示。
+"en":
+  card_file_missing: "The card file does not exist"
+  card_file_name_invalid: "Invalid card file name"
+  card_file_path_invalid: "Invalid card file path"
+  payload_not_json: "The payload is not valid JSON"
+  payload_not_object: "The payload must be an object"
+  payload_too_large: "A Bot Bridge extension payload cannot exceed 192 KB"
+  unsupported_stage: "Unsupported Bot Bridge extension stage: %{stage}"

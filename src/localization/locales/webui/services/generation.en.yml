@@ -1,0 +1,9 @@
+# src/webui/services/generation.py 返回给请求方的提示。
+"en":
+  character_parse_failed: "The AI response could not be parsed; please try again"
+  llm_client_uninitialized: "The LLM client is not initialized"
+  model_list_not_json: "The model list response is not valid JSON"
+  model_list_unrecognized: "The endpoint did not return a recognizable model list"
+  rule_json_parse_failed: "The rule JSON returned by the AI could not be parsed; please try again"
+  rule_theme_required: "Enter a description of the rule's theme"
+  source_rule_missing: "The base rule does not exist: %{source_rule_id}"

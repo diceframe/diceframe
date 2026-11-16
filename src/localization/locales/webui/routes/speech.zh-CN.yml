@@ -1,0 +1,8 @@
+# src/webui/routes/speech.py 返回给请求方的提示。
+"zh-CN":
+  body_must_be_json: "请求体必须是 JSON"
+  body_must_be_json_object: "请求体必须是 JSON 对象"
+  profile_not_object: "个人音色必须是 JSON 对象"
+  profiles_admin_only: "仅管理员可以管理个人音色"
+  profiles_not_on_share_page: "玩家分享页不可管理个人音色"
+  speed_not_number: "speed 必须是数字"

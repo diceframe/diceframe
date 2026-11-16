@@ -1,0 +1,4 @@
+# src/webui/character_sheet_authority.py 返回给请求方的提示。
+"zh-CN":
+  adopt_requires_gm: "角色行动后只能由 GM 为其套用卡片"
+  delete_requires_gm: "角色行动后只能由 GM 删除"

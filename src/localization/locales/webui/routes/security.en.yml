@@ -1,0 +1,3 @@
+# src/webui/routes/security.py 返回给请求方的提示。
+"en":
+  body_must_be_json_object: "The request body must be a JSON object"

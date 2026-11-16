@@ -1,0 +1,4 @@
+# src/webui/services/ruleset_builder.py 返回给请求方的提示。
+"zh-CN":
+  rule_missing: "规则不存在: %{rule_id}"
+  uses_generic_creation: "该规则使用现有通用角色创建流程"

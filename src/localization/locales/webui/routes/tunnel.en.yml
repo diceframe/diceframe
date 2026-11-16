@@ -1,0 +1,6 @@
+# src/webui/routes/tunnel.py 返回给请求方的提示。
+"en":
+  admin_session_required: "An administrator session is required"
+  body_must_be_json: "The request body must be JSON"
+  plugin_token_invalid: "Invalid plugin token"
+  tunnel_publish_permission_missing: "The plugin lacks the tunnel.publish permission"

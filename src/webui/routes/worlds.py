@@ -12,6 +12,7 @@ from src.webui.routes._common import (
     _require_confirmed_request,
     require_content_owner,
 )
+from src.localization.messages import t
 
 
 async def api_worlds(request: web.Request) -> web.Response:
@@ -137,7 +138,7 @@ async def api_lorebook_preview(request: web.Request) -> web.Response:
 async def api_lorebook_create(request: web.Request) -> web.Response:
     body = await request.json()
     if len(str(body.get("content", ""))) > MAX_LOREBOOK_CHARS:
-        return web.json_response({"error": f"世界书条目过长（上限 {MAX_LOREBOOK_CHARS} 字）"}, status=400)
+        return web.json_response({"error": t("webui.routes.worlds.entry_too_long", max_lorebook_chars=MAX_LOREBOOK_CHARS)}, status=400)
     result = _get_api(request).save_entry(body)
     if not result.get("ok"):
         return web.json_response(result, status=400)
@@ -151,7 +152,7 @@ async def api_lorebook_import(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"ok": False, "error": "条目列表不能为空"}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.worlds.entries_required")}, status=400)
     entries = body.get("entries") if isinstance(body, dict) else None
     result = _get_api(request).import_entries(
         world_id, entries if isinstance(entries, list) else [],
@@ -165,7 +166,7 @@ async def api_lorebook_generate(request: web.Request) -> web.Response:
     body = await request.json()
     prompt = str(body.get("prompt", "")).strip()
     if len(prompt) > MAX_LOREBOOK_CHARS:
-        return web.json_response({"error": f"生成描述过长（上限 {MAX_LOREBOOK_CHARS} 字）"}, status=400)
+        return web.json_response({"error": t("webui.routes.worlds.generation_prompt_too_long", max_lorebook_chars=MAX_LOREBOOK_CHARS)}, status=400)
     result = await _get_api(request).generate_lorebook_entries(
         request.match_info["world_id"],
         prompt,
@@ -180,7 +181,7 @@ async def api_lorebook_update(request: web.Request) -> web.Response:
     entry_id = request.match_info["entry_id"]
     body = await request.json()
     if "content" in body and len(str(body.get("content", ""))) > MAX_LOREBOOK_CHARS:
-        return web.json_response({"error": f"世界书条目过长（上限 {MAX_LOREBOOK_CHARS} 字）"}, status=400)
+        return web.json_response({"error": t("webui.routes.worlds.entry_too_long", max_lorebook_chars=MAX_LOREBOOK_CHARS)}, status=400)
     _get_api(request).update_entry(entry_id, body)
     return web.json_response({"ok": True})
 

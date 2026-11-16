@@ -1,0 +1,3 @@
+# src/webui/routes/game_lorebooks.py 返回给请求方的提示。
+"zh-CN":
+  host_only: "只有登录房主可以管理本局资料册"

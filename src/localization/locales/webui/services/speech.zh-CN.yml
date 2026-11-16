@@ -1,0 +1,4 @@
+# src/webui/services/speech.py 返回给请求方的提示。
+"zh-CN":
+  identity_not_in_game: "当前身份不属于本局游戏"
+  public_timeline_only: "只能朗读本局公开时间线中的内容"

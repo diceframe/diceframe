@@ -31,6 +31,7 @@ from src.imagegen.contracts import (
     PROMPT_TEMPLATE_VARIABLE_RE,
     PROMPT_TEMPLATE_VARIABLES,
 )
+from src.localization.messages import t
 
 
 logger = logging.getLogger("trpg")
@@ -149,11 +150,11 @@ class GeneratedImageService:
         if instance is None:
             return {"ok": False, "error": "游戏不存在"}
         if user_id != instance.gm_uid:
-            return {"ok": False, "error": "仅 GM 可读取分镜草稿"}
+            return {"ok": False, "error": t("webui.services.generated_images.storyboard_draft_gm_only")}
         entries = [e for e in reversed(instance.log) if str(e.get("gm_response") or "").strip()]
         entry = next((e for e in entries if int(e.get("round") or 0) == int(round_number)), entries[0] if entries else None)
         if entry is None:
-            return {"ok": False, "error": "没有可用叙事"}
+            return {"ok": False, "error": t("webui.services.generated_images.no_narration_available")}
         panels, _ = normalize_scene_panels(
             entry.get("scene_panels")
             or (entry.get("scene_image") or {}).get("panels"),
@@ -314,17 +315,17 @@ class GeneratedImageService:
         if instance is None:
             return {"ok": False, "error": "游戏不存在"}
         if user_id != instance.gm_uid:
-            return {"ok": False, "error": "仅 GM 可分析分镜"}
+            return {"ok": False, "error": t("webui.services.generated_images.analyze_storyboard_gm_only")}
         if not bool(getattr(self._dependencies.imagegen, "auto_storyboard", False)):
-            return {"ok": False, "error": "自动分镜已关闭，当前按单图生成"}
+            return {"ok": False, "error": t("webui.services.generated_images.auto_storyboard_off")}
         if self._dependencies.llm_client is None or not hasattr(self._dependencies.llm_client, "call"):
-            return {"ok": False, "error": "主文本模型尚未配置，无法分析分镜"}
+            return {"ok": False, "error": t("webui.services.generated_images.text_model_unconfigured_storyboard")}
         entries = [e for e in reversed(instance.log) if str(e.get("gm_response") or "").strip()]
         entry = next((e for e in entries if int(e.get("round") or 0) == int(round_number)), entries[0] if entries else None)
         if entry is None:
-            return {"ok": False, "error": "没有可用叙事"}
+            return {"ok": False, "error": t("webui.services.generated_images.no_narration_available")}
         if panel_count is not None and (type(panel_count) is not int or not 1 <= panel_count <= 6):
-            return {"ok": False, "error": "分镜格数必须是 1 到 6 的整数"}
+            return {"ok": False, "error": t("webui.services.generated_images.storyboard_panel_count_range")}
         requested_count = panel_count
         source_revision = storyboard_source_revision(entry)
         cache_key = (str(game_key), source_revision, int(requested_count or 0))
@@ -349,7 +350,7 @@ class GeneratedImageService:
             except StoryboardInferenceError as exc:
                 return {"ok": False, "error": str(exc)}
             if requested_count is not None and len(panels) != requested_count:
-                return {"ok": False, "error": f"分镜分析未生成指定的 {requested_count} 格，请重新分析"}
+                return {"ok": False, "error": t("webui.services.generated_images.storyboard_panel_count_mismatch", requested_count=requested_count)}
             self._storyboard_cache[cache_key] = (deepcopy(panels), compressed)
             if len(self._storyboard_cache) > 64:
                 self._storyboard_cache.pop(next(iter(self._storyboard_cache)))
@@ -370,7 +371,7 @@ class GeneratedImageService:
             or live_entry is None
             or storyboard_source_revision(live_entry) != source_revision
         ):
-            return {"ok": False, "error": "目标剧情已变化，请重新分析分镜"}
+            return {"ok": False, "error": t("webui.services.generated_images.story_changed_analyze_again")}
         persist_status = await self._persist_storyboard_candidate(
             current,
             live_entry,
@@ -384,11 +385,11 @@ class GeneratedImageService:
             expected_swipe=int(live_entry.get("current_swipe") or 0),
         )
         if persist_status == "read_only":
-            return {"ok": False, "error_code": "RUN_READ_ONLY", "error": "本局已结团或正在准备结团，分镜候选未写入存档"}
+            return {"ok": False, "error_code": "RUN_READ_ONLY", "error": t("webui.services.generated_images.run_ended_storyboard_not_saved")}
         if persist_status == "stale":
-            return {"ok": False, "error": "目标剧情已变化，请重新分析分镜"}
+            return {"ok": False, "error": t("webui.services.generated_images.story_changed_analyze_again")}
         if persist_status == "save_failed":
-            return {"ok": False, "error": "分镜候选保存失败，请重试"}
+            return {"ok": False, "error": t("webui.services.generated_images.storyboard_candidates_save_failed")}
         return {
             "ok": True,
             "round": int(entry.get("round") or 0),
@@ -402,9 +403,9 @@ class GeneratedImageService:
         instance = self._dependencies.get_instance(game_key)
         backend = self._dependencies.imagegen
         if instance is None or backend is None:
-            return {"ok": False, "error": "游戏或图像服务不可用"}
+            return {"ok": False, "error": t("webui.services.generated_images.game_or_image_service_unavailable")}
         if user_id != instance.gm_uid:
-            return {"ok": False, "error": "仅 GM 可预览提示词"}
+            return {"ok": False, "error": t("webui.services.generated_images.preview_prompt_gm_only")}
         normalized, compressed = normalize_scene_panels(panels, merge_same_location=False)
         context = {"manual": True, "scene": _scene_text(instance), "panels": normalized, "storyboard": {"panels": normalized, "compressed_count": compressed}}
         try:
@@ -422,18 +423,18 @@ class GeneratedImageService:
     ) -> dict[str, Any]:
         field = str(field or "").strip()
         if field not in PROMPT_FIELD_LIMITS:
-            raise ImageGenerationError("不支持的提示词字段")
+            raise ImageGenerationError(t("webui.services.generated_images.unsupported_prompt_field"))
         source = str(text or "").strip()
         if not source:
-            raise ImageGenerationError("请先填写需要优化的提示词")
+            raise ImageGenerationError(t("webui.services.generated_images.prompt_required"))
         if len(source) > 12_000:
-            raise ImageGenerationError("待优化提示词不能超过 12000 个字符")
+            raise ImageGenerationError(t("webui.services.generated_images.prompt_too_long"))
         variables = PROMPT_TEMPLATE_VARIABLE_RE.findall(source)
         if any(variable not in PROMPT_TEMPLATE_VARIABLES for variable in variables):
-            raise ImageGenerationError("提示词包含不支持的模板变量")
+            raise ImageGenerationError(t("webui.services.generated_images.prompt_unsupported_variables"))
         llm_client = self._dependencies.llm_client
         if llm_client is None:
-            raise ImageGenerationError("主文本模型尚未配置")
+            raise ImageGenerationError(t("webui.services.generated_images.text_model_unconfigured"))
 
         output_limit = PROMPT_FIELD_LIMITS[field]
         normalized_language = normalize_language(language)
@@ -458,20 +459,20 @@ class GeneratedImageService:
                 max_tokens=1024,
             )
         except Exception as exc:
-            raise ImageGenerationError(f"AI 优化提示词失败：{exc}") from exc
+            raise ImageGenerationError(t("webui.services.generated_images.optimize_failed", exc=exc)) from exc
 
         optimized = str(response.narration or response.content or "").strip()
         if optimized.startswith("```") and optimized.endswith("```"):
             optimized = "\n".join(optimized.splitlines()[1:-1]).strip()
         if not optimized:
-            raise ImageGenerationError("AI 没有返回可用的优化结果")
+            raise ImageGenerationError(t("webui.services.generated_images.optimized_empty"))
         if len(optimized) > output_limit:
-            raise ImageGenerationError(f"AI 优化结果超过 {output_limit} 个字符，请重试")
+            raise ImageGenerationError(t("webui.services.generated_images.optimized_too_long", output_limit=output_limit))
         optimized_variables = PROMPT_TEMPLATE_VARIABLE_RE.findall(optimized)
         if any(variable not in PROMPT_TEMPLATE_VARIABLES for variable in optimized_variables):
-            raise ImageGenerationError("AI 优化结果包含不支持的模板变量")
+            raise ImageGenerationError(t("webui.services.generated_images.optimized_unsupported_variables"))
         if Counter(variables) != Counter(optimized_variables):
-            raise ImageGenerationError("AI 优化结果遗漏了原有模板变量，请重试")
+            raise ImageGenerationError(t("webui.services.generated_images.optimized_missing_variables"))
         return {
             "ok": True,
             "text": optimized,
@@ -496,7 +497,7 @@ class GeneratedImageService:
     ) -> dict[str, Any]:
         backend = self._dependencies.imagegen
         if backend is None:
-            raise ImageGenerationError("系统图像生成尚未配置或启用")
+            raise ImageGenerationError(t("webui.services.generated_images.image_generation_unconfigured"))
         request_context = dict(context or {})
         result = await backend.generate(ImageGenerationRequest(
             prompt=prompt,
@@ -533,7 +534,7 @@ class GeneratedImageService:
         if not user_id or (
             user_id != instance.gm_uid and user_id not in instance.players
         ):
-            raise PermissionError("当前身份不属于本局游戏")
+            raise PermissionError(t("webui.services.generated_images.identity_not_in_game"))
         backend = self._dependencies.imagegen
         if backend is None:
             return []
@@ -564,9 +565,9 @@ class GeneratedImageService:
         if instance is None:
             return {"ok": False, "error": "游戏不存在"}
         if not user_id or user_id != instance.gm_uid:
-            return {"ok": False, "error": "仅 GM 可修改地图背景"}
+            return {"ok": False, "error": t("webui.services.generated_images.map_background_gm_only")}
         if self.image_file(asset_id) is None:
-            return {"ok": False, "error": "生成图片不存在"}
+            return {"ok": False, "error": t("webui.services.generated_images.generated_image_missing")}
         return await self._dependencies.update_map_background(
             game_key,
             {"kind": "generated", "asset_id": asset_id},
@@ -582,23 +583,23 @@ class GeneratedImageService:
         if instance is None:
             return {"ok": False, "error": "游戏不存在"}
         if not user_id or user_id != instance.gm_uid:
-            return {"ok": False, "error": "仅 GM 可生成当前轮场景图"}
+            return {"ok": False, "error": t("webui.services.generated_images.generate_scene_gm_only")}
         try:
             requested_round = int(round_number) if round_number is not None else progression.current_round(instance)
         except (TypeError, ValueError):
             requested_round = progression.current_round(instance)
         prompt = str(prompt or "").strip()
         if not prompt:
-            return {"ok": False, "error": "请填写画面描述"}
+            return {"ok": False, "error": t("webui.services.generated_images.description_required")}
         backend = self._dependencies.imagegen
         if backend is None:
-            return {"ok": False, "error": "系统图像生成尚未配置或启用"}
+            return {"ok": False, "error": t("webui.services.generated_images.image_generation_unconfigured")}
         if not bool(getattr(backend, "manual_scene", True)):
-            return {"ok": False, "error": "手动场景图功能尚未启用"}
+            return {"ok": False, "error": t("webui.services.generated_images.manual_scene_image_disabled")}
         entries = [item for item in reversed(instance.log) if str(item.get("gm_response") or "").strip()]
         entry = next((item for item in entries if int(item.get("round") or 0) == requested_round), entries[0] if entries else None)
         if entry is None:
-            return {"ok": False, "error": "当前游戏还没有可附加的 GM 叙事记录"}
+            return {"ok": False, "error": t("webui.services.generated_images.no_gm_narration_to_attach")}
         target_round = int(entry.get("round") or 0)
         source_revision = storyboard_source_revision(entry)
         expected_run_id = str(getattr(instance, "run_id", "") or "")
@@ -607,7 +608,7 @@ class GeneratedImageService:
         # when no panels were supplied by the caller.
         storyboard_enabled = bool(getattr(backend, "auto_storyboard", False))
         if panel_count is not None and (type(panel_count) is not int or not 1 <= panel_count <= 6):
-            return {"ok": False, "error": "分镜格数必须是 1 到 6 的整数"}
+            return {"ok": False, "error": t("webui.services.generated_images.storyboard_panel_count_range")}
         requested_panels, _ = normalize_scene_panels(panels, merge_same_location=False)
         if not storyboard_enabled:
             requested_panels = []
@@ -625,7 +626,7 @@ class GeneratedImageService:
             or any(not isinstance(panel, dict) or not str(panel.get("location") or "").strip()
                    or not str(panel.get("description") or "").strip() for panel in panels)
         ):
-            return {"ok": False, "error": "提交的分镜格数与内容不一致，请补全每一格"}
+            return {"ok": False, "error": t("webui.services.generated_images.storyboard_panels_incomplete")}
         if storyboard_enabled and (declared_panels or (panel_count is not None and panel_count > 1)):
             try:
                 normalized_panels, compressed_count = await infer_scene_panels(
@@ -648,7 +649,7 @@ class GeneratedImageService:
                     panel_count,
                     exc,
                 )
-                return {"ok": False, "error": f"分镜分析失败，未开始生图：{exc}"}
+                return {"ok": False, "error": t("webui.services.generated_images.storyboard_analysis_failed", exc=exc)}
         else:
             # Opening the manual dialog must not silently launch another LLM
             # analysis. If no saved/applied storyboard exists, keep the
@@ -689,7 +690,7 @@ class GeneratedImageService:
             ]))
             refs = self._avatar_references(instance, normalized_panels, participant_ids)
             if not refs:
-                return {"ok": False, "error": "画面中没有可明确识别的上传头像角色，请在描述中写明角色名称后重试"}
+                return {"ok": False, "error": t("webui.services.generated_images.no_identifiable_avatar_character")}
             # The textual labels must describe the files that are actually
             # uploaded.  ``participant_ids`` can include a visible player
             # whose portrait is missing or invalid; including that player in
@@ -735,17 +736,17 @@ class GeneratedImageService:
             return {"ok": False, "error": str(exc)}
         current = self._dependencies.get_instance(game_key)
         if current is None or str(getattr(current, "run_id", "") or "") != expected_run_id:
-            return {"ok": False, "error": "本局已重开或重置，生成图片未写入新存档"}
+            return {"ok": False, "error": t("webui.services.generated_images.game_restarted_image_not_saved")}
         # The image request ran unlocked; attaching it to the archive takes the
         # run authority so a run frozen meanwhile is never rewritten.
         async with _run_authority(current) as entered:
             if not entered:
-                return {"ok": False, "error_code": "RUN_READ_ONLY", "error": "本局已结团或正在准备结团，生成图片未写入存档"}
+                return {"ok": False, "error_code": "RUN_READ_ONLY", "error": t("webui.services.generated_images.run_ended_image_not_saved")}
             entry = next((item for item in reversed(current.log) if int(item.get("round") or 0) == target_round and str(item.get("gm_response") or "").strip()), None)
             if entry is None:
-                return {"ok": False, "error": "目标 GM 叙事已被回滚，生成图片未写入存档"}
+                return {"ok": False, "error": t("webui.services.generated_images.narration_rolled_back_image_not_saved")}
             if storyboard_source_revision(entry) != source_revision:
-                return {"ok": False, "error": "目标剧情已变化，生成图片未写入旧版本存档"}
+                return {"ok": False, "error": t("webui.services.generated_images.story_changed_image_not_saved")}
             reference = {"kind": "generated", "asset_id": result.asset_id}
             old_entry = deepcopy(entry.get("scene_image")); old_top = _scene_image_value(current)
             # Explicit panels in a successful manual generation represent the
@@ -782,7 +783,7 @@ class GeneratedImageService:
                 else:
                     entry[self._STORYBOARD_CANDIDATE_KEY] = old_candidate
                 _restore_scene_image(current, old_top)
-                return {"ok": False, "error": "图片生成成功，但存档保存失败，未写入图片引用"}
+                return {"ok": False, "error": t("webui.services.generated_images.image_generated_save_failed")}
         return {"ok": True, **result.public_dict(), "reference": reference, "requested_round": requested_round, "target_round": target_round, "prompt_budget": context.get("prompt_budget", {}), **({"reference_character_ids": context.get("reference_character_ids", []), "reference_count": int(context.get("reference_count") or 0)} if refs else {}), **({"layout": storyboard_layout(len(normalized_panels)), "panels": normalized_panels, "compressed_count": compressed_count} if normalized_panels else {})}
 
     def _resolve_panel_participants(

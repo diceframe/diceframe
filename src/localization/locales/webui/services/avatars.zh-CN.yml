@@ -1,0 +1,12 @@
+# src/webui/services/avatars.py 返回给请求方的提示。
+"zh-CN":
+  delete_failed: "删除头像失败"
+  file_missing: "未提供头像文件"
+  file_too_large: "头像文件不能超过 3 MB"
+  invalid_data: "头像文件数据无效"
+  invalid_id: "无效的头像 ID"
+  not_found: "头像不存在"
+  too_large: "头像尺寸过大"
+  too_small: "头像尺寸不能小于 32×32"
+  unreadable_image: "无法读取该头像图片"
+  unsupported_format: "头像仅支持 PNG、JPEG 或 WebP"

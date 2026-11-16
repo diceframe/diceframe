@@ -18,6 +18,7 @@ import time
 from dataclasses import dataclass
 
 from src.webui.device_tokens import DeviceTokenStore
+from src.localization.messages import t
 
 
 logger = logging.getLogger("trpg")
@@ -128,7 +129,7 @@ class PairingService:
             return (
                 {
                     "ok": False,
-                    "error": "配对码无效或已过期",
+                    "error": t("webui.pairing.code_invalid_or_expired"),
                     "error_code": "PAIRING_CODE_INVALID",
                 },
                 401,

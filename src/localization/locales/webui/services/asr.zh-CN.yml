@@ -1,0 +1,3 @@
+# src/webui/services/asr.py 返回给请求方的提示。
+"zh-CN":
+  identity_not_in_game: "当前身份不属于本局游戏"

@@ -13,6 +13,7 @@ from typing import Any, Callable
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from src.plugin_host.content import safe_id_part
+from src.localization.messages import t
 
 
 MAX_MAP_ICON_BYTES = 3 * 1024 * 1024
@@ -66,7 +67,7 @@ def package_content_map(
     world_id = str(world.get("id") or world.get("world_id") or "").strip()
     world_name = str(world.get("name") or world.get("world_name") or world_id).strip()
     if not world_id:
-        raise ValueError("所选世界缺少有效 ID，无法打包地图")
+        raise ValueError(t("webui.services.content_pack_maps.world_id_missing"))
 
     location_entries = [
         entry for entry in entries
@@ -156,10 +157,10 @@ def _package_background(
         return ""
     source = dependencies.resolve_background_file(selection)
     if source is None or not source.is_file():
-        raise ValueError("无法读取为内容包选择的地图底图")
+        raise ValueError(t("webui.services.content_pack_maps.background_unreadable"))
     payload = source.read_bytes()
     if not payload:
-        raise ValueError("为内容包选择的地图底图为空")
+        raise ValueError(t("webui.services.content_pack_maps.background_empty"))
     files[f"maps/backgrounds/{map_id}.webp"] = payload
     return map_id
 
@@ -169,20 +170,20 @@ def _package_icons(
     files: dict[str, str | bytes],
 ) -> tuple[dict[str, bytes], dict[str, str]]:
     if len(uploads) > MAX_MAP_ICON_UPLOADS:
-        raise ValueError(f"地图图标一次最多选择 {MAX_MAP_ICON_UPLOADS} 个")
+        raise ValueError(t("webui.services.content_pack_maps.too_many_icons", max_map_icon_uploads=MAX_MAP_ICON_UPLOADS))
     total_bytes = 0
     packaged: dict[str, bytes] = {}
     aliases: dict[str, str] = {}
     used_ids: set[str] = set()
     for index, upload in enumerate(uploads, start=1):
         if not isinstance(upload, dict):
-            raise ValueError("地图图标数据格式无效")
+            raise ValueError(t("webui.services.content_pack_maps.icon_data_format_invalid"))
         file_name = Path(str(upload.get("file_name") or "")).name
         source_id = str(upload.get("id") or Path(file_name).stem or f"icon-{index}").strip()
         raw = _decode_icon(str(upload.get("file_data") or ""))
         total_bytes += len(raw)
         if total_bytes > MAX_TOTAL_MAP_ICON_BYTES:
-            raise ValueError("地图图标总大小不能超过 24 MB")
+            raise ValueError(t("webui.services.content_pack_maps.icons_total_too_large"))
         payload = _normalized_icon(raw)
         icon_id = _unique_icon_id(source_id, used_ids)
         packaged[icon_id] = payload
@@ -195,13 +196,13 @@ def _package_icons(
 
 def _decode_icon(file_data: str) -> bytes:
     if not file_data or len(file_data) > (MAX_MAP_ICON_BYTES * 4 // 3) + 32:
-        raise ValueError("单个地图图标不能超过 3 MB")
+        raise ValueError(t("webui.services.content_pack_maps.icon_too_large"))
     try:
         raw = base64.b64decode(file_data, validate=True)
     except (ValueError, binascii.Error) as exc:
-        raise ValueError("地图图标文件数据无效") from exc
+        raise ValueError(t("webui.services.content_pack_maps.icon_file_data_invalid")) from exc
     if not raw or len(raw) > MAX_MAP_ICON_BYTES:
-        raise ValueError("单个地图图标不能超过 3 MB")
+        raise ValueError(t("webui.services.content_pack_maps.icon_too_large"))
     return raw
 
 
@@ -209,12 +210,12 @@ def _normalized_icon(raw: bytes) -> bytes:
     try:
         with Image.open(io.BytesIO(raw)) as source:
             if source.format not in {"PNG", "JPEG", "WEBP"}:
-                raise ValueError("地图图标仅支持 PNG、JPEG 或 WebP")
+                raise ValueError(t("webui.services.content_pack_maps.icon_format"))
             width, height = source.size
             if width < 16 or height < 16:
-                raise ValueError("地图图标尺寸不能小于 16×16")
+                raise ValueError(t("webui.services.content_pack_maps.icon_too_small"))
             if width > 4096 or height > 4096 or width * height > MAX_MAP_ICON_PIXELS:
-                raise ValueError("地图图标尺寸过大")
+                raise ValueError(t("webui.services.content_pack_maps.icon_dimensions_too_large"))
             image = ImageOps.exif_transpose(source).convert("RGBA")
             image.thumbnail((MAX_MAP_ICON_EDGE, MAX_MAP_ICON_EDGE), Image.Resampling.LANCZOS)
             output = io.BytesIO()
@@ -223,7 +224,7 @@ def _normalized_icon(raw: bytes) -> bytes:
     except ValueError:
         raise
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-        raise ValueError("无法读取地图图标") from exc
+        raise ValueError(t("webui.services.content_pack_maps.icon_unreadable")) from exc
 
 
 def _matching_icon(location: dict[str, Any], aliases: dict[str, str]) -> str:

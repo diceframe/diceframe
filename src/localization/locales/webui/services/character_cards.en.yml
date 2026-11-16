@@ -1,0 +1,15 @@
+# src/webui/services/character_cards.py 返回给请求方的提示。
+"en":
+  card_missing: "The character card does not exist"
+  card_missing_with_id: "The character card does not exist: %{card_id}"
+  diceframe_card_not_npc: "A DiceFrame character card cannot be imported as an NPC; choose \"Import as character card\""
+  duplicate_cards_unsafe_recovery: "The character card library contains duplicate cards, so it cannot be restored safely"
+  file_data_missing: "No file data was provided"
+  library_read_failed: "Failed to read the character card library"
+  lorebook_library_disabled: "The lorebook library is not enabled"
+  npc_import_needs_world: "Importing as an NPC requires a target world"
+  professional_card_no_legacy_edit: "Professional-ruleset character cards cannot use the legacy generic edit endpoint"
+  professional_card_no_narrative_recovery: "Professional-ruleset character cards cannot be restored from narrative metadata"
+  select_cards_to_export: "Select the character cards to export"
+  selected_cards_missing: "The selected character cards were not found"
+  target_world_missing: "The target world does not exist"

@@ -1,0 +1,4 @@
+# src/webui/services/bot_access.py 返回给请求方的提示。
+"zh-CN":
+  bind_token_invalid: "绑定凭证无效或已使用，请由 GM 在网页重新生成一次性绑定命令"
+  play_mode_no_group_binding: "该玩法模式不支持群聊绑定"

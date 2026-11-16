@@ -1,0 +1,4 @@
+# src/webui/api.py 返回给请求方的提示。
+"en":
+  game_restarted_refresh_and_retry: "The game was restarted; refresh and try again"
+  rewriting_wait_and_retry: "The GM is rewriting an earlier round; wait for it to finish and try again"

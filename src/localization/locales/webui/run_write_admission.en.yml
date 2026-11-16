@@ -1,0 +1,3 @@
+# src/webui/run_write_admission.py 返回给请求方的提示。
+"en":
+  run_read_only: "This run is read-only"
