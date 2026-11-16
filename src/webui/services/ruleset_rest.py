@@ -5,10 +5,11 @@ from __future__ import annotations
 import secrets
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from src.engine import module_hooks
+from src.engine.staged_transaction import StagedGameTransaction
 from src.engine.modules import game_config, progression_state
 from src.engine.modules import ruleset_runtime
 from src.engine.world.memory_projection import queue_world_memory
@@ -579,8 +580,17 @@ async def _resolve_live_party_authority(
             eligible_uids = _rest_eligible_uids(instance)
             if not eligible_uids:
                 return _failure("REST_NOT_AVAILABLE", "当前没有可参加休息的存活角色")
+            # Preserve a pre-ledger writer's last verdict before replacing its
+            # session, so upgrading does not reopen that replay window.
+            old_decision = session.get("decision")
+            if isinstance(old_decision, dict) and old_decision.get("operation_id"):
+                ruleset_runtime.require_writable(instance)
+                ruleset_runtime.state(instance).setdefault("rest_decision_receipts", []).append(
+                    {**deepcopy(old_decision), "session_id": session.get("session_id")},
+                )
             session = {
                 "status": "collecting",
+                "session_id": secrets.token_hex(16),
                 "rest": rest,
                 "required_uids": eligible_uids,
                 "participants": {},
@@ -691,6 +701,47 @@ async def _decide_authority(
     is_gm: bool,
     body: Any,
 ) -> dict[str, Any]:
+    # Plan the whole party on an isolated aggregate. Per-character saves must
+    # never publish a partially recovered party or a consumed verdict.
+    async with instance._lock:
+        transaction = StagedGameTransaction(instance)
+        staged = transaction.staged
+
+        async def defer_save(_instance: Any) -> None:
+            pass
+
+        staged_dependencies = replace(
+            dependencies, get_instance=lambda _key: staged, save_instance=defer_save,
+        )
+        result = await _plan_decision(
+            staged_dependencies, staged, game_key, user_id, is_gm, body,
+        )
+        if result.get("duplicate") or transaction.matches(staged):
+            return result
+        session = saved_rest_session(staged)
+        if session.get("decision", {}).get("operation_id"):
+            state = ruleset_runtime.state(staged)
+            state.setdefault("rest_decision_receipts", []).append({
+                **deepcopy(session["decision"]),
+                "session_id": session.get("session_id"),
+            })
+        transaction.publish(instance)
+        try:
+            await dependencies.save_instance(instance)
+        except BaseException:
+            transaction.rollback(instance)
+            raise
+        return result
+
+
+async def _plan_decision(
+    dependencies: LiveRulesetRestDependencies,
+    instance: Any,
+    game_key: str,
+    user_id: str,
+    is_gm: bool,
+    body: Any,
+) -> dict[str, Any]:
     parsed = validate_draft_shape(body)
     if "approve" not in parsed or not isinstance(parsed.get("approve"), bool):
         return _failure("INVALID_DECISION", "裁决必须明确 approve 为 true 或 false")
@@ -707,7 +758,11 @@ async def _decide_authority(
         # awaiting_approval，若先判状态就会把一次成功的裁决报成失败。
         decision = session.get("decision")
         decision = deepcopy(decision) if isinstance(decision, dict) else {}
-        if decision.get("operation_id") == operation_id:
+        receipts = ruleset_runtime.state(instance).get("rest_decision_receipts", [])
+        if decision.get("operation_id") == operation_id or any(
+            entry.get("operation_id") == operation_id
+            for entry in receipts if isinstance(entry, dict)
+        ):
             return {
                 "ok": True, "duplicate": True, "rest_session": public_rest_session(instance),
             }
@@ -823,6 +878,7 @@ async def _settle_party(
     own = results.get(user_id) or {}
     return {
         **own,
+        "ok": True,
         "pending": False,
         "resolved": True,
         "duration_minutes": minutes,
