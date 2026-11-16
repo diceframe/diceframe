@@ -1403,6 +1403,11 @@ class Dnd2024Runtime:
             "channel_effect", "maximized", "rider", "rider_target_id",
             "pool_total", "allocated_amount", "slot_level", "source_spell_ref",
             "turn_effect_preserved",
+            # 神圣武器的绑定对象与攻击加值、以及它"只报事实不参与判定"的
+            # 光照字段；掩蔽加值与来源同理。
+            "weapon_ref", "sacred_weapon_bonus", "bright_light_radius",
+            "dim_light_beyond", "light_automation",
+            "cover_bonus", "cover_sources",
         }
         combat = (
             ruleset_runtime.state(instance).get("combat")

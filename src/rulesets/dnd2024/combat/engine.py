@@ -63,9 +63,12 @@ from .primitives import (
     PERSISTENT_RAGE_DURATION,
     RAGE_MAX_ROUNDS,
     DIVINE_SENSE_DURATION,
+    SMITE_OF_PROTECTION_CONDITION,
     TURN_UNDEAD_DURATION,
+    TURNS_SCOPED_DURATIONS,
     TURN_WINDOW_CLOSED_EVENT,
     UNARMED_STRIKE_REF,
+    WORLD_CLOCK_DURATIONS,
     CombatIntentError,
     actor_kind as _actor_kind,
     companion_actor as _companion_actor,
@@ -1219,10 +1222,11 @@ class Dnd2024CombatEngine(
     ) -> list[dict[str, Any]]:
         """End effects that run on the world clock rather than on turns.
 
-        Divine Sense lasts ten minutes and is not tied to a fight; a combat
-        that ends before the clock passes must leave it in place, and a clock
-        that passes outside combat must still end it.  Every intent sweeps the
-        same limit, so no second timer exists to disagree with the ledger.
+        Divine Sense and the Sacred Weapon bond both run for ten minutes and
+        are not tied to a fight; a combat that ends before the clock passes
+        must leave them in place, and a clock that passes outside combat must
+        still end them.  Every intent sweeps the same limit, so no second timer
+        exists to disagree with the ledger.
         """
 
         now = self._logical_minutes(instance)
@@ -1235,7 +1239,7 @@ class Dnd2024CombatEngine(
             for condition_id, meta in (view.get("conditions") or {}).items():
                 if not isinstance(meta, dict):
                     continue
-                if meta.get("duration") != DIVINE_SENSE_DURATION:
+                if meta.get("duration") not in WORLD_CLOCK_DURATIONS:
                     continue
                 expires_at = meta.get("expires_at_minute")
                 if isinstance(expires_at, bool) or not isinstance(expires_at, int):
@@ -1945,6 +1949,87 @@ class Dnd2024CombatEngine(
             return {"bonus": 0, "sources": []}
         return {"bonus": best.pop("bonus"), "sources": [best]}
 
+    def _cover_record(
+        self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
+    ) -> dict[str, Any]:
+        """The best cover this creature has right now: Smite of Protection.
+
+        Cover is positional and momentary, so it is answered by a query instead
+        of being written onto anyone.  The condition lives on the Paladin, and
+        the reach comes from their own Aura of Protection -- which means an ally
+        who walks out loses it and one who walks back in (while it is still
+        running) gets it again, without a second copy of the radius.
+
+        Bonuses never stack, with each other or with a higher cover that a
+        future slice may add: the best single source wins, and several Paladins
+        holding the same benefit still give out exactly one +2.
+        """
+
+        empty = {"armor_class_bonus": 0, "dex_save_bonus": 0, "sources": []}
+        target_id = str(target.get("actor_id") or "")
+        if not target_id or str(target.get("side") or "") != "party":
+            return empty
+        best: dict[str, Any] | None = None
+        for row in self._projected_auras(instance, combat):
+            holder_id = str(row["holder_id"])
+            holder = self._actor_view(instance, combat, holder_id)
+            meta = (holder.get("conditions") or {}).get(SMITE_OF_PROTECTION_CONDITION)
+            if not isinstance(meta, dict):
+                continue
+            # 掩蔽借的是条件自己声明的那道灵光：既不复制半径，也不默认套用
+            # 任何一道光环，光环换名或换属性时这里跟着走。
+            source_aura = str(meta.get("cover_source_feature_id") or "aura_of_protection")
+            if str(row["definition"].id) != source_aura:
+                continue
+            if self._distance(combat, holder_id, target_id) > int(row["range_ft"]):
+                continue
+            armor_class_bonus = int(meta.get("cover_armor_class_bonus", 2) or 0)
+            dex_save_bonus = int(meta.get("cover_dex_save_bonus", 2) or 0)
+            if armor_class_bonus < 1 and dex_save_bonus < 1:
+                continue
+            rank = self._initiative_rank(combat, holder_id)
+            if best is None or (armor_class_bonus, dex_save_bonus) > (
+                best["armor_class_bonus"], best["dex_save_bonus"]
+            ) or (
+                (armor_class_bonus, dex_save_bonus)
+                == (best["armor_class_bonus"], best["dex_save_bonus"])
+                and rank < best["_rank"]
+            ):
+                best = {
+                    "armor_class_bonus": armor_class_bonus,
+                    "dex_save_bonus": dex_save_bonus,
+                    "sources": [{
+                        "feature_id": "smite_of_protection",
+                        "source_actor_id": holder_id,
+                        "range_ft": int(row["range_ft"]),
+                        "source_spell_ref": str(meta.get("source_spell_ref") or ""),
+                    }],
+                    "_rank": rank,
+                }
+        if best is None:
+            return empty
+        best.pop("_rank", None)
+        return best
+
+    def _cover_save_bonus(
+        self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
+        ability: str,
+    ) -> dict[str, Any]:
+        """Cover's contribution to one saving throw, which is Dex-only.
+
+        Asked separately from the AC half so a caller never has to remember
+        which ability cover helps: anything but Dexterity answers zero and the
+        event stays shaped like every other save.
+        """
+
+        if str(ability or "") != "dex":
+            return {"bonus": 0, "sources": []}
+        cover = self._cover_record(instance, combat, target)
+        return {
+            "bonus": int(cover["dex_save_bonus"]),
+            "sources": cover["sources"],
+        }
+
     def _passive_condition_immunity(
         self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
         condition_id: str,
@@ -2271,7 +2356,7 @@ class Dnd2024CombatEngine(
                     # turn has just begun, so this instance expires now.
                     target_conditions.pop(condition_id, None)
                     continue
-                if value.get("duration") == TURN_UNDEAD_DURATION:
+                if value.get("duration") in TURNS_SCOPED_DURATIONS:
                     # 1 分钟在回合制里就是十个自己的回合：每到自己回合结束
                     # 减一，归零移除。计数放在条件上，所以中断、存档、重放
                     # 都读同一份事实，不需要外部计时器。计时属于**持有着**

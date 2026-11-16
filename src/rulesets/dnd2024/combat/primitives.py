@@ -33,6 +33,22 @@ TURN_UNDEAD_DURATION = "turn_undead"
 TURN_UNDEAD_MAX_ROUNDS = 10
 DIVINE_SENSE_CONDITION = "divine_sense"
 DIVINE_SENSE_DURATION = "divine_sense"
+# 神圣武器绑定的是一把具体的武器引用，因此它是"持有者身上 + weapon_ref"的
+# 一段状态，按世界时钟计时（十分钟），也按装备协调结束（不再携带该武器）。
+SACRED_WEAPON_CONDITION = "sacred_weapon"
+SACRED_WEAPON_DURATION = "sacred_weapon"
+# 守护至圣斩给的是"下一次施放至圣斩之后到你下一回合开始"的一段掩蔽。它挂在
+# 圣武士自己身上而不是逐个盟友身上：掩蔽的范围是灵光，离开就失去、回到灵光
+# 且未到期就恢复，逐个复制到盟友身上反而做不到这一点。
+SMITE_OF_PROTECTION_CONDITION = "smite_of_protection"
+SMITE_OF_PROTECTION_DURATION = "actor_turn_start"
+# 斥退敌人给的是"一分钟或直到受伤"的 Frightened，另加一条"每回合只能三选一"
+# 的限制。一分钟在回合制里同样是十个自己的回合，所以和 Turn Undead 共用同一套
+# 计数逻辑，而不是另立一个计时器。
+ABJURE_FOES_DURATION = "abjure_foes"
+TURNS_SCOPED_DURATIONS = frozenset({TURN_UNDEAD_DURATION, ABJURE_FOES_DURATION})
+# 只有世界时钟能结束的效果：它们不参与回合域到期，也不随战斗结束消失。
+WORLD_CLOCK_DURATIONS = frozenset({DIVINE_SENSE_DURATION, SACRED_WEAPON_DURATION})
 
 
 def combat_turn_slots(combat: dict[str, Any]) -> list[dict[str, Any]]:

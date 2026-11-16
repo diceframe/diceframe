@@ -40,6 +40,37 @@ _MAX_OPERATION_LOG = 32
 # inventory，不进入规则投影。
 _PROJECTED_ITEM_TYPES = frozenset({"weapon", "armor", "shield", "focus"})
 
+# 神圣武器的绑定状态直接挂在 canonical 上（战斗只读这一个键）。装备协调是
+# 唯一知道"这件物品还在不在身上"的地方，因此"脱手即结束"也在这里做，而不是
+# 等下一次战斗回合去猜。
+SACRED_WEAPON_CONDITION = "sacred_weapon"
+
+
+def _end_dropped_weapon_bindings(
+    canonical: Mapping[str, Any], carried_refs: Sequence[str],
+) -> list[str]:
+    """End every weapon bond whose weapon is no longer carried.
+
+    The bond names one exact ref.  Once that ref leaves the carried list the
+    feature is over, and picking the weapon back up does not restore it -- so
+    this deletes rather than suspends.  A bond with no ref recorded (older
+    state, hand-written sheet) is ended as well: an unfalsifiable bond would
+    keep granting a bonus to a weapon nobody can identify.
+    """
+
+    conditions = canonical.get("conditions")
+    if not isinstance(conditions, dict):
+        return []
+    meta = conditions.get(SACRED_WEAPON_CONDITION)
+    if not isinstance(meta, dict):
+        return []
+    carried = {str(ref) for ref in carried_refs}
+    weapon_ref = str(meta.get("weapon_ref") or "")
+    if weapon_ref and weapon_ref in carried:
+        return []
+    conditions.pop(SACRED_WEAPON_CONDITION, None)
+    return [weapon_ref or SACRED_WEAPON_CONDITION]
+
 # Ruleset item type -> generic equipment slot.
 #
 # The generic layer owns the slot vocabulary but cannot know what a ruleset item
@@ -419,6 +450,9 @@ class Dnd2024CharacterStateReconciler:
         self._annotate_live_rows(equipment)
         self._annotate_live_rows(inventory)
         item_refs = self._project_equipped_refs(equipment, warnings)
+        # 脱手结束神圣武器：读的是刚投影出来的携带清单，不是上一层写的旧值，
+        # 所以"卖出/卸下/转移"任何一条路径都在同一次协调里结束它。
+        ended_bindings = _end_dropped_weapon_bindings(canonical, item_refs)
 
         rules = self._armor_rules(canonical, item_refs, warnings)
         if rules is None:
@@ -502,6 +536,7 @@ class Dnd2024CharacterStateReconciler:
             and previous_pending == pending
             and mirror_attunement == projected_attunement
             and canonical_equipment.get("item_state") == previous_item_state
+            and not ended_bindings
         ):
             return None
 
@@ -555,6 +590,7 @@ class Dnd2024CharacterStateReconciler:
             "armor_class": armor_class,
             "revision": revision,
             "warnings": warnings,
+            "ended_weapon_bindings": ended_bindings,
         }
 
     def reconcile_canonical(

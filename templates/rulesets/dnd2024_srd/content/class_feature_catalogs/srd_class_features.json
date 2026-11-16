@@ -557,6 +557,23 @@
           }
         },
         {
+          "id": "sacred_weapon",
+          "owner": "subclass:oath_of_devotion",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p56:sacred-weapon",
+          "summary": "When you take the Attack action, you can expend one use of your Channel Divinity to imbue one Melee weapon you are holding: for 10 minutes you add your Charisma modifier (minimum +1) to attack rolls with it, each hit deals its normal damage type or Radiant, and it sheds Bright Light in a 20-foot radius and Dim Light 20 feet beyond. The effect ends early if you are not carrying the weapon.",
+          "parameters": {
+            "channel_resource_id": "channel_divinity",
+            "weapon_attack_bonus_ability": "cha",
+            "weapon_attack_bonus_minimum": 1,
+            "weapon_binding_minutes": 10,
+            "weapon_damage_type_choices": ["normal", "radiant"],
+            "bright_light_radius": 20,
+            "dim_light_beyond": 20,
+            "light_automation": "guided"
+          }
+        },
+        {
           "id": "paladins_smite",
           "minimum_level": 2,
           "summary": "Divine Smite is always prepared; one free cast per Long Rest.",
@@ -608,6 +625,48 @@
           "parameters": {
             "aura_expands_feature_id": "aura_of_protection",
             "aura_range_override_ft": 30
+          }
+        },
+        {
+          "id": "abjure_foes",
+          "owner": "class:paladin",
+          "minimum_level": 9,
+          "source_ref": "srd-5.2.1:p55:abjure-foes",
+          "summary": "Magic action, one Channel Divinity: up to your Charisma modifier (minimum one) creatures you can see within 60 feet make a Wisdom save or are Frightened for 1 minute or until they take damage. While Frightened this way a creature can move, take an action, or take a Bonus Action on its turn -- only one of the three.",
+          "resource_id": "channel_divinity",
+          "parameters": {
+            "target_range_ft": 60,
+            "target_count_ability": "cha",
+            "target_count_minimum": 1,
+            "save_ability": "wis",
+            "condition": "frightened",
+            "condition_minutes": 1,
+            "turn_choice_limit": ["move", "action", "bonus_action"],
+            "ends_on_damage": true
+          },
+          "capabilities": [
+            {
+              "id": "abjure_foes",
+              "target_kind": "creature",
+              "cost": {
+                "action": 1,
+                "resources": [{"id": "channel_divinity", "amount": 1}]
+              },
+              "actions": [{"kind": "abjure_foes", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "smite_of_protection",
+          "owner": "subclass:oath_of_devotion",
+          "minimum_level": 15,
+          "source_ref": "srd-5.2.1:p57:smite-of-protection",
+          "summary": "Whenever you cast Divine Smite, you and your allies have Half Cover while in your Aura of Protection. The benefit lasts until the start of your next turn.",
+          "parameters": {
+            "cover_source_feature_id": "aura_of_protection",
+            "cover_armor_class_bonus": 2,
+            "cover_dex_save_bonus": 2,
+            "cover_trigger_spell_id": "divine_smite"
           }
         },
         {
@@ -1590,6 +1649,21 @@
               "actions": [{"kind": "turn_undead", "count": 1}]
             }
           ]
+        },
+        {
+          "id": "sear_undead",
+          "owner": "class:cleric",
+          "minimum_level": 5,
+          "source_ref": "srd-5.2.1:p37:sear-undead",
+          "summary": "Whenever you use Turn Undead, you can roll a number of d8s equal to your Wisdom modifier (minimum 1) and add them together. Each Undead that fails its save against that use takes Radiant damage equal to the total. This damage does not end the turn effect.",
+          "parameters": {
+            "sear_die": "d8",
+            "sear_ability": "wis",
+            "sear_minimum": 1,
+            "sear_damage_type": "radiant",
+            "sear_applies_to_feature_id": "channel_divinity",
+            "sear_preserves_turn_effect": true
+          }
         },
         {
           "id": "preserve_life",

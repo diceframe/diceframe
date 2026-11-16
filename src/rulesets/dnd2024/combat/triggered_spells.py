@@ -19,7 +19,12 @@ from .action_adapter import (
     roll_damage_node,
     spell_formula_node,
 )
-from .primitives import CombatIntentError, actor_kind
+from .primitives import (
+    SMITE_OF_PROTECTION_CONDITION,
+    SMITE_OF_PROTECTION_DURATION,
+    CombatIntentError,
+    actor_kind,
+)
 
 
 HIT_SPELL_DECISION = "melee_hit_spell"
@@ -131,6 +136,52 @@ class CombatTriggeredSpellsMixin:
             events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         return events
 
+    def _smite_of_protection_events(
+        self, actor: dict[str, Any], spell_ref: str,
+    ) -> list[dict[str, Any]]:
+        """Half Cover for the aura, opened by an actual Divine Smite cast.
+
+        The trigger is the cast, not the damage: a Smite whose damage is later
+        cut by resistance still happened, while a declined hit-spell decision
+        never reaches this method at all.  Nothing is paid here -- the feature
+        costs no Channel use and no slot of its own.
+
+        The condition sits on the Paladin rather than on each ally, because the
+        benefit is positional: it comes from the aura and therefore has to be
+        re-answered whenever anyone moves.
+        """
+
+        character = self._feature_character(actor)
+        if not self.features.has_feature(
+            character, "smite_of_protection", owner="subclass:oath_of_devotion",
+        ):
+            return []
+        trigger = str(self.features.feature_value(
+            character, "smite_of_protection", "cover_trigger_spell_id",
+            "divine_smite",
+        ) or "divine_smite")
+        if str(spell_ref).removeprefix("spell:") != trigger:
+            return []
+        actor_id = str(actor["actor_id"])
+        return [{
+            "type": "condition.applied", "target_id": actor_id,
+            "condition": SMITE_OF_PROTECTION_CONDITION,
+            "duration": SMITE_OF_PROTECTION_DURATION,
+            "source_actor_id": actor_id,
+            "feature_id": "smite_of_protection",
+            "source_spell_ref": spell_ref,
+            "cover_source_feature_id": str(self.features.feature_value(
+                character, "smite_of_protection", "cover_source_feature_id",
+                "aura_of_protection",
+            ) or "aura_of_protection"),
+            "cover_armor_class_bonus": int(self.features.feature_value(
+                character, "smite_of_protection", "cover_armor_class_bonus", 2,
+            ) or 2),
+            "cover_dex_save_bonus": int(self.features.feature_value(
+                character, "smite_of_protection", "cover_dex_save_bonus", 2,
+            ) or 2),
+        }]
+
     def _triggered_spell_events(self, instance, combat, intent, rng):
         actor = self._actor_view(instance, combat, intent["actor_id"])
         decision = hit_spell_decision(combat, actor["actor_id"])
@@ -161,6 +212,9 @@ class CombatTriggeredSpellsMixin:
                 "target_ids": [decision["target_id"]],
             }
         )
+        # 施法已成事实之后才开掩蔽：无论走真槽还是免费施法都到这一步，
+        # 而"拒绝命中法术决策"根本不构成一次施放。
+        events.extend(self._smite_of_protection_events(actor, intent["spell_ref"]))
         events.extend(
             self._finish_hit_spell(
                 instance,

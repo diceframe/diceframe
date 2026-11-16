@@ -592,6 +592,11 @@ class CombatReducerMixin:
                 if remaining < cost:
                     raise EventBatchError("movement resource is already spent")
                 combat["economy"]["movement"] = remaining - cost
+                if str(combat["economy"].get("actor_id") or "") == actor_id:
+                    # "这次移动用掉了本回合的移动选择"只对当前行动者成立：
+                    # 被推开的第三方不消耗任何人的选择权。Abjure Foes 的三选一
+                    # 靠这个标记区分"选了移动"与"还没选"。
+                    combat["economy"]["moved"] = True
             if event.get("crit_move"):
                 # 额度只覆盖它自己这一次移动；消费后即失效，其他移动要按
                 # 常规规则判定借机攻击。

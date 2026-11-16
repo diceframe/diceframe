@@ -42,6 +42,9 @@ ACTION_KINDS = frozenset({
     # 圣疗从 track 池按请求量扣款，声明里给不出固定 amount，所以池只做可用性
     # 判定，真实扣减由结算发一条按意图金额的 class_resource.spent。
     "lay_on_hands",
+    # 斥退敌人是"一次魔法动作 + 一次引导，目标数由魅力决定"的多目标控制，
+    # 与 Divine Spark 的单目标、Turn Undead 的固定类型都不同形。
+    "abjure_foes",
 })
 ACTION_COST_KINDS = ("bonus_action", "action")
 # 回合开始窗口的支付键。与动作成本互斥：一个能力要么花动作，要么只在自己
