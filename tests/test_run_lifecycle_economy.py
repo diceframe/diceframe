@@ -2662,7 +2662,7 @@ async def test_in_flight_check_plan_is_discarded_after_economy_decision(
     release = asyncio.Event()
     calls_before = session_stats.total_llm_calls(instance)
 
-    async def delayed_plan(target, rule, client):
+    async def delayed_plan(target, rule, client, *, narrative_checks=False):
         entered.set()
         await release.wait()
         return [(

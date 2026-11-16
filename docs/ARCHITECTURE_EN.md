@@ -3057,6 +3057,23 @@ frontend generic component
 
 ---
 
+### Runtime Narrative Check Preparation
+
+A `dice_system=none` rule declaring `narrative_checks` resolves free-text checks
+through the optional `NarrativeCheckResolverRuntime.resolve_narrative_checks`.
+Preparation plans on a detached aggregate; blocking RPC runs in a worker with
+only that snapshot. Publication uses the authority → state gates and a staged
+transaction, fencing registry identity, run, phase, all persisted inputs and a
+runtime-only check generation. Abort/reset advances that generation to reject
+same-round retry ABA. A cancelled worker may finish but cannot publish to live
+state. Runtime results already committed to an action retain their original
+check identity and dice across narrative failure retries, regardless of new
+planner UUIDs. Prompts and regeneration select generic formatting by
+`planner_source=runtime`, preserving actual dice, individual rolls and outcome.
+This recovery/concurrency fix does not change the persisted schema.
+
+---
+
 # 22. Generic Combat Extension
 
 The goal of the generic combat extension is not to implement “one universal TRPG ruleset.”

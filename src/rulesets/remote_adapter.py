@@ -165,6 +165,26 @@ class RemoteRulesetRuntimeAdapter:
             receipt_payload={"intent": deepcopy(intent)},
         )
 
+    def resolve_narrative_checks(
+        self,
+        instance: Any,
+        requests: list[dict[str, Any]],
+        rng: Any = None,
+    ) -> list[dict[str, Any]]:
+        """Ask the runtime to roll free-text checks the core cannot roll."""
+
+        result = self._call(
+            "resolve_narrative_checks",
+            {
+                "instance": self._dto(instance, "instance"),
+                "requests": [deepcopy(item) for item in requests],
+                "rng": self._dto(rng, "rng"),
+            },
+        )
+        if not isinstance(result, list):
+            raise RuntimeProbeError("remote resolve_narrative_checks result must be a list")
+        return result
+
     def apply_event_batch(self, instance: Any, batch: dict[str, Any]) -> dict[str, Any]:
         instance_dto = self._dto(instance, "instance")
         result = self._call(

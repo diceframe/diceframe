@@ -48,7 +48,8 @@ def test_deleting_provider_clears_check_route_credentials_and_disables_dedicated
 async def test_factory_owns_dedicated_client_and_passes_it_to_planning(tmp_path, monkeypatch):
     from src.engine.game_instance import GameInstance, GameState
     selected = []
-    async def plan(_instance, _rule, client):
+    async def plan(_instance, _rule, client, *, narrative_checks=False):
+        assert narrative_checks is False
         selected.append(client)
         return [], {"available": True, "skipped": True}
     monkeypatch.setattr("src.commands.round_processor.plan_round_checks", plan)

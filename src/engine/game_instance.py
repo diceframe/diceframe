@@ -235,6 +235,9 @@ class GameInstance:
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     # 内部：process_round/generate_swipe 互斥锁，防并发处理同一实例
     _process_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    # Runtime-only ABA fence: abort/reset invalidates in-flight check preparation
+    # even if a retry restores identical round/action data before RPC returns.
+    _round_check_generation: int = field(default=0, repr=False, compare=False)
     # Runtime-only authority gate. Lock order is authority -> process -> state.
     _authority_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     _authority_owner: asyncio.Task[Any] | None = field(default=None, repr=False)
@@ -723,6 +726,7 @@ class GameInstance:
 
     def reset_round_checks(self, *, prepared: bool = False) -> None:
         checks.require_writable(self)
+        self._round_check_generation += 1
         checks.replace_last_check(self, None)
         checks.last_checks(self).clear()
         module_hooks.run(module_hooks.ROUND_RESET, self)
