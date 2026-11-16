@@ -90,6 +90,8 @@ def test_missing_runtime_binding_resolves_to_legacy() -> None:
             "composite_action": False,
             "narrative_turns": False,
             "narrative_checks": False,
+            "adventure_projection": False,
+            "automatic_intents": False,
             "adventure_formats": ("diceframe:adventure-graph-v2",),
         },
     }

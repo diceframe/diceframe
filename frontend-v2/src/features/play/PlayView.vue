@@ -4,7 +4,7 @@ import { NIcon } from 'naive-ui'
 import { BookOutline, ChatbubbleEllipsesOutline, ChevronBack, ChevronForward, KeyOutline, PlayForwardOutline, ShareOutline, ShieldOutline, StatsChartOutline, TerminalOutline } from '@vicons/ionicons5'
 import { useRoute, useRouter } from 'vue-router'
 import { api, apiBlob, errorMessage as apiErrorMessage, hasAccessToken, isNotFoundError, retryOnRateLimit } from '@/api/client'
-import type { BotBindTokenResponse, CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterPortrait, CharacterSheet, CheckResult, CommandResponse, GameDetail, GmStyle, HealthResponse, JsonObject, LuckDecisionResponse, PendingPayment, Player, PlayerContextResponse, PublicAction, RestActivity, RuleMeta, RulesetCombatAction, RulesetDirectorProposal, RulesetGameplayView, StoryMode, WorldCandidate, WorldListResponse, WorldTemplatesResponse } from '@/api/types'
+import type { BotBindTokenResponse, CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterPortrait, CharacterSheet, CheckResult, CommandResponse, GameDetail, GmStyle, HealthResponse, JsonObject, LuckDecisionResponse, PendingPayment, Player, PlayerContextResponse, PublicAction, RestActivity, RuleMeta, StoryMode, WorldCandidate, WorldListResponse, WorldTemplatesResponse } from '@/api/types'
 import { queryString } from '@/stores/gameContext'
 import { isStoredPlayerMember } from '@/utils/joinIdentity'
 import { readSeatToken, storeSeatToken } from '@/utils/seatToken'
@@ -64,11 +64,12 @@ import { useCheckReveal } from '@/features/play/check-decisions/useCheckReveal'
 import CheckModePanel from '@/features/play/check-modes/CheckModePanel.vue'
 import AdventurePanel from '@/components/play/AdventurePanel.vue'
 import RulesetCharacterCenterHost from '@/features/rulesets/RulesetCharacterCenterHost.vue'
+import RulesetPanels from '@/features/play/RulesetPanels.vue'
 import RulesetPlayHost from '@/features/rulesets/RulesetPlayHost.vue'
 import { resolveRulesetPlayExtension } from '@/features/rulesets/registry'
 import { ruleSceneUrl } from '@/composables/useBackgroundImages'
 import { fileToBase64, resolveGameSceneImageUrl, revokeSceneImageUrl, sceneImageStyle } from '@/api/sceneImages'
-import { fetchRulesetAvailableActions } from '@/api/rulesets'
+import { useRulesetGameplay } from '@/features/play/useRulesetGameplay'
 import { currencyLabel } from '@/utils/ruleSchema'
 import { currencyAmountToInputText, currencyEditableUnitLabel } from '@/utils/currency'
 import type { CurrencySystem } from '@/utils/currency'
@@ -294,6 +295,7 @@ watch(
 async function refreshRulesetPanels(): Promise<void> {
   rulesetRefreshKey.value += 1
   await game.refresh(true)
+  await refreshRulesetGameplay()
 }
 const hasAuthoritativeCombat = computed(() => Boolean(
   game.detail.value?.ruleset_runtime?.capabilities?.authoritative_intents
@@ -308,11 +310,21 @@ const hasCampaignGuidance = computed(() => Boolean(
 ))
 type RulesetTool = 'campaign' | 'combat'
 const activeRulesetTool = ref<RulesetTool | ''>('')
-const directorProposal = ref<RulesetDirectorProposal | null>(null)
-const rulesetGameplay = ref<RulesetGameplayView | null>(null)
-const rulesetAvailableActions = ref<RulesetCombatAction[]>([])
-const rulesetCombatStatus = ref('none')
-const rulesetCampaignStatus = ref('')
+const { gameplay: rulesetGameplay, availableActions: rulesetAvailableActions, refresh: refreshRulesetGameplay } = useRulesetGameplay({
+  gameKey: game.currentGame,
+  viewer: game.userId,
+  isGm: game.isGm,
+  detail: game.detail,
+  stateSignal: game.rulesetStateSignal,
+})
+const directorProposal = computed(() => rulesetGameplay.value?.director?.proposal?.kind === 'narrative'
+  ? null : rulesetGameplay.value?.director?.proposal || null)
+const rulesetCombatStatus = computed(() => String(rulesetGameplay.value?.combat?.status || 'none'))
+const rulesetCampaignStatus = computed(() => String(rulesetGameplay.value?.campaign?.tutorial?.status || ''))
+// Keep the sidebar absent when no valid declarative nodes are projected.
+const hasRulesetPanels = computed(() => (rulesetGameplay.value?.panels || []).some(node => (
+  !!node && typeof node === 'object' && typeof (node as { component?: unknown }).component === 'string'
+)))
 const hasCombatExtension = computed(() => Boolean(game.detail.value?.combat_extension))
 const hasProfessionalTools = computed(() => hasCampaignGuidance.value || hasAuthoritativeCombat.value)
 // 自由规则可能只开启 combat_extension：此时 tools 栏也必须出现，否则「战斗动作」没有入口。
@@ -322,9 +334,7 @@ const hasSequentialActionCapability = computed(() => Boolean(
   game.detail.value?.ruleset_runtime?.capabilities?.sequential_checks
   || game.detail.value?.ruleset_runtime?.capabilities?.composite_action,
 ))
-// available_actions only requires authoritative_intents on the backend, so
-// sequential-check / composite-action rules without deterministic_combat must
-// still be able to fetch the action list (SK-01: not combat-page-only).
+// These capabilities gate action-composer UI only, not gameplay/panel fetching.
 const hasRulesetActionCapability = computed(() => {
   const capabilities = game.detail.value?.ruleset_runtime?.capabilities
   if (!capabilities?.authoritative_intents) return false
@@ -349,80 +359,20 @@ function navigateRulesetTool(tool: RulesetTool): void {
   }
 }
 
-let rulesetToolPoll: number | undefined
-let rulesetToolSequence = 0
-let rulesetActionSequence = 0
 let previousEncounterPhase = ''
-async function syncRulesetActions(): Promise<void> {
-  const gameKey = game.currentGame.value
-  if (!hasRulesetActionCapability.value || !gameKey) return
-  const sequence = ++rulesetActionSequence
-  try {
-    const response = await fetchRulesetAvailableActions(gameKey)
-    if (sequence !== rulesetActionSequence || game.currentGame.value !== gameKey) return
-    rulesetAvailableActions.value = response.available_actions || []
-  } catch {
-    if (sequence !== rulesetActionSequence || game.currentGame.value !== gameKey) return
-    // The composer simply hides while the optional action list cannot sync.
-    rulesetAvailableActions.value = []
+watch(rulesetGameplay, (gameplay) => {
+  if (!hasAuthoritativeCombat.value || !gameplay) {
+    previousEncounterPhase = ''
+    return
   }
-}
-async function syncEncounterTool(): Promise<void> {
-  const gameKey = game.currentGame.value
-  if (!hasAuthoritativeCombat.value || !gameKey) return
-  const sequence = ++rulesetToolSequence
-  try {
-    const response = await fetchRulesetAvailableActions(gameKey)
-    if (sequence !== rulesetToolSequence || game.currentGame.value !== gameKey) return
-    rulesetGameplay.value = response.gameplay
-    directorProposal.value = response.gameplay.director?.proposal?.kind === 'narrative'
-      ? null
-      : response.gameplay.director?.proposal || null
-    rulesetCombatStatus.value = String(response.gameplay.combat?.status || 'none')
-    rulesetCampaignStatus.value = String(response.gameplay.campaign?.tutorial?.status || '')
-    const combatActive = response.gameplay.combat?.status === 'active'
-    const step = response.gameplay.campaign?.tutorial?.current_step
-    const narrativeEncounterPending = response.gameplay.encounter_request?.status === 'pending'
-    const encounterPending = Boolean(
-      step?.requires === 'combat_ended'
-      && !response.gameplay.campaign?.tutorial?.requirement_met,
-    )
-    const phase = combatActive ? 'active' : encounterPending || narrativeEncounterPending ? 'pending' : ''
-    if (phase && phase !== previousEncounterPhase) activeRulesetTool.value = 'combat'
-    previousEncounterPhase = phase
-  } catch {
-    if (sequence !== rulesetToolSequence || game.currentGame.value !== gameKey) return
-    // The normal play surface remains usable if the optional tool state cannot sync.
-    directorProposal.value = null
-    rulesetGameplay.value = null
-    rulesetCombatStatus.value = 'none'
-    rulesetCampaignStatus.value = ''
-  }
-}
-
-function resetRulesetToolPolling(): void {
-  rulesetToolSequence += 1
-  rulesetActionSequence += 1
-  if (rulesetToolPoll) window.clearInterval(rulesetToolPoll)
-  rulesetToolPoll = undefined
-  previousEncounterPhase = ''
-  directorProposal.value = null
-  rulesetGameplay.value = null
-  rulesetAvailableActions.value = []
-  rulesetCombatStatus.value = 'none'
-  rulesetCampaignStatus.value = ''
-  if (!game.currentGame.value) return
-  void syncRulesetActions()
-  if (!hasAuthoritativeCombat.value) return
-  void syncEncounterTool()
-  rulesetToolPoll = window.setInterval(() => {
-    if (document.visibilityState !== 'hidden') {
-      void syncEncounterTool()
-      void syncRulesetActions()
-    }
-  }, 30000)
-}
-const rulesetCombatActive = computed(() => rulesetGameplay.value?.combat?.status === 'active')
+  const combatActive = gameplay.combat?.status === 'active'
+  const step = gameplay.campaign?.tutorial?.current_step
+  const encounterPending = Boolean(step?.requires === 'combat_ended' && !gameplay.campaign?.tutorial?.requirement_met)
+  const phase = combatActive ? 'active' : encounterPending || gameplay.encounter_request?.status === 'pending' ? 'pending' : ''
+  if (phase && phase !== previousEncounterPhase) activeRulesetTool.value = 'combat'
+  previousEncounterPhase = phase
+}, { flush: 'sync' })
+const rulesetCombatActive = computed(() => hasAuthoritativeCombat.value && rulesetGameplay.value?.combat?.status === 'active')
 const canEditOwnPortrait = computed(() => Boolean(
   actorId.value
   && game.player.value?.user_id === actorId.value
@@ -1293,20 +1243,8 @@ watch(
 watch(() => game.currentGame.value, (next, prev) => {
   if (next && next !== prev) loadPlayContext()
 })
-watch(
-  [() => game.currentGame.value, hasAuthoritativeCombat, hasRulesetActionCapability],
-  resetRulesetToolPolling,
-  { immediate: true },
-)
-watch(() => game.detail.value?.round_number, () => {
-  if (hasAuthoritativeCombat.value) void syncEncounterTool()
-  if (hasRulesetActionCapability.value) void syncRulesetActions()
-})
 watch(() => game.rulesetStateSignal.value, () => {
-  if (hasRulesetActionCapability.value) void syncRulesetActions()
-  if (!hasAuthoritativeCombat.value) return
-  rulesetRefreshKey.value += 1
-  void syncEncounterTool()
+  if (hasAuthoritativeCombat.value) rulesetRefreshKey.value += 1
 })
 watch(
   [() => game.currentGame.value, () => JSON.stringify(game.detail.value?.scene_image || {})],
@@ -1324,7 +1262,6 @@ watch(showGmThinking, (thinking) => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onPlayKeydown)
-  if (rulesetToolPoll) window.clearInterval(rulesetToolPoll)
   sceneImageSequence += 1
   revokeSceneImageUrl(playSceneImageUrl.value)
   revokeSceneImageUrl(sceneImageDefaultUrl.value)
@@ -1448,6 +1385,23 @@ function onPlayKeydown(event: KeyboardEvent) {
               :refresh-key="JSON.stringify([game.detail.value.run_id, game.detail.value.last_activity, game.detail.value.rest_activity])"
               @changed="game.refresh(true)"
             />
+            <!-- 规则运行时自带的声明式面板：插件无法携带 Vue 组件，命刻/机会/冲突
+                 步骤这类专属信息只能以节点形式下发，由统一渲染器呈现。这些是
+                 「查看类」信息，放在角色栏折叠区，不占消息流顶部。 -->
+            <details
+              v-if="hasRulesetPanels"
+              class="panel sidebar-disclosure"
+              data-testid="ruleset-panels-disclosure"
+            >
+              <summary><strong>{{ t('rulesetPanelsTitle') }}</strong></summary>
+              <div class="sidebar-disclosure-body">
+                <RulesetPanels
+                  :game-key="game.currentGame.value"
+                  :panels="rulesetGameplay?.panels"
+                  @refresh="refreshRulesetPanels"
+                />
+              </div>
+            </details>
           </template>
         </GameSidebar>
       </aside>

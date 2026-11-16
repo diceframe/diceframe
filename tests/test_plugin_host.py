@@ -286,6 +286,38 @@ async def test_static_plugin_type_needs_no_entrypoint(tmp_path):
     assert updated["status"] == "active"
 
 
+@pytest.mark.asyncio
+async def test_ruleset_runtime_counts_as_live_while_registered(tmp_path):
+    """规则运行时的开关读 ``running``：它没有宿主进程，注册成功就算活着。"""
+
+    plugins = tmp_path / "plugins"
+    write_plugin(
+        plugins, "fu-like", plugin_type="ruleset-runtime",
+        manifest_extra={
+            "permissions": ["ruleset.execute"],
+            "ruleset_runtime": {"runtime_id": "fu:like", "runtime_version": 1},
+        },
+    )
+    host = PluginHost(plugins, tmp_path / "data")
+    host.discover()
+
+    before = host.public_detail("fu-like")
+    assert before["has_entrypoint"] is True
+    assert before["running"] is False
+
+    await host.start("fu-like", require_enabled=False)
+
+    started = host.public_detail("fu-like")
+    assert started["status"] == "active"
+    assert started["running"] is True
+
+    await host.stop("fu-like")
+
+    stopped = host.public_detail("fu-like")
+    assert stopped["running"] is False
+    assert stopped["enabled"] is False
+
+
 def test_public_plugin_detail_reports_real_support_level(tmp_path):
     plugins = tmp_path / "plugins"
     write_plugin(plugins, "map-assets", plugin_type="content-pack", entrypoint=False)

@@ -56,7 +56,10 @@ import PlayView from '../src/features/play/PlayView.vue'
 
 const STUBS = {
   Teleport: true,
-  GameSidebar: true,
+  GameSidebar: defineComponent({
+    name: 'GameSidebar',
+    template: '<aside><slot name="after-character" /></aside>',
+  }),
   KpQuestionDialog: true,
   MapBackgroundSettingsModal: true,
   RulesetPlayHost: true,
@@ -126,6 +129,7 @@ describe('combat actions entry near the action composer', () => {
 
   beforeEach(() => {
     i18n.global.locale.value = 'zh-CN'
+    gameState.currentGame.value = GAME_KEY
     gameState.detail.value = combatExtensionDetail()
     gameState.players.value = [{ user_id: 'ally', character_name: '阿刃' } as Player]
     gameState.isGm.value = false
@@ -137,6 +141,52 @@ describe('combat actions entry near the action composer', () => {
 
   afterEach(() => {
     document.body.innerHTML = ''
+  })
+
+  it.each([
+    { sequential_checks: true },
+    { composite_action: true },
+    {},
+  ])('renders fetched runtime panels without deterministic combat (%j)', async (capabilities) => {
+    gameState.detail.value = combatExtensionDetail({
+      ruleset_runtime: {
+        id: 'test:panels',
+        capabilities: { authoritative_intents: true, deterministic_combat: false, ...capabilities },
+      },
+    })
+    mockedAvailableActions.mockResolvedValue({
+      gameplay: { combat: { status: 'active' }, panels: [{ component: 'text', label: 'Opportunity', value: 'A merchant offers a map' }] },
+      available_actions: [],
+    })
+    const wrapper = await mountPlayView()
+    expect(mockedAvailableActions).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-testid="ruleset-panels"]').text()).toContain('A merchant offers a map')
+    expect(wrapper.findComponent({ name: 'RulesetPlayHost' }).exists()).toBe(false)
+    expect(wrapper.find('.combat-message-composer').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each(['game', 'viewer'] as const)('does not render a late panel response after switching %s in PlayView', async (field) => {
+    gameState.detail.value = combatExtensionDetail({
+      ruleset_runtime: { id: 'test:panels', capabilities: { authoritative_intents: true } },
+    })
+    const payload = (value: string) => ({
+      gameplay: { panels: [{ component: 'text', label: 'Clock', value }] },
+      available_actions: [],
+    })
+    let resolveOld!: (value: ReturnType<typeof payload>) => void
+    mockedAvailableActions.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))
+      .mockResolvedValue(payload('Current viewer panel'))
+    const wrapper = await mountPlayView()
+    if (field === 'game') gameState.currentGame.value = 'web|other|bot'
+    else gameState.userId.value = 'other-player'
+    await flushPromises()
+    expect(wrapper.get('[data-testid="ruleset-panels"]').text()).toContain('Current viewer panel')
+    resolveOld(payload('Private old panel'))
+    await flushPromises()
+    expect(wrapper.get('[data-testid="ruleset-panels"]').text()).not.toContain('Private old panel')
+    expect(wrapper.get('[data-testid="ruleset-panels"]').text()).toContain('Current viewer panel')
+    wrapper.unmount()
   })
 
   it('does not reopen GM tools on entry because another visit left them open', async () => {

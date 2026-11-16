@@ -53,6 +53,10 @@ class RulesetCapabilities:
     # 这个位来调用，不靠 isinstance 猜。
     narrative_checks: bool = False
     adventure_formats: tuple[str, ...] = ()
+    # 外部运行时要对「当前节点」做规则判断（遭遇开场、节点战利品、抉择门槛），
+    # 就必须拿到宿主已解析、已校验的冒险图投影。声明这个位表示"请在实例 DTO
+    # 里带上只读投影"；进度仍然归宿主，运行时不写图。
+    adventure_projection: bool = False
     # 通用战斗扩展（Issue 212）：只有规则 runtime 显式声明才会启用；
     # 前端据此展示动作/资源条/行动条，不自行推断。
     combat_action_effects: bool = False
@@ -62,6 +66,9 @@ class RulesetCapabilities:
     # 顺序多检定或组合技能计划。两者是独立能力，不自动互相推导。
     sequential_checks: bool = False
     composite_action: bool = False
+    # Remote adapters must opt in before sending the optional automatic-intent
+    # RPC; authoritative intents or deterministic combat alone do not imply it.
+    automatic_intents: bool = False
 
     def __post_init__(self) -> None:
         if self.combat_scheduler and self.combat_scheduler not in SCHEDULER_KINDS:

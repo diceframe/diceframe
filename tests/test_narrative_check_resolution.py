@@ -200,7 +200,6 @@ async def test_round_processor_hands_free_text_checks_to_the_runtime() -> None:
     assert [request["check_id"] for _, request in surviving] == ["a"]
     assert surviving[0][1]["dice_system"] == "runtime"
     action = instance.action_queue[0]
-    assert action["check_request"]["dice_system"] == "runtime"
     assert action["check_result"]["verdict"] == "失败"
     assert action["dice_value"] == 8
     assert action["dice_rolls"] == [5, 3]

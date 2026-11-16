@@ -675,6 +675,8 @@ Frontend rules:
 - Do not treat whether a button is visible as authorization;
 - UI capability gating is an experience layer only; the server must validate again.
 
+Ruleset gameplay projections are owned by `features/play/useRulesetGameplay.ts`, sharing one available-actions response for declarative panels and the action catalogue. Fetching requires only the backend's `authoritative_intents` capability, not `deterministic_combat` or sequential/composite actions; combat tools retain their separate capability gate. A game, viewer, GM-role or runtime switch immediately clears the projection and invalidates old requests. Rounds, ruleset-state signals and visible-page polling refresh it.
+
 Play-state synchronization is owned by `composables/useGame.ts`. Because [Cloudflare Quick Tunnels do not support SSE](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/#limitations), `.trycloudflare.com` player pages fetch the current game snapshot through the existing APIs every two seconds, skipping ticks while a refresh is in flight. Local and custom-domain pages retain SSE; P2P subscriptions take precedence. Polling reuses the existing permission filtering, closed-entrance handling and connection cleanup.
 
 The homepage's “Join friends” entry is owned by `features/peer/FriendJoinPanel.vue`. `joinInvitation.ts` classifies regular invitation URLs and `DFP2-` direct-connect codes locally without probing remote hosts or consuming credentials. Regular URLs retain their original origin, deployment path, backend parameter and seat credential and open only after an explicit click. Direct codes enter the existing P2P flow with its connection consent intact. The Hub entry switch gates experimental direct connect only; ordinary invitation joining remains available. The play invitation dialog links to official multiplayer documentation without attaching game or invitation credentials.
@@ -3041,6 +3043,8 @@ To avoid forcing every runtime to implement an ever-growing method set, addition
 - `RunLifecycleRuntime`
 - `PublicTimelineProjectionRuntime`
 
+Remote adapters must explicitly declare support for the optional `next_automatic_intent` RPC through the independent `RulesetCapabilities.automatic_intents=True` flag. It defaults to false and is not inferred from `authoritative_intents`, `deterministic_combat`, or the existence of the adapter method. Without this declaration the adapter returns `None` without sending that RPC, so ordinary intents remain usable. Once declared, only a successful `null` response ends the automatic ladder; remote rejection, transport errors and malformed responses propagate to the existing authority transaction for rejection and rollback, rather than being swallowed as “unsupported.” Built-in runtimes still use the optional Protocol; D&D also declares the capability to keep its metadata accurate.
+
 The correct extension pattern is usually:
 
 ```text
@@ -3056,6 +3060,26 @@ frontend generic component
 ```
 
 ---
+
+### External Runtime Apply and Transport Boundaries
+
+Host apply receipts live in the existing `ruleset_runtime.event_ledger` under
+`_host_remote_apply_v1`, binding batch payload, runtime/version and game/run.
+Sheet-only handoffs also require receipts. Identical replay returns a result
+without writing an old post-image; reused IDs with different payloads and
+historical batches without verifiable host receipts are rejected explicitly.
+The child receives only a ledger projection without host metadata. State/ledger
+handoffs preserve history and append exactly one matching batch. Receipts,
+ruleset state and sheets save/rollback through the existing transaction and round
+before-images, with no new persisted module slot. See
+[RULESET_REMOTE_EVENT_BRIDGE.md](RULESET_REMOTE_EVENT_BRIDGE.md) for compatibility
+and cached pre-image validation.
+
+The stdio stderr drain retains at most a 1600-byte incomplete-line prefix and
+discards overflow until newline. Logging allows 64 lines of 400 characters;
+the pipe keeps draining after that budget without accumulating complete lines.
+Each stdout reader is bound to its process generation's stream/response queue,
+so late EOF from an old child cannot contaminate RPC after restart.
 
 ### Runtime Narrative Check Preparation
 
