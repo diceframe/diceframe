@@ -27,6 +27,8 @@ MAX_ARGUMENT_BYTES = 4096
 # 子进程 stderr 只做诊断用：留够定位问题的行，但不让它把宿主日志淹掉。
 MAX_STDERR_LINES = 64
 MAX_STDERR_LINE_CHARS = 400
+# Bound incomplete physical lines before decoding, even without a newline.
+MAX_STDERR_LINE_BYTES = MAX_STDERR_LINE_CHARS * 4
 _SHELL_EXECUTABLES = frozenset({"cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe", "sh", "bash", "zsh"})
 _SAFE_ENV_KEYS = frozenset({
     "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TZ",
@@ -120,8 +122,16 @@ class StdioRuntimeTransport:
             )
         except OSError as exc:
             raise RuntimeProbeError("failed to start runtime process") from exc
-        self._reader = threading.Thread(target=self._read_stdout, name="diceframe-runtime-stdout", daemon=True)
-        self._stderr_reader = threading.Thread(target=self._drain_stderr, name="diceframe-runtime-stderr", daemon=True)
+        # Bind readers to this generation. A late EOF from a terminated child
+        # must never enter the replacement child's response queue.
+        self._reader = threading.Thread(
+            target=self._read_stdout, args=(self.process.stdout, self._responses),
+            name="diceframe-runtime-stdout", daemon=True,
+        )
+        self._stderr_reader = threading.Thread(
+            target=self._drain_stderr, args=(self.process.stderr,),
+            name="diceframe-runtime-stderr", daemon=True,
+        )
         self._reader.start()
         self._stderr_reader.start()
 
@@ -136,22 +146,24 @@ class StdioRuntimeTransport:
             raise ValueError("runtime command may not invoke a shell")
         return normalized
 
-    def _read_stdout(self) -> None:
-        stream = self.process.stdout
+    def _read_stdout(
+        self, stream: Any,
+        responses: queue.Queue[tuple[dict[str, Any] | None, BaseException | None]],
+    ) -> None:
         if stream is None:
-            self._responses.put((None, RuntimeProbeError("runtime process has no stdout")))
+            responses.put((None, RuntimeProbeError("runtime process has no stdout")))
             return
         while True:
             try:
                 raw = stream.readline(MAX_PROBE_BYTES + 1)
             except (OSError, ValueError):  # 关闭与读并发时按 EOF 处理
-                self._responses.put((None, RuntimeProbeError("runtime process closed stdout")))
+                responses.put((None, RuntimeProbeError("runtime process closed stdout")))
                 return
             if not raw:
-                self._responses.put((None, RuntimeProbeError("runtime process closed stdout")))
+                responses.put((None, RuntimeProbeError("runtime process closed stdout")))
                 return
             if len(raw) > MAX_PROBE_BYTES:
-                self._responses.put((None, RuntimeProbeError("runtime response is too large")))
+                responses.put((None, RuntimeProbeError("runtime response is too large")))
                 return
             text, fallback = _decode_stream_bytes(raw)
             if fallback is not None and not self._encoding_fallback_warned:
@@ -164,24 +176,26 @@ class StdioRuntimeTransport:
             try:
                 value = json.loads(text)
             except json.JSONDecodeError:
-                self._responses.put((None, RuntimeProbeError("runtime returned invalid JSON")))
+                responses.put((None, RuntimeProbeError("runtime returned invalid JSON")))
                 return
             if not isinstance(value, dict):
-                self._responses.put((None, RuntimeProbeError("runtime response must be an object")))
+                responses.put((None, RuntimeProbeError("runtime response must be an object")))
                 return
-            self._responses.put((value, None))
+            responses.put((value, None))
 
-    def _drain_stderr(self) -> None:
+    def _drain_stderr(self, stream: Any = None) -> None:
         """Forward the child's stderr to the host log instead of swallowing it.
 
         以前这里读到即丢。外部 runtime 崩在 import、协议解析或规则加载里时，
         宿主只看得到「进程超时」——真正的原因全在这一侧，等于没有可诊断性。
         """
 
-        stream = self.process.stderr
+        if stream is None:
+            stream = self.process.stderr
         if stream is None:
             return
         pending = b""
+        truncated = False
         while True:
             try:
                 chunk = stream.read(4096)
@@ -189,14 +203,22 @@ class StdioRuntimeTransport:
                 return
             if not chunk:
                 break
-            pending += chunk
-            while b"\n" in pending:
-                line, pending = pending.split(b"\n", 1)
-                self._emit_stderr(line)
+            # Keep only a bounded prefix of each physical line; discard its
+            # continuation while continuing to drain the pipe (no backpressure
+            # on a child that is still answering RPCs on stdout).
+            parts = chunk.split(b"\n")
+            for index, part in enumerate(parts):
+                remaining = MAX_STDERR_LINE_BYTES - len(pending)
+                pending += part[:remaining]
+                truncated = truncated or len(part) > remaining
+                if index < len(parts) - 1:
+                    self._emit_stderr(pending, truncated=truncated)
+                    pending = b""
+                    truncated = False
         if pending:
-            self._emit_stderr(pending)
+            self._emit_stderr(pending, truncated=truncated)
 
-    def _emit_stderr(self, raw: bytes) -> None:
+    def _emit_stderr(self, raw: bytes, *, truncated: bool = False) -> None:
         text, _ = _decode_stream_bytes(raw)
         text = text.strip()
         if not text:
@@ -205,7 +227,7 @@ class StdioRuntimeTransport:
             self._stderr_dropped += 1
             return
         self._stderr_seen += 1
-        if len(text) > MAX_STDERR_LINE_CHARS:
+        if truncated or len(text) > MAX_STDERR_LINE_CHARS:
             text = text[:MAX_STDERR_LINE_CHARS] + "…"
         if self._stderr_sink is not None:
             try:
