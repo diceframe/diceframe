@@ -8,3 +8,5 @@ Pillow>=10,<14
 peewee>=4.5,<5
 pypdf>=6.19,<7
 pydantic-ai-slim==1.107.7
+# 后端文案多语言（src/localization/messages.py）；YAML extra 带入 PyYAML 读取文案文件。
+python-i18n[YAML]>=0.3.9,<0.4

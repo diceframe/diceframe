@@ -1,0 +1,18 @@
+# src/engine/currency/validation.py 返回给请求方的提示。
+"en":
+  base_unit_missing: "base_unit does not exist: %{base_unit}"
+  base_unit_rate_not_one: "rate of base_unit %{base_unit} must be 1, got %{rate}"
+  base_unit_required: "currency_system is missing base_unit"
+  declared_schema_version_unsupported: "currency_system.schema_version supports only 1 (legacy) or %{schema_version}, got %{version}"
+  display_unit_missing: "display_unit does not exist: %{display_unit}"
+  not_object: "currency_system must be an object"
+  schema_version_invalid: "Invalid currency_system.schema_version: %{version}"
+  schema_version_required: "currency_system is missing schema_version"
+  schema_version_unsupported: "currency_system.schema_version supports only %{schema_version}, got %{version_int}"
+  unit_id_duplicate: "units[%{index}] has a duplicate unit id: %{unit_id}"
+  unit_id_required: "units[%{index}] is missing id"
+  unit_name_required: "units[%{index}] is missing name"
+  unit_not_object: "units[%{index}] must be an object"
+  unit_rate_not_integer: "rate of unit %{unit_id} must be an integer, got %{rate_raw}"
+  unit_rate_not_positive: "rate of unit %{unit_id} must be > 0, got %{rate_raw}"
+  units_empty: "currency_system.units must be a non-empty array"

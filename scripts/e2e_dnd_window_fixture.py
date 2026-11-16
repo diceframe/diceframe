@@ -99,6 +99,19 @@ def _advancement_choices(preview: dict[str, Any]) -> dict[str, Any]:
                 option for option in requirement["options"] if option.get("available")
             ]
             choices[requirement_id] = str(available[0]["value"])
+        elif requirement.get("kind") == "feature_choice":
+            # Expertise 这类特性必须在本级回答一项；造数据只要一个合法角色，
+            # 取第一个可用选项即可。
+            available = [
+                option["value"] for option in requirement["options"]
+                if option.get("available", True)
+            ][: int(requirement.get("count") or 1)]
+            choices.setdefault("feature_choices", []).append({
+                "owner": requirement["owner"],
+                "feature_id": requirement["feature_id"],
+                "choice_id": requirement["choice_id"],
+                "selected_refs": available,
+            })
     return choices
 
 
