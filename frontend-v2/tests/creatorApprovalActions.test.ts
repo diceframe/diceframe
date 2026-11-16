@@ -57,6 +57,36 @@ describe('Creator approval actions', () => {
     expect(mocks.resume).not.toHaveBeenCalled()
   })
 
+  it('ignores a previous project restore failure while the current approval is running', async () => {
+    let rejectOld!: (error: Error) => void
+    let releaseResume!: () => void
+    localStorage.setItem('diceframe_creator_assistant_session_project-a', 'session-a')
+    localStorage.setItem('diceframe_creator_assistant_session_project-b', 'session-b')
+    mocks.session.mockImplementation((id: string) => id === 'session-a'
+      ? new Promise((_resolve, reject) => { rejectOld = reject })
+      : Promise.resolve({ session_id: 'session-b', pending: { ...approval } }))
+    mocks.resume.mockImplementation(async (_session, _id, _digest, handlers) => {
+      await new Promise<void>(resolve => { releaseResume = resolve })
+      handlers.onConfirmResult({ ok: true })
+    })
+    const scope = ref<string | undefined>('project-a')
+    const assistant = useCreatorAssistant(scope)
+    scope.value = 'project-b'
+    await nextTick()
+    await Promise.resolve()
+    const pending = assistant.resumeApproval()
+    expect(assistant.actionBusy.value).toBe(true)
+    rejectOld(new Error('old session expired'))
+    await Promise.resolve()
+    await nextTick()
+    expect(assistant.pendingApproval.value?.approval_id).toBe('approval-a')
+    expect(localStorage.getItem('diceframe_creator_assistant_session_project-b')).toBe('session-b')
+    releaseResume()
+    await pending
+    expect(assistant.actionBusy.value).toBe(false)
+    expect(assistant.pendingApproval.value).toBeNull()
+  })
+
   it('ignores late approval output after switching project', async () => {
     let release!: () => void
     mocks.resume.mockImplementation(async (_session, _id, _digest, handlers) => {

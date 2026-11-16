@@ -128,6 +128,7 @@ export function useCreatorAssistant(scope: Ref<string | undefined>) {
       if (generation !== switchGeneration || activeScope !== scope.value) return
       updateFromSession(snapshot)
     } catch {
+      if (generation !== switchGeneration || activeScope !== scope.value) return
       // A missing or expired project session only means the local transcript
       // remains available; the next request starts a fresh server session.
       sessionId.value = null
