@@ -6,7 +6,6 @@ from src.plugin_host.runtime_protocol import PluginInvocationError, PluginProtoc
 from src.webui.routes._common import _get_api, _require_confirmed_request
 from src.webui.services.modules import ModuleInUse
 from src.webui.viewer import viewer_for
-from src.webui.ui_isolation import build_frame_descriptor, frame_response_headers
 
 
 def _module_in_use_response(exc: ModuleInUse) -> web.Response:
@@ -352,25 +351,10 @@ async def api_plugin_asset(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(path)
 
 
-async def api_plugin_prebuilt_ui(request: web.Request) -> web.StreamResponse:
-    api = _get_api(request)
-    plugin_id = request.match_info["plugin_id"]
-    relative_path = request.match_info.get("path", "")
-    try:
-        descriptor = api.prebuilt_plugin_ui_descriptor(plugin_id)
-        origin = f"{request.scheme}://{request.host}"
-        frame = build_frame_descriptor(
-            plugin_id,
-            descriptor["entrypoint"],
-            origin=origin,
-            assets=descriptor.get("assets", []),
-        )
-        path = api.prebuilt_plugin_ui_asset_path(plugin_id, relative_path)
-    except KeyError as exc:
-        return web.json_response({"ok": False, "error": str(exc)}, status=404)
-    except ValueError as exc:
-        return web.json_response({"ok": False, "error": str(exc)}, status=400)
-    return web.FileResponse(path, headers=frame_response_headers(frame))
+# prebuilt UI 生产路由已撤下：第三方插件 HTML 从应用自身 origin 下发会把 CSP
+# `script-src 'self'` 等于整个 DiceFrame origin；须待独立 origin/nonce 隔离方案
+# 后再暴露（PR #754 审查阻塞 5）。host 侧 prebuilt_plugin_ui_descriptor /
+# prebuilt_ui_asset_path 与 src/webui/ui_isolation.py 模块保留待复用。
 
 async def api_plugin_marketplace_install(request: web.Request) -> web.Response:
     denied=_require_confirmed_request(request)
@@ -489,7 +473,6 @@ def register_plugins(app: web.Application) -> None:
     app.router.add_post("/api/plugins/content/import-all",api_plugin_content_import_all)
     app.router.add_post("/api/plugins/export",api_plugin_export)
     app.router.add_get("/api/plugins/assets/{plugin_id}/{path:.*}",api_plugin_asset)
-    app.router.add_get("/api/plugins/{plugin_id}/prebuilt-ui/{path:.*}", api_plugin_prebuilt_ui)
     app.router.add_post("/api/plugins/marketplace/install",api_plugin_marketplace_install)
     app.router.add_get("/api/plugins/mirrors",api_plugin_mirrors)
     app.router.add_post("/api/plugins/mirrors",api_plugin_mirror_add)

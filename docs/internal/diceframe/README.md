@@ -64,10 +64,10 @@ runtime.
 
 ## Validation
 
-The current structural validation result is stored in
-`diceframe_docs_validation_2026-11-13.json`: 18 checks passed and 31 task cards
-were parsed. The repository gate passed with 146 tests, one skip, frontend
-type-check/lint, and the production build.
+The 2026-11-13 structural validation artifact (18 checks passed, 31 task cards
+parsed; repository gate: 146 tests, one skip, frontend type-check/lint,
+production build) was recorded before the one-off validation scripts and JSON
+report were removed from the repository as AI workspace residue.
 
 The 2026-11-11 report remains historical evidence; it is not reused as the
 current result.
