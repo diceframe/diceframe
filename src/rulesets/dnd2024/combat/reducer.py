@@ -563,7 +563,8 @@ class CombatReducerMixin:
                 stored.pop(level)
             else:
                 stored[level] = remaining - 1
-            combat["economy"]["slot_spell_cast"] = True
+            if not event.get("exchange"):
+                combat["economy"]["slot_spell_cast"] = True
             return
         if event_type == "dnd2024.spell.font_slot_created":
             kind, raw_id = _actor_kind(str(event["actor_id"]))
