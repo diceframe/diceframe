@@ -60,6 +60,9 @@ import sys
 
 
 def handle(op, payload):
+    if op == "game_binding":
+        return {"rule_id": payload["rule"]["rule_id"], "runtime_id": "external:t3-sample",
+                "runtime_version": 1, "content_version": "1", "state_schema_version": 1}
     if op == "describe_experience":
         return {"id": "external:t3-sample", "name": "T3 样例规则", "locale": payload.get("locale", "")}
     if op == "builder_choices":
@@ -741,11 +744,9 @@ async def test_authoritative_intent_and_restart_recovery(tmp_path):
     assert reapplied["applied"] is True
     assert ruleset_runtime.state(restarted_instance)["version"] == 2
 
-    # 停电重放保护：确定性 request_id（batch:<id>）命中持久化收据缓存，
-    # 逐字返回首次响应、不二次执行——若真重执行，服务端 ledger 判重会
-    # 返回 replayed=True/applied=False，与首次响应不同。
+    # A later retry acknowledges the receipt without reapplying an old snapshot.
     replayed = runtime2.apply_event_batch(restarted_instance, continued["event_batch"])
-    assert replayed == reapplied
+    assert replayed == {"ok": True, "applied": False, "replayed": True}
     assert ruleset_runtime.state(restarted_instance)["version"] == 2
     restarted_source.close()
 

@@ -27,6 +27,7 @@ import hashlib
 import json
 import logging
 import sys
+import threading
 from dataclasses import replace as _dataclass_replace
 from pathlib import Path
 from typing import Any
@@ -49,10 +50,16 @@ class PluginRulesetRuntimeSource:
         self._registry = registry
         # runtime_id -> (fingerprint, adapter)；指纹相同的重复同步直接复用。
         self._owned: dict[str, tuple[str, RemoteRulesetRuntimeAdapter]] = {}
+        self._closed = False
+        self._lifecycle_lock = threading.RLock()
 
     # ---------------------------------------------------------------- 同步
 
     def sync(self, plugin_host: Any) -> dict[str, Any]:
+        with self._lifecycle_lock:
+            return self._sync(plugin_host)
+
+    def _sync(self, plugin_host: Any) -> dict[str, Any]:
         """Idempotent full resync; returns a report for logs and tests.
 
         切换协议（P1-02）：先构建并探活新 adapter，成功后才以「注销旧 → 注册新 →
@@ -61,6 +68,8 @@ class PluginRulesetRuntimeSource:
         显式拒绝（fail closed），不依赖遍历顺序。
         """
 
+        if self._closed:
+            return {"registered": [], "removed": [], "failed": {}}
         desired, collisions = self._collect_desired(plugin_host)
 
         removed = sorted(self._revoke_stale(desired))
@@ -169,9 +178,11 @@ class PluginRulesetRuntimeSource:
         再解析（fail closed），子进程由 adapter.close() 终止。
         """
 
-        for runtime_id in list(self._owned):
-            self._drop(runtime_id)
-            self._registry.unregister(runtime_id)
+        with self._lifecycle_lock:
+            self._closed = True
+            for runtime_id in list(self._owned):
+                self._drop(runtime_id)
+                self._registry.unregister(runtime_id)
 
     # ---------------------------------------------------------------- 内部
 

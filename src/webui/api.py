@@ -1363,6 +1363,21 @@ class WebAPI:
         self._plugin_ruleset_runtime_source = source
         return source.sync(plugin_host)
 
+    def adopt_plugin_ruleset_runtime_source(self, previous: "WebAPI") -> None:
+        """Transfer source ownership after a model/API-only rebuild commits.
+
+        The registry is deliberately reused by the subsystem factory. Keep the
+        existing listener and transports, and prevent teardown of the old API
+        from closing the source now owned by its replacement.
+        """
+        source = getattr(previous, "_plugin_ruleset_runtime_source", None)
+        if source is None:
+            return
+        if self._ruleset_registry is not previous._ruleset_registry:
+            raise ValueError("plugin runtime source requires the same ruleset registry")
+        self._plugin_ruleset_runtime_source = source
+        previous._plugin_ruleset_runtime_source = None
+
     def close_plugin_ruleset_runtime_source(self) -> None:
         """关闭同步桥持有的全部外部 runtime 子进程（组合根 teardown 调用）。"""
 

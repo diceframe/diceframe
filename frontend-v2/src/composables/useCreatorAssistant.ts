@@ -2,6 +2,7 @@ import { ref, watch, type Ref } from 'vue'
 import {
   cancelAssistantAgent,
   streamAssistantAgentConfirm,
+  streamAssistantAgentResume,
   getAssistantAgentSession,
   streamAssistantAgent,
   type AgentApproval,
@@ -76,6 +77,7 @@ function normaliseApproval(value: unknown): AgentApproval | null {
     preview: item.preview,
     expires_at: typeof item.expires_at === 'number' || typeof item.expires_at === 'string' ? item.expires_at : undefined,
     resumable: item.resumable === true,
+    expired: item.expired === true,
     recovery_required: item.recovery_required === true,
     execution_status: typeof item.execution_status === 'string' ? item.execution_status : undefined,
   }
@@ -213,9 +215,13 @@ export function useCreatorAssistant(scope: Ref<string | undefined>) {
     messages.value[idx] = { ...message, events }
   }
 
-  async function confirmApproval(approved = true): Promise<AgentConfirmResult | undefined> {
+  async function confirmApproval(approved = true, resume = false): Promise<AgentConfirmResult | undefined> {
     const approval = pendingApproval.value
-    if (!approval || !sessionId.value || actionBusy.value) return undefined
+    const currentSession = sessionId.value
+    const generation = switchGeneration
+    if (!approval || !currentSession || actionBusy.value) return undefined
+    if (resume && (!approval.resumable || approval.expired || approval.recovery_required)) return undefined
+    const isCurrent = () => generation === switchGeneration && sessionId.value === currentSession
     actionBusy.value = true
     actionError.value = ''
     try {
@@ -227,26 +233,30 @@ export function useCreatorAssistant(scope: Ref<string | undefined>) {
       }
       const assistantIdx = messages.value.length - 1
 
-      await streamAssistantAgentConfirm(
-        sessionId.value, approval.approval_id, approval.plan_digest, approved,
-        {
-          onDelta(delta) {
+      const handlers = {
+          onDelta(delta: string) {
+            if (!isCurrent()) return
             messages.value[assistantIdx] = {
               ...messages.value[assistantIdx],
               content: messages.value[assistantIdx].content + delta,
             }
           },
-          onAgentEvent(event, payload) {
+          onAgentEvent(event: string, payload: Record<string, unknown>) {
+            if (!isCurrent()) return
             const current = messages.value[assistantIdx]
             const events = [...(current.events || []), { event, payload }]
             messages.value[assistantIdx] = { ...current, events }
           },
-          onConfirmResult(result) {
+          onConfirmResult(result: AgentConfirmResult) {
             confirmResult = result
           },
-        },
-      )
-
+      }
+      if (resume) {
+        await streamAssistantAgentResume(currentSession, approval.approval_id, approval.plan_digest, handlers)
+      } else {
+        await streamAssistantAgentConfirm(currentSession, approval.approval_id, approval.plan_digest, approved, handlers)
+      }
+      if (!isCurrent()) return undefined
       const result = confirmResult ?? { ok: false, error: 'No result received' }
       if (approved) addResult(result, approval.tool)
       pendingApproval.value = result.pending ? normaliseApproval(result.pending) : null
@@ -254,11 +264,20 @@ export function useCreatorAssistant(scope: Ref<string | undefined>) {
       persist()
       return result
     } catch (error: unknown) {
+      if (!isCurrent()) return undefined
       actionError.value = error instanceof Error ? error.message : 'Assistant action failed.'
       return undefined
     } finally {
-      actionBusy.value = false
+      if (isCurrent()) actionBusy.value = false
     }
+  }
+
+  function resumeApproval(): Promise<AgentConfirmResult | undefined> {
+    return confirmApproval(true, true)
+  }
+
+  function cancelApproval(): Promise<AgentConfirmResult | undefined> {
+    return confirmApproval(false)
   }
 
   function toggleAutoApprove(): void {
@@ -281,8 +300,8 @@ export function useCreatorAssistant(scope: Ref<string | undefined>) {
     authorizationBusy: ref(false),
     authorizationError: ref(''),
     retryLast: async (_locale: string) => { /* no-op */ },
-    resumeApproval: async () => undefined,
-    cancelApproval: () => { /* no-op */ },
+    resumeApproval,
+    cancelApproval,
     invalidateApproval: () => { /* no-op */ },
     reviewDraft: async (_draftId: string, _draft: import('@/api/assistant').AgentDraftReview) => { /* no-op */ },
     saveDraft: async (_draftId: string, _locale: string) => { /* no-op */ },

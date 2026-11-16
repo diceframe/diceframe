@@ -139,7 +139,9 @@ def test_remote_ruleset_adapter_applies_only_opaque_state_and_ledger_dtos():
     result = runtime.apply_event_batch(instance, {"batch_id": "b1"})
     assert result == {"ok": True, "applied": True}
     assert ruleset_runtime.state(instance)["opaque"] == {"hp": 9}
-    assert ruleset_runtime.event_ledger(instance) == [{"batch_id": "b1"}]
+    from src.rulesets.remote_event_receipts import child_ledger
+
+    assert child_ledger(ruleset_runtime.event_ledger(instance)) == [{"batch_id": "b1"}]
 
 
 def test_remote_state_bridge_rejects_history_replacement_without_mutating_live_state():

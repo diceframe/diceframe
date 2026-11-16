@@ -352,6 +352,12 @@ class ConfigController:
                 )
                 self.logger.exception("AI 服务商插件重启失败")
 
+        previous_api = app.get("api")
+        if new_api is not previous_api and callable(
+            getattr(new_api, "adopt_plugin_ruleset_runtime_source", None)
+        ):
+            new_api.adopt_plugin_ruleset_runtime_source(previous_api)
+
         if model_runtime_changed and subsystems is not None:
             dependencies.activate_api_runtime(subsystems, new_api)
             app["subsystems"] = subsystems
