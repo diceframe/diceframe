@@ -202,9 +202,13 @@ def _reconciled_state(
 def _mutated(runtime: Dnd2024Runtime, key: str, value: object):
     bundle = runtime.load_bundle(LOCALE)
     entities = deepcopy(bundle.entities)
-    entities["class_feature_catalog"]["srd_class_features"]["classes"]["sorcerer"][
-        "features"
-    ][0]["parameters"][key] = value
+    features = entities["class_feature_catalog"]["srd_class_features"]["classes"][
+        "sorcerer"
+    ]["features"]
+    # 按 id 取，不按下标：sorcerer 的特性数组会随着别的切片插入新特性而移位，
+    # 下标取法会在那种改动里静默改错一个特性。
+    target = next(item for item in features if item["id"] == "draconic_spells")
+    target["parameters"][key] = value
     return replace(bundle, entities=entities)
 
 

@@ -173,6 +173,32 @@ def _check(events: list[dict], kind: str = "death_save") -> dict:
     )
 
 
+def _decline_window(engine, instance, events: list[dict]) -> list[dict]:
+    """Decline every check-window face a death save opens, then read the result.
+
+    A Champion of this level owns Indomitable, and since the death-save ruling
+    that face is offered on a failed death save too (a reroll discards the old
+    die instead of adding to it, so it can genuinely rescue one).  These tests
+    are about Survivor's advantage and crit threshold, not about who spends
+    what, so they decline each face and assert on the outcome that follows.
+    """
+
+    while events and events[-1]["type"] == "dnd2024.decision.pending":
+        window = events[-1]
+        resolved = engine.resolve_intent(instance, {
+            "intent_id": f"decline:{window['decision_id']}",
+            "type": "decision.resolve",
+            "expected_version": ruleset_runtime.state(instance)["version"],
+            "submitted_by": "gm",
+            "decision_id": window["decision_id"],
+            "option": "decline",
+        }, SequenceRng([]))
+        assert resolved["ok"] is True, resolved
+        assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
+        events = resolved["event_batch"]["events"]
+    return events
+
+
 def _resolved(events: list[dict]) -> dict:
     return next(event for event in events if event["type"] == "dnd2024.death_save.resolved")
 
@@ -570,7 +596,7 @@ def test_advantage_keeps_natural_one_and_takes_the_highest(
     _at_zero(engine, instance)
     _canonical(instance)["conditions"]["death_saves"] = {"successes": 0, "failures": 1}
 
-    events = _death_save(engine, instance, rolls=rolls)
+    events = _decline_window(engine, instance, _death_save(engine, instance, rolls=rolls))
 
     resolved = _resolved(events)
     assert resolved["successes"] == successes
@@ -784,7 +810,7 @@ def test_advantage_and_the_aura_are_separate_entries_on_one_save() -> None:
     _at_zero(engine, instance)
     _canonical(instance, "p2")  # the paladin stays up
 
-    events = _death_save(engine, instance, rolls=[17, 3])
+    events = _decline_window(engine, instance, _death_save(engine, instance, rolls=[17, 3]))
 
     check = _check(events)
     assert check["natural"] == 17
@@ -803,7 +829,7 @@ def test_advantage_and_the_aura_are_separate_entries_on_one_save() -> None:
     # a "treated as 20".
     engine, instance = _with_partner(runtime, _sheet(runtime, 18), paladin)
     _at_zero(engine, instance)
-    events = _death_save(engine, instance, rolls=[9, 2])
+    events = _decline_window(engine, instance, _death_save(engine, instance, rolls=[9, 2]))
     check = _check(events)
     assert check["natural"] == 9
     assert check["aura_bonus"] == 1
@@ -816,7 +842,7 @@ def test_advantage_and_the_aura_are_separate_entries_on_one_save() -> None:
     # face, is what crossed 10.
     engine, instance = _combat(runtime, _sheet(runtime, 18))
     _at_zero(engine, instance)
-    events = _death_save(engine, instance, rolls=[9, 2])
+    events = _decline_window(engine, instance, _death_save(engine, instance, rolls=[9, 2]))
     check = _check(events)
     assert check["aura_bonus"] == 0
     assert check["total"] == 9

@@ -30,6 +30,7 @@ def condition_flags(
 
     incapacitated = False
     speed_zero = False
+    speed_halved = False
     auto_fail_saves: set[str] = set()
     crit_on_hit_within_5 = False
     for condition_id, entry in registry.items():
@@ -37,6 +38,7 @@ def condition_flags(
             continue
         incapacitated = incapacitated or bool(entry.get("implies_incapacitated"))
         speed_zero = speed_zero or bool(entry.get("speed_zero"))
+        speed_halved = speed_halved or bool(entry.get("speed_halved"))
         crit_on_hit_within_5 = crit_on_hit_within_5 or bool(
             entry.get("crit_on_hit_within_5")
         )
@@ -46,6 +48,7 @@ def condition_flags(
     return {
         "incapacitated": incapacitated,
         "speed_zero": speed_zero,
+        "speed_halved": speed_halved,
         "auto_fail_saves": auto_fail_saves,
         "crit_on_hit_within_5": crit_on_hit_within_5,
     }
@@ -54,15 +57,25 @@ def condition_flags(
 def effective_speed(
     registry: dict[str, dict[str, Any]], conditions: dict[str, Any], base_speed: int,
 ) -> int:
-    """回合开始的速度上限：speed_zero 压倒一切修正；否则叠加全部 speed_modifier，向下取整于 0。"""
+    """回合开始的速度上限。
 
-    if condition_flags(registry, conditions)["speed_zero"]:
+    ``speed_zero`` 压倒一切；否则先叠加全部 ``speed_modifier``（加法修正），
+    再应用一次 ``speed_halved``（乘数效应）。两者顺序固定：先减再折半，而不是
+    各自独立作用，否则"被减速 10 尺又减半"会算出两个不同的答案。多个减半来源
+    仍只折半一次——D&D 的乘数规则不与自身相乘。
+    """
+
+    flags = condition_flags(registry, conditions)
+    if flags["speed_zero"]:
         return 0
     total = 0
     for condition_id, entry in registry.items():
         if condition_id in conditions:
             total += int(entry.get("speed_modifier", 0) or 0)
-    return max(0, int(base_speed) + total)
+    speed = max(0, int(base_speed) + total)
+    if flags["speed_halved"]:
+        speed //= 2
+    return speed
 
 
 def condition_check_bonus_rolls(
@@ -132,7 +145,20 @@ def mode_from_sources(sources: list[dict]) -> str:
 
 def attack_mode(engine: Any, instance: Any, actor: dict, target: dict,
                 range_disadvantage: bool, *, use_grant: bool = True,
-                extra_sources: tuple[dict, ...] = ()) -> dict:
+                extra_sources: tuple[dict, ...] = (),
+                combat: dict[str, Any] | None = None) -> dict:
+    """Both sides of the roll, with suppressed conditions already removed.
+
+    ``combat`` is optional so the pure pre-roll callers can keep passing just
+    views, but every caller that has it passes it: an aura that makes
+    Frightened inert must change the attack mode, and a condition the engine
+    suppresses in one place and not in another is worse than not suppressing it
+    at all.
+    """
+
+    if combat is not None:
+        actor = engine._effective_target(instance, combat, actor)
+        target = engine._effective_target(instance, combat, target)
     sources = attack_sources(engine.catalog.conditions, actor, target, range_disadvantage)
     # 意图声明的来源（如 Lucky）只在本次掷骰生效，不写进持续条件注册表：
     # 追加到来源列表后由同一个归一函数处理优劣势抵消。
@@ -172,7 +198,7 @@ def policy(engine: Any, instance: Any, uid: str) -> dict:
                     if engine.validate_intent(instance, intent).get("ok"):
                         result["previews"].append({"spell_ref": spell["spell_ref"], "target_id": target["actor_id"],
                             "label": f"{spell['name']} → {target.get('name') or target['actor_id']}",
-                            **attack_mode(engine, instance, actor, engine._actor_view(instance, combat, target["actor_id"]), False)})
+                            **attack_mode(engine, instance, actor, engine._actor_view(instance, combat, target["actor_id"]), False, combat=combat)})
         if available["type"] != "attack":
             continue
         for weapon in available.get("weapons", []):
@@ -189,5 +215,5 @@ def policy(engine: Any, instance: Any, uid: str) -> dict:
                 result["previews"].append({"weapon_ref": weapon["weapon_ref"], "target_id": target["actor_id"],
                     "label": f"{weapon.get('name') or weapon['weapon_ref']} → {target.get('name') or target['actor_id']}",
                     **attack_mode(engine, instance, actor, engine._actor_view(instance, combat, target["actor_id"]),
-                                  normal < distance <= maximum)})
+                                  normal < distance <= maximum, combat=combat)})
     return result

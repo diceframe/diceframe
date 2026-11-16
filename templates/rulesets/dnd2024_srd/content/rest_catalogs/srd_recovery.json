@@ -37,7 +37,8 @@
       {"id": "channel_divinity", "minimum_level": 2, "maximum_track": "channel_divinity", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p37:channel-divinity"}
     ],
     "druid": [
-      {"id": "wild_shape", "minimum_level": 2, "maximum_track": "wild_shape", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p42:wild-shape"}
+      {"id": "wild_shape", "minimum_level": 2, "maximum_track": "wild_shape", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p42:wild-shape"},
+      {"id": "natural_recovery", "minimum_level": 6, "maximum_fixed": 1, "short": "none", "long": "all", "requires_subclass": "subclass:circle_of_the_land", "short_recovery": {"mode": "spell_slots", "budget": "half_level_round_up", "max_slot_level": 5}, "source_ref": "srd-5.2.1:p46:natural-recovery"}
     ],
     "fighter": [
       {"id": "second_wind", "minimum_level": 1, "maximum_track": "second_wind", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p48:second-wind"},
@@ -61,14 +62,15 @@
     ],
     "sorcerer": [
       {"id": "innate_sorcery", "minimum_level": 1, "maximum_fixed": 2, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p65:innate-sorcery"},
-      {"id": "sorcery_points", "minimum_level": 2, "maximum_track": "sorcery_points", "short": "none", "long": "all", "source_ref": "srd-5.2.1:p66:font-of-magic"}
+      {"id": "sorcery_points", "minimum_level": 2, "maximum_track": "sorcery_points", "short": "none", "long": "all", "source_ref": "srd-5.2.1:p66:font-of-magic"},
+      {"id": "sorcerous_restoration", "minimum_level": 5, "maximum_fixed": 1, "short": "none", "long": "all", "short_recovery": {"mode": "points", "budget": "half_level_round_down", "track": "sorcery_points"}, "source_ref": "srd-5.2.1:p66:sorcerous-restoration"}
     ],
     "warlock": [
-      {"id": "magical_cunning", "minimum_level": 2, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p72:magical-cunning"},
+      {"id": "magical_cunning", "minimum_level": 2, "maximum_fixed": 1, "short": "none", "long": "all", "ritual": {"minutes": 1, "mode": "pact_slots", "budget": "half_max_round_up", "full_feature": "eldritch_master"}, "source_ref": "srd-5.2.1:p72:magical-cunning"},
       {"id": "dark_ones_own_luck", "minimum_level": 6, "maximum_ability_modifier": "cha", "minimum": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p76:dark-ones-own-luck"}
     ],
     "wizard": [
-      {"id": "arcane_recovery", "minimum_level": 1, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p78:arcane-recovery"}
+      {"id": "arcane_recovery", "minimum_level": 1, "maximum_fixed": 1, "short": "none", "long": "all", "short_recovery": {"mode": "spell_slots", "budget": "half_level_round_up", "max_slot_level": 5}, "source_ref": "srd-5.2.1:p78:arcane-recovery"}
     ]
   },
   "feat_resources": {
