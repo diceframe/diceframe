@@ -60,7 +60,7 @@ def create_clock(
         MIN_CLOCK_SEGMENTS <= segments <= MAX_CLOCK_SEGMENTS
     ):
         raise ValueError(_text(language, "segments_out_of_range"))
-    tracker._clock_counter = int(getattr(tracker, "_clock_counter", 0)) + 1
+    tracker._clock_counter = tracker._next_clock_id()
     clock_id = f"clock_{tracker._clock_counter}"
     tracker.clocks[clock_id] = ClockEntry(
         clock_id=clock_id,

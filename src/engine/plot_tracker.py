@@ -363,7 +363,7 @@ class PlotTracker:
                 continue
             key = next((k for k, c in self.clocks.items() if c.title == title), "")
             if not key:
-                self._clock_counter += 1
+                self._clock_counter = self._next_clock_id()
                 key = f"clock_{self._clock_counter}"
                 self.clocks[key] = ClockEntry(
                     clock_id=key,
@@ -496,6 +496,13 @@ class PlotTracker:
 
     # ---- 序列化 ----
 
+    def _next_clock_id(self) -> int:
+        """取一个未占用的命刻计数器值；已存在的键一律让位，不覆盖。"""
+        counter = int(getattr(self, "_clock_counter", 0) or 0)
+        while f"clock_{counter + 1}" in self.clocks:
+            counter += 1
+        return counter + 1
+
     def to_dict(self) -> dict:
         return {
             "quests": {k: v.to_dict() for k, v in self.quests.items()},
@@ -516,4 +523,16 @@ class PlotTracker:
         pt.clocks = {k: ClockEntry.from_dict(v) for k, v in (data.get("clocks") or {}).items()}
         pt.bonds = {k: BondEntry.from_dict(v) for k, v in (data.get("bonds") or {}).items()}
         pt._quest_counter = data.get("quest_counter", 0)
+        # 计数器必须恢复，且不早于存量键的最大后缀：旧存档缺少该字段时
+        # 归零会与已恢复的 clock_1 碰撞，新建命刻会静默覆盖旧命刻。
+        try:
+            saved_counter = int(data.get("clock_counter", 0) or 0)
+        except (TypeError, ValueError):
+            saved_counter = 0
+        max_suffix = max(
+            (int(key.removeprefix("clock_")) for key in pt.clocks
+             if key.startswith("clock_") and str(key.removeprefix("clock_")).isdigit()),
+            default=0,
+        )
+        pt._clock_counter = max(saved_counter, max_suffix)
         return pt
