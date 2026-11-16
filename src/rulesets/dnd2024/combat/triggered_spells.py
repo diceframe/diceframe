@@ -12,6 +12,7 @@ from copy import deepcopy
 from typing import Any
 
 from src.engine.player_control import is_ai_controlled
+from src.rulesets.dnd2024.spells.casting import free_cast_resource, spell_cost_events
 from .action_adapter import (
     double_dice_counts,
     formula_node_from_dice_formula,
@@ -30,72 +31,6 @@ def hit_spell_decision(combat: dict[str, Any], actor_id: str) -> dict[str, Any] 
             row
             for row in combat.get("pending_decisions", [])
             if row.get("kind") == HIT_SPELL_DECISION and row.get("actor_id") == actor_id
-        ),
-        None,
-    )
-
-
-def free_cast_resource(
-    actor: dict[str, Any], spell_ref: str, spell_level: int | None = None,
-) -> dict[str, Any] | None:
-    """The single free source this cast may draw on, or ``None``.
-
-    One cast spends exactly one source, so this returns at most one row and the
-    caller never has to arbitrate.  An unlimited slot wins over every finite
-    source: Spell Mastery never runs out, and burning a Magic Initiate use (or
-    a Mystic Arcanum, or a Signature use) on a spell the character could cast
-    for free forever would be a silent, unrecoverable loss.
-
-    ``spell_level`` is the level the cast actually uses.  Free casting never
-    upcasts -- a level 6 arcanum is cast at level 6 -- so a slot only matches
-    when its fixed level equals the spell's own.
-    """
-
-    slots = [
-        row for row in actor.get("free_cast_slots", []) or []
-        if row.get("valid", True)
-        and row.get("spell_ref") == spell_ref
-        and (spell_level is None or int(row.get("spell_level", 0) or 0) == int(spell_level))
-    ]
-    unlimited = next(
-        (row for row in slots if row.get("recharge") == "unlimited"), None,
-    )
-    if unlimited is not None:
-        return {
-            "kind": "free_slot",
-            "free_slot_id": unlimited["slot_id"],
-            "spell_level": int(unlimited["spell_level"]),
-            "unlimited": True,
-        }
-    # 职业特性免费施放挂在 class resource 上；起源专长（魔法学徒）的
-    # 每长休一次免费施放挂在该专长条目上。两者都可能授予同一法术。
-    grants = [
-        row for row in actor.get("spell_grants", []) if row.get("spell_ref") == spell_ref
-    ]
-    feat_grant = next((row for row in grants if row.get("free_cast_available")), None)
-    if feat_grant is not None:
-        return {"kind": "feat", "feat_ref": feat_grant["feat_ref"]}
-    limited = next(
-        (
-            row for row in slots
-            if row.get("uses_remaining") is None or int(row["uses_remaining"]) > 0
-        ),
-        None,
-    )
-    if limited is not None:
-        return {
-            "kind": "free_slot",
-            "free_slot_id": limited["slot_id"],
-            "spell_level": int(limited["spell_level"]),
-        }
-    grant = next((row for row in grants if row.get("resource_id")), None)
-    if grant is None:
-        return None
-    return next(
-        (
-            row
-            for row in actor.get("class_resources", [])
-            if row.get("id") == grant["resource_id"] and int(row.get("current", 0)) > 0
         ),
         None,
     )
@@ -150,54 +85,10 @@ class CombatTriggeredSpellsMixin:
                 "amount": 1,
             }
         ] if spend_action else []
-        if int(spell["level"]) > 0:
-            if slot_level > 0:
-                events.append(
-                    {
-                        "type": "dnd2024.spell.slot_spent",
-                        "actor_id": actor["actor_id"],
-                        "slot_level": slot_level,
-                        "amount": 1,
-                    }
-                )
-            else:
-                resource = free_cast_resource(
-                    actor, f"spell:{spell['id']}", int(spell["level"]),
-                )
-                if resource is None:
-                    raise CombatIntentError("the free spell cast is not available")
-                if resource.get("kind") == "feat":
-                    events.append(
-                        {
-                            "type": "dnd2024.feat_spell.free_cast_spent",
-                            "actor_id": actor["actor_id"],
-                            "feat_ref": resource["feat_ref"],
-                        }
-                    )
-                    return events
-                if resource.get("kind") == "free_slot":
-                    if not resource.get("unlimited"):
-                        # Spell Mastery never runs out, so there is no counter to
-                        # spend: emitting an event for it would need a number the
-                        # slot deliberately does not carry.
-                        events.append(
-                            {
-                                "type": "dnd2024.free_cast.spent",
-                                "actor_id": actor["actor_id"],
-                                "free_slot_id": resource["free_slot_id"],
-                                "spell_ref": f"spell:{spell['id']}",
-                                "spell_level": int(resource["spell_level"]),
-                            }
-                        )
-                    return events
-                events.append(
-                    {
-                        "type": "dnd2024.class_resource.spent",
-                        "actor_id": actor["actor_id"],
-                        "resource_id": resource["id"],
-                        "amount": 1,
-                    }
-                )
+        try:
+            events.extend(spell_cost_events(actor, spell, slot_level))
+        except ValueError as exc:
+            raise CombatIntentError(str(exc)) from exc
         return events
 
     def _finish_hit_spell(

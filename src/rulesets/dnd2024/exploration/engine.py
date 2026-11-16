@@ -53,7 +53,13 @@ from src.rulesets.dnd2024.exploration.revive_effects import (
     revive_definition,
     revive_events,
 )
+from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.spells.casting import (
+    apply_free_cast_cost, free_cast_resource, spell_caster, spell_cost_events,
+    spellcasting_projection,
+)
 from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
+from src.rulesets.dnd2024.spells.feat_spells import concentration_holder
 from src.rulesets.dnd2024.treasure import (
     Dnd2024TreasureCatalog,
     TreasureTableError,
@@ -98,6 +104,7 @@ class Dnd2024ExplorationEngine:
     bundle_validated: bool = False
     catalog: Dnd2024CombatCatalog = field(init=False)
     spells: Dnd2024SpellCatalog = field(init=False)
+    features: Dnd2024ClassFeatureResolver = field(init=False)
     treasure: Dnd2024TreasureCatalog = field(init=False)
 
     def __post_init__(self) -> None:
@@ -105,6 +112,7 @@ class Dnd2024ExplorationEngine:
             self.bundle, validate_items=not self.bundle_validated,
         )
         self.spells = Dnd2024SpellCatalog.from_bundle(self.bundle)
+        self.features = Dnd2024ClassFeatureResolver(self.bundle)
         self.treasure = Dnd2024TreasureCatalog.from_bundle(self.bundle)
 
     # ------------------------------------------------------------------
@@ -163,12 +171,7 @@ class Dnd2024ExplorationEngine:
         return targets
 
     def _spell_refs(self, canonical: dict[str, Any]) -> list[str]:
-        class_magic = canonical.get("spellcasting", {}).get("class")
-        class_magic = class_magic if isinstance(class_magic, dict) else {}
-        return list(dict.fromkeys([
-            *list(class_magic.get("cantrip_refs") or []),
-            *list(class_magic.get("prepared_spell_refs") or []),
-        ]))
+        return spellcasting_projection(canonical, self.features)["spell_refs"]
 
     def _casting_eligible(self, canonical: dict[str, Any]) -> bool:
         """探索施法的公共资格：HP>0、非 dead、非失能。
@@ -217,7 +220,8 @@ class Dnd2024ExplorationEngine:
         class_magic = canonical.get("spellcasting", {}).get("class")
         class_magic = class_magic if isinstance(class_magic, dict) else {}
         spells = []
-        for spell_ref in self._spell_refs(canonical):
+        casting = spellcasting_projection(canonical, self.features)
+        for spell_ref in casting["spell_refs"]:
             spell = self.spells.get(spell_ref)
             if spell is None:
                 continue
@@ -231,6 +235,10 @@ class Dnd2024ExplorationEngine:
                 ]
                 if int(spell["level"]) > 0 else [0]
             )
+            if int(spell["level"]) > 0 and free_cast_resource(
+                casting, spell_ref, int(spell["level"]),
+            ) is not None:
+                available_slots.insert(0, 0)
             if int(spell["level"]) > 0 and not available_slots:
                 continue
             spells.append({
@@ -359,6 +367,10 @@ class Dnd2024ExplorationEngine:
         if spell["level"] == 0:
             if slot_level != 0:
                 raise ExplorationIntentError("a cantrip does not use a spell slot")
+        elif slot_level == 0:
+            casting = spellcasting_projection(canonical, self.features)
+            if free_cast_resource(casting, spell_ref, int(spell["level"])) is None:
+                raise ExplorationIntentError("the free spell cast is not available")
         else:
             if slot_level < spell["level"]:
                 raise ExplorationIntentError("slot_level is lower than the spell level")
@@ -591,15 +603,11 @@ class Dnd2024ExplorationEngine:
         }]
         expected = int(intent["expected_version"])
         intent_id = str(intent.get("intent_id") or "")
-        if spell["level"] > 0:
-            events.append({
-                "type": "dnd2024.spell.slot_spent", "actor_id": actor_id,
-                "slot_level": slot_level, "amount": 1,
-            })
+        caster = spell_caster(self._actor_view(instance, actor_id), spell_ref)
+        events.extend(spell_cost_events(caster, spell, slot_level))
         if effect is not None and effect.get("concentration"):
             actor_canonical = self._canonical_of(instance, actor_id)
-            class_magic = actor_canonical.get("spellcasting", {}).get("class") or {}
-            if class_magic.get("concentration"):
+            if concentration_holder(actor_canonical).get("concentration"):
                 events.append({
                     "type": "dnd2024.concentration.ended", "actor_id": actor_id,
                     "reason": "new_concentration_spell",
@@ -637,11 +645,11 @@ class Dnd2024ExplorationEngine:
             if mode == "healing":
                 healing_node = spell_formula_node(
                     str(effect["healing"]), effect.get("upcast_healing"),
-                    spell, slot_level, self._actor_view(instance, actor_id),
+                    spell, slot_level, caster,
                 )
                 if effect.get("add_spell_ability"):
                     healing_node = heal_ability_modifier_node(
-                        healing_node, self._actor_view(instance, actor_id),
+                        healing_node, caster,
                     )
                 healing, rolls = roll_damage_node(healing_node, rng)
                 healing = max(1, healing)
@@ -755,6 +763,7 @@ class Dnd2024ExplorationEngine:
         derived = canonical.get("derived", {}) if isinstance(canonical.get("derived"), dict) else {}
         return {
             "actor_id": actor_id,
+            **spellcasting_projection(canonical, self.features),
             "spell_attack_bonus": int(derived.get("spell_attack_bonus", 0) or 0),
             "spell_save_dc": int(derived.get("spell_save_dc", 0) or 0),
             "spell_ability": str(class_magic.get("ability") or ""),
@@ -843,6 +852,18 @@ class Dnd2024ExplorationEngine:
             for condition in ("dead", "unconscious", "stable", "death_saves"):
                 conditions.pop(condition, None)
             return
+        if event_type in {
+            "dnd2024.free_cast.spent", "dnd2024.feat_spell.free_cast_spent",
+            "dnd2024.class_resource.spent",
+        }:
+            kind, raw_id = str(event["actor_id"]).split(":", 1)
+            if kind != "player" or raw_id not in snapshot["characters"]:
+                raise EventBatchError("exploration casting is player-only")
+            try:
+                apply_free_cast_cost(snapshot["characters"][raw_id], event)
+            except ValueError as exc:
+                raise EventBatchError(str(exc)) from exc
+            return
         if event_type == "dnd2024.spell.slot_spent":
             kind, raw_id = str(event["actor_id"]).split(":", 1)
             if kind != "player":
@@ -856,17 +877,13 @@ class Dnd2024ExplorationEngine:
             return
         if event_type == "dnd2024.concentration.started":
             kind, raw_id = str(event["actor_id"]).split(":", 1)
-            if kind == "player":
-                canonical = snapshot["characters"][raw_id]
-                canonical["spellcasting"]["class"]["concentration"] = {
-                    "spell_ref": event["spell_ref"], "target_ids": deepcopy(event["target_ids"]),
-                }
-            else:
-                self._companion_canonical(snapshot, raw_id)["spellcasting"]["class"][
-                    "concentration"
-                ] = {
-                    "spell_ref": event["spell_ref"], "target_ids": deepcopy(event["target_ids"]),
-                }
+            canonical = (
+                snapshot["characters"][raw_id] if kind == "player"
+                else self._companion_canonical(snapshot, raw_id)
+            )
+            concentration_holder(canonical)["concentration"] = {
+                "spell_ref": event["spell_ref"], "target_ids": deepcopy(event["target_ids"]),
+            }
             return
         if event_type == "dnd2024.concentration.ended":
             kind, raw_id = str(event["actor_id"]).split(":", 1)
@@ -874,7 +891,7 @@ class Dnd2024ExplorationEngine:
                 canonical = snapshot["characters"][raw_id]
             else:
                 canonical = self._companion_canonical(snapshot, raw_id)
-            canonical["spellcasting"]["class"]["concentration"] = None
+            concentration_holder(canonical)["concentration"] = None
             self._remove_concentration_conditions(snapshot, str(event["actor_id"]))
             return
         if event_type == "dnd2024.treasure.rolled":
