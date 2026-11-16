@@ -296,13 +296,74 @@ export interface RestSessionParticipant {
 
 export interface RestSessionStatus {
   active: boolean
-  status: 'idle' | 'collecting' | 'resolving' | 'completed' | 'error' | string
+  status: 'idle' | 'collecting' | 'awaiting_approval' | 'resolving' | 'completed' | 'rejected' | 'error' | string
   rest: 'short' | 'long' | null | string
   ready_count: number
   active_count: number
   participants: RestSessionParticipant[]
-  resolved_at?: string
+  /** Logical game clock ({day, minute}), never a wall-clock timestamp. */
+  started_clock?: { day: number, minute: number } | null
+  awaiting_since_clock?: { day: number, minute: number } | null
+  resolved_clock?: { day: number, minute: number } | null
+  /** Minutes this rest consumes, as declared by the ruleset. */
+  duration_minutes?: number | null
+  decided?: boolean
   error?: string
+}
+
+/** A GM verdict on a party rest that is waiting for approval. */
+export interface RestDecisionResponse {
+  ok: boolean
+  duplicate?: boolean
+  rejected?: boolean
+  duration_minutes?: number
+  rest_session?: RestSessionStatus
+  error?: string
+  code?: string
+}
+
+/** One spell a free-cast slot may legally hold, as computed by the server. */
+export interface RestSpellOption {
+  ref: string
+  name: string
+  level: number
+}
+
+/** A free-cast slot a long rest may re-choose (Spell Mastery study). */
+export interface RestFreeCastSlot {
+  slot_id: string
+  feature_id: string
+  spell_level: number
+  recharge: string
+  spell_ref: string
+  spell_name: string
+  /** How many slots may be re-chosen in one rest; the server enforces it too. */
+  rest_replace: number
+  valid: boolean
+  options: RestSpellOption[]
+}
+
+/** The terrain a Circle of the Land druid commits on every long rest. */
+export interface RestLandTerrain {
+  owner: string
+  feature_id: string
+  current: string
+  options: string[]
+  required: boolean
+}
+
+/** Long-rest choices this character owns; empty fields mean "nothing to ask". */
+export interface RestOptions {
+  land_terrain: RestLandTerrain | null
+  free_cast: RestFreeCastSlot[]
+}
+
+export interface RulesetRestOptionsResponse extends JsonObject {
+  ok: boolean
+  code?: string
+  error?: string
+  rest_options?: RestOptions
+  rest_session?: RestSessionStatus
 }
 
 export interface LiveAdvancementPlayerStatus {
@@ -1270,7 +1331,7 @@ export interface RulesetCombatSpell extends JsonObject {
   /** The server exposes this only when the spell attack can still spend a Lucky point. */
   lucky_advantage_available?: boolean
   /** The server exposes this only when Overchannel can legally maximize this casting. */
-  maximize_damage_available?: boolean
+  overchannel_available?: boolean
 }
 
 export interface RulesetCombatReactionFeature extends JsonObject {

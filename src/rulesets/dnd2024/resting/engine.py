@@ -4,17 +4,20 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.attunement import AttunementError
 from src.rulesets.dnd2024.character.attunement import apply_short_rest_attunement
 from src.rulesets.dnd2024.character.attunement import owned_ref_counts
 from src.rulesets.dnd2024.character.builder import ability_modifier
+from src.rulesets.dnd2024.combat.catalog import DAMAGE_TYPES
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.features.resources import reset_feature_usage
 from src.rulesets.dnd2024.items.charges import ChargesError, recharge_for_rest
 from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
 from src.rulesets.dnd2024.spells.feat_spells import concentration_holder, restore_feat_free_casts
+from src.rulesets.dnd2024.spells.font_of_magic import clear_font_slots
 from src.rulesets.dnd2024.spells.preparation import PreparationPolicy
 from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 
@@ -27,6 +30,18 @@ class RestError(ValueError):
 # ``sync_resources``）：任何没有显式声明的职业资源都继续沿用旧行为。
 RESIZE_POLICIES = ("preserve_spent", "preserve_current")
 DEFAULT_RESIZE_POLICY = "preserve_spent"
+
+# 短休预算型恢复（Arcane/Natural Recovery 的槽位、Sorcerous Restoration 的点数）。
+# 模式与预算口径都由 rest 目录声明，代码不按职业分支：新增一个同类特性时只需要
+# 在内容里写一行 ``short_recovery``。
+SHORT_RECOVERY_MODES = ("spell_slots", "points")
+SHORT_RECOVERY_BUDGETS = ("half_level_round_up", "half_level_round_down")
+
+# 需要真实耗时的权威仪式（目前只有 Magical Cunning）。它与休息的区别是时间：
+# 仪式在自己的权威写里推进 ``minutes`` 分钟，然后才恢复；时长与恢复口径同样由
+# 内容声明，代码不按职业分支。
+RITUAL_MODES = ("pact_slots",)
+RITUAL_BUDGETS = ("half_max_round_up",)
 
 
 def _canonical(payload: dict[str, Any]) -> dict[str, Any]:
@@ -103,6 +118,60 @@ class Dnd2024RestEngine:
             raise RestError(f"{label} has an unknown resize policy")
         if not str(spec.get("source_ref") or "").startswith("srd-5.2.1:"):
             raise RestError(f"{label} source is invalid")
+        requires_subclass = spec.get("requires_subclass")
+        # 子职专属的资源池：声明写成 ``subclass:<id>``，与特性目录的 owner 同一套
+        # 身份。写错前缀就等于一个永远为假的资格判据，池会静默不生成。
+        if requires_subclass is not None and not str(requires_subclass).startswith("subclass:"):
+            raise RestError(f"{label} requires_subclass must name a subclass")
+        recovery = spec.get("short_recovery")
+        if recovery is not None:
+            Dnd2024RestEngine._validate_short_recovery(recovery, label)
+        ritual = spec.get("ritual")
+        if ritual is not None:
+            Dnd2024RestEngine._validate_ritual(ritual, label)
+
+    @staticmethod
+    def _validate_ritual(ritual: Any, label: str) -> None:
+        if not isinstance(ritual, dict):
+            raise RestError(f"{label}.ritual must be an object")
+        minutes = ritual.get("minutes")
+        if (
+            isinstance(minutes, bool)
+            or not isinstance(minutes, int)
+            or not 1 <= minutes <= 1440
+        ):
+            raise RestError(f"{label}.ritual minutes must be an integer from 1 to 1440")
+        if ritual.get("mode") not in RITUAL_MODES:
+            raise RestError(f"{label}.ritual has an unknown mode")
+        if ritual.get("budget") not in RITUAL_BUDGETS:
+            raise RestError(f"{label}.ritual has an unknown budget")
+        full_feature = ritual.get("full_feature")
+        if full_feature is not None and (
+            not isinstance(full_feature, str) or not full_feature
+        ):
+            raise RestError(f"{label}.ritual full_feature must name a feature")
+
+    @staticmethod
+    def _validate_short_recovery(recovery: Any, label: str) -> None:
+        if not isinstance(recovery, dict):
+            raise RestError(f"{label}.short_recovery must be an object")
+        mode = recovery.get("mode")
+        if mode not in SHORT_RECOVERY_MODES:
+            raise RestError(f"{label}.short_recovery has an unknown mode")
+        if recovery.get("budget") not in SHORT_RECOVERY_BUDGETS:
+            raise RestError(f"{label}.short_recovery has an unknown budget")
+        if mode == "spell_slots":
+            max_slot_level = recovery.get("max_slot_level")
+            if (
+                isinstance(max_slot_level, bool)
+                or not isinstance(max_slot_level, int)
+                or not 1 <= max_slot_level <= 9
+            ):
+                raise RestError(f"{label}.short_recovery max_slot_level is invalid")
+        else:
+            track = recovery.get("track")
+            if not isinstance(track, str) or not track:
+                raise RestError(f"{label}.short_recovery must name a track")
 
     def sync_resources(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Add or resize class resources without silently refilling spent uses.
@@ -150,13 +219,34 @@ class Dnd2024RestEngine:
             )
         return character
 
+    @staticmethod
+    def _owns_spec(spec: dict[str, Any], character: dict[str, Any]) -> bool:
+        """Whether the character holds the subclass a resource spec is tied to.
+
+        ``requires_subclass`` keeps a subclass-only pool (Circle of the Land's
+        Natural Recovery) off every other member of the class: the rest table is
+        keyed by class, so without this gate a Moon druid would be handed a
+        counter it can never spend.
+        """
+
+        required = str(spec.get("requires_subclass") or "")
+        if not required:
+            return True
+        features = character.get("features")
+        features = features if isinstance(features, dict) else {}
+        return str(features.get("subclass_ref") or "") == required
+
     def _sync_specs(
         self, specs: list[dict[str, Any]], class_state: dict[str, Any],
         tracks: dict[str, int], character: dict[str, Any], level: int,
         *, skip: bool = False,
     ) -> None:
         for spec in specs:
-            if skip or level < int(spec.get("minimum_level", 1) or 1):
+            if (
+                skip
+                or level < int(spec.get("minimum_level", 1) or 1)
+                or not self._owns_spec(spec, character)
+            ):
                 class_state.pop(spec["id"], None)
                 continue
             maximum = self._maximum(spec, tracks, character)
@@ -179,9 +269,28 @@ class Dnd2024RestEngine:
     def complete_short_rest(
         self, payload: dict[str, Any], hit_die_rolls: dict[str, list[int]] | None = None,
         attunement: dict[str, Any] | None = None,
+        free_cast: dict[str, Any] | None = None,
+        recovery: dict[str, Any] | None = None,
+        fiendish_resilience: str | None = None,
     ) -> dict[str, Any]:
+        if free_cast:
+            # Spell Mastery 的研究只发生在长休；短休给这个参数不是"没效果"，
+            # 而是用错了入口，直接拒绝比静默忽略更安全。
+            raise RestError("free cast slots can only be re-chosen during a long rest")
         character = self.sync_resources(payload)
         self._require_conscious(character, "Short Rest")
+        # Fiend 的抗性改选与其它选择一样先校验再落账：非法类型不能留下
+        # 已经恢复的 HP 与槽位。
+        fiendish_choice = self._plan_fiendish_resilience(
+            character,
+            fiendish_resilience if fiendish_resilience is not None
+            else payload.get("fiendish_resilience"),
+        )
+        # 预算型恢复先算成计划：超预算、选到没消耗的槽、当天已用过都要在
+        # 任何状态变化之前拒绝，这样一次非法选择不会留下半个休息结果。
+        recovery_plan = self._plan_short_recovery(
+            character, recovery if recovery is not None else payload.get("recovery"),
+        )
         events: list[dict[str, Any]] = []
         rolls = hit_die_rolls or {}
         if not isinstance(rolls, dict):
@@ -215,6 +324,10 @@ class Dnd2024RestEngine:
                 })
         self._recover_class_resources(character, "short", events)
         self._recover_spell_slots(character, "short", events)
+        self._recover_free_cast_slots(character, "short", events)
+        events.extend(self._apply_short_recovery(character, recovery_plan))
+        events.extend(self._apply_fiendish_resilience(character, fiendish_choice))
+        events.extend(self._reset_relentless_rage_dc(character))
         events.extend(self._apply_attunement(character, payload, attunement))
         events.extend(self._recharge_items(character, payload, "short"))
         return {
@@ -226,10 +339,30 @@ class Dnd2024RestEngine:
         }
 
     def complete_long_rest(
-        self, payload: dict[str, Any], prepared_spells: dict[str, list[str]] | None = None,
+        self, payload: dict[str, Any], land_terrain: str | None = None,
+        prepared_spells: dict[str, list[str]] | None = None,
+        free_cast: dict[str, Any] | None = None,
+        fiendish_resilience: str | None = None,
     ) -> dict[str, Any]:
         character = self.sync_resources(payload)
         self._require_conscious(character, "Long Rest")
+        fiendish_choice = self._plan_fiendish_resilience(
+            character,
+            fiendish_resilience if fiendish_resilience is not None
+            else payload.get("fiendish_resilience"),
+        )
+        # Land 地形选择先算成一份计划再落账：校验通过之前不动任何状态，
+        # 因此一次非法地形不会留下"半套"休息结果。
+        terrain_plan = self._plan_land_terrain(
+            character, land_terrain if land_terrain is not None
+            else payload.get("land_terrain"),
+        )
+        # Spell Mastery 的"研究法术书"同理：先校验再落账，一项非法替换
+        # 不能让长休留下已经恢复的 HP 与槽位。
+        free_cast_plan = self._plan_free_cast_rebind(
+            character, free_cast if free_cast is not None
+            else payload.get("free_cast"),
+        )
         events: list[dict[str, Any]] = []
         resources = character["resources"]
         previous_hp = int(resources.get("hp", 0) or 0)
@@ -252,10 +385,36 @@ class Dnd2024RestEngine:
                 "after": conditions["exhaustion"],
             })
         resources["ability_score_reductions"] = {}
+        # 造的临时槽先作废，再按普通规则恢复：顺序反过来，"长休后槽位
+        # 总数"就会在一瞬间把临时槽算成普通槽。
+        removed_font_slots = clear_font_slots(character)
+        if removed_font_slots:
+            events.append({
+                "type": "discard_font_slots",
+                "slots": removed_font_slots,
+            })
         self._recover_class_resources(character, "long", events)
         self._recover_spell_slots(character, "long", events)
+        # 重新研究先落账，再按 recharge 补满：长休结束时被换上的法术槽也是满的，
+        # 顺序反了就会把"研究完睡一觉"算成"睡完又花掉一次"。
+        events.extend(self._apply_free_cast_rebind(character, free_cast_plan))
+        self._recover_free_cast_slots(character, "long", events)
+        events.extend(self._apply_land_terrain(character, terrain_plan))
         if prepared_spells:
             events.extend(self._apply_prepared_spells(character, prepared_spells))
+        events.extend(self._apply_fiendish_resilience(character, fiendish_choice))
+        events.extend(self._reset_relentless_rage_dc(character))
+        # 长休作用域的特性使用计数只在这里清零：短休、战斗结束、回合结束、
+        # 升级与语言切换都不得动它，否则"首次免费"会被反复刷新。
+        for record in reset_feature_usage(character):
+            events.append({
+                "type": "reset_feature_usage",
+                "owner": record["owner"],
+                "feature_id": record["feature_id"],
+                "scope": record["scope"],
+                "before": record["count"],
+                "after": 0,
+            })
         for feat_ref in restore_feat_free_casts(character):
             events.append({"type": "restore_feat_spell", "feat_ref": feat_ref})
         holder = concentration_holder(character)
@@ -365,6 +524,146 @@ class Dnd2024RestEngine:
             block["cantrip_refs"] = list(change["cantrip_refs"])
         return [{"type": "prepared_spells_changed", "before": before, "after": after}]
 
+    def rest_options(self, character: Mapping[str, Any] | None) -> dict[str, Any]:
+        """Read-only description of what a Long Rest requires or may change.
+
+        The rest panel renders from this table instead of guessing: the terrain
+        options are the same ``terrain_options`` the commit path validates, and
+        the study rows come from the same slot table the rebind planner reads.
+        A character with neither gets two empty fields rather than an error, so
+        a fighter's rest panel simply shows nothing extra.
+
+        This is a Long-Rest projection by construction: a Short Rest takes no
+        terrain and no study, and the Short Rest entry point rejects both.
+        """
+
+        payload: dict[str, Any] = character if isinstance(character, Mapping) else {}
+        resolver = Dnd2024ClassFeatureResolver(self.bundle)
+        definition = resolver.spell_grant_terrain_feature(payload)
+        terrain: dict[str, Any] | None = None
+        if definition is not None:
+            options = [
+                str(item) for item in definition.parameters.get("terrain_options") or ()
+            ]
+            stored = str(
+                (resolver.spell_grant_choices(payload).get(definition.id) or {}).get(
+                    "terrain"
+                ) or ""
+            )
+            terrain = {
+                "owner": definition.owner,
+                "feature_id": definition.id,
+                "current": stored,
+                "options": options,
+                "required": True,
+            }
+        return {
+            "land_terrain": terrain,
+            "free_cast": Dnd2024SpellSelection(self.bundle).rest_free_cast_rows(payload),
+            # 短休那一半也一并交出：面板只有一个休息入口，客户端不该为了知道
+            # 「这一觉能拿回什么槽」再去猜一份自己的表。
+            "short_recovery": self._recovery_projection(payload),
+        }
+
+    def _recovery_projection(self, payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """``rest_recovery_options`` that degrades instead of raising.
+
+        The projection is read on every rest panel open, including for sheets
+        the rest engine would refuse to settle (no single class, unwritable
+        state).  A drawing aid must not be the thing that errors there; the
+        commit path still fails closed through ``_plan_short_recovery``.
+        """
+
+        try:
+            return self.rest_recovery_options(dict(payload))
+        except RestError:
+            return []
+
+    # ------------------------------------------------------------------
+    # Circle of the Land terrain
+    # ------------------------------------------------------------------
+
+    def _plan_land_terrain(
+        self, character: dict[str, Any], requested: Any,
+    ) -> dict[str, Any] | None:
+        """Validate the land terrain this Long Rest commits, without mutating.
+
+        The choice belongs to the rest, not to creation: a Land Druid picks a
+        terrain every Long Rest, and picking the same one again is a legal,
+        idempotent choice.  This returns the plan so an invalid terrain fails
+        before any Hit Point, slot, or resource has been touched.
+        """
+
+        resolver = Dnd2024ClassFeatureResolver(self.bundle)
+        definition = resolver.spell_grant_terrain_feature(character)
+        text = str(requested or "")
+        if definition is None:
+            if text:
+                raise RestError("this character has no land terrain to choose")
+            return None
+        options = [
+            str(item) for item in definition.parameters.get("terrain_options") or ()
+        ]
+        stored = str(
+            (resolver.spell_grant_choices(character).get(definition.id) or {}).get(
+                "terrain"
+            ) or ""
+        )
+        if text and text not in options:
+            raise RestError(f"land terrain must be one of {', '.join(options)}")
+        return {
+            "owner": definition.owner,
+            "feature_id": definition.id,
+            "options": options,
+            "before": stored,
+            "after": text,
+        }
+
+    def _apply_land_terrain(
+        self, character: dict[str, Any], plan: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Commit the planned terrain.
+
+        Switching replaces the old terrain on the same feature slot, so the
+        previous land's spells disappear with the source that granted them
+        while every other source -- ordinary Druid preparation, another
+        subclass's grant -- is left alone.  Omitting the choice never invents
+        one: a character that already chose keeps the terrain (and is told
+        nothing changed), and one that never chose gets an explicit missing
+        event instead of a silent default.
+        """
+
+        if plan is None:
+            return []
+        before, after = plan["before"], plan["after"]
+        if not after:
+            if before:
+                return []
+            return [{
+                "type": "spell_grant_terrain_missing",
+                "owner": plan["owner"],
+                "feature_id": plan["feature_id"],
+                "options": list(plan["options"]),
+            }]
+        spellcasting = character.setdefault("spellcasting", {})
+        block = spellcasting.get("class")
+        if not isinstance(block, dict):
+            block = {}
+            spellcasting["class"] = block
+        choices = block.setdefault("spell_grant_choices", {})
+        entry = choices.get(plan["feature_id"])
+        entry = dict(entry) if isinstance(entry, dict) else {}
+        entry["terrain"] = after
+        choices[plan["feature_id"]] = entry
+        return [{
+            "type": "spell_grant_terrain",
+            "owner": plan["owner"],
+            "feature_id": plan["feature_id"],
+            "before": before,
+            "after": after,
+            "changed": before != after,
+        }]
+
     def _recharge_items(
         self, character: dict[str, Any], payload: dict[str, Any], rest: str,
     ) -> list[dict[str, Any]]:
@@ -426,6 +725,190 @@ class Dnd2024RestEngine:
         ]
         if rejected:
             raise RestError(str(rejected[0].get("reason") or "attunement rejected"))
+
+    def validate_land_terrain(
+        self, character: dict[str, Any], terrain: Any,
+    ) -> None:
+        """Validate a Long Rest land choice without touching live state.
+
+        Same reason as ``validate_attunement``: a party rest is opened only
+        after every participant's payload is known to be usable, so a typo in
+        the terrain must fail before the session starts rather than halfway
+        through the resolution loop.
+        """
+
+        if terrain is None:
+            return
+        probe = deepcopy(character)
+        self._plan_land_terrain(probe, terrain)
+
+    # ------------------------------------------------------------------
+    # free-cast slots
+    # ------------------------------------------------------------------
+
+    def validate_free_cast(
+        self, character: dict[str, Any], changes: Any,
+    ) -> None:
+        """Validate a Long Rest study without touching live state.
+
+        Kept symmetric with ``validate_land_terrain``: an illegal study must
+        fail when the rest is *opened*, because a party rest that dies halfway
+        through its resolution loop rolls every participant back.
+        """
+
+        if changes in (None, {}):
+            return
+        probe = deepcopy(character)
+        self._plan_free_cast_rebind(probe, changes)
+
+    def _plan_free_cast_rebind(
+        self, character: dict[str, Any], requested: Any,
+    ) -> dict[str, dict[str, Any]]:
+        """Validate a Long Rest spell study without mutating the character."""
+
+        if requested in (None, {}):
+            return {}
+        selection = Dnd2024SpellSelection(self.bundle)
+        records, errors = selection.rebind_free_cast(character, requested)
+        if errors:
+            raise RestError("; ".join(errors))
+        return records
+
+    @staticmethod
+    def _apply_free_cast_rebind(
+        character: dict[str, Any], plan: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not plan:
+            return []
+        block = character.setdefault("spellcasting", {}).setdefault("class", {})
+        stored = block.setdefault("free_cast_slots", {})
+        events: list[dict[str, Any]] = []
+        for slot_id, record in plan.items():
+            before = stored.get(slot_id)
+            before_ref = str((before or {}).get("spell_ref") or "")
+            after_ref = str(record.get("spell_ref") or "")
+            # 计划里带着所有已研究的槽，只有真正换了的那一格才值得记一条事件：
+            # 提交一格却回放出两条"某法术换成它自己"，读日志的人会被误导。
+            stored[slot_id] = deepcopy(record)
+            if before_ref == after_ref:
+                continue
+            events.append({
+                "type": "rebind_free_cast",
+                "slot_id": slot_id,
+                "before": before_ref,
+                "after": after_ref,
+            })
+        return events
+
+    def _recover_free_cast_slots(
+        self, character: dict[str, Any], rest: str, events: list[dict[str, Any]],
+    ) -> None:
+        """Refill the free-cast slots this rest covers.
+
+        Four Mystic Arcana refill on a Long Rest only, the two Signature slots
+        on either rest, and Spell Mastery never (its slots are unlimited and
+        carry no counter at all).  A slot that has not been used keeps no
+        record, so there is nothing to write back.
+        """
+
+        bounds = {
+            "long_rest": {"long"},
+            "short_rest": {"short", "long"},
+            "unlimited": set(),
+        }
+        block = character.get("spellcasting")
+        block = block.get("class") if isinstance(block, dict) else None
+        stored = block.get("free_cast_slots") if isinstance(block, dict) else None
+        if not isinstance(stored, dict):
+            return
+        resolver = Dnd2024ClassFeatureResolver(self.bundle)
+        for row in resolver.free_cast_slots(character):
+            if rest not in bounds.get(str(row["recharge"]), set()):
+                continue
+            record = stored.get(row["slot_id"])
+            if not isinstance(record, dict):
+                continue
+            maximum = int(row["uses_max"])
+            before = record.get("uses_remaining")
+            if before == maximum:
+                continue
+            record["uses_remaining"] = maximum
+            events.append({
+                "type": "restore_free_cast",
+                "slot_id": str(row["slot_id"]),
+                "before": before,
+                "after": maximum,
+            })
+
+    def _plan_fiendish_resilience(
+        self, character: dict[str, Any], requested: Any,
+    ) -> str | None:
+        """Validate a Fiend's rest-time damage-type choice.
+
+        ``None``/absent means "keep the current choice": the feature only
+        changes when the player explicitly re-chooses.  A first rest without a
+        choice therefore leaves the character with no resistance rather than
+        defaulting to a type.
+        """
+
+        if requested is None or requested == "":
+            return None
+        if not isinstance(requested, str):
+            raise RestError("fiendish_resilience must be a damage type")
+        chosen = requested.strip().lower()
+        if chosen not in DAMAGE_TYPES:
+            raise RestError(f"unknown damage type for fiendish resilience: {requested}")
+        resolver = Dnd2024ClassFeatureResolver(self.bundle)
+        if not resolver.has_feature(
+            character, "fiendish_resilience", owner="subclass:fiend_patron",
+        ):
+            raise RestError("this character has no fiendish resilience")
+        excluded = resolver.feature_value(
+            character, "fiendish_resilience", "excluded_damage_types", [],
+        )
+        if isinstance(excluded, list) and chosen in {str(item) for item in excluded}:
+            raise RestError(f"{chosen} cannot be chosen with fiendish resilience")
+        return chosen
+
+    def _apply_fiendish_resilience(
+        self, character: dict[str, Any], chosen: str | None,
+    ) -> list[dict[str, Any]]:
+        if chosen is None:
+            return []
+        block = character.setdefault("features", {})
+        current = block.get("fiendish_resilience")
+        current = current if isinstance(current, dict) else {}
+        before = str(current.get("damage_type") or "")
+        block["fiendish_resilience"] = {**current, "damage_type": chosen}
+        return [{
+            "type": "rebind_fiendish_resilience", "before": before or None,
+            "after": chosen, "feature_id": "fiendish_resilience",
+            "owner": "subclass:fiend_patron",
+        }]
+
+    def _reset_relentless_rage_dc(
+        self, character: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Both rests reset the survival DC to the declaration's base.
+
+        Nothing is written when the DC is already at the base, so a rest that
+        never used the feature does not invent a recovery event.
+        """
+
+        block = character.get("features")
+        if not isinstance(block, dict):
+            return []
+        resolver = Dnd2024ClassFeatureResolver(self.bundle)
+        if not resolver.has_feature(character, "relentless_rage"):
+            return []
+        base = resolver.feature_value(character, "relentless_rage", "base_dc", 10)
+        base_dc = int(base) if isinstance(base, int) and not isinstance(base, bool) else 10
+        stored = block.get("relentless_rage")
+        stored = stored if isinstance(stored, dict) else {}
+        if stored.get("next_dc") == base_dc:
+            return []
+        block["relentless_rage"] = {**stored, "next_dc": base_dc}
+        return [{"type": "reset_relentless_rage_dc", "dc": base_dc}]
 
     def _class_state(self, character: dict[str, Any]) -> tuple[str, str, int]:
         build = character.get("build")
@@ -522,3 +1005,474 @@ class Dnd2024RestEngine:
                 "before": before,
                 "after": deepcopy(class_magic["slots_current"]),
             })
+
+    # ------------------------------------------------------------------
+    # short-rest recovery budgets (Arcane/Natural Recovery, Sorcerous Restoration)
+    # ------------------------------------------------------------------
+
+    def validate_short_recovery(
+        self, character: dict[str, Any], recovery: Any,
+    ) -> None:
+        """Validate a Short Rest recovery choice without touching live state.
+
+        Same shape as ``validate_land_terrain``: a party rest is opened only
+        after every participant's payload is known to be usable, so an
+        overspent budget has to fail before the session starts.
+        """
+
+        if recovery in (None, {}):
+            return
+        self._plan_short_recovery(self.sync_resources(character), recovery)
+
+    def rest_recovery_options(
+        self, character: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """What a Short Rest could give back right now, for the client to draw.
+
+        A read-only projection over the same declarations the commit path
+        plans from: nothing here decides anything, it only reports the budget
+        and how many uses of each pool are left.
+        """
+
+        character = self.sync_resources(character)
+        _class_ref, class_id, level = self._class_state(character)
+        class_state = character["resources"]["class"]
+        class_magic = character.get("spellcasting", {}).get("class")
+        class_magic = class_magic if isinstance(class_magic, dict) else {}
+        rows: list[dict[str, Any]] = []
+        for spec in self.rules["class_resources"][class_id]:
+            declaration = spec.get("short_recovery")
+            if not isinstance(declaration, dict):
+                continue
+            if level < int(spec.get("minimum_level", 1) or 1):
+                continue
+            if not self._owns_spec(spec, character):
+                continue
+            state = class_state.get(spec["id"])
+            if not isinstance(state, dict):
+                continue
+            row: dict[str, Any] = {
+                "resource_id": str(spec["id"]),
+                "mode": str(declaration["mode"]),
+                "budget": self._recovery_budget(declaration, level),
+                "uses_left": int(state.get("current", 0) or 0),
+            }
+            if declaration["mode"] == "spell_slots":
+                row["max_slot_level"] = int(declaration["max_slot_level"])
+                row["slots"] = self._expended_slots(
+                    class_magic, int(declaration["max_slot_level"]),
+                )
+            else:
+                row["track"] = str(declaration["track"])
+                track = class_state.get(str(declaration["track"]))
+                track = track if isinstance(track, dict) else {}
+                row["spent"] = int(track.get("maximum", 0) or 0) - int(
+                    track.get("current", 0) or 0
+                )
+            rows.append(row)
+        return rows
+
+    @staticmethod
+    def _expended_slots(
+        class_magic: Mapping[str, Any], max_slot_level: int,
+    ) -> list[dict[str, int]]:
+        current = class_magic.get("slots_current") or {}
+        maximum = class_magic.get("slots_max") or {}
+        rows: list[dict[str, int]] = []
+        for level in sorted(str(key) for key in maximum):
+            try:
+                numeric = int(level)
+            except ValueError:
+                continue
+            if not 1 <= numeric <= max_slot_level:
+                continue
+            top = int(maximum.get(level, 0) or 0)
+            left = int(current.get(level, 0) or 0)
+            rows.append({"level": numeric, "expended": max(0, top - left), "maximum": top})
+        return rows
+
+    @staticmethod
+    def _recovery_budget(declaration: Mapping[str, Any], level: int) -> int:
+        if declaration.get("budget") == "half_level_round_up":
+            return (int(level) + 1) // 2
+        return int(level) // 2
+
+    def _plan_short_recovery(
+        self, character: dict[str, Any], recovery: Any,
+    ) -> list[dict[str, Any]]:
+        """Turn the request into a checked plan; raise before any state moves."""
+
+        if recovery in (None, {}):
+            return []
+        if not isinstance(recovery, dict):
+            raise RestError("recovery must be an object keyed by feature id")
+        _class_ref, class_id, level = self._class_state(character)
+        declared = {
+            str(spec["id"]): spec
+            for spec in self.rules["class_resources"][class_id]
+            if isinstance(spec.get("short_recovery"), dict)
+        }
+        class_state = character["resources"]["class"]
+        class_magic = character.get("spellcasting", {}).get("class")
+        class_magic = class_magic if isinstance(class_magic, dict) else {}
+        plan: list[dict[str, Any]] = []
+        for raw_id, request in recovery.items():
+            resource_id = str(raw_id)
+            spec = declared.get(resource_id)
+            if spec is None or level < int(spec.get("minimum_level", 1) or 1):
+                raise RestError(
+                    f"{resource_id} is not a short-rest recovery option for this character"
+                )
+            if not self._owns_spec(spec, character):
+                raise RestError(
+                    f"{resource_id} is not a short-rest recovery option for this character"
+                )
+            state = class_state.get(resource_id)
+            if not isinstance(state, dict):
+                raise RestError(f"{resource_id} has no resource pool on this character")
+            if int(state.get("current", 0) or 0) < 1:
+                raise RestError(
+                    f"{resource_id} cannot be used again until the next long rest"
+                )
+            declaration = spec["short_recovery"]
+            budget = self._recovery_budget(declaration, level)
+            if budget <= 0:
+                raise RestError(f"{resource_id} has no budget at this level")
+            if not isinstance(request, dict):
+                raise RestError(f"{resource_id} recovery must be an object")
+            if declaration["mode"] == "spell_slots":
+                slots = self._plan_slot_recovery(
+                    class_magic, request, budget, int(declaration["max_slot_level"]),
+                    resource_id,
+                )
+                if not slots:
+                    continue
+                plan.append({
+                    "resource_id": resource_id, "mode": "spell_slots",
+                    "budget": budget, "slots": slots,
+                })
+            else:
+                points = self._plan_point_recovery(
+                    class_state, request, budget, str(declaration["track"]),
+                    resource_id,
+                )
+                if not points:
+                    continue
+                plan.append({
+                    "resource_id": resource_id, "mode": "points",
+                    "budget": budget, "track": str(declaration["track"]),
+                    "points": points,
+                })
+        return plan
+
+    @staticmethod
+    def _plan_slot_recovery(
+        class_magic: Mapping[str, Any], request: dict[str, Any], budget: int,
+        max_slot_level: int, resource_id: str,
+    ) -> dict[str, int]:
+        extra = set(request) - {"slots"}
+        if extra:
+            raise RestError(
+                f"{resource_id} recovery does not accept {sorted(extra)[0]}"
+            )
+        requested = request.get("slots") or {}
+        if not isinstance(requested, dict):
+            raise RestError(f"{resource_id}.slots must be an object keyed by slot level")
+        current = class_magic.get("slots_current") or {}
+        maximum = class_magic.get("slots_max") or {}
+        picked: dict[str, int] = {}
+        total = 0
+        for raw_level, raw_count in requested.items():
+            try:
+                slot_level = int(str(raw_level))
+            except ValueError as exc:
+                raise RestError(f"{resource_id} has an invalid slot level") from exc
+            if not 1 <= slot_level <= max_slot_level:
+                raise RestError(
+                    f"{resource_id} can only recover slots of level 1 to {max_slot_level}"
+                )
+            if isinstance(raw_count, bool) or not isinstance(raw_count, int) or raw_count < 1:
+                raise RestError(f"{resource_id} slot counts must be positive integers")
+            key = str(slot_level)
+            expanded = max(
+                0, int(maximum.get(key, 0) or 0) - int(current.get(key, 0) or 0)
+            )
+            if raw_count > expanded:
+                raise RestError(
+                    f"{resource_id} cannot recover more level {slot_level} slots than are expended"
+                )
+            picked[key] = raw_count
+            total += slot_level * raw_count
+        if total > budget:
+            raise RestError(
+                f"{resource_id} budget is {budget} combined levels, {total} requested"
+            )
+        return picked
+
+    @staticmethod
+    def _plan_point_recovery(
+        class_state: Mapping[str, Any], request: dict[str, Any], budget: int,
+        track: str, resource_id: str,
+    ) -> int:
+        extra = set(request) - {"points"}
+        if extra:
+            raise RestError(
+                f"{resource_id} recovery does not accept {sorted(extra)[0]}"
+            )
+        points = request.get("points", 0)
+        if isinstance(points, bool) or not isinstance(points, int) or points < 0:
+            raise RestError(f"{resource_id}.points must be a non-negative integer")
+        if points == 0:
+            return 0
+        if points > budget:
+            raise RestError(f"{resource_id} can regain at most {budget} points")
+        state = class_state.get(track)
+        state = state if isinstance(state, dict) else {}
+        spent = int(state.get("maximum", 0) or 0) - int(state.get("current", 0) or 0)
+        if points > spent:
+            raise RestError(f"{resource_id} cannot regain more points than are expended")
+        return points
+
+    def _apply_short_recovery(
+        self, character: dict[str, Any], plan: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Commit a checked plan: slots or points first, then the use itself."""
+
+        if not plan:
+            return []
+        class_state = character["resources"]["class"]
+        class_magic = character.setdefault("spellcasting", {}).setdefault("class", {})
+        events: list[dict[str, Any]] = []
+        for item in plan:
+            if item["mode"] == "spell_slots":
+                before = deepcopy(class_magic.get("slots_current") or {})
+                current = dict(before)
+                for level, count in item["slots"].items():
+                    current[level] = int(current.get(level, 0) or 0) + int(count)
+                class_magic["slots_current"] = current
+                events.append({
+                    "type": "recover_spell_slots",
+                    "resource_id": item["resource_id"],
+                    "budget": item["budget"],
+                    "slots": dict(item["slots"]),
+                    "before": before,
+                    "after": deepcopy(current),
+                })
+            else:
+                track = class_state[item["track"]]
+                before = int(track.get("current", 0) or 0)
+                track["current"] = min(
+                    int(track.get("maximum", 0) or 0), before + int(item["points"])
+                )
+                events.append({
+                    "type": "recover_class_points",
+                    "resource_id": item["resource_id"],
+                    "budget": item["budget"],
+                    "track": item["track"],
+                    "before": before,
+                    "after": int(track["current"]),
+                })
+            # 使用次数只在真的换回了东西之后才扣：一次"选了零恢复"的提交
+            # 不该悄悄烧掉今天唯一的一次。
+            state = class_state[item["resource_id"]]
+            before_uses = int(state.get("current", 0) or 0)
+            state["current"] = before_uses - 1
+            events.append({
+                "type": "spend_resource_use",
+                "resource_id": item["resource_id"],
+                "before": before_uses,
+                "after": int(state["current"]),
+            })
+        return events
+
+    # ------------------------------------------------------------------
+    # timed rituals (Magical Cunning)
+    # ------------------------------------------------------------------
+
+    def ritual_options(self, character: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+        """What a timed ritual would give back right now, for the client to draw.
+
+        Read-only, like ``rest_recovery_options``: it reports the declared
+        minutes, the remaining uses, and the exact number of slots the rite
+        would hand back, so the panel never has to re-derive ceil(max / 2).
+        """
+
+        payload = dict(character) if isinstance(character, Mapping) else {}
+        try:
+            character = self.sync_resources(payload)
+            _class_ref, class_id, level = self._class_state(character)
+        except RestError:
+            return []
+        class_state = character["resources"]["class"]
+        pact = self._pact_slots(character)
+        rows: list[dict[str, Any]] = []
+        if pact is None:
+            return rows
+        slot_level, maximum, current = pact
+        for spec in self.rules["class_resources"][class_id]:
+            declaration = spec.get("ritual")
+            if not isinstance(declaration, dict):
+                continue
+            if level < int(spec.get("minimum_level", 1) or 1):
+                continue
+            if not self._owns_spec(spec, character):
+                continue
+            state = class_state.get(spec["id"])
+            if not isinstance(state, dict):
+                continue
+            full = self._ritual_full_budget(declaration, character)
+            rows.append({
+                "resource_id": str(spec["id"]),
+                "minutes": int(declaration["minutes"]),
+                "uses_left": int(state.get("current", 0) or 0),
+                "slot_level": slot_level,
+                "maximum": maximum,
+                "expended": max(0, maximum - current),
+                "regain": self._ritual_regain(declaration, maximum, current, full),
+                "full_budget": full,
+            })
+        return rows
+
+    def complete_ritual(
+        self, payload: dict[str, Any], resource_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Finish a timed rite: regain Pact Magic slots and spend the use.
+
+        The caller is responsible for the other half of the transaction -- the
+        minutes this returns have to move the world clock inside the same
+        authoritative write -- so a failure on either side leaves no half-done
+        rite behind.
+        """
+
+        character = self.sync_resources(payload)
+        self._require_conscious(character, "Ritual")
+        plan = self._plan_ritual(character, resource_id)
+        class_magic = character.setdefault("spellcasting", {}).setdefault("class", {})
+        before = deepcopy(class_magic.get("slots_current") or {})
+        after = dict(before)
+        after[plan["slot_level"]] = int(after.get(plan["slot_level"], 0) or 0) + int(
+            plan["regain"]
+        )
+        class_magic["slots_current"] = after
+        state = character["resources"]["class"][plan["resource_id"]]
+        before_uses = int(state.get("current", 0) or 0)
+        state["current"] = before_uses - 1
+        events = [
+            {
+                "type": "recover_pact_slots",
+                "resource_id": plan["resource_id"],
+                "minutes": plan["minutes"],
+                "full_budget": plan["full_budget"],
+                "slots": {plan["slot_level"]: plan["regain"]},
+                "before": before,
+                "after": deepcopy(after),
+            },
+            {
+                "type": "spend_resource_use",
+                "resource_id": plan["resource_id"],
+                "before": before_uses,
+                "after": int(state["current"]),
+            },
+        ]
+        return {
+            "character": character,
+            "events": events,
+            "ritual": plan["resource_id"],
+            "minutes": plan["minutes"],
+            "source_ref": plan["source_ref"],
+        }
+
+    def _plan_ritual(
+        self, character: dict[str, Any], resource_id: str | None,
+    ) -> dict[str, Any]:
+        """Check one rite completely before any slot or use moves."""
+
+        _class_ref, class_id, level = self._class_state(character)
+        class_state = character["resources"]["class"]
+        declared = {
+            str(spec["id"]): spec
+            for spec in self.rules["class_resources"][class_id]
+            if isinstance(spec.get("ritual"), dict)
+        }
+        wanted = str(resource_id or "").strip()
+        if not wanted:
+            # 不点名只在唯一候选时成立：多候选时替玩家挑一个属于自造选择。
+            if len(declared) != 1:
+                raise RestError("resource_id must name the ritual to perform")
+            wanted = next(iter(declared))
+        spec = declared.get(wanted)
+        if spec is None or level < int(spec.get("minimum_level", 1) or 1):
+            raise RestError(f"{wanted} is not a ritual option for this character")
+        if not self._owns_spec(spec, character):
+            raise RestError(f"{wanted} is not a ritual option for this character")
+        state = class_state.get(wanted)
+        if not isinstance(state, dict):
+            raise RestError(f"{wanted} has no resource pool on this character")
+        if int(state.get("current", 0) or 0) < 1:
+            raise RestError(f"{wanted} cannot be used again until the next long rest")
+        pact = self._pact_slots(character)
+        if pact is None:
+            raise RestError(f"{wanted} requires Pact Magic spell slots")
+        slot_level, maximum, current = pact
+        declaration = spec["ritual"]
+        full = self._ritual_full_budget(declaration, character)
+        regain = self._ritual_regain(declaration, maximum, current, full)
+        if regain <= 0:
+            # 每日一次的机会不该被一次「本来就没有槽可恢复」的仪式烧掉。
+            raise RestError(f"{wanted} has no expended Pact Magic slots to regain")
+        return {
+            "resource_id": wanted,
+            "minutes": int(declaration["minutes"]),
+            "slot_level": slot_level,
+            "regain": regain,
+            "full_budget": full,
+            "source_ref": str(spec["source_ref"]),
+        }
+
+    @staticmethod
+    def _ritual_regain(
+        declaration: Mapping[str, Any], maximum: int, current: int, full: bool,
+    ) -> int:
+        expended = max(0, int(maximum) - int(current))
+        if full:
+            return expended
+        if declaration.get("budget") == "half_max_round_up":
+            # 「不超过最大值一半（向上取整）」是槽的**个数**，不是环阶预算。
+            return min((int(maximum) + 1) // 2, expended)
+        return 0
+
+    def _ritual_full_budget(
+        self, declaration: Mapping[str, Any], character: dict[str, Any],
+    ) -> bool:
+        """Whether an owned feature upgrades this rite to a full refill.
+
+        Eldritch Master does not grant a second use; it replaces the ceiling of
+        the same Magical Cunning use, so the upgrade is declared on the rite and
+        matched by feature id rather than by class level.
+        """
+
+        feature_id = str(declaration.get("full_feature") or "")
+        if not feature_id:
+            return False
+        return Dnd2024ClassFeatureResolver(self.bundle).has_feature(character, feature_id)
+
+    @staticmethod
+    def _pact_slots(character: Mapping[str, Any]) -> tuple[str, int, int] | None:
+        """``(slot level key, maximum, current)`` for a Pact Magic caster.
+
+        Pact Magic keeps one slot level in the ordinary slot tables, so a
+        character whose profile is not ``pact`` (or that somehow holds more
+        than one row) has nothing this rite can restore.
+        """
+
+        class_magic = (character.get("spellcasting") or {}).get("class")
+        if not isinstance(class_magic, Mapping):
+            return None
+        if str(class_magic.get("slot_profile") or "") != "pact":
+            return None
+        maximum = class_magic.get("slots_max") or {}
+        current = class_magic.get("slots_current") or {}
+        if not isinstance(maximum, Mapping) or len(maximum) != 1:
+            return None
+        key = next(iter(maximum))
+        return str(key), int(maximum[key] or 0), int(current.get(str(key), 0) or 0)

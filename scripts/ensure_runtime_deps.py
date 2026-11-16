@@ -39,9 +39,17 @@ def main() -> int:
         print(f"缺少运行依赖 {', '.join(missing)}，且找不到 {REQUIREMENTS}", file=sys.stderr)
         return 1
     print("检测到缺少运行依赖：" + "、".join(missing))
-    print("正在执行：python -m pip install -r requirements.txt")
+    print("目标解释器：" + sys.executable)
+    if sys.prefix == sys.base_prefix:
+        # 系统解释器上装依赖是个坑：版本可能没有对应 wheel，pip 会去编译，
+        # 第一次启动就变成十几分钟。先提醒，再照装（不能挡住首次体验）。
+        print(
+            "当前不在虚拟环境里，这些包会装进全局 Python。建议先执行 "
+            "`py -3 -m venv .venv`，web_ui.bat 会优先使用 .venv 或 .venv314。",
+        )
+    print("正在执行：python -m pip install --prefer-binary -r requirements.txt")
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-r", str(REQUIREMENTS)],
+        [sys.executable, "-m", "pip", "install", "--prefer-binary", "-r", str(REQUIREMENTS)],
         cwd=str(ROOT),
     )
     return result.returncode

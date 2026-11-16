@@ -9,10 +9,16 @@ from .triggered_spells import free_cast_resource
 from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.features import CombatCapabilityView
 from src.rulesets.dnd2024.features.combat import martial_arts_profile
-from src.rulesets.dnd2024.spells.feat_spells import feat_spell_grants
+from src.rulesets.dnd2024.features.resources import (
+    OVERCHANNEL_FEATURE_ID,
+    OVERCHANNEL_OWNER,
+    OVERCHANNEL_SPELL_CLASS,
+)
+from src.rulesets.dnd2024.spells.casting import spell_caster, spellcasting_projection
 
 from .check_windows import LUCKY_RESOURCE
 from .primitives import (
+    FEATURE_STATE_KEYS,
     CombatIntentError,
     UNARMED_STRIKE_REF,
     actor_kind as _actor_kind,
@@ -97,7 +103,7 @@ class CombatViewMixin:
                 "weapon_category_refs": [], "proficiency_bonus": 0,
                 "creature_type": str(enemy.get("creature_type") or ""),
                 "counterspell_dc": int(enemy.get("counterspell_dc", 0) or 0),
-                "skill_values": {}, "concentration": None,
+                "skill_values": {}, "skill_refs": [], "concentration": None,
             }
         raise CombatIntentError("actor_id is invalid")
 
@@ -136,9 +142,27 @@ class CombatViewMixin:
         feature_projection = self.features.actor_projection(character)
         # 起源专长（魔法学徒）授予的戏法/1 环法术与职业特性授予并列：
         # 各自带施法属性、攻击加值与 DC，结算时按法术来源取值。
+        #
+        # 常驻授予还要带 `automation_status`：它只由"这个法术真的有可结算
+        # 效果"派生，不手写。目录里存在一条法术不等于能施放，客户端也必须
+        # 能从同一个字段看出来。
+        casting = spellcasting_projection(character, self.features, feature_projection)
         spell_grants = [
-            *feature_projection["spell_grants"], *feat_spell_grants(character),
+            {
+                **row,
+                "automation_status": (
+                    "automated"
+                    if str(row.get("spell_ref", "")).removeprefix("spell:")
+                    in self.catalog.spell_effects
+                    else "not_automated"
+                ),
+            }
+            for row in casting["spell_grants"]
         ]
+        # 免费施法槽是独立资源，不是"这个法术免费"的布尔值：每槽自报
+        # 固定环阶、recharge、剩余次数与所选法术，结算时按 (slot, level)
+        # 匹配一个来源。
+        free_cast_slots = casting["free_cast_slots"]
         return {
             "actor_id": _player_actor(uid), "kind": "player", "id": uid, "side": "party",
             "hp": int(resources.get("hp", 0) or 0),
@@ -156,6 +180,9 @@ class CombatViewMixin:
             "abilities": deepcopy(character.get("abilities") or {}),
             "saving_throws": deepcopy(character.get("derived", {}).get("saving_throws") or {}),
             "skill_values": deepcopy(character.get("proficiencies", {}).get("skill_values") or {}),
+            # 技能熟练本身也要投影：Reliable Talent 只对"使用技能熟练"的检定
+            # 生效，而加值数字分不清 "+2 因为熟练" 与 "+2 因为属性"。
+            "skill_refs": list(character.get("proficiencies", {}).get("skill_refs") or []),
             "proficiency_bonus": int(
                 character.get("derived", {}).get("proficiency_bonus", 2) or 2
             ),
@@ -163,17 +190,14 @@ class CombatViewMixin:
                 character.get("proficiencies", {}).get("weapon_category_refs") or []
             ),
             "equipment_refs": list(character.get("equipment", {}).get("item_refs") or []),
-            "spell_refs": list(dict.fromkeys([
-                *list(class_magic.get("cantrip_refs") or []),
-                *list(class_magic.get("prepared_spell_refs") or []),
-                *[row["spell_ref"] for row in spell_grants],
-            ])),
-            "class_spell_refs": list(dict.fromkeys([
-                *list(class_magic.get("cantrip_refs") or []),
-                *list(class_magic.get("prepared_spell_refs") or []),
-            ])),
+            "spell_refs": casting["spell_refs"],
+            "class_spell_refs": casting["class_spell_refs"],
             "slots": deepcopy(class_magic.get("slots_current") or {}),
+            # Font of Magic 造的临时槽：单独一栏，绝不并进普通槽表，否则
+            # "最多 5 环"和"长休消失"这两件事就没地方可查了。
+            "font_slots": casting["font_slots"],
             "spell_grants": deepcopy(spell_grants),
+            "free_cast_slots": deepcopy(free_cast_slots),
             "spell_attack_bonus": int(
                 character.get("derived", {}).get("spell_attack_bonus", 0) or 0
             ),
@@ -186,7 +210,26 @@ class CombatViewMixin:
             "conditions": deepcopy(conditions),
             "death_saves": deepcopy(conditions.get("death_saves") or {}),
             "build": deepcopy(character.get("build") or {}),
-            "features": {"subclass_ref": subclass_ref},
+            "features": {
+                "subclass_ref": subclass_ref,
+                # Which option a two-way choice committed to (Blessed Strikes,
+                # Elemental Fury).  Ownership of the chosen option is decided
+                # from this record, so a view that dropped it would read as
+                # "never chose" and silently withdraw the feature's mechanics.
+                "feature_choices": deepcopy(feature_state.get("feature_choices") or []),
+                # Copied verbatim, not sanitised: a corrupted ledger must reach
+                # the counter read and fail closed there, never look like zero.
+                "usage": deepcopy(feature_state["usage"])
+                if feature_state.get("usage") is not None else [],
+                # Character-scoped feature state (a re-chosen resistance, the
+                # next survival DC) outlives the combat, so the view has to
+                # carry it or combat would silently read "never chosen".
+                **{
+                    feature_id: deepcopy(feature_state[feature_id])
+                    for feature_id in FEATURE_STATE_KEYS
+                    if isinstance(feature_state.get(feature_id), dict)
+                },
+            },
             "class_resources": deepcopy(feature_projection["class_resources"]),
             "martial_arts_die": str(feature_projection["unarmed_damage_die"]),
             "unarmed_ability_choice": list(feature_projection["unarmed_ability_choice"]),
@@ -204,23 +247,7 @@ class CombatViewMixin:
         through an origin feat uses that feat's chosen spellcasting ability.
         """
 
-        if spell_ref in actor.get("class_spell_refs", []):
-            return actor
-        grant = next(
-            (
-                row for row in actor.get("spell_grants", [])
-                if row.get("spell_ref") == spell_ref and row.get("source") == "feat"
-            ),
-            None,
-        )
-        if grant is None:
-            return actor
-        return {
-            **actor,
-            "spell_ability": grant["spell_ability"],
-            "spell_attack_bonus": int(grant["spell_attack_bonus"]),
-            "spell_save_dc": int(grant["spell_save_dc"]),
-        }
+        return spell_caster(actor, spell_ref)
 
     def _project_character(self, character: dict[str, Any]) -> dict[str, Any]:
         from src.rulesets.dnd2024.character.builder import Dnd2024CharacterBuilder
@@ -387,11 +414,25 @@ class CombatViewMixin:
                 "current": entry.get("current", 0),
                 "maximum": entry.get("maximum", 0),
             }
+        features: dict[str, Any] = {
+            "subclass_ref": str((actor.get("features") or {}).get("subclass_ref") or ""),
+        }
+        # The committed option of a two-way choice decides which mechanics are
+        # owned; dropping it here would make every option-gated feature read as
+        # "never chosen" during combat.
+        raw_choices = (actor.get("features") or {}).get("feature_choices")
+        if raw_choices is not None:
+            features["feature_choices"] = deepcopy(raw_choices)
+        raw_usage = (actor.get("features") or {}).get("usage")
+        if raw_usage is not None:
+            features["usage"] = deepcopy(raw_usage)
+        for feature_id in FEATURE_STATE_KEYS:
+            stored = (actor.get("features") or {}).get(feature_id)
+            if isinstance(stored, dict):
+                features[feature_id] = deepcopy(stored)
         return {
             "build": actor.get("build") or {},
-            "features": {"subclass_ref": str(
-                (actor.get("features") or {}).get("subclass_ref") or ""
-            )},
+            "features": features,
             "abilities": actor.get("abilities") or {},
             "resources": {"class": class_state},
             "equipment": {"item_refs": list(actor.get("equipment_refs") or [])},
@@ -438,15 +479,24 @@ class CombatViewMixin:
                 int(level) for level, count in actor["slots"].items()
                 if int(count) > 0 and int(level) >= int(spell["level"]) and not economy.get("slot_spell_cast")
             ] if spell["level"] > 0 else [0]
-            if spell["level"] > 0 and free_cast_resource(actor, ref):
+            if spell["level"] > 0 and not economy.get("slot_spell_cast"):
+                # 临时槽在普通槽表之外，但施法时它是真槽：不并进来，玩家就
+                # 看得到"我造了个槽"却选不了它。
+                for level, count in (actor.get("font_slots") or {}).items():
+                    if int(count) > 0 and int(level) >= int(spell["level"]):
+                        available_slots.append(int(level))
+            if spell["level"] > 0 and free_cast_resource(
+                actor, ref, int(spell["level"]),
+            ):
                 available_slots.insert(0, 0)
-            available_slots.sort()
+            available_slots = sorted(set(available_slots))
             if available_slots:
                 # 目标声明随法术一起投影：前端只消费服务端语义，不再按
                 # spell mode 硬编码"盟友/敌人"。
+                spell_range = self._spell_effective_range(actor, spell, effect)
                 row = {
                     "spell_ref": ref, "name": spell["name"], "level": spell["level"],
-                    "casting_time": spell["casting_time"], "range": effect["range"],
+                    "casting_time": spell["casting_time"], "range": spell_range,
                     "mode": effect["mode"], "available_slot_levels": available_slots,
                     "target_side": _target_side(effect["mode"]),
                     "target_count": int(effect.get("target_count", 1) or 1),
@@ -455,6 +505,9 @@ class CombatViewMixin:
                 }
                 if effect.get("target_scope"):
                     row["target_scope"] = effect["target_scope"]
+                if spell_range != int(effect["range"]):
+                    # 被特性改写过的射程要能对账：前端显示的是和，不是原文。
+                    row["range_base"] = int(effect["range"])
                 if effect.get("resist_choice"):
                     row["resist_choice"] = list(effect["resist_choice"])
                 if effect["mode"] == "triggered_damage":
@@ -469,16 +522,22 @@ class CombatViewMixin:
                 character = self._feature_character(actor)
                 max_slot = (
                     int(self.features.feature_value(
-                        character, "overchannel", "max_slot_level", 5,
+                        character, OVERCHANNEL_FEATURE_ID, "maximum_slot_level", 0,
+                        owner=OVERCHANNEL_OWNER,
                     ) or 0)
-                    if self.features.has_feature(character, "overchannel") else 0
+                    if self.features.has_feature(
+                        character, OVERCHANNEL_FEATURE_ID, owner=OVERCHANNEL_OWNER,
+                    ) else 0
                 )
                 eligible_slots = [
                     level for level in available_slots if 1 <= level <= max_slot
                 ]
-                row["maximize_damage_available"] = bool(
+                # 列表归属与学派是两个独立字段：Overchannel 认的是
+                # `class_refs` 里的 Wizard，不是 `school == evocation`。
+                row["overchannel_available"] = bool(
                     max_slot and effect.get("damage")
                     and effect["mode"] in {"spell_attack", "saving_throw", "automatic_damage"}
+                    and OVERCHANNEL_SPELL_CLASS in spell["class_refs"]
                     and eligible_slots
                 )
                 result.append(row)

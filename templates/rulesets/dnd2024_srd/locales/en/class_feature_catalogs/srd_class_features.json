@@ -120,6 +120,8 @@
       "fleet_step": "Fleet Step",
       "foe_slayer": "Foe Slayer",
       "font_of_inspiration": "Font of Inspiration",
+      "font_slot_to_points": "Spell Slot to Sorcery Points",
+      "font_create_slot": "Create Spell Slot",
       "font_of_magic": "Font of Magic",
       "frenzy": "Frenzy",
       "greater_divine_intervention": "Greater Divine Intervention",
@@ -221,7 +223,13 @@
       "wild_resurgence": "Wild Resurgence",
       "wild_shape": "Wild Shape",
       "wizard_subclass": "Wizard Subclass",
-      "words_of_creation": "Words of Creation"
+      "words_of_creation": "Words of Creation",
+      "ranger": "Ranger",
+      "expertise": "Expertise",
+      "jack_of_all_trades": "Jack of All Trades",
+      "reliable_talent": "Reliable Talent",
+      "scholar": "Scholar",
+      "remarkable_athlete": "Remarkable Athlete"
     }
   }
 }

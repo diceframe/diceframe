@@ -15,9 +15,17 @@ from ..items.charges import (
     spend_charges,
     validate_charges_declaration,
 )
-from src.rulesets.dnd2024.spells.feat_spells import concentration_holder, spend_feat_free_cast
+from src.rulesets.dnd2024.features.models import ClassFeatureError
+from src.rulesets.dnd2024.features.resources import (
+    feature_usage_count,
+    set_feature_usage_count,
+)
+from src.rulesets.dnd2024.spells.feat_spells import concentration_holder
+from src.rulesets.dnd2024.spells.font_of_magic import MAX_CREATED_SLOT_LEVEL
+from src.rulesets.dnd2024.spells.casting import apply_free_cast_cost
 from src.rulesets.events import EventBatchError
 from .primitives import actor_kind as _actor_kind
+from .primitives import FEATURE_STATE_KEYS, RELENTLESS_RAGE_DECISION
 
 
 _ITEM_EVENT_FIELDS = {
@@ -299,6 +307,54 @@ class CombatReducerMixin:
                 raise EventBatchError(f"feature is already used this turn: {feature_id}")
             feature_ids.append(feature_id)
             return
+        if event_type == "dnd2024.feature_usage.changed":
+            # 长休作用域计数器：before_count 是批次生成时的权威快照，不匹配
+            # 说明批次过期或重复消费，宁可炸掉也不覆盖合法计数。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion feature usage is canonical")
+            character = self._canonical_of(snapshot, kind, raw_id)
+            owner = str(event["owner"])
+            feature_id = str(event["feature_id"])
+            scope = str(event["scope"])
+            before = int(event["before_count"])
+            after = int(event["after_count"])
+            try:
+                current = feature_usage_count(character, owner, feature_id, scope)
+                if current != before:
+                    raise EventBatchError(
+                        f"feature usage for {owner}.{feature_id} moved: "
+                        f"expected {before}, found {current}"
+                    )
+                if after != current + 1:
+                    raise EventBatchError("feature usage must advance by exactly one")
+                set_feature_usage_count(character, owner, feature_id, scope, after)
+            except ClassFeatureError as exc:
+                raise EventBatchError(str(exc)) from exc
+            return
+        if event_type == "dnd2024.feature_state.set":
+            # 角色特性状态（Relentless Rage 的下一 DC）不是资源计数器，也不
+            # 属于任何条件：它写在既有 ``features`` 结构里，键集合是闭集，
+            # 未知字段一律拒绝，避免变成通用 character 写入口。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion feature state is canonical")
+            character = self._canonical_of(snapshot, kind, raw_id)
+            feature_id = str(event["feature_id"])
+            allowed = FEATURE_STATE_KEYS.get(feature_id)
+            values = event.get("values")
+            if allowed is None or not isinstance(values, dict) or not values:
+                raise EventBatchError("feature state is not writable")
+            unknown = sorted(set(values) - allowed)
+            if unknown:
+                raise EventBatchError(f"feature state field is not writable: {unknown[0]}")
+            block = character.get("features")
+            if not isinstance(block, dict):
+                raise EventBatchError("character feature state is missing")
+            current = block.get(feature_id)
+            current = current if isinstance(current, dict) else {}
+            block[feature_id] = {**deepcopy(current), **deepcopy(values)}
+            return
         if event_type == "dnd2024.class_resource.spent":
             # 职业资源永远写在既有的 canonical resources.class 结构里，
             # 不新增第二套资源表，也不允许扣成负数。
@@ -310,16 +366,87 @@ class CombatReducerMixin:
                 if kind == "player"
                 else self._companion_character(snapshot, raw_id)
             )
-            resource_id = str(event["resource_id"])
+            try:
+                apply_free_cast_cost(character, event)
+            except ValueError as exc:
+                raise EventBatchError(str(exc)) from exc
+            return
+        if event_type == "dnd2024.bardic.granted":
+            # 激励骰实例是唯一的状态记录：授予时间与到期分钟由 resolution
+            # 从权威世界时钟算出写进事件，reducer 不读时钟。同一持有者的
+            # 有效骰至多一个，重复授予 fail closed；过期实例在这里顺带清理
+            # （读取/视图按同一谓词隐藏，无需后台任务）。
+            granted_at = int(event["granted_at_minute"])
+            instances = [
+                item for item in combat.get("bardic_instances") or []
+                if isinstance(item, dict)
+                and int(item.get("expires_at_minute", 0) or 0) > granted_at
+                and str(item.get("status") or "") == "active"
+            ]
+            holder_id = str(event["holder_id"])
+            if any(str(item.get("holder_id") or "") == holder_id for item in instances):
+                raise EventBatchError("the holder already has a Bardic Inspiration die")
+            instances.append({
+                "die_instance_id": str(event["die_instance_id"]),
+                "holder_id": holder_id,
+                "source_actor_id": str(event["actor_id"]),
+                "die_sides": int(event["die_sides"]),
+                "granted_at_minute": granted_at,
+                "expires_at_minute": int(event["expires_at_minute"]),
+                "status": "active",
+            })
+            combat["bardic_instances"] = instances
+            return
+        if event_type == "dnd2024.bardic.consumed":
+            # 掷过的骰实例留在列表里留痕（status "rolled"），但读取谓词只认
+            # "active"，所以它立即不可再用，也不会阻止新的授予。
+            holder_id = str(event["holder_id"])
+            combat["bardic_instances"] = [
+                item if not (
+                    isinstance(item, dict)
+                    and str(item.get("holder_id") or "") == holder_id
+                    and str(item.get("status") or "") == "active"
+                ) else {**item, "status": "rolled"}
+                for item in combat.get("bardic_instances") or []
+            ]
+            return
+        if event_type == "dnd2024.class_resource.refunded":
+            # 失败退款（Peerless Skill）：同一批次先扣后退，上限仍是目录
+            # 声明的最大值，不会退成超过上限。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion class resources are canonical")
+            character = (
+                snapshot["characters"][raw_id]
+                if kind == "player"
+                else self._companion_character(snapshot, raw_id)
+            )
             class_state = character.setdefault("resources", {}).setdefault("class", {})
-            state = class_state.get(resource_id)
+            state = class_state.get(str(event["resource_id"]))
             if not isinstance(state, dict):
-                raise EventBatchError(f"class resource is not initialized: {resource_id}")
-            current = int(state.get("current", 0) or 0)
+                raise EventBatchError("class resource is not initialized")
             amount = int(event.get("amount", 1) or 1)
-            if current < amount:
-                raise EventBatchError(f"class resource is already spent: {resource_id}")
-            state["current"] = current - amount
+            state["current"] = min(int(state.get("maximum", 0) or 0), int(state.get("current", 0) or 0) + amount)
+            return
+        if event_type == "dnd2024.class_resource.refilled":
+            # Superior Inspiration: "regain expended uses until you have two".
+            # The target is a floor, not a gift: never raise above the
+            # catalogue maximum (a +1 Charisma bard still caps at one use).
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion class resources are canonical")
+            character = (
+                snapshot["characters"][raw_id]
+                if kind == "player"
+                else self._companion_character(snapshot, raw_id)
+            )
+            class_state = character.setdefault("resources", {}).setdefault("class", {})
+            state = class_state.get(str(event["resource_id"]))
+            if not isinstance(state, dict):
+                raise EventBatchError("class resource is not initialized")
+            maximum = int(state.get("maximum", 0) or 0)
+            target = min(int(event["target"]), maximum)
+            state["current"] = max(int(state.get("current", 0) or 0), target)
             return
         if event_type == "dnd2024.attack.spent":
             economy = combat["economy"]
@@ -335,9 +462,13 @@ class CombatReducerMixin:
                 economy["attacks_remaining"] = max(0, int(event["attacks_per_action"]) - 1)
             return
         if event_type == "dnd2024.movement.granted":
-            combat["economy"]["movement"] = int(combat["economy"].get("movement", 0)) + int(
-                event["amount"]
-            )
+            amount = int(event["amount"])
+            combat["economy"]["movement"] = int(combat["economy"].get("movement", 0)) + amount
+            if str(event.get("reason") or "") == "critical_hit":
+                # 暴击后移动单独记账：它既进池（玩家仍要提交 move），又带着
+                # 一份"本次移动免借机攻击"的额度。下一次移动消费掉它，
+                # 不会延续到后续任何移动。
+                combat["economy"]["crit_move"] = amount
             return
         if event_type == "dnd2024.position.changed":
             actor_id = str(event["actor_id"])
@@ -350,6 +481,10 @@ class CombatReducerMixin:
                 if remaining < cost:
                     raise EventBatchError("movement resource is already spent")
                 combat["economy"]["movement"] = remaining - cost
+            if event.get("crit_move"):
+                # 额度只覆盖它自己这一次移动；消费后即失效，其他移动要按
+                # 常规规则判定借机攻击。
+                combat["economy"]["crit_move"] = 0
             return
         if event_type == "resource.changed":
             if str(event.get("resource") or "hp") == "temp_hp":
@@ -395,16 +530,73 @@ class CombatReducerMixin:
             if int(slots.get(level, 0) or 0) < 1:
                 raise EventBatchError("spell slot is already spent")
             slots[level] -= 1
-            combat["economy"]["slot_spell_cast"] = True
+            if not event.get("exchange"):
+                # Font 的"槽换次数"不是施法：不占用本回合的施法标记。
+                combat["economy"]["slot_spell_cast"] = True
+            return
+        if event_type == "dnd2024.spell.font_slot_spent":
+            # 临时槽是普通槽表之外的一栏，所以它有自己的事件：一个槽位
+            # 事件只能扣一处，否则同一笔施法会同时吃临时槽和普通槽。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion spell slots are canonical")
+            character = (
+                snapshot["characters"][raw_id]
+                if kind == "player"
+                else self._companion_character(snapshot, raw_id)
+            )
+            block = character["spellcasting"]["class"]
+            stored = block.get("font_slots")
+            if not isinstance(stored, dict):
+                raise EventBatchError("font slots are not initialized")
+            level = str(event["slot_level"])
+            remaining = stored.get(level)
+            if not isinstance(remaining, int) or isinstance(remaining, bool) or remaining < 1:
+                raise EventBatchError("temporary spell slot is already spent")
+            if remaining == 1:
+                # 用完即删：留下的 0 会被读成"还有一个空槽"，也再没人需要它。
+                stored.pop(level)
+            else:
+                stored[level] = remaining - 1
+            if not event.get("exchange"):
+                combat["economy"]["slot_spell_cast"] = True
+            return
+        if event_type == "dnd2024.spell.font_slot_created":
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion spell slots are canonical")
+            character = (
+                snapshot["characters"][raw_id]
+                if kind == "player"
+                else self._companion_character(snapshot, raw_id)
+            )
+            block = character["spellcasting"]["class"]
+            level = int(event["slot_level"])
+            if not 1 <= level <= MAX_CREATED_SLOT_LEVEL:
+                # 伪造的高环临时槽在这里就死掉，不等它去骗过施法校验。
+                raise EventBatchError("temporary spell slot level is illegal")
+            stored = block.get("font_slots")
+            if not isinstance(stored, dict):
+                stored = {}
+                block["font_slots"] = stored
+            key = str(level)
+            stored[key] = int(stored.get(key, 0) or 0) + 1
             return
         if event_type == "dnd2024.feat_spell.free_cast_spent":
             kind, raw_id = _actor_kind(str(event["actor_id"]))
             if kind not in {"player", "companion"}:
                 raise EventBatchError("only player/companion feat spells are canonical")
             try:
-                spend_feat_free_cast(
-                    self._canonical_of(snapshot, kind, raw_id), str(event["feat_ref"]),
-                )
+                apply_free_cast_cost(self._canonical_of(snapshot, kind, raw_id), event)
+            except ValueError as exc:
+                raise EventBatchError(str(exc)) from exc
+            return
+        if event_type == "dnd2024.free_cast.spent":
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion free casts are canonical")
+            try:
+                apply_free_cast_cost(self._canonical_of(snapshot, kind, raw_id), event)
             except ValueError as exc:
                 raise EventBatchError(str(exc)) from exc
             return
@@ -523,11 +715,23 @@ class CombatReducerMixin:
             # 优先失去临时生命值：伤害先吸收，余下的才扣 hp；事件的 amount
             # 仍是打出的伤害，吸收只反映在资源状态上。
             temp = int(resources.get("temp_hp", 0) or 0)
-            if delta < 0 and temp > 0:
+            if delta < 0 and temp > 0 and not event.get("healing"):
                 absorbed = min(temp, -delta)
                 resources["temp_hp"] = temp - absorbed
                 delta += absorbed
-            resources["hp"] = max(0, min(maximum, before + delta))
+            next_hp = max(0, min(maximum, before + delta))
+            relentless = event.get("relentless")
+            if (
+                isinstance(relentless, dict)
+                and next_hp <= 0
+                and before > 0
+                and not event.get("relentless_deferred")
+            ):
+                # 归零前拦截：临时 HP 已经吸收，但 HP 本身不动、昏迷与结束
+                # 狂暴都还没发生。伤害随决策挂起，等本人决定是否用这次特性。
+                self._open_relentless_rage(snapshot, target_id, before, event, relentless)
+                return
+            resources["hp"] = next_hp
             conditions = character.setdefault("conditions", {})
             if resources["hp"] <= 0:
                 conditions["unconscious"] = {"source": "zero_hp"}
@@ -553,3 +757,34 @@ class CombatReducerMixin:
                 enemy.setdefault("conditions", {})["defeated"] = {"source": "zero_hp"}
         else:
             raise EventBatchError("HP target actor is invalid")
+
+    def _open_relentless_rage(
+        self, snapshot: dict[str, Any], target_id: str, before: int,
+        event: dict[str, Any], marker: dict[str, Any],
+    ) -> None:
+        """Hold the damage and offer the zero-HP survival save.
+
+        ``decision_id`` is derived from round/turn/HP so a replay that reaches
+        the same damage produces the same window instead of a second one.
+        """
+
+        combat = snapshot["ruleset_state"]["combat"]
+        decision_id = (
+            f"relentless-rage:{target_id}:{combat.get('round', 0)}:"
+            f"{combat.get('turn_index', 0)}:{before}"
+        )
+        pending = combat.setdefault("pending_decisions", [])
+        if any(item.get("decision_id") == decision_id for item in pending):
+            return
+        pending.append({
+            "decision_id": decision_id,
+            "kind": RELENTLESS_RAGE_DECISION,
+            "actor_id": target_id,
+            "assigned_to": str(marker.get("assigned_to") or ""),
+            "options": ["use", "decline"],
+            "dc": int(marker["dc"]),
+            "dc_step": int(marker.get("dc_step", 5) or 5),
+            "hp_amount": int(marker.get("hp_amount", 0) or 0),
+            "save_ability": str(marker.get("save_ability") or "con"),
+            "damage_event": {**deepcopy(event), "relentless_deferred": True},
+        })

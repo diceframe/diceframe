@@ -17,12 +17,14 @@ const props = withDefaults(defineProps<{
   cardId?: string
   restSession?: RestSessionStatus | null
   initialFocus?: 'rest'
+  isGm?: boolean
 }>(), {
   language: 'zh-CN',
   gameKey: '',
   userId: '',
   cardId: '',
   restSession: null,
+  isGm: false,
 })
 const emit = defineEmits<{
   saved: [character: CharacterSheet, reason?: 'profile' | 'rest']
@@ -48,6 +50,7 @@ function onSaved(character: CharacterSheet, reason?: 'profile' | 'rest'): void {
     :card-id="cardId"
     :rest-session="restSession"
     :initial-focus="initialFocus"
+    :is-gm="isGm"
     @saved="onSaved"
     @rest-pending="emit('rest-pending')"
     @cancel="emit('cancel')"

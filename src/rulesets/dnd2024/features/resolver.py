@@ -36,6 +36,7 @@ from .models import (
     FeatureView,
 )
 from .resources import (
+    FEATURE_USAGE_SCOPES,
     ClassResourceDeclaration,
     Dnd2024ClassResourceCatalog,
     ResourceDefinition,
@@ -43,8 +44,159 @@ from .resources import (
 )
 
 
+#: 命中 rider 声明允许的参数键。每个键都必须被消费，缺键则加载期拒绝：一个
+#: 写得像"已实现"、实际没有任何代码读取的参数，比不写更危险。
+_RIDER_PARAMETER_KEYS: dict[str, frozenset[str]] = {
+    "stunning_strike": frozenset({
+        "once_per_turn", "focus_cost", "save_ability",
+        "on_fail_condition", "on_success_condition", "condition_duration",
+        "on_success_attack_condition",
+    }),
+    "empowered_strikes": frozenset({"unarmed_damage_type_choices"}),
+    "open_hand_technique": frozenset({
+        "flurry_hit_choices", "addle_condition", "push_distance_ft",
+        "push_save_ability", "topple_save_ability", "topple_condition",
+    }),
+    "radiant_strikes": frozenset({
+        "extra_damage", "extra_damage_type", "attack_kinds",
+    }),
+    "divine_strike": frozenset({
+        "damage_dice", "damage_types", "once_per_turn", "attack_kinds",
+    }),
+    "primal_strike": frozenset({
+        "damage_dice", "damage_types", "once_per_turn", "attack_kinds",
+    }),
+    "potent_spellcasting": frozenset({"cantrip_source_class", "ability"}),
+    "improved_blessed_strikes": frozenset({
+        "divine_strike_dice", "temp_hp_ability_multiplier", "temp_hp_range_ft",
+    }),
+    "improved_elemental_fury": frozenset({
+        "primal_strike_dice", "range_bonus_ft", "range_minimum_ft",
+    }),
+}
+#: 声明"这次攻击算哪一类"的闭集。``weapon`` 是任意武器攻击（近战或远程），
+#: ``melee_weapon`` 是近战武器，``beast_form`` 是荒野形态的野兽攻击。
+_RIDER_ATTACK_KINDS = frozenset({"weapon", "melee_weapon", "unarmed_strike", "beast_form"})
+_OPEN_HAND_CHOICES = frozenset({"addle", "push", "topple"})
+_RIDER_CONDITION_DURATIONS = frozenset({"attacker_next_turn_start", "target_turn_start"})
+
+
 def _humanize(feature_id: str) -> str:
     return str(feature_id).replace("_", " ").strip().title()
+
+
+# 光环免疫只承诺引擎真的会"抑制"的条件。一个条件若连机械效果都没有声明，
+# 免疫它就是一句空话：被拦截的条件和没被拦截的条件在结算上完全一样，测试
+# 也分辨不出来。因此这份白名单是能力边界，不是条件全集的子集。
+_AURA_IMMUNITY_CONDITIONS = frozenset({"charmed", "frightened"})
+
+
+def _grant_row(value: Any) -> tuple[int, str] | None:
+    """Parse one ``"<level>:spell:<id>"`` always-prepared table row.
+
+    The table lives in the declaration rather than in code, and the encoding is
+    flat because a feature parameter may only hold scalars.  A row that does not
+    parse is a catalog defect, not a grant: it is dropped so the loader's
+    scalar check stays the only thing that can reject a declaration.
+    """
+
+    parts = str(value or "").split(":")
+    if len(parts) != 3 or parts[1] != "spell" or not parts[2]:
+        return None
+    try:
+        level = int(parts[0])
+    except ValueError:
+        return None
+    if level < 1:
+        return None
+    return level, f"spell:{parts[2]}"
+
+
+def _terrain_grant_row(value: Any) -> tuple[str, int, str] | None:
+    """Parse one ``"<terrain>:<level>:spell:<id>"`` land table row."""
+
+    parts = str(value or "").split(":")
+    if len(parts) != 4 or not parts[0] or parts[2] != "spell" or not parts[3]:
+        return None
+    try:
+        level = int(parts[1])
+    except ValueError:
+        return None
+    if level < 1:
+        return None
+    return parts[0], level, f"spell:{parts[3]}"
+
+
+# Free-cast slot encoding.  A feature parameter may only hold scalars, so the
+# six facts that define one slot travel as a single flat row rather than as a
+# nested object: ``"<slot_id>:<level>:<recharge>:<uses>:<spell_ref>"``.
+#
+# ``unlimited`` is a real recharge value, not "no recharge": Spell Mastery never
+# runs out, and a record that stored a finite count for it would be a lie.
+_FREE_CAST_RECHARGES = frozenset({"long_rest", "short_rest", "unlimited"})
+# A choice slot writes ``-`` where a fixed slot writes its spell, so the row
+# keeps five fields either way.
+_FREE_CAST_CHOICE = "-"
+# Where a choice slot may pick from.  ``class_list`` reads the declared lists,
+# ``spellbook`` reads the character's own spellbook, ``fixed`` needs no pick.
+FREE_CAST_SOURCES = frozenset({"fixed", "class_list", "spellbook"})
+
+
+def _free_cast_slot(value: Any) -> dict[str, Any] | None:
+    """Parse one free-cast slot row.
+
+    ``uses`` of ``0`` means the slot never runs out, and a ``spell_ref`` of
+    ``-`` means the player chooses the spell (the alternative is a feature that
+    names its own spell, like Contact Patron).  The last field is split off with
+    ``maxsplit`` because a spell ref itself contains a colon.
+    """
+
+    parts = str(value or "").split(":", 4)
+    if len(parts) != 5:
+        return None
+    slot_id, raw_level, recharge, raw_uses, raw_spell = parts
+    if not slot_id or recharge not in _FREE_CAST_RECHARGES:
+        return None
+    try:
+        spell_level = int(raw_level)
+        uses = int(raw_uses)
+    except ValueError:
+        return None
+    if spell_level < 1 or uses < 0:
+        return None
+    spell_ref = str(raw_spell or "")
+    if spell_ref != _FREE_CAST_CHOICE:
+        if not spell_ref.startswith("spell:") or len(spell_ref) <= len("spell:"):
+            return None
+    return {
+        "slot_id": slot_id,
+        "spell_level": spell_level,
+        "recharge": recharge,
+        "uses": uses,
+        "spell_ref": "" if spell_ref == _FREE_CAST_CHOICE else spell_ref,
+    }
+
+
+# The defeat-trigger payload is one closed four-key set.  ``trigger`` names the
+# only supported event; the other three describe the temp-HP formula.  Keeping
+# the names in one place means the loader and the combat helper can never
+# disagree about which keys exist.
+_DEFEAT_TRIGGER_KEYS = (
+    "trigger", "temp_hp_ability", "temp_hp_class_ref", "temp_hp_minimum",
+)
+# The one trigger this slice understands.  It is exported because the combat
+# settlement reads the same name: a loader that accepts a trigger the engine
+# never fires would ship a silently inert feature.
+ENEMY_REDUCED_TO_ZERO_HP = "enemy_reduced_to_zero_hp"
+_DEFEAT_TRIGGERS = frozenset({ENEMY_REDUCED_TO_ZERO_HP})
+# Parameters the previous implementation accepted.  A declaration that still
+# carries them describes a rule SRD 5.2.1 does not have, so loading fails
+# instead of quietly ignoring the extra keys.
+_RETIRED_DEFEAT_KEYS = (
+    "defeat_temp_hp_ability",
+    "defeat_temp_hp_add_class_level",
+    "defeat_share_range_ft",
+)
 
 
 class Dnd2024ClassFeatureResolver:
@@ -63,6 +215,8 @@ class Dnd2024ClassFeatureResolver:
         # 成长专长的 kind -> category 映射同样惰性：只有声明了 choice 的特性
         # 才需要它，普通特性投影不该为此读一遍专项目录。
         self._feat_categories: dict[str, str] | None = None
+        # 技能目录同样惰性：只有声明了技能选择的特性才需要它。
+        self._skill_id_set: set[str] | None = None
         # 与 ``Dnd2024Runtime._sync_class_resources`` 相同的边界：bundle 没有
         # 声明这套可选内容时，职业特性整体降级为「不存在」，而不是让每一个
         # 角色投影都失败。声明存在但格式非法时仍然 fail closed。
@@ -188,6 +342,19 @@ class Dnd2024ClassFeatureResolver:
                 # 下授予它的父特性已经被拥有时才算拥有。
                 parent_key = (definition.owner, definition.option_of)
                 if parent_key not in granted:
+                    continue
+                parent = by_key.get(parent_key)
+                if (
+                    parent is not None
+                    and parent.choice is not None
+                    and parent.choice.kind == "feature_option"
+                    and definition.id not in self._selected_feature_options(
+                        character, parent,
+                    )
+                ):
+                    # 互斥选项：父特性拥有不等于两个选项都拥有。Divine Strike
+                    # 与 Potent Spellcasting 是替代关系，同时拥有会让一次命中
+                    # 既拿 1d8 又拿 Wisdom 加值。
                     continue
             elif key not in granted:
                 continue
@@ -332,6 +499,295 @@ class Dnd2024ClassFeatureResolver:
             return default
         return self._value(definition, character, key, default)
 
+    def saving_throw_proficiency_all(
+        self, character: Mapping[str, Any] | None,
+    ) -> bool:
+        """Whether an owned feature grants proficiency in every saving throw.
+
+        Disciplined Survivor is the only declaration today.  The contract is
+        the declaration itself (``parameters.saving_throw_proficiency ==
+        "all"``), so a second feature that grants the same thing needs no new
+        code and no character-sheet branch.
+        """
+
+        return any(
+            str(definition.parameters.get("saving_throw_proficiency") or "") == "all"
+            for definition in self.features_for(character)
+        )
+
+    # ------------------------------------------------------------------
+    # always-prepared spell grants
+    # ------------------------------------------------------------------
+
+    def spell_grant_choices(
+        self, character: Mapping[str, Any] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """The persisted per-feature spell-grant choices.
+
+        Two declarations need one: Circle of the Land picks a terrain each Long
+        Rest, and Magical Discoveries learns two spells at Bard 6.  Both are
+        player choices, so they live on the sheet; the *grants* are re-derived
+        from them on every read and never stored beside them, which is what
+        keeps a downgrade, a rebuild or a replay from carrying a stale terrain.
+        A malformed record is ignored here -- the entry point that writes one
+        validates it, and the read path must not invent a grant either.
+        """
+
+        spellcasting = (character or {}).get("spellcasting")
+        if not isinstance(spellcasting, Mapping):
+            return {}
+        class_magic = spellcasting.get("class")
+        if not isinstance(class_magic, Mapping):
+            return {}
+        raw = class_magic.get("spell_grant_choices")
+        if not isinstance(raw, Mapping):
+            return {}
+        return {
+            str(key): dict(value)
+            for key, value in raw.items()
+            if isinstance(value, Mapping)
+        }
+
+    def spell_grant_terrain_feature(
+        self, character: Mapping[str, Any] | None,
+    ) -> ClassFeatureDefinition | None:
+        """The owned declaration that makes the character choose a land terrain."""
+
+        for definition in self.features_for(character):
+            if definition.parameters.get("terrain_options"):
+                return definition
+        return None
+
+    # ------------------------------------------------------------------
+    # free-cast slots
+    # ------------------------------------------------------------------
+
+    def free_cast_choices(
+        self, character: Mapping[str, Any] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """The persisted free-cast slot records, keyed by slot id.
+
+        A record holds only what the player owns: the chosen spell and how many
+        uses are left.  Level, recharge and the use maximum stay in the
+        declaration, so a content fix is never shadowed by stale sheet data.
+        """
+
+        spellcasting = (character or {}).get("spellcasting")
+        if not isinstance(spellcasting, Mapping):
+            return {}
+        class_magic = spellcasting.get("class")
+        if not isinstance(class_magic, Mapping):
+            return {}
+        raw = class_magic.get("free_cast_slots")
+        if not isinstance(raw, Mapping):
+            return {}
+        return {
+            str(key): dict(value)
+            for key, value in raw.items()
+            if isinstance(value, Mapping)
+        }
+
+    def free_cast_slots(
+        self, character: Mapping[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Every free-cast slot the character owns, merged with its record.
+
+        The identity of a slot is ``(owner, feature_id, slot_id)`` and it is
+        never flattened into a single "can cast for free" flag: each row keeps
+        its own spell, level, recharge and remaining uses, because Contact
+        Patron, the four Mystic Arcana, Spell Mastery and Signature Spells are
+        six independent pools with six different recharge rules.
+
+        An absent record means "not spent yet" for a slot whose spell the
+        feature itself names, and "not chosen yet" for one the player picks.
+        """
+
+        stored = self.free_cast_choices(character)
+        return self._free_cast_rows(self.features_for(character), character, stored)
+
+    def _free_cast_rows(
+        self,
+        definitions: tuple[ClassFeatureDefinition, ...],
+        character: Mapping[str, Any] | None,
+        stored: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Free-cast rows for an already-resolved ownership list."""
+
+        records = self.free_cast_choices(character) if stored is None else stored
+        rows: list[dict[str, Any]] = []
+        for definition in definitions:
+            parameters = definition.parameters
+            raw_slots = parameters.get("free_cast_slots") or ()
+            if not raw_slots:
+                continue
+            source = str(parameters.get("free_cast_source") or "fixed")
+            for raw in raw_slots:
+                parsed = _free_cast_slot(raw)
+                if parsed is None:
+                    continue
+                rows.append(self._free_cast_row(
+                    definition, parsed, records.get(parsed["slot_id"]), source,
+                ))
+        return rows
+
+    def _free_cast_row(
+        self,
+        definition: ClassFeatureDefinition,
+        parsed: Mapping[str, Any],
+        record: Mapping[str, Any] | None,
+        source: str,
+    ) -> dict[str, Any]:
+        parameters = definition.parameters
+        uses = int(parsed["uses"])
+        fixed = str(parsed["spell_ref"] or "")
+        spell_ref = fixed
+        uses_remaining: int | None = None if uses == 0 else uses
+        valid = True
+        if record is not None:
+            # A record that disagrees with the declaration about the slot's
+            # level or recharge is not a slot any more; ignoring the mismatch
+            # would let a tampered sheet cast a level 2 spell out of a level 6
+            # arcanum by relabelling it.
+            stored_level = record.get("spell_level")
+            stored_recharge = record.get("recharge")
+            if (
+                (stored_level is not None and int(stored_level) != int(parsed["spell_level"]))
+                or (stored_recharge is not None and str(stored_recharge) != str(parsed["recharge"]))
+            ):
+                valid = False
+            chosen = record.get("spell_ref")
+            if not fixed and isinstance(chosen, str) and chosen:
+                spell_ref = chosen
+            if uses and isinstance(record.get("uses_remaining"), int):
+                uses_remaining = max(0, int(record["uses_remaining"]))
+        lists = [str(ref) for ref in parameters.get("free_cast_lists") or ()]
+        return {
+            "id": f"free_cast:{definition.owner}:{definition.id}:{parsed['slot_id']}",
+            "owner": definition.owner,
+            "feature_id": definition.id,
+            "slot_id": str(parsed["slot_id"]),
+            "spell_level": int(parsed["spell_level"]),
+            "recharge": str(parsed["recharge"]),
+            "uses_max": uses,
+            "spell_ref": spell_ref,
+            "selected": bool(spell_ref),
+            "uses_remaining": uses_remaining,
+            "valid": valid,
+            "source": "fixed" if fixed else source,
+            "spell_lists": lists,
+            "casting_time": str(parameters.get("free_cast_casting_time") or ""),
+            "save_auto_succeed": bool(parameters.get("free_cast_save_auto")),
+            "replacement": int(parameters.get("free_cast_replacement") or 0),
+            "replacement_group": str(
+                parameters.get("free_cast_replacement_group") or definition.id
+            ),
+            "rest_replace": int(parameters.get("free_cast_rest_replace") or 0),
+        }
+
+    def spell_grant_rows(
+        self, character: Mapping[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Always-prepared spells the character owns, one row per source.
+
+        Provenance is the point of this projection: a row names the ``owner``
+        and ``feature_id`` that grants the spell, the level at which the grant
+        started, and the terrain or choice slot it came from.  Two sources that
+        hand out the same spell stay two rows, so revoking one can never delete
+        a spell the other still provides.
+        """
+
+        return self._spell_grant_rows(self.features_for(character), character)
+
+    def _spell_grant_rows(
+        self,
+        definitions: tuple[ClassFeatureDefinition, ...],
+        character: Mapping[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Grant rows for an already-resolved ownership list.
+
+        ``actor_projection`` passes the list it just resolved so the combat
+        boundary resolves ownership once; every other caller uses
+        :meth:`spell_grant_rows`, which is why both read the same tables.
+        """
+
+        state = self.class_state(character)
+        if state is None:
+            return []
+        class_id, level = state
+        class_entity = self.bundle.get("class", class_id) or {}
+        ability = str(class_entity.get("spellcasting_ability") or "")
+        choices = self.spell_grant_choices(character)
+        rows: list[dict[str, Any]] = []
+        for definition in definitions:
+            parameters = definition.parameters
+            for raw in parameters.get("always_prepared") or ():
+                parsed = _grant_row(raw)
+                if parsed is None or parsed[0] > level:
+                    continue
+                rows.append(
+                    self._grant_row(definition, parsed[1], parsed[0], ability)
+                )
+            terrain = str((choices.get(definition.id) or {}).get("terrain") or "")
+            for raw in parameters.get("always_prepared_terrain") or ():
+                terrain_row = _terrain_grant_row(raw)
+                if (
+                    terrain_row is None
+                    or terrain_row[1] > level
+                    or terrain_row[0] != terrain
+                ):
+                    continue
+                rows.append(self._grant_row(
+                    definition, terrain_row[2], terrain_row[1], ability,
+                    terrain=terrain,
+                ))
+            slot = choices.get(definition.id) or {}
+            if int(parameters.get("spell_choice_count") or 0):
+                granted_level = int(slot.get("granted_level") or definition.minimum_level)
+                for ref in slot.get("spells") or ():
+                    if not isinstance(ref, str) or not ref:
+                        continue
+                    rows.append(self._grant_row(
+                        definition, ref, granted_level, ability,
+                        choice_id=definition.id,
+                    ))
+            if bool(parameters.get("free_cast_prepares")):
+                # Spell Mastery, Signature Spells and Contact Patron all say
+                # "you always have them prepared"; the free cast is a separate
+                # fact about the same spell, so it comes through as one more
+                # source on the prepared view rather than as its own entry.
+                for free in self._free_cast_rows(
+                    (definition,), character, self.free_cast_choices(character),
+                ):
+                    if not free["spell_ref"] or not free["valid"]:
+                        continue
+                    rows.append(self._grant_row(
+                        definition, free["spell_ref"],
+                        int(definition.minimum_level), ability,
+                        choice_id=free["slot_id"],
+                    ))
+        return rows
+
+    @staticmethod
+    def _grant_row(
+        definition: ClassFeatureDefinition,
+        spell_ref: str,
+        granted_level: int,
+        ability: str,
+        *,
+        terrain: str = "",
+        choice_id: str = "",
+    ) -> dict[str, Any]:
+        return {
+            "owner": definition.owner,
+            "feature_id": definition.id,
+            "spell_ref": str(spell_ref),
+            "granted_level": int(granted_level),
+            "terrain": str(terrain),
+            "choice_id": str(choice_id),
+            "source": "class_feature",
+            "spell_ability": ability,
+        }
+
     def min_feature_value(
         self,
         character: Mapping[str, Any] | None,
@@ -435,6 +891,46 @@ class Dnd2024ClassFeatureResolver:
                     total += scaled
         return total
 
+    def movement_modes(self, character: Mapping[str, Any] | None) -> dict[str, bool]:
+        """The special Speeds the owned declarations grant.
+
+        Roving's "+10 feet while you aren't wearing Heavy armor" is a Speed
+        bonus, and ``speed_bonus`` drops it under Heavy armor.  The Climb and
+        Swim Speeds the same feature grants are unconditional: Heavy armor
+        removes the +10, not those two Speeds.  That asymmetry is the rule, so
+        this reads *owned* declarations while the Speed bonus reads only
+        *active* ones.
+
+        A mode is a yes/no fact, never a number: the distance always equals the
+        character's own current Speed, which ``derive_speed`` owns.
+        """
+
+        climb = swim = False
+        for definition in self.features_for(character):
+            if definition.parameters.get("climb_speed_from_speed") is True:
+                climb = True
+            if definition.parameters.get("swim_speed_from_speed") is True:
+                swim = True
+        return {"climb": climb, "swim": swim}
+
+    def jump_ability(self, character: Mapping[str, Any] | None) -> str:
+        """The ability that sets jump distance; default is Strength.
+
+        Second-Story Work permits Dexterity instead of Strength (SRD p64).
+        The derived profile reports the largest legal jump, not a forced
+        substitution that could reduce the character's normal jump distance.
+        """
+
+        abilities = (character or {}).get("abilities") or {}
+        best = "str"
+        for definition in self.features_for(character):
+            ability = definition.parameters.get("jump_ability")
+            if isinstance(ability, str) and ability and int(
+                abilities.get(ability, 10)
+            ) > int(abilities.get(best, 10)):
+                best = ability
+        return best
+
     def feature_max_hp_bonus(self, character: Mapping[str, Any] | None) -> int:
         """The Hit Point maximum increase granted by owned features.
 
@@ -478,6 +974,26 @@ class Dnd2024ClassFeatureResolver:
             if definition.parameters.get(name)
         ]
 
+    def feature_flag_source_rows(
+        self,
+        character: Mapping[str, Any] | None,
+        key: str,
+    ) -> list[dict[str, str]]:
+        """Owned declaration identities whose boolean parameter ``key`` is truthy.
+
+        Same order and same ownership as :meth:`feature_flag_sources`, but each
+        row carries the ``owner`` as well: provenance that only names a local id
+        cannot tell two subclasses' identically-named features apart, and the
+        reported source list is the only record a client sees.
+        """
+
+        name = str(key)
+        return [
+            {"code": definition.id, "owner": definition.owner}
+            for definition in self.features_for(character)
+            if definition.parameters.get(name)
+        ]
+
     def feature_selection(
         self,
         character: Mapping[str, Any] | None,
@@ -491,6 +1007,12 @@ class Dnd2024ClassFeatureResolver:
         empty selection rather than letting the last write win.  Nothing here
         grants a feature: ownership still comes only from the class and
         subclass grant tables, never from a submitted choice.
+
+        A ``skill_proficiency`` slot is projected against the *skill* catalog:
+        a ref the bundle does not define, or one left out of the declaration's
+        own whitelist, is not part of the selection.  The returned shape stays
+        ``{choice_id, selected_refs}`` for both kinds so a client reads one
+        contract.
         """
 
         choice = definition.choice
@@ -503,19 +1025,182 @@ class Dnd2024ClassFeatureResolver:
             and record.get("feature_id") == definition.id
             and record.get("choice_id") == choice.id
         ]
+        # 同一个三元组可以合法地出现多次：Bard 的 Expertise 在 2 级与 9 级各选
+        # 两项，两级共用一个 (owner, feature_id, choice_id)。区分它们的是
+        # ``granted_level``，所以按等级分组：组内重复仍然是"写了两次"的歧义，
+        # 不同等级则是先后两次合法选择，合并成一份选择集。
+        groups: dict[Any, list[Mapping[str, Any]]] = {}
+        for record in matches:
+            groups.setdefault(record.get("granted_level"), []).append(record)
+        if any(len(group) > 1 for group in groups.values()):
+            return {"choice_id": choice.id, "selected_refs": []}
+        allowed = set(choice.enabled_options)
         selected: list[str] = []
-        if len(matches) == 1:
-            raw_refs = matches[0].get("selected_refs")
-            categories = self._advancement_feat_categories()
-            if isinstance(raw_refs, list):
-                for ref in raw_refs:
-                    if not isinstance(ref, str):
-                        continue
-                    if categories.get(ref.removeprefix("feat:")) != choice.category:
-                        continue
-                    if ref not in selected:
-                        selected.append(ref)
+        for group in groups.values():
+            raw_refs = group[0].get("selected_refs")
+            if not isinstance(raw_refs, list):
+                continue
+            for ref in raw_refs:
+                if not isinstance(ref, str):
+                    continue
+                if not self._choice_ref_is_valid(choice, ref, allowed):
+                    continue
+                if ref not in selected:
+                    selected.append(ref)
         return {"choice_id": choice.id, "selected_refs": selected}
+
+    def _choice_ref_is_valid(
+        self, choice: Any, ref: str, allowed: set[str],
+    ) -> bool:
+        """Whether one persisted ref belongs to this declared choice's pool."""
+
+        if choice.kind == "skill_proficiency":
+            if not ref.startswith("skill:"):
+                return False
+            if ref[6:] not in self._skill_ids():
+                return False
+            return ref in allowed if allowed else True
+        categories = self._advancement_feat_categories()
+        if categories.get(ref.removeprefix("feat:")) != choice.category:
+            return False
+        return True
+
+    def _skill_ids(self) -> set[str]:
+        """The skill catalog's ids, read once per resolver."""
+
+        if self._skill_id_set is None:
+            self._skill_id_set = {
+                str(entity.get("id")) for entity in self.bundle.list("skill")
+                if isinstance(entity, Mapping)
+            }
+        return self._skill_id_set
+
+    def expertise_skills(
+        self, character: Mapping[str, Any] | None,
+    ) -> list[dict[str, str]]:
+        """The skills this character holds Expertise in, with their sources.
+
+        Expertise is a property of the character, not of one class: a Bard /
+        Rogue multiclass has one pool and the SRD forbids the same skill twice
+        ("You can't have Expertise in the same skill proficiency more than
+        once").  The set is therefore the union over every *owned* declaration
+        that declares an Expertise-granting skill choice.
+
+        A persisted record whose ``(owner, feature_id)`` matches no owned
+        declaration contributes nothing, so a forged or stale slot cannot
+        turn a skill into a two-Proficiency-Bonus skill.  Each entry keeps the
+        declaring owner so two same-named ``expertise`` features stay
+        distinguishable in provenance.
+        """
+
+        seen: dict[str, dict[str, str]] = {}
+        for definition in self.features_for(character):
+            choice = definition.choice
+            if (
+                choice is None
+                or choice.kind != "skill_proficiency"
+                or choice.grants != "expertise"
+            ):
+                continue
+            selection = self.feature_selection(character, definition)
+            for ref in (selection or {}).get("selected_refs") or []:
+                skill_id = str(ref)[6:]
+                if skill_id in seen:
+                    continue
+                seen[skill_id] = {
+                    "skill_ref": f"skill:{skill_id}",
+                    "code": definition.id,
+                    "owner": definition.owner,
+                }
+        return [seen[key] for key in sorted(seen)]
+
+    def half_proficiency_bonus(
+        self, character: Mapping[str, Any] | None,
+    ) -> bool:
+        """Whether an owned declaration grants Jack of All Trades.
+
+        The flag is read from the declaration, never from a feature id: a second
+        class that later grants the same half-bonus needs no code change, and a
+        same-named feature that does *not* grant it stays inert.
+        """
+
+        return any(
+            definition.parameters.get("half_proficiency_bonus") is True
+            for definition in self.active_features_for(character)
+        )
+
+    def ability_check_floor(
+        self, character: Mapping[str, Any] | None,
+    ) -> tuple[int, list[dict[str, str]]]:
+        """The d20 floor an owned declaration puts on proficient checks.
+
+        Returns the highest declared floor and every declaration that states
+        it.  A floor of ``10`` means "treat a d20 roll of 9 or lower as a 10";
+        it is a substitution of the *face*, never a reroll, so the caller must
+        not draw a second d20.  The caller also owns the proficiency gate: this
+        method answers only "what floor does the character own".
+        """
+
+        floor = 0
+        sources: list[dict[str, str]] = []
+        for definition in self.active_features_for(character):
+            value = definition.parameters.get("ability_check_floor")
+            if isinstance(value, bool) or not isinstance(value, int):
+                continue
+            sources.append({"code": definition.id, "owner": definition.owner})
+            floor = max(floor, value)
+        return floor, sources
+
+    def initiative_advantage_sources(
+        self, character: Mapping[str, Any] | None,
+    ) -> list[dict[str, str]]:
+        """Owned declarations that grant Advantage on Initiative rolls."""
+
+        return [
+            {"code": definition.id, "owner": definition.owner}
+            for definition in self.active_features_for(character)
+            if definition.parameters.get("initiative_advantage") is True
+        ]
+
+    def skill_advantage_sources(
+        self, character: Mapping[str, Any] | None, skill_id: str,
+    ) -> list[dict[str, str]]:
+        """Owned declarations that grant Advantage on one named skill check.
+
+        ``skill_advantage_refs`` is an explicit list, so "Advantage on Strength
+        (Athletics)" never widens into every Strength check: a skill that no
+        declaration names answers with an empty list.
+        """
+
+        wanted = f"skill:{str(skill_id)}"
+        sources: list[dict[str, str]] = []
+        for definition in self.active_features_for(character):
+            refs = definition.parameters.get("skill_advantage_refs")
+            if not isinstance(refs, list) or wanted not in refs:
+                continue
+            sources.append({"code": definition.id, "owner": definition.owner})
+        return sources
+
+    def critical_hit_move(
+        self, character: Mapping[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """The post-critical movement an owned declaration grants, or ``None``.
+
+        The divisor is declared, so the "half your Speed" budget is computed
+        from the current Speed instead of being stored: a Speed change between
+        the hit and the move would otherwise pay out a stale number.
+        """
+
+        for definition in self.active_features_for(character):
+            divisor = definition.parameters.get("critical_hit_move_speed_divisor")
+            if isinstance(divisor, bool) or not isinstance(divisor, int) or divisor < 1:
+                continue
+            return {
+                "code": definition.id,
+                "owner": definition.owner,
+                "divisor": divisor,
+            }
+        return None
 
     @staticmethod
     def _feature_choice_records(
@@ -532,6 +1217,67 @@ class Dnd2024ClassFeatureResolver:
         if not isinstance(raw, list):
             return []
         return [record for record in raw if isinstance(record, Mapping)]
+
+    def _selected_feature_options(
+        self,
+        character: Mapping[str, Any] | None,
+        parent: ClassFeatureDefinition,
+    ) -> frozenset[str]:
+        """The option ids the character committed to under ``parent``.
+
+        Identity is ``(owner, feature_id, choice_id)`` exactly as the
+        advancement path stores it.  A record whose ``selected_refs`` is
+        malformed contributes nothing: the character then simply does not own
+        the option, which is the same answer as "never chose".
+        """
+
+        choice = parent.choice
+        if choice is None:  # pragma: no cover - callers filter on choice
+            return frozenset()
+        selected: set[str] = set()
+        for record in self._feature_choice_records(character):
+            if (
+                str(record.get("owner") or "") != parent.owner
+                or str(record.get("feature_id") or "") != parent.id
+                or str(record.get("choice_id") or "") != choice.id
+            ):
+                continue
+            refs = record.get("selected_refs")
+            if not isinstance(refs, list):
+                continue
+            for ref in refs:
+                local = str(ref).removeprefix("feature:")
+                if local in choice.enabled_options or f"feature:{local}" in choice.enabled_options:
+                    selected.add(local)
+        return frozenset(selected)
+
+    def feature_option_choice(
+        self,
+        character: Mapping[str, Any] | None,
+        feature_id: str,
+        *,
+        owner: str | None = None,
+    ) -> str:
+        """The single option id chosen under ``feature_id``, or ``""``.
+
+        Returns ``""`` when the feature is not owned, is not an option parent,
+        or has no (or more than one) committed selection.  Callers must treat
+        an empty answer as "no option in force" rather than defaulting to one,
+        so an un-answered choice grants nothing instead of guessing.
+        """
+
+        for definition in self.features_for(character):
+            if definition.id != feature_id:
+                continue
+            if owner is not None and definition.owner != owner:
+                continue
+            if definition.choice is None or definition.choice.kind != "feature_option":
+                continue
+            selected = self._selected_feature_options(character, definition)
+            if len(selected) == 1:
+                return next(iter(selected))
+            return ""
+        return ""
 
     def _advancement_feat_categories(self) -> dict[str, str]:
         """The advancement feat catalog's id -> category map, read once."""
@@ -607,8 +1353,18 @@ class Dnd2024ClassFeatureResolver:
         )
         return {
             "spell_grants": [
-                {"spell_ref": f"spell:{definition.parameters['granted_spell_id']}", "resource_id": definition.resource_id}
-                for definition in active if definition.parameters.get("granted_spell_id")
+                # 常驻授予（子职法术表、Land 地形、Magical Discoveries）与
+                # "免费施放" 授予是两种东西：前者只说明"已准备"，不带资源，
+                # 后者挂一个职业资源池。两者同列但都不许对方冒充自己。
+                *self._spell_grant_rows(owned, character),
+                *[
+                    {
+                        "spell_ref": f"spell:{definition.parameters['granted_spell_id']}",
+                        "resource_id": definition.resource_id,
+                    }
+                    for definition in active
+                    if definition.parameters.get("granted_spell_id")
+                ],
             ],
             "class_resources": [
                 definition.to_dict()
@@ -801,6 +1557,26 @@ class Dnd2024ClassFeatureResolver:
                 if capability.id == wanted:
                     return capability
         return None
+
+    def feature_definition(self, feature_id: str) -> ClassFeatureDefinition | None:
+        """The declaration with this id, whichever owner-scoped key holds it.
+
+        ``features_by_key`` is keyed by ``(owner, id)`` because the same feature
+        id can exist for a class and a subclass.  Callers that only know the id
+        -- a capability's declaring feature, for instance -- need the owner to
+        find the class-level table the feature's numbers live in, so this
+        lookup prefers the bare class owner over a subclass one.
+        """
+
+        wanted = str(feature_id or "")
+        found: ClassFeatureDefinition | None = None
+        for (owner, identifier), definition in self.catalog.features_by_key.items():
+            if identifier != wanted:
+                continue
+            if owner.startswith("class:"):
+                return definition
+            found = found or definition
+        return found
 
     def unarmed_strike_die(self, character: Mapping[str, Any] | None) -> str:
         """The feature-derived base damage of this character's Unarmed Strike."""
@@ -1041,6 +1817,8 @@ class Dnd2024ClassFeatureResolver:
                     f"class feature {definition.id} references an unknown class table"
                 )
             self._validate_owner_grant(definition, progression_catalog)
+            self._validate_aura_parameters(definition)
+            self._validate_condition_immunity_parameters(definition)
             for key, value in definition.parameters.items():
                 if key == "crit_threshold":
                     if (
@@ -1083,7 +1861,9 @@ class Dnd2024ClassFeatureResolver:
             self._validate_defeat_trigger_parameters(definition)
             self._validate_defense_parameters(definition)
             self._validate_speed_parameters(definition)
+            self._validate_movement_parameters(definition)
             self._validate_overchannel_parameters(definition)
+            self._validate_hit_rider_parameters(definition)
             if definition.resource_id:
                 declaration = self.resources.declaration(
                     definition.class_id, definition.resource_id,
@@ -1178,17 +1958,17 @@ class Dnd2024ClassFeatureResolver:
         threshold = parameters.get("death_save_crit_threshold")
         if "death_save_crit_threshold" in parameters and (
             isinstance(threshold, bool) or not isinstance(threshold, int)
-            or not 2 <= threshold <= 19
+            or not 2 <= threshold <= 20
         ):
             raise ClassFeatureError(
-                f"{definition.id}.death_save_crit_threshold must be an integer from 2 to 19"
+                f"{definition.id}.death_save_crit_threshold must be an integer from 2 to 20"
             )
         base = parameters.get("turn_start_regen_base")
         if "turn_start_regen_base" in parameters and (
-            isinstance(base, bool) or not isinstance(base, int) or base < 0
+            isinstance(base, bool) or not isinstance(base, int) or base < 1
         ):
             raise ClassFeatureError(
-                f"{definition.id}.turn_start_regen_base must be a non-negative integer"
+                f"{definition.id}.turn_start_regen_base must be a positive integer"
             )
         ability = parameters.get("turn_start_regen_ability")
         if "turn_start_regen_ability" in parameters and (
@@ -1204,41 +1984,110 @@ class Dnd2024ClassFeatureResolver:
                 f"{definition.id} must declare turn_start_regen_base and "
                 "turn_start_regen_ability as a pair"
             )
+        for flag in ("half_proficiency_bonus", "initiative_advantage"):
+            if flag in parameters and parameters[flag] is not True:
+                raise ClassFeatureError(
+                    f"{definition.id}.{flag} must be true when declared"
+                )
+        floor = parameters.get("ability_check_floor")
+        if "ability_check_floor" in parameters and (
+            isinstance(floor, bool) or not isinstance(floor, int)
+            or not 1 <= floor <= 20
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.ability_check_floor must be an integer from 1 to 20"
+            )
+        advantage_refs = parameters.get("skill_advantage_refs")
+        if "skill_advantage_refs" in parameters and (
+            not isinstance(advantage_refs, list)
+            or not advantage_refs
+            or any(
+                not isinstance(ref, str) or not ref.startswith("skill:")
+                for ref in advantage_refs
+            )
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.skill_advantage_refs must list skill refs"
+            )
+        divisor = parameters.get("critical_hit_move_speed_divisor")
+        if "critical_hit_move_speed_divisor" in parameters and (
+            isinstance(divisor, bool) or not isinstance(divisor, int) or divisor < 2
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.critical_hit_move_speed_divisor must be an "
+                "integer of at least 2"
+            )
 
-    @staticmethod
-    def _validate_defeat_trigger_parameters(definition: ClassFeatureDefinition) -> None:
+    def _validate_defeat_trigger_parameters(self, definition: ClassFeatureDefinition) -> None:
         """Fail closed on the defeat-trigger payload.
 
-        The payload is a closed set: the temp-HP ability code plus two optional
-        knobs (a class-level flag and a share radius).  A payload that declares
-        any of them without the ability would silently resolve to nothing, so it
-        is rejected at load time instead of becoming an inert feature.
+        The payload is one closed four-key set: what triggers it, which ability
+        feeds the formula, which class level the formula adds, and the floor.
+        Declaring a subset would leave the formula with either no ability or no
+        level, which resolves to a silently wrong or inert feature -- so a
+        partial set is rejected at load time rather than at settlement.
+
+        Optional other_defeat_range_ft also grants the benefit for someone
+        else's kill measured from the defeated enemy to the feature owner
+        (Dark One's Blessing, SRD 5.2.1 p76).
         """
 
         parameters = definition.parameters
-        keys = (
-            "defeat_temp_hp_ability",
-            "defeat_temp_hp_add_class_level",
-            "defeat_share_range_ft",
-        )
-        if not any(key in parameters for key in keys):
-            return
-        ability = parameters.get("defeat_temp_hp_ability")
-        if not isinstance(ability, str) or ability not in ABILITY_IDS:
+        retired = [key for key in _RETIRED_DEFEAT_KEYS if key in parameters]
+        if retired:
+            # Retired formula keys remain rejected at the catalog boundary.
             raise ClassFeatureError(
-                f"{definition.id}.defeat_temp_hp_ability must name an ability"
+                f"{definition.id} declares the retired parameter {retired[0]}"
             )
-        flag = parameters.get("defeat_temp_hp_add_class_level")
-        if "defeat_temp_hp_add_class_level" in parameters and not isinstance(flag, bool):
-            raise ClassFeatureError(
-                f"{definition.id}.defeat_temp_hp_add_class_level must be a boolean"
-            )
-        share = parameters.get("defeat_share_range_ft")
-        if "defeat_share_range_ft" in parameters and (
-            isinstance(share, bool) or not isinstance(share, int) or not 1 <= share <= 120
+        radius = parameters.get("other_defeat_range_ft")
+        if "other_defeat_range_ft" in parameters and (
+            isinstance(radius, bool) or not isinstance(radius, int) or radius <= 0
         ):
             raise ClassFeatureError(
-                f"{definition.id}.defeat_share_range_ft must be an integer from 1 to 120"
+                f"{definition.id}.other_defeat_range_ft must be a positive integer"
+            )
+        keys = _DEFEAT_TRIGGER_KEYS
+        # Only claim a ``trigger`` key this payload actually owns.  Another
+        # slice may declare its own trigger name on a different feature, and
+        # rejecting it here would couple two unrelated payloads.
+        formula_keys = [key for key in keys if key != "trigger" and key in parameters]
+        if not formula_keys and parameters.get("trigger") not in _DEFEAT_TRIGGERS:
+            return
+        missing = [key for key in keys if key not in parameters]
+        if missing:
+            raise ClassFeatureError(
+                f"{definition.id} must declare {' / '.join(keys)} together; "
+                f"missing {' / '.join(missing)}"
+            )
+        trigger = parameters.get("trigger")
+        if trigger not in _DEFEAT_TRIGGERS:
+            raise ClassFeatureError(
+                f"{definition.id}.trigger must be one of {sorted(_DEFEAT_TRIGGERS)}"
+            )
+        ability = parameters.get("temp_hp_ability")
+        if not isinstance(ability, str) or ability not in ABILITY_IDS:
+            raise ClassFeatureError(
+                f"{definition.id}.temp_hp_ability must name an ability"
+            )
+        class_ref = parameters.get("temp_hp_class_ref")
+        if not isinstance(class_ref, str) or not class_ref.startswith("class:"):
+            raise ClassFeatureError(
+                f"{definition.id}.temp_hp_class_ref must be a class:<id> reference"
+            )
+        class_id = class_ref.removeprefix("class:")
+        progression = self.progression
+        if (
+            not class_id
+            or progression is None
+            or class_id not in progression.classes
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.temp_hp_class_ref names an unknown class table"
+            )
+        minimum = parameters.get("temp_hp_minimum")
+        if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 1:
+            raise ClassFeatureError(
+                f"{definition.id}.temp_hp_minimum must be an integer of at least 1"
             )
 
     @staticmethod
@@ -1259,6 +2108,223 @@ class Dnd2024ClassFeatureResolver:
             raise ClassFeatureError(
                 f"{definition.id}.speed_bonus_ft must be an integer from 1 to 120"
             )
+
+    @staticmethod
+    def _validate_movement_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on the special-Speed and jump contract.
+
+        ``climb_speed_from_speed`` / ``swim_speed_from_speed`` are flags, not
+        amounts: the distance always equals the character's current Speed, so a
+        ``False`` or a number would promise a mode the resolver cannot honour.
+        ``jump_ability`` names the score that sets the jump distance, and a typo
+        there would silently fall back to Strength -- the very substitution the
+        Thief feature exists to make.
+        """
+
+        parameters = definition.parameters
+        for key in ("climb_speed_from_speed", "swim_speed_from_speed"):
+            if key in parameters and parameters[key] is not True:
+                raise ClassFeatureError(
+                    f"{definition.id}.{key} must be true when declared"
+                )
+        ability = parameters.get("jump_ability")
+        if "jump_ability" in parameters and ability not in ("str", "dex"):
+            raise ClassFeatureError(
+                f"{definition.id}.jump_ability must be str or dex"
+            )
+
+    @staticmethod
+    def _validate_condition_immunity_parameters(
+        definition: ClassFeatureDefinition,
+    ) -> None:
+        """Fail closed on the condition-immunity and condition-removal contract.
+
+        Immunity is a set of condition ids a feature *suppresses*; removal is a
+        set the actor may *delete*, gated by a timing that has to be one the
+        engine actually honours.  Both are lists of ids, never sentences: a
+        typo here would silently immunize nothing, and an unrecognised timing
+        would promise a removal that never happens at the wrong moment.
+        """
+
+        parameters = definition.parameters
+
+        def _string_list(key: str) -> None:
+            value = parameters[key]
+            if not isinstance(value, list) or not value:
+                raise ClassFeatureError(
+                    f"{definition.id}.{key} must be a non-empty list of condition ids"
+                )
+            if any(not isinstance(code, str) or not code for code in value):
+                raise ClassFeatureError(
+                    f"{definition.id}.{key} must hold condition ids"
+                )
+            if len(set(value)) != len(value):
+                raise ClassFeatureError(f"{definition.id}.{key} repeats a condition")
+
+        for key in (
+            "immune_conditions", "removable_conditions", "exhaustion_sources_ignored",
+            "removes_conditions_on_gaining",
+        ):
+            if key in parameters:
+                _string_list(key)
+
+        if "immune_while_condition" in parameters:
+            value = parameters["immune_while_condition"]
+            if not isinstance(value, str) or not value:
+                raise ClassFeatureError(
+                    f"{definition.id}.immune_while_condition must name a condition"
+                )
+
+        trigger_key = "removes_conditions_on_gaining_condition"
+        if ("removes_conditions_on_gaining" in parameters) != (trigger_key in parameters):
+            # 清理规则必须同时说明"获得哪个条件时"与"清理什么"；只有一半
+            # 的声明会被引擎读成一条永远不触发的规则。
+            raise ClassFeatureError(
+                f"{definition.id} must declare removes_conditions_on_gaining and "
+                f"{trigger_key} together"
+            )
+        if trigger_key in parameters:
+            trigger = parameters[trigger_key]
+            if not isinstance(trigger, str) or not trigger:
+                raise ClassFeatureError(
+                    f"{definition.id}.{trigger_key} must name the gained condition"
+                )
+
+        if "removable_at" in parameters:
+            if parameters["removable_at"] != "own_turn_end":
+                raise ClassFeatureError(
+                    f"{definition.id}.removable_at currently supports own_turn_end only"
+                )
+            if "removable_conditions" not in parameters:
+                raise ClassFeatureError(
+                    f"{definition.id} declares removable_at without removable_conditions"
+                )
+
+    def _validate_aura_parameters(self, definition: ClassFeatureDefinition) -> None:
+        """Fail closed on the aura declaration contract.
+
+        An aura is three separate declarations that only mean something
+        together: the base aura owns the range and the saving-throw bonus, an
+        expansion names a base aura and overrides its range, and a condition
+        immunity names the base aura it rides on.  Nothing here names Paladin
+        -- the relation is catalog data, so the shape is reusable -- and a
+        dangling or self-referential relation is rejected at load because the
+        consumer would otherwise project no aura at all and say nothing.
+        """
+
+        parameters = definition.parameters
+        # 同一 id 可能同时存在于 class 与 subclass 两个 owner 下，按 id 收集后
+        # 只认真的声明了范围的那一条，避免拿错 owner 的同名条目。
+        index = self.catalog.features_by_key
+
+        def _base_aura(feature_id: Any) -> ClassFeatureDefinition | None:
+            if not isinstance(feature_id, str) or not feature_id:
+                return None
+            for candidate in index.values():
+                if candidate.id == feature_id and "aura_range_ft" in candidate.parameters:
+                    return candidate
+            return None
+
+        for key in ("aura_range_ft", "aura_range_override_ft"):
+            value = parameters.get(key)
+            if key in parameters and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 1
+            ):
+                raise ClassFeatureError(
+                    f"{definition.id}.{key} must be a positive integer"
+                )
+
+        has_ability = "aura_save_bonus_ability" in parameters
+        has_minimum = "aura_save_bonus_minimum" in parameters
+        if has_ability != has_minimum:
+            raise ClassFeatureError(
+                f"{definition.id} must declare aura_save_bonus_ability and "
+                f"aura_save_bonus_minimum together"
+            )
+        if has_ability:
+            ability = parameters["aura_save_bonus_ability"]
+            if not isinstance(ability, str) or ability not in ABILITY_IDS:
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_save_bonus_ability must name an ability"
+                )
+            minimum = parameters["aura_save_bonus_minimum"]
+            if (
+                isinstance(minimum, bool) or not isinstance(minimum, int)
+                or minimum < 1
+            ):
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_save_bonus_minimum must be an integer "
+                    f"of at least 1"
+                )
+
+        # 豁免加值必须挂在一个有范围的基础光环上，否则它永远不会生效。
+        bonus_declared = has_ability or "aura_save_bonus_minimum" in parameters
+        if bonus_declared and "aura_range_ft" not in parameters:
+            raise ClassFeatureError(
+                f"{definition.id} declares a saving-throw bonus without aura_range_ft"
+            )
+
+        has_immunities = "aura_condition_immunities" in parameters
+        has_source = "aura_source_feature_id" in parameters
+        if has_immunities != has_source:
+            raise ClassFeatureError(
+                f"{definition.id} must declare aura_source_feature_id and "
+                f"aura_condition_immunities together"
+            )
+        if has_immunities:
+            immunities = parameters["aura_condition_immunities"]
+            if not isinstance(immunities, list) or not immunities:
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_condition_immunities must be a non-empty list"
+                )
+            if any(not isinstance(code, str) or not code for code in immunities):
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_condition_immunities must hold condition ids"
+                )
+            if len(set(immunities)) != len(immunities):
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_condition_immunities repeats a condition"
+                )
+            unsupported = sorted(code for code in immunities if code not in _AURA_IMMUNITY_CONDITIONS)
+            if unsupported:
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_condition_immunities does not support "
+                    f"{', '.join(unsupported)} yet"
+                )
+            source = _base_aura(parameters["aura_source_feature_id"])
+            if source is None:
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_source_feature_id must name a base aura"
+                )
+
+        has_override = "aura_range_override_ft" in parameters
+        has_expands = "aura_expands_feature_id" in parameters
+        if has_override != has_expands:
+            raise ClassFeatureError(
+                f"{definition.id} must declare aura_expands_feature_id and "
+                f"aura_range_override_ft together"
+            )
+        if has_expands:
+            expanded = _base_aura(parameters["aura_expands_feature_id"])
+            if expanded is None or expanded.id == definition.id:
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_expands_feature_id must name another base aura"
+                )
+            # 扩展链必须收敛：A 覆盖 B、B 又覆盖 A 时，"有效范围"取决于从哪
+            # 条开始折叠，任何确定性说法都是假的，因此整条链拒绝加载。
+            seen = {definition.id}
+            cursor = expanded.id
+            while cursor:
+                if cursor in seen:
+                    raise ClassFeatureError(
+                        f"{definition.id}.aura_expands_feature_id forms a cycle"
+                    )
+                seen.add(cursor)
+                following = _base_aura(cursor)
+                if following is None:
+                    break
+                next_id = following.parameters.get("aura_expands_feature_id")
+                cursor = next_id if isinstance(next_id, str) and next_id else ""
 
     @staticmethod
     def _validate_defense_parameters(definition: ClassFeatureDefinition) -> None:
@@ -1291,17 +2357,17 @@ class Dnd2024ClassFeatureResolver:
     def _validate_overchannel_parameters(definition: ClassFeatureDefinition) -> None:
         """Fail closed on the maximize-damage contract.
 
-        A typo in the slot cap or the self-damage dice would silently change
-        how much a maximized cast costs, so each declared knob is range-checked
-        at load time.  Missing knobs are fine: consumers fall back to their
-        documented defaults.
+        A typo in the slot cap, the self-damage die or the base cost would
+        silently change how much a maximized cast costs, so each declared knob
+        is range-checked at load time.  Missing knobs are fine: consumers fall
+        back to their documented defaults.
         """
 
         parameters = definition.parameters
         for key, low, high in (
-            ("max_slot_level", 1, 9),
-            ("cost_dice_per_slot", 1, 10),
-            ("cost_die_sides", 2, 20),
+            ("maximum_slot_level", 1, 9),
+            ("self_damage_die", 2, 20),
+            ("initial_self_damage_dice", 1, 10),
         ):
             value = parameters.get(key)
             if key in parameters and (
@@ -1311,10 +2377,131 @@ class Dnd2024ClassFeatureResolver:
                 raise ClassFeatureError(
                     f"{definition.id}.{key} must be an integer from {low} to {high}"
                 )
-        damage_type = parameters.get("cost_damage_type")
-        if "cost_damage_type" in parameters and (
-            not isinstance(damage_type, str) or not damage_type
-        ):
+        scope = parameters.get("usage_scope")
+        if "usage_scope" in parameters and scope not in FEATURE_USAGE_SCOPES:
             raise ClassFeatureError(
-                f"{definition.id}.cost_damage_type must name a damage type"
+                f"{definition.id}.usage_scope must be one of "
+                f"{sorted(FEATURE_USAGE_SCOPES)}"
             )
+
+    @staticmethod
+    def _validate_hit_rider_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on every hit-rider declaration this slice consumes.
+
+        The check is deliberately strict in both directions: an unknown key
+        means the author expected behaviour no code implements, and a missing
+        key means the code would read a default the SRD never states.  Both
+        are load-time errors rather than silent no-ops.
+        """
+
+        expected = _RIDER_PARAMETER_KEYS.get(definition.id)
+        if expected is None:
+            return
+        # 延迟导入：``combat.catalog`` 经物品声明回到 character 包，模块级导入
+        # 会把 features <-> character 变成环。这里只在加载期各声明校验时读一次
+        # 两个闭集，不承担运行时职责。
+        from src.rulesets.dnd2024.combat.catalog import (
+            DAMAGE_TYPES, DICE_RE, SAVE_ABILITIES,
+        )
+
+        parameters = definition.parameters
+        unknown = sorted(set(parameters) - expected)
+        if unknown:
+            raise ClassFeatureError(
+                f"{definition.id} does not support {', '.join(unknown)}"
+            )
+        # A separate next-attack effect is optional for declarations that only
+        # grant a persistent success condition.
+        optional = {"on_success_attack_condition"} if definition.id == "stunning_strike" else set()
+        missing = sorted(expected - set(parameters) - optional)
+        if missing:
+            raise ClassFeatureError(
+                f"{definition.id} is missing {', '.join(missing)}"
+            )
+
+        feature_id = definition.id
+
+        def flag(key: str) -> None:
+            if not isinstance(parameters[key], bool):
+                raise ClassFeatureError(f"{feature_id}.{key} must be a boolean")
+
+        def positive_int(key: str) -> None:
+            value = parameters[key]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ClassFeatureError(
+                    f"{feature_id}.{key} must be a positive integer"
+                )
+
+        def bare_id(key: str) -> None:
+            value = parameters[key]
+            if not isinstance(value, str) or not value:
+                raise ClassFeatureError(f"{feature_id}.{key} must name a value")
+
+        def one_of(key: str, allowed: frozenset[str]) -> None:
+            value = parameters[key]
+            if not isinstance(value, str) or value not in allowed:
+                raise ClassFeatureError(
+                    f"{feature_id}.{key} must be one of {sorted(allowed)}"
+                )
+
+        def id_list(key: str, allowed: frozenset[str]) -> None:
+            value = parameters[key]
+            if (
+                not isinstance(value, list)
+                or not value
+                or any(not isinstance(item, str) or item not in allowed for item in value)
+                or len(set(value)) != len(value)
+            ):
+                raise ClassFeatureError(
+                    f"{feature_id}.{key} must be a list drawn from {sorted(allowed)}"
+                )
+
+        def dice(key: str) -> None:
+            value = parameters[key]
+            if not isinstance(value, str) or not DICE_RE.match(value):
+                raise ClassFeatureError(
+                    f"{feature_id}.{key} must be a dice formula"
+                )
+
+        if feature_id == "stunning_strike":
+            flag("once_per_turn")
+            positive_int("focus_cost")
+            one_of("save_ability", SAVE_ABILITIES)
+            bare_id("on_fail_condition")
+            bare_id("on_success_condition")
+            if "on_success_attack_condition" in parameters:
+                bare_id("on_success_attack_condition")
+            one_of("condition_duration", _RIDER_CONDITION_DURATIONS)
+        elif feature_id == "empowered_strikes":
+            id_list("unarmed_damage_type_choices", DAMAGE_TYPES)
+        elif feature_id == "open_hand_technique":
+            id_list("flurry_hit_choices", _OPEN_HAND_CHOICES)
+            bare_id("addle_condition")
+            positive_int("push_distance_ft")
+            one_of("push_save_ability", SAVE_ABILITIES)
+            one_of("topple_save_ability", SAVE_ABILITIES)
+            bare_id("topple_condition")
+        elif feature_id == "radiant_strikes":
+            dice("extra_damage")
+            one_of("extra_damage_type", DAMAGE_TYPES)
+            id_list("attack_kinds", _RIDER_ATTACK_KINDS)
+        elif feature_id in {"divine_strike", "primal_strike"}:
+            dice("damage_dice")
+            id_list("damage_types", DAMAGE_TYPES)
+            flag("once_per_turn")
+            id_list("attack_kinds", _RIDER_ATTACK_KINDS)
+        elif feature_id == "potent_spellcasting":
+            value = parameters["cantrip_source_class"]
+            if not isinstance(value, str) or not value.startswith("class:"):
+                raise ClassFeatureError(
+                    f"{feature_id}.cantrip_source_class must name a class"
+                )
+            one_of("ability", frozenset(ABILITY_IDS))
+        elif feature_id == "improved_blessed_strikes":
+            dice("divine_strike_dice")
+            positive_int("temp_hp_ability_multiplier")
+            positive_int("temp_hp_range_ft")
+        elif feature_id == "improved_elemental_fury":
+            dice("primal_strike_dice")
+            positive_int("range_bonus_ft")
+            positive_int("range_minimum_ft")

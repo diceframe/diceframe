@@ -12,6 +12,8 @@ from src.rulesets.dnd2024.character.builder import ABILITY_IDS, ability_modifier
 from src.rulesets.dnd2024.character.derivation import (
     derive_armor_class,
     derive_armor_training_state,
+    derive_movement_profile,
+    derive_skill_check,
     derive_speed,
 )
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
@@ -562,7 +564,26 @@ class Dnd2024AdvancementEngine:
             current_cantrips = list(before_spell.get("cantrip_refs") or [])
             current_prepared = list(before_spell.get("prepared_spell_refs") or [])
             current_spellbook = list(before_spell.get("spellbook_refs") or [])
-            target_requirements = spell_selection.requirements(class_ref, target_level)
+            # 施法选择按"升级后"的角色状态解析特性归属：Bard 9→10 的那一级
+            # Magical Secrets 才算拥有，用升级前的 9 级读会永远看不到四列表。
+            spell_state = deepcopy(character)
+            spell_state["build"] = {
+                **(character.get("build") or {}),
+                "class_levels": [{"class_ref": class_ref, "level": target_level}],
+            }
+            spell_feature_state = spell_state.get("features")
+            spell_feature_state = (
+                spell_feature_state if isinstance(spell_feature_state, dict) else {}
+            )
+            spell_feature_state["subclass_ref"] = (
+                selected_subclass_ref
+                if selected_subclass_ref == expected_subclass_ref
+                else str(spell_feature_state.get("subclass_ref") or "")
+            )
+            spell_state["features"] = spell_feature_state
+            target_requirements = spell_selection.requirements(
+                class_ref, target_level, spell_state,
+            )
             previous_lists = {
                 "cantrip_refs": current_cantrips,
                 "prepared_spell_refs": current_prepared,
@@ -578,14 +599,30 @@ class Dnd2024AdvancementEngine:
                 if policy is not None and policy.source == "spellbook"
                 else 0
             )
+            open_slots = [
+                slot for slot in spell_selection.grant_slots(target_level, spell_state)
+                if not slot["selected_refs"]
+            ]
+            # 免费施法槽同样"拥有但未选"时要把整块标成 required：11 级的
+            # 秘奥与 18 级的法术精通都必须在这一级做出选择，但它们未提交
+            # 时不算非法（见 `_validate_free_cast`）。
+            open_free = [
+                slot
+                for slot in spell_selection.free_cast_slots(target_level, spell_state)
+                if slot["source"] != "fixed" and not slot["selected"]
+            ]
             spell_choice_required = (
                 len(current_cantrips) != target_requirements["cantrip_count"]
                 or len(current_prepared) != target_requirements["prepared_spell_count"]
                 or spellbook_growth > 0
+                or bool(open_slots)
+                or bool(open_free)
             )
             raw_spell_choices = choices.get("class_spell_choices")
             if spell_choice_required or raw_spell_choices is not None:
-                spell_options = spell_selection.options(class_ref, target_level)
+                spell_options = spell_selection.options(
+                    class_ref, target_level, spell_state,
+                )
                 requirements.append({
                     "id": "class_spell_choices",
                     "kind": "spell_selection",
@@ -605,10 +642,13 @@ class Dnd2024AdvancementEngine:
                     "spellbook_additions": spellbook_growth,
                     "cantrips": spell_options["cantrips"],
                     "leveled_spells": spell_options["leveled_spells"],
+                    "grant_slots": spell_options["grant_slots"],
+                    "free_cast_slots": spell_options["free_cast_slots"],
                 })
                 spell_choices, spell_errors = spell_selection.validate(
                     class_ref, target_level, raw_spell_choices,
                     previous=previous_lists,
+                    character=spell_state,
                 )
                 errors.extend(spell_errors)
             else:
@@ -767,11 +807,14 @@ class Dnd2024AdvancementEngine:
         choice_records = preview["diff"].get("feature_choices") or []
         if choice_records:
             # 选项槽与专长所有权分开保存：前者记录玩家选了什么、哪一级选的，
-            # 后者才是既有专长前提与被动效果读取的所有权来源。
+            # 后者才是既有专长前提与被动效果读取的所有权来源。技能选择只写
+            # 槽，不写 feat_refs——否则 "skill:stealth" 会被当成一个专长。
             features.setdefault("feature_choices", []).extend(deepcopy(choice_records))
             owned_refs = features.setdefault("feat_refs", [])
             for record in choice_records:
                 for ref in record["selected_refs"]:
+                    if not str(ref).startswith("feat:"):
+                        continue
                     if ref not in owned_refs:
                         owned_refs.append(ref)
         grants = features.setdefault("class_feature_grants", [])
@@ -1227,8 +1270,123 @@ class Dnd2024AdvancementEngine:
             })
 
         matched: set[int] = set()
+        expertise = {
+            row["skill_ref"] for row in resolver.expertise_skills(character)
+        }
+        proficient = {
+            str(ref) for ref in (character.get("proficiencies") or {}).get("skill_refs") or []
+        }
         for definition in declared:
             choice = definition.choice
+            if choice is not None and choice.kind == "skill_proficiency":
+                options = self._skill_options(choice, proficient, expertise)
+                requirements.append({
+                    "id": f"feature_choice:{definition.owner}:{definition.id}:{choice.id}",
+                    "kind": "feature_choice",
+                    "required": True,
+                    "owner": definition.owner,
+                    "feature_id": definition.id,
+                    "choice_id": choice.id,
+                    "count": choice.count,
+                    "options": options,
+                })
+                chosen = self._plan_skill_choice(
+                    definition, choice, options, submitted, matched, errors,
+                    target_level=target_level, proficient=proficient,
+                    expertise=expertise,
+                )
+                records.extend(chosen)
+                expertise.update(
+                    str(ref) for record in chosen for ref in record["selected_refs"]
+                )
+                continue
+            if choice is not None and choice.kind == "feature_option":
+                # 互斥特性选项（Divine Strike / Potent Spellcasting、Primal
+                # Strike / Potent Spellcasting）的候选就是声明里点名的那些
+                # 特性，不走专长目录，也不存在"未实现"这一档：写进
+                # enabled_options 就等于承诺它已实现。
+                options = [
+                    {
+                        "value": str(ref),
+                        "available": True,
+                        "unavailable_reasons": [],
+                    }
+                    for ref in choice.enabled_options
+                ]
+                requirements.append({
+                    "id": f"feature_choice:{definition.owner}:{definition.id}:{choice.id}",
+                    "kind": "feature_choice",
+                    "required": True,
+                    "owner": definition.owner,
+                    "feature_id": definition.id,
+                    "choice_id": choice.id,
+                    "count": choice.count,
+                    "options": options,
+                })
+                slot = [
+                    index for index, record in enumerate(submitted)
+                    if record["owner"] == definition.owner
+                    and record["feature_id"] == definition.id
+                    and record["choice_id"] == choice.id
+                ]
+                if len(slot) > 1:
+                    errors.append(
+                        f"feature choice {definition.id} was submitted more than once"
+                    )
+                    matched.update(slot)
+                    continue
+                if not slot:
+                    errors.append(
+                        f"feature choice {definition.id} requires a selection at this level"
+                    )
+                    continue
+                matched.add(slot[0])
+                raw_refs = submitted[slot[0]]["selected_refs"]
+                if not isinstance(raw_refs, list) or not all(
+                    isinstance(ref, str) for ref in raw_refs
+                ):
+                    errors.append(
+                        f"feature choice {definition.id} selected_refs must be strings"
+                    )
+                    continue
+                allowed = set(choice.enabled_options)
+                picked: list[str] = []
+                bad = False
+                for ref in raw_refs:
+                    candidate = (
+                        str(ref) if str(ref).startswith("feature:")
+                        else f"feature:{ref}"
+                    )
+                    if candidate not in allowed:
+                        errors.append(
+                            f"{ref} is not a declared option of {definition.id}"
+                        )
+                        bad = True
+                        continue
+                    if candidate in picked:
+                        errors.append(
+                            f"feature choice {definition.id} selected_refs repeats an option"
+                        )
+                        bad = True
+                        continue
+                    picked.append(candidate)
+                if len(picked) != choice.count:
+                    if not bad:
+                        # 空清单也必须炸：静默放行会让角色"没选"却升级成功，
+                        # 之后所有依赖该选项的机械都读成"从未选择"。
+                        errors.append(
+                            f"feature choice {definition.id} must select exactly "
+                            f"{choice.count} option(s)"
+                        )
+                    continue
+                records.append({
+                    "owner": definition.owner,
+                    "feature_id": definition.id,
+                    "choice_id": choice.id,
+                    "selected_refs": picked,
+                    "granted_level": target_level,
+                })
+                continue
             enabled = set(choice.enabled_options)
             projected: list[dict[str, Any]] = []
             for option in self._feat_options(
@@ -1323,6 +1481,120 @@ class Dnd2024AdvancementEngine:
                 )
         return requirements, records, errors
 
+    def _skill_options(
+        self,
+        choice: Any,
+        proficient: set[str],
+        expertise: set[str],
+    ) -> list[dict[str, Any]]:
+        """Every skill in this choice's pool, with why one is not pickable.
+
+        The pool is the declaration's own whitelist when it names one (Scholar
+        names six) and the whole skill catalog otherwise (Expertise).  Options
+        are never filtered out: "you are not proficient in it" and "you already
+        have Expertise in it" have to stay visible, or the player cannot tell a
+        missing option from a rejected one.
+        """
+
+        allowed = set(choice.enabled_options)
+        options: list[dict[str, Any]] = []
+        for skill in self.bundle.list("skill"):
+            ref = f"skill:{skill['id']}"
+            if allowed and ref not in allowed:
+                continue
+            reasons: list[str] = []
+            if choice.requires_proficiency and ref not in proficient:
+                reasons.append("not_proficient")
+            if choice.exclude_expertise and ref in expertise:
+                reasons.append("already_expertise")
+            options.append({
+                "value": ref,
+                "name": str(skill.get("name") or skill["id"]),
+                "source_ref": str(skill.get("source_ref") or ""),
+                "available": not reasons,
+                "unavailable_reasons": reasons,
+            })
+        return options
+
+    def _plan_skill_choice(
+        self,
+        definition: Any,
+        choice: Any,
+        options: list[dict[str, Any]],
+        submitted: list[dict[str, Any]],
+        matched: set[int],
+        errors: list[str],
+        *,
+        target_level: int,
+        proficient: set[str],
+        expertise: set[str],
+    ) -> list[dict[str, Any]]:
+        """Validate one skill slot and return the record it commits."""
+
+        slot = [
+            index for index, record in enumerate(submitted)
+            if record["owner"] == definition.owner
+            and record["feature_id"] == definition.id
+            and record["choice_id"] == choice.id
+        ]
+        if not slot:
+            errors.append(
+                f"feature choice {definition.id} requires a selection at this level"
+            )
+            return []
+        if len(slot) > 1:
+            errors.append(
+                f"feature choice {definition.id} was submitted more than once"
+            )
+            matched.update(slot)
+            return []
+        matched.add(slot[0])
+        raw_refs = submitted[slot[0]]["selected_refs"]
+        if not isinstance(raw_refs, list) or not all(
+            isinstance(ref, str) for ref in raw_refs
+        ):
+            errors.append(f"feature choice {definition.id} selected_refs must be strings")
+            return []
+        if len(raw_refs) != choice.count:
+            errors.append(
+                f"feature choice {definition.id} must select exactly {choice.count} option"
+                + ("" if choice.count == 1 else "s")
+            )
+            return []
+        if len(set(raw_refs)) != len(raw_refs):
+            errors.append(f"feature choice {definition.id} selected_refs repeats an option")
+            return []
+        by_value = {option["value"]: option for option in options}
+        for ref in raw_refs:
+            option = by_value.get(ref)
+            if option is None:
+                errors.append(f"{ref} is not a declared option of {definition.id}")
+                continue
+            if option["unavailable_reasons"]:
+                errors.append(f"{ref} is not available: {', '.join(option['unavailable_reasons'])}")
+                continue
+            if choice.requires_proficiency and ref not in proficient:
+                errors.append(f"{ref} is not a skill proficiency of this character")
+                continue
+            if choice.exclude_expertise and ref in expertise:
+                errors.append(f"{ref} already has Expertise")
+                continue
+            expertise.add(ref)
+        if len([ref for ref in raw_refs if ref in by_value]) != choice.count:
+            return []
+        if any(
+            option["unavailable_reasons"] for option in
+            (by_value[ref] for ref in raw_refs if ref in by_value)
+        ):
+            return []
+        return [{
+            "owner": definition.owner,
+            "feature_id": definition.id,
+            "choice_id": choice.id,
+            "selected_refs": list(raw_refs),
+            "granted_level": target_level,
+        }]
+
     def _feat_options(
         self,
         category: str,
@@ -1416,7 +1688,7 @@ class Dnd2024AdvancementEngine:
             for level, maximum in slot_max.items()
         }
         tracks = snapshot["tracks"]
-        spellcasting["class"] = {
+        next_magic = {
             **deepcopy(previous),
             "class_ref": preview["class_ref"],
             "ability": class_entity.get("spellcasting_ability"),
@@ -1442,6 +1714,26 @@ class Dnd2024AdvancementEngine:
             ),
             "concentration": previous.get("concentration"),
         }
+        grant_choices = preview["diff"].get("class_spell_choices", {}).get(
+            "spell_grant_choices"
+        )
+        if isinstance(grant_choices, dict) and grant_choices:
+            # 授予槽位与地形选择都是玩家选择：升级只合并本次提交的槽位，
+            # 不能把 Land 已经选好的地形写丢。
+            merged = deepcopy(previous.get("spell_grant_choices") or {})
+            merged.update(deepcopy(grant_choices))
+            next_magic["spell_grant_choices"] = merged
+        free_cast = preview["diff"].get("class_spell_choices", {}).get(
+            "free_cast_slots"
+        )
+        if isinstance(free_cast, dict) and free_cast:
+            # 免费施法槽的记录同时装着"选了哪个法术"和"还剩几次"：这里的
+            # 合并只覆盖本次提交的槽位，替换 arcanum 不会顺手把已消耗的
+            # 次数刷回满值（`_free_cast_record` 保留原计数）。
+            merged_free = deepcopy(previous.get("free_cast_slots") or {})
+            merged_free.update(deepcopy(free_cast))
+            next_magic["free_cast_slots"] = merged_free
+        spellcasting["class"] = next_magic
 
     def _update_derived(self, character: dict[str, Any]) -> None:
         level = int(character["build"]["level"])
@@ -1449,6 +1741,11 @@ class Dnd2024AdvancementEngine:
         abilities = character["abilities"]
         proficiencies = character["proficiencies"]
         saving_refs = set(proficiencies.get("saving_throw_refs") or [])
+        if self._feature_resolver.saving_throw_proficiency_all(character):
+            # 全豁免熟练是升级时重建的派生事实：写回 ref 集合让同一张卡在
+            # 升级前后只走同一个加值公式，集合语义顺带保证了不重复叠加。
+            saving_refs |= {f"ability:{ability}" for ability in ABILITY_IDS}
+            proficiencies["saving_throw_refs"] = sorted(saving_refs)
         skill_refs = set(proficiencies.get("skill_refs") or [])
         saving_throws = {
             ability: ability_modifier(abilities[ability])
@@ -1456,11 +1753,22 @@ class Dnd2024AdvancementEngine:
             for ability in ABILITY_IDS
         }
         skill_values: dict[str, int] = {}
+        # 技能加值只有一个聚合入口：升级、建卡与 live 重算都走它。Expertise
+        # 与半熟练若在这里另写一套，同一张卡在升级前后会出现两种加值。
+        expertise = {
+            row["skill_ref"] for row in self._feature_resolver.expertise_skills(character)
+        }
+        half_proficiency = self._feature_resolver.half_proficiency_bonus(character)
         for skill in self.bundle.list("skill"):
             ability = str(skill.get("ability_ref") or "").removeprefix("ability:")
-            skill_values[str(skill["id"])] = ability_modifier(abilities[ability]) + (
-                proficiency if f"skill:{skill['id']}" in skill_refs else 0
-            )
+            ref = f"skill:{skill['id']}"
+            skill_values[str(skill["id"])] = derive_skill_check(
+                int(abilities[ability]),
+                proficiency_bonus=proficiency,
+                proficient=ref in skill_refs,
+                expertise=ref in expertise,
+                half_proficiency=half_proficiency,
+            )["total"]
         perception = skill_values.get("perception", ability_modifier(abilities["wis"]))
         derived = character.setdefault("derived", {})
         derived.update({
@@ -1508,6 +1816,11 @@ class Dnd2024AdvancementEngine:
                 feature_bonus=self._feature_resolver.speed_bonus(character),
                 armor_training=armor_training,
             )
+            # 攀爬/游泳速度与跳跃距离都挂在当前 Speed 上，升级当次就要跟着变，
+            # 否则升到 Ranger 6 拿到 Roving 之后，爬速要等下一次换装才出现。
+            derived.update(derive_movement_profile(
+                derived["speed"], abilities, self._feature_resolver, character,
+            ))
         class_ref = str(character["build"]["class_levels"][0]["class_ref"])
         class_entity = self.bundle.get("class", _class_id(class_ref)) or {}
         spell_ability = str(class_entity.get("spellcasting_ability") or "")

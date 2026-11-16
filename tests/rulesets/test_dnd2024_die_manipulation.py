@@ -17,11 +17,14 @@ from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.combat.action_adapter import (
     double_dice_counts,
     maximize_dice_nodes,
+    roll_damage_node,
 )
+from src.rulesets.dnd2024.combat.primitives import CombatIntentError
 from src.rulesets.dnd2024.features import (
     Dnd2024ClassFeatureCatalog,
     Dnd2024ClassFeatureResolver,
 )
+from src.rulesets.dnd2024.features.resources import set_feature_usage_count
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 
@@ -161,6 +164,18 @@ def canonical(instance, uid: str = "gm") -> dict:
     return instance.get_character_sheet(uid)["ruleset_character"]
 
 
+def prime_overchannel(instance, count: int = 1, uid: str = "gm") -> None:
+    """Make the next cast the (count + 1)-th Overchannel of this long rest.
+
+    Priming writes the same canonical ledger the reducer writes; ownership,
+    spells, slots and the feature declaration all still come from real data.
+    """
+
+    set_feature_usage_count(
+        canonical(instance, uid), "subclass:evoker", "overchannel", "long_rest", count,
+    )
+
+
 def set_turn(engine, instance, actor_id: str) -> None:
     combat = ruleset_runtime.state(instance)["combat"]
     combat["turn_index"] = combat["initiative"].index(actor_id)
@@ -266,15 +281,17 @@ def test_catalog_declares_cleric_and_wizard_features() -> None:
         supreme = catalog.features["supreme_healing"]
         overchannel = catalog.features["overchannel"]
         assert supreme.class_id == "cleric"
+        assert supreme.owner == "subclass:life_domain"
         assert supreme.minimum_level == 17
+        assert supreme.source_ref == "srd-5.2.1:p40:supreme-healing"
         assert dict(supreme.parameters) == {}
         assert overchannel.class_id == "wizard"
         assert overchannel.minimum_level == 14
         assert dict(overchannel.parameters) == {
-            "max_slot_level": 5,
-            "cost_dice_per_slot": 2,
-            "cost_die_sides": 12,
-            "cost_damage_type": "necrotic",
+            "maximum_slot_level": 5,
+            "usage_scope": "long_rest",
+            "self_damage_die": 12,
+            "initial_self_damage_dice": 2,
         }
 
     english = Dnd2024ClassFeatureCatalog.from_bundle(runtime.load_bundle("en"))
@@ -293,6 +310,18 @@ def test_feature_ownership_follows_levels(runtime, cleric17, cleric16, wizard14,
     assert resolver.has_feature(cleric16["ruleset_character"], "supreme_healing") is False
     assert resolver.has_feature(wizard14["ruleset_character"], "overchannel") is True
     assert resolver.has_feature(wizard13["ruleset_character"], "overchannel") is False
+    # The feature view carries the subclass owner, not the class.
+    owned = [
+        item for item in resolver.features_for(cleric17["ruleset_character"])
+        if item.id == "supreme_healing"
+    ]
+    assert [(item.owner, item.minimum_level) for item in owned] == [
+        ("subclass:life_domain", 17),
+    ]
+    assert not [
+        item for item in resolver.features_for(cleric16["ruleset_character"])
+        if item.id == "supreme_healing"
+    ]
 
 
 # --- T3: AST transform -----------------------------------------------------
@@ -345,20 +374,53 @@ def test_maximize_dice_nodes_transforms_only_dice() -> None:
     assert maximize_dice_nodes(double_dice_counts({"op": "dice", "formula": "2d8"})) == {
         "op": "constant", "value": 32,
     }
+    # The task-book example: 3d4 + 2 → 14 (12 maximized dice plus the flat 2).
+    assert maximize_dice_nodes({
+        "op": "add",
+        "args": [
+            {"op": "dice", "formula": "3d4"},
+            {"op": "constant", "value": 2},
+        ],
+    }) == {
+        "op": "add",
+        "args": [
+            {"op": "constant", "value": 12},
+            {"op": "constant", "value": 2},
+        ],
+    }
+    # Malformed dice fail closed instead of becoming zero.
+    for bad in ({"op": "dice", "formula": "2d"}, {"op": "dice", "formula": "0d6"}):
+        with pytest.raises(CombatIntentError):
+            maximize_dice_nodes(bad)
+    with pytest.raises(CombatIntentError):
+        maximize_dice_nodes(["not", "a", "node"])  # type: ignore[arg-type]
+
+    # A constant-only tree evaluates to its value with an empty dice trace.
+    assert roll_damage_node({"op": "constant", "value": 16}, SequenceRng([])) == (16, [])
 
 
 # --- T4: Supreme Healing on cure_wounds ------------------------------------
 
 def test_supreme_healing_maximizes_cure_wounds_without_rng(cleric17, runtime) -> None:
     engine, instance = new_combat(runtime, cleric17)
+    max_hp = int(canonical(instance)["resources"]["max_hp"])
+    amount = 16 + heal_modifier(instance)
+    set_hp(instance, 50)
     result, rng = cast_result(engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[99])
     assert result["ok"], result
     assert engine.apply_batch(instance, result["event_batch"])["applied"]
+    assert int(canonical(instance)["resources"]["hp"]) == 50 + amount
     assert rng.values == [99], "maximized dice must not consume RNG"
     healed = healing_to(result, "player:gm")
-    assert healed["amount"] == 16 + heal_modifier(instance)
+    assert healed["amount"] == amount
     assert healed["rolls"] == []
     assert healed["maximized"] is True
+
+    # The event keeps the full amount; the cap is the reducer's job.
+    set_hp(instance, max_hp)
+    result = cast(engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[99])
+    assert healing_to(result, "player:gm")["amount"] == amount
+    assert int(canonical(instance)["resources"]["hp"]) == max_hp
 
 
 # --- T5: Supreme Healing scales with the slot ------------------------------
@@ -374,6 +436,13 @@ def test_supreme_healing_maximizes_upcast_dice(cleric17, runtime) -> None:
     assert healed["rolls"] == []
     assert healed["maximized"] is True
 
+    result = cast(engine, instance, "spell:healing_word", 1, ["player:gm"], rolls=[99])
+    healed = healing_to(result, "player:gm")
+    # 2d4 base, maximized to 8.
+    assert healed["amount"] == 8 + modifier
+    assert healed["rolls"] == []
+    assert healed["maximized"] is True
+
     result = cast(engine, instance, "spell:healing_word", 2, ["player:gm"], rolls=[99])
     healed = healing_to(result, "player:gm")
     # 2d4 base + 2d4 per extra slot level → 4d4, all maximized.
@@ -386,11 +455,14 @@ def test_supreme_healing_maximizes_upcast_dice(cleric17, runtime) -> None:
 
 def test_cure_wounds_below_seventeen_still_rolls(cleric16, runtime) -> None:
     engine, instance = new_combat(runtime, cleric16)
-    result = cast(engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[4, 5])
+    result, rng = cast_result(
+        engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[4, 5],
+    )
     healed = healing_to(result, "player:gm")
     assert healed["rolls"] == [4, 5]
     assert healed["amount"] == 9 + heal_modifier(instance)
     assert "maximized" not in healed
+    assert rng.values == [], "an unmaximized heal must consume its dice"
 
 
 # --- T7: temporary HP is not healing ---------------------------------------
@@ -408,43 +480,145 @@ def test_supreme_healing_does_not_touch_temp_hp(cleric17, runtime) -> None:
     assert "maximized" not in temp
 
 
+# --- T7b: the owner is part of the identity, not just the short id ---------
+
+def test_supreme_healing_is_owner_scoped(runtime, cleric17, wizard14) -> None:
+    """The short id alone must not be enough to maximize a heal.
+
+    The three sheet mutations below are negative for a short-id lookup too, so
+    the decisive assertions are the owner variants: if ``owner`` were ignored,
+    those lookups would answer True on a real 17th-level Life Cleric.
+    """
+
+    resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle(LOCALE))
+    canonical_sheet = cleric17["ruleset_character"]
+    assert resolver.has_feature(
+        canonical_sheet, "supreme_healing", owner="subclass:life_domain",
+    ) is True
+    assert resolver.has_feature(
+        canonical_sheet, "supreme_healing", owner="class:cleric",
+    ) is False
+    assert resolver.has_feature(
+        canonical_sheet, "supreme_healing", owner="subclass:college_of_lore",
+    ) is False
+
+    no_subclass = deepcopy(canonical_sheet)
+    no_subclass["features"].pop("subclass_ref", None)
+    assert resolver.has_feature(no_subclass, "supreme_healing") is False
+
+    foreign = deepcopy(canonical_sheet)
+    foreign["features"]["subclass_ref"] = "subclass:college_of_lore"
+    assert resolver.has_feature(foreign, "supreme_healing") is False
+
+    forged = deepcopy(wizard14["ruleset_character"])
+    forged["features"]["subclass_ref"] = "subclass:life_domain"
+    assert resolver.has_feature(forged, "supreme_healing") is False
+
+
+# --- T7c: a 17th-level cleric without the owner still rolls ----------------
+
+def test_a_seventeen_level_cleric_without_the_owner_does_not_maximize(
+    runtime, cleric17,
+) -> None:
+    sheet = deepcopy(cleric17)
+    sheet["ruleset_character"]["features"].pop("subclass_ref", None)
+    engine, instance = new_combat(runtime, sheet)
+    result, rng = cast_result(
+        engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[4, 5],
+    )
+    assert result["ok"], result
+    healed = healing_to(result, "player:gm")
+    assert healed["rolls"] == [4, 5]
+    assert "maximized" not in healed
+    assert healed["amount"] == 9 + heal_modifier(instance)
+    assert rng.values == [], "an unmaximized heal must still consume the RNG"
+
+
+# --- T7d: the blocked heal still maximizes, but pays out nothing -----------
+
+def test_cannot_regain_hp_blocks_the_maximized_heal(cleric17, runtime) -> None:
+    engine, instance = new_combat(runtime, cleric17)
+    canonical(instance)["conditions"] = {"cannot_regain_hp": True}
+    set_hp(instance, 10)
+    result, rng = cast_result(
+        engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[99],
+    )
+    assert result["ok"], result
+    healed = healing_to(result, "player:gm")
+    assert healed["delta"] == 0
+    assert healed["amount"] == 0
+    assert healed["blocked_by"] == "cannot_regain_hp"
+    assert healed["rolls"] == []
+    assert healed["maximized"] is True
+    assert rng.values == [99], "the blocked heal must not roll"
+    assert engine.apply_batch(instance, result["event_batch"])["applied"]
+    assert int(canonical(instance)["resources"]["hp"]) == 10
+
+
+# --- T7e: replaying a maximized heal is a no-op ---------------------------
+
+def test_the_maximized_heal_replays_without_a_second_payout(cleric17, runtime) -> None:
+    engine, instance = new_combat(runtime, cleric17)
+    set_hp(instance, 10)
+    result, _rng = cast_result(
+        engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[99],
+    )
+    assert healing_to(result, "player:gm")["maximized"] is True
+    assert engine.apply_batch(instance, result["event_batch"])["applied"]
+    hp_after = int(canonical(instance)["resources"]["hp"])
+    slots_after = canonical(instance)["spellcasting"]["class"]["slots_current"]
+    assert hp_after == 10 + 16 + heal_modifier(instance)
+
+    # The batch carries the extra ``maximized`` audit key; replaying it must
+    # neither pay out twice nor reject the unknown-for-the-reducer field.
+    replay = engine.apply_batch(instance, result["event_batch"])
+    assert replay["applied"] is False
+    assert int(canonical(instance)["resources"]["hp"]) == hp_after
+    assert canonical(instance)["spellcasting"]["class"]["slots_current"] == slots_after
+
+
 # --- T8: intent validation fails closed ------------------------------------
 
-def test_maximize_damage_validation_matrix(cleric17, wizard13, wizard14, runtime) -> None:
+def test_overchannel_validation_matrix(cleric17, wizard13, wizard14, runtime) -> None:
     engine, instance = new_combat(runtime, cleric17)
     assert reject(
-        engine, instance, "spell:cure_wounds", 1, ["player:gm"], maximize_damage=True,
+        engine, instance, "spell:cure_wounds", 1, ["player:gm"], overchannel=True,
     ) == "overchannel is required to maximize damage"
 
     engine, instance = new_combat(runtime, wizard13)
     grant(instance, "spell:magic_missile")
     assert reject(
-        engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"], maximize_damage=True,
+        engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"], overchannel=True,
     ) == "overchannel is required to maximize damage"
 
     # Explicit false is a no-op, not a request that still requires Overchannel.
     result = cast(
         engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"],
-        maximize_damage=False, rolls=[1, 2, 3],
+        overchannel=False, rolls=[1, 2, 3],
     )
     assert damage_to(result, "enemy:goblin-1")["amount"] == 9
     assert not any(event.get("overchannel_cost") for event in events_of(result))
 
     engine, instance = new_combat(runtime, wizard14)
-    grant(instance, "spell:cure_wounds", "spell:thunderwave")
+    grant(instance, "spell:cure_wounds", "spell:false_life", "spell:thunderwave")
     grant_cantrip(instance, "spell:fire_bolt")
+    # 名单归属先于伤害判定：治疗法术不在法师列表上。
     assert reject(
-        engine, instance, "spell:cure_wounds", 1, ["player:gm"], maximize_damage=True,
+        engine, instance, "spell:cure_wounds", 1, ["player:gm"], overchannel=True,
+    ) == "overchannel only applies to Wizard spells"
+    # 假死术在法师列表上（黯蚀学派），但没有伤害效果。
+    assert reject(
+        engine, instance, "spell:false_life", 1, ["player:gm"], overchannel=True,
     ) == "this spell does not deal damage"
     assert reject(
-        engine, instance, "spell:fire_bolt", 0, ["enemy:goblin-1"], maximize_damage=True,
+        engine, instance, "spell:fire_bolt", 0, ["enemy:goblin-1"], overchannel=True,
     ) == "maximized casting requires a spell slot of level 1-5"
     assert reject(
-        engine, instance, "spell:thunderwave", 6, ["enemy:goblin-1"], maximize_damage=True,
+        engine, instance, "spell:thunderwave", 6, ["enemy:goblin-1"], overchannel=True,
     ) == "maximized casting requires a spell slot of level 1-5"
     assert reject(
-        engine, instance, "spell:thunderwave", 1, ["enemy:goblin-1"], maximize_damage="yes",
-    ) == "maximize_damage must be a boolean"
+        engine, instance, "spell:thunderwave", 1, ["enemy:goblin-1"], overchannel="yes",
+    ) == "overchannel must be a boolean"
 
     # No intent parameter → the same spell still casts normally, with real dice.
     result = cast(engine, instance, "spell:thunderwave", 1, ["enemy:goblin-1"], rolls=[1, 3, 4])
@@ -467,21 +641,21 @@ def test_available_spells_expose_overchannel_only_for_eligible_casts(
 ) -> None:
     engine, instance = new_combat(runtime, wizard14)
     rows = _available_spell_rows(engine, instance)
-    assert rows["spell:chromatic_orb"]["maximize_damage_available"] is True
-    assert rows["spell:burning_hands"]["maximize_damage_available"] is True
+    assert rows["spell:chromatic_orb"]["overchannel_available"] is True
+    assert rows["spell:burning_hands"]["overchannel_available"] is True
     # A non-damaging spell or a cantrip with no leveled slot is never eligible.
-    assert rows["spell:charm_person"]["maximize_damage_available"] is False
-    assert rows["spell:fire_bolt"]["maximize_damage_available"] is False
+    assert rows["spell:charm_person"]["overchannel_available"] is False
+    assert rows["spell:fire_bolt"]["overchannel_available"] is False
 
     # A 6th-level slot can pay for the spell, but Overchannel stops at 5.
     canonical(instance)["spellcasting"]["class"]["slots_current"] = {"6": 1}
     rows = _available_spell_rows(engine, instance)
     assert rows["spell:burning_hands"]["available_slot_levels"] == [6]
-    assert rows["spell:burning_hands"]["maximize_damage_available"] is False
+    assert rows["spell:burning_hands"]["overchannel_available"] is False
 
     engine, instance = new_combat(runtime, wizard13)
     rows = _available_spell_rows(engine, instance)
-    assert rows["spell:chromatic_orb"]["maximize_damage_available"] is False
+    assert rows["spell:chromatic_orb"]["overchannel_available"] is False
 
 
 # --- T9: saving_throw damage face ------------------------------------------
@@ -492,23 +666,24 @@ def test_overchannel_maximizes_saving_throw_damage(wizard14, runtime) -> None:
 
     result = cast(
         engine, instance, "spell:thunderwave", 1, ["enemy:goblin-1"],
-        rolls=[1, 5, 6], maximize_damage=True,
+        rolls=[1, 5, 6], overchannel=True,
     )
     damage = damage_to(result, "enemy:goblin-1")
     assert damage["amount"] == 16, "2d8 maximized = 16 on a failed save"
     assert damage["rolls"] == []
     assert damage["damage_type"] == "thunder"
-    assert overchannel_cost(result)["amount"] == 11
+    assert not any(event.get("overchannel_cost") for event in events_of(result))
 
-    engine, instance = new_combat(runtime, wizard14)
-    grant(instance, "spell:thunderwave")
-    result = cast(
+    # 同一天第二次使用：每环阶 2d12 黯蚀。
+    prime_overchannel(instance)
+    second = cast(
         engine, instance, "spell:thunderwave", 1, ["enemy:goblin-1"],
-        rolls=[20, 5, 6], maximize_damage=True,
+        rolls=[20, 5, 6], overchannel=True,
     )
-    damage = damage_to(result, "enemy:goblin-1")
+    damage = damage_to(second, "enemy:goblin-1")
     assert damage["amount"] == 8, "maximize first, then halve on a successful save"
     assert damage["rolls"] == []
+    assert overchannel_cost(second)["amount"] == 11
 
 
 # --- T10: automatic_damage face --------------------------------------------
@@ -522,16 +697,18 @@ def test_overchannel_maximizes_automatic_damage(wizard14, runtime) -> None:
 
     first = cast(
         engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"],
-        rolls=[1, 2], maximize_damage=True,
+        rolls=[1, 2], overchannel=True,
     )
     assert damage_to(first, "enemy:goblin-1")["amount"] == 15  # 3d4+3 maximized
     assert damage_to(first, "enemy:goblin-1")["rolls"] == []
+    assert not any(event.get("overchannel_cost") for event in events_of(first))
 
     second = cast(
         engine, instance, "spell:magic_missile", 1, ["enemy:goblin-2"],
-        rolls=[3, 4], maximize_damage=True,
+        rolls=[3, 4], overchannel=True,
     )
     assert damage_to(second, "enemy:goblin-2")["amount"] == 15
+    assert overchannel_cost(second)["amount"] == 7  # 第二次：2d12
     enemies_state = ruleset_runtime.state(instance)["combat"]["enemies"]
     assert enemies_state["goblin-1"]["hp"] == 25
     assert enemies_state["goblin-2"]["hp"] == 25
@@ -542,10 +719,12 @@ def test_overchannel_maximizes_automatic_damage(wizard14, runtime) -> None:
 def test_overchannel_maximizes_each_ray_after_crit_doubling(wizard14, runtime) -> None:
     engine, instance = new_combat(runtime, wizard14, enemies=[enemy("goblin-1", hp=100)])
     grant(instance, "spell:scorching_ray")
+    # 第二次使用才有自伤；首环阶代价固定为 2d12/环。
+    prime_overchannel(instance)
     # Scorching Ray is a level 2 spell; a level 2 slot still yields three rays.
     result = cast(
         engine, instance, "spell:scorching_ray", 2, ["enemy:goblin-1"] * 3,
-        rolls=[20, 10, 10, 5, 6, 7, 8], maximize_damage=True,
+        rolls=[20, 10, 10, 5, 6, 7, 8], overchannel=True,
     )
     amounts = [
         event["amount"] for event in events_of(result)
@@ -558,6 +737,7 @@ def test_overchannel_maximizes_each_ray_after_crit_doubling(wizard14, runtime) -
     for event in events_of(result):
         if event["type"] == "resource.changed" and event.get("target_id") == "enemy:goblin-1":
             assert event["rolls"] == []
+            assert event["overchannel"] is True
         if event["type"] == "check.resolved":
             assert "maximized" not in event
     checks = [
@@ -568,15 +748,16 @@ def test_overchannel_maximizes_each_ray_after_crit_doubling(wizard14, runtime) -
     assert overchannel_cost(result)["amount"] == 26  # 2d12 per slot level × 2
 
 
-# --- T12: self damage lands after the whole cast and victory ----------------
+# --- T12: the cost belongs to the cast, before victory ---------------------
 
-def test_overchannel_cost_lands_after_victory(wizard14, runtime) -> None:
+def test_overchannel_cost_lands_before_victory(wizard14, runtime) -> None:
     engine, instance = new_combat(runtime, wizard14, enemies=[enemy("goblin-1", hp=10)])
     grant(instance, "spell:magic_missile")
+    prime_overchannel(instance)
     before = int(canonical(instance)["resources"]["hp"])
     result = cast(
         engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"],
-        rolls=[3, 4], maximize_damage=True,
+        rolls=[3, 4], overchannel=True,
     )
     events = events_of(result)
     victory_index = next(
@@ -585,7 +766,7 @@ def test_overchannel_cost_lands_after_victory(wizard14, runtime) -> None:
     cost_index = next(
         index for index, event in enumerate(events) if event.get("overchannel_cost")
     )
-    assert victory_index < cost_index, "victory resolves before the self-damage cost"
+    assert cost_index < victory_index, "the self damage is part of the cast, not an epilogue"
     cost = overchannel_cost(result)
     assert cost["amount"] == 7
     assert cost["delta"] == -7
@@ -602,9 +783,10 @@ def test_overchannel_cost_ignores_resistance(wizard14, runtime) -> None:
         "source": "test", "resist_damage_types": ["necrotic"],
     }
     grant(instance, "spell:magic_missile")
+    prime_overchannel(instance)
     result = cast(
         engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"],
-        rolls=[6, 6], maximize_damage=True,
+        rolls=[6, 6], overchannel=True,
     )
     cost = overchannel_cost(result)
     assert cost["amount"] == 12
@@ -620,9 +802,10 @@ def test_overchannel_cost_triggers_concentration_check(wizard14, runtime) -> Non
     cast(engine, instance, "spell:stoneskin", 4, ["player:gm"])
     assert canonical(instance)["spellcasting"]["class"]["concentration"] is not None
 
+    prime_overchannel(instance)
     result = cast(
         engine, instance, "spell:thunderwave", 1, ["enemy:goblin-1"],
-        rolls=[10, 6, 5, 10], maximize_damage=True,
+        rolls=[10, 6, 5, 10], overchannel=True,
     )
     events = events_of(result)
     cost_index = next(
@@ -645,9 +828,10 @@ def test_overchannel_cost_can_drop_the_caster(wizard14, runtime) -> None:
     engine, instance = new_combat(runtime, wizard14, enemies=[enemy("goblin-1", hp=100)])
     set_hp(instance, 1)
     grant(instance, "spell:magic_missile")
+    prime_overchannel(instance)
     result = cast(
         engine, instance, "spell:magic_missile", 1, ["enemy:goblin-1"],
-        rolls=[12, 12], maximize_damage=True,
+        rolls=[12, 12], overchannel=True,
     )
     cost = overchannel_cost(result)
     assert cost["amount"] == 24

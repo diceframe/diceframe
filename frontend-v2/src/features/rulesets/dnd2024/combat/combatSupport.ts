@@ -42,6 +42,7 @@ export function friendlyCombatError(cause: unknown, locale: string): string {
   if (/only the window owner can resolve this check window/i.test(message)) return '这个窗口只能由被指定的玩家结算。'
   if (/lucky pool is empty/i.test(message)) return '幸运点已经用完，无法再声明幸运优势。'
   if (/overchannel is required to maximize damage/i.test(message)) return '当前法术或角色没有伤害最大化资格。'
+  if (/overchannel only applies to Wizard spells/i.test(message)) return '超限导能只对法师法术生效。'
   if (/automatic combat turn exceeded the safety limit/i.test(message)) return '敌方自动回合未能正常结束，本次操作已安全回滚。请刷新战斗状态后重试。'
   return message
 }
