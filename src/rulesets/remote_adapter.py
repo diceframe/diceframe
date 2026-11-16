@@ -233,11 +233,17 @@ class RemoteRulesetRuntimeAdapter:
 
         ``AutomaticIntentRuntime`` drives enemies, companions and AI-hosted
         seats without asking the model for a rules action.  A remote runtime
-        declares its own turns here; the host still resolves them through the
-        normal ``resolve_intent`` / ``apply_event_batch`` chain, so ``None`` is
-        a normal terminal value rather than an error.
+        opts in with ``capabilities.automatic_intents`` before this optional
+        RPC is sent. Without that declaration there is no automatic ladder,
+        even though this adapter structurally satisfies the protocol. Once
+        declared, RPC errors must propagate so the host can reject/roll back
+        the submission; only a successful null response ends the ladder.
+        The host resolves returned intents through the normal
+        ``resolve_intent`` / ``apply_event_batch`` chain.
         """
 
+        if not self.capabilities.automatic_intents:
+            return None
         result = self._call(
             "next_automatic_intent", {"instance": self._instance_dto(instance)},
         )

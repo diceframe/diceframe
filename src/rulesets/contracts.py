@@ -66,6 +66,9 @@ class RulesetCapabilities:
     # 顺序多检定或组合技能计划。两者是独立能力，不自动互相推导。
     sequential_checks: bool = False
     composite_action: bool = False
+    # Remote adapters must opt in before sending the optional automatic-intent
+    # RPC; authoritative intents or deterministic combat alone do not imply it.
+    automatic_intents: bool = False
 
     def __post_init__(self) -> None:
         if self.combat_scheduler and self.combat_scheduler not in SCHEDULER_KINDS:
