@@ -311,7 +311,7 @@ def test_localized_focus_label_reaches_the_projection() -> None:
 
     assert feature_ids == [
         "unarmored_defense", "unarmored_movement", "martial_arts", "monks_focus",
-        "flurry_of_blows", "patient_defense", "step_of_the_wind",
+        "uncanny_metabolism", "flurry_of_blows", "patient_defense", "step_of_the_wind",
     ]
     assert sheet["class_resources"][0]["name"] == "专注点"
     martial_arts = next(

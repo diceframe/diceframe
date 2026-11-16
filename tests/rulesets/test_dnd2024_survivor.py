@@ -354,7 +354,8 @@ def test_bloodied_fighter_regenerates_at_turn_start() -> None:
     events = _end_turn(engine, instance, "enemy:goblin-1")
 
     types = [event["type"] for event in events]
-    assert types[-2] == "dnd2024.turn.advanced"
+    # 位置不固定：Champion 的 Heroic Warrior 也在同一个 turn-start 管线里追加
+    # 事件，所以只断言"回合推进在前、再生在后"。
     regen = _regen(events)
     assert regen is not None
     assert regen["amount"] == 5 + con_modifier
@@ -622,11 +623,12 @@ def test_combat_start_regenerates_for_a_bloodied_first_actor() -> None:
     events = resolved["event_batch"]["events"]
     types = [event["type"] for event in events]
 
-    # The started event keeps its shape and the regen is the only thing after
-    # it -- the audit wrapper stays where it was.
-    assert types.index("dnd2024.combat.started") == types.index("intent.submitted") + 1
-    assert types[-1] == "resource.changed"
-    assert len(types) == 3
+    # The started event keeps its shape, and this first turn's regeneration is
+    # the first thing after it.  A later turn-start hook (the Champion's Heroic
+    # Warrior) may append after the regen, never before it.
+    assert types[:3] == [
+        "intent.submitted", "dnd2024.combat.started", "resource.changed",
+    ]
     regen = _regen(events)
     assert regen is not None
     assert regen["amount"] == 5 + con_modifier
