@@ -93,6 +93,8 @@ def test_clean_external_runtime_fixture_covers_builder_action_projection_and_res
 
     before_replay = len(calls)
     replay = runtime.apply_event_batch(instance, first["event_batch"])
-    assert replay["applied"] is True
+    # 统一后的 replay 契约：宿主收据短路返回，不再重复应用，也不伪装成首次应用。
+    assert replay["applied"] is False
+    assert replay["replayed"] is True
     assert len(calls) == before_replay + 0  # durable receipt avoids a second transport call
     assert json.loads(ledger_path.read_text(encoding="utf-8"))
