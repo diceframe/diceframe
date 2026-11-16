@@ -161,7 +161,25 @@ def resolve_planned_checks(
     that has no d20.
     """
 
-    requests = [request for _, request in planned]
+    # The action owns the settled check, not the next planner invocation. Keep
+    # the original request/identity even if a retry proposes different inputs.
+    reused: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    unresolved: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for action, request in planned:
+        check = action.get("check_result")
+        if isinstance(check, dict) and (
+            check.get("planner_source") == "runtime"
+            or action.get("dice_roll_source") == "runtime"
+        ):
+            original = deepcopy(action.get("check_request") or request)
+            original["check_id"] = check["check_id"]
+            original["dice_system"] = "runtime"
+            reused.append((action, original))
+        else:
+            unresolved.append((action, request))
+    if not unresolved:
+        return reused
+    requests = [request for _, request in unresolved]
     try:
         results = resolver.resolve_narrative_checks(
             instance, [deepcopy(request) for request in requests],
@@ -169,13 +187,13 @@ def resolve_planned_checks(
     except Exception:
         game_key = getattr(instance, "game_key", "")
         logger.exception("规则运行时未能结算叙事检定，本轮不掷骰: game=%s", game_key)
-        return []
+        return reused
     by_request = {
         id(request): check
         for request, check in normalize_resolved_checks(requests, results)
     }
-    surviving: list[tuple[dict[str, Any], dict[str, Any]]] = []
-    for action, request in planned:
+    surviving = list(reused)
+    for action, request in unresolved:
         check = by_request.get(id(request))
         if check is None:
             continue

@@ -414,6 +414,27 @@ class RoundProcessor:
         return list(checks.last_checks(instance))
 
     async def prepare_round_checks_ai(self, instance: GameInstance) -> list[dict]:
+        """Stage runtime work away from live authority; retain the core path."""
+        progression.require_writable(instance)
+        session_stats.require_writable(instance)
+        checks.require_writable(instance)
+        if checks.round_checks_prepared(instance):
+            return list(checks.last_checks(instance))
+        if instance.state != GameState.ACTIVE_JUDGMENT:
+            return []
+        rule_ctx = self._prompt.load_rule_context(instance, self._load_world_template)
+        if self._narrative_check_resolver(instance, rule_ctx.rule) is not None:
+            from src.commands.runtime_check_preparation import prepare_runtime_checks
+
+            async def prepare(candidate: GameInstance) -> list[dict]:
+                return await self._prepare_round_checks_ai(candidate, isolated_runtime=True)
+
+            return await prepare_runtime_checks(instance, self.registry, prepare)
+        return await self._prepare_round_checks_ai(instance)
+
+    async def _prepare_round_checks_ai(
+        self, instance: GameInstance, *, isolated_runtime: bool = False,
+    ) -> list[dict]:
         """阶段 1：由 GM 模型统一规划检定，再由服务端一次性掷骰结算。"""
         progression.require_writable(instance)
         session_stats.require_writable(instance)
@@ -435,6 +456,9 @@ class RoundProcessor:
         expected_economy_fingerprint = economy_fingerprint(instance)
 
         def planning_target_is_current() -> bool:
+            # A detached runtime candidate is fenced as a whole on publication.
+            if isolated_runtime:
+                return True
             current = self.registry.get(instance.game_key)
             return (
                 current is instance
@@ -529,7 +553,12 @@ class RoundProcessor:
                 if id(action) not in deferred_actions
             ]
             if narrative_resolver is not None and planned:
-                planned = resolve_planned_checks(instance, narrative_resolver, planned)
+                # Only detached candidates may cross this thread boundary.
+                if not isolated_runtime:
+                    raise RuntimeError("runtime checks require isolated preparation")
+                planned = await asyncio.to_thread(
+                    resolve_planned_checks, instance, narrative_resolver, planned,
+                )
             for action, request in planned:
                 action["check_request"] = request
             if not metadata.get("skipped"):
