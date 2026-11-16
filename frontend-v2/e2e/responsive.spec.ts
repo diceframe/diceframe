@@ -545,7 +545,21 @@ test('phone character actions can scroll clear of bottom navigation', async ({ p
   const token = accessToken()
   await page.addInitScript(value => localStorage.setItem('trpg_access_token', value), token)
   await page.setViewportSize({ width: 390, height: 844 })
+  // 卡片在本用例内给定，不依赖前面 spec 攒下的数据：列表为空时 section 的最后
+  // 一个按钮是工具栏的「导入酒馆卡」，它本来就在视口内，滚动不会发生，断言会
+  // 空转通过——那正是这条用例此前的假通过方式。
+  const cards = [1, 2, 3].map(index => ({
+    card_id: `scroll:card-${index}`,
+    character_name: `滚动测试员 ${index}`,
+    rule_id: 'freeform_fantasy',
+    rule_name: '自由幻想',
+    race: '人类',
+    class: '战士',
+  }))
+  await page.route(/\/api\/character-cards(?:\?|$)/, route =>
+    route.request().method() !== 'GET' ? route.continue() : route.fulfill({ json: { cards } }))
   await page.goto('/#/characters')
+  await expect(page.locator('.library-character-card')).toHaveCount(cards.length)
   const finalAction = page.locator('.shared-character-section button').last()
   await finalAction.scrollIntoViewIfNeeded()
   const positions = await page.evaluate(() => {
@@ -554,8 +568,11 @@ test('phone character actions can scroll clear of bottom navigation', async ({ p
     return {
       actionBottom: action[action.length - 1].getBoundingClientRect().bottom,
       navTop: nav.getBoundingClientRect().top,
+      scrollY: window.scrollY,
     }
   })
+  // 内容必须真的长到需要滚动，否则下面那条断言什么也没证明。
+  expect(positions.scrollY).toBeGreaterThan(0)
   expect(positions.actionBottom).toBeLessThanOrEqual(positions.navTop)
 })
 

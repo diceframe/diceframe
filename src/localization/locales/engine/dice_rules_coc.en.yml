@@ -1,0 +1,7 @@
+# src/engine/dice_rules_coc.py 返回给请求方的提示。
+"en":
+  bonus_penalty_negative: "The number of bonus and penalty dice cannot be negative"
+  bonus_penalty_too_many: "The number of bonus and penalty dice cannot exceed %{max_dice_count}"
+  sanity_loss_empty: "The Sanity loss is empty"
+  sanity_loss_invalid: "Invalid Sanity loss notation: %{raw}"
+  sanity_loss_out_of_range: "The Sanity loss is out of range: %{term}"

@@ -435,7 +435,7 @@ def test_fighter_action_surge_declaration_and_capability_load() -> None:
     })
 
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "second_wind", "weapon_mastery", "action_surge",
+        "second_wind", "weapon_mastery", "action_surge", "tactical_mind",
     ]
     capability = resolver.declared_capability(character, "action_surge")
 
@@ -608,7 +608,7 @@ def test_rogue_sneak_attack_declaration_loads_as_a_passive_feature() -> None:
     character = _rogue(1)
 
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "sneak_attack", "weapon_mastery",
+        "expertise", "sneak_attack", "weapon_mastery",
     ]
     feature = resolver.features_for(character)[0]
     assert feature.capabilities == ()
@@ -640,8 +640,8 @@ def test_rogue_uncanny_dodge_declares_no_capability_and_keeps_parameters() -> No
     character = _rogue(5)
 
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "sneak_attack", "cunning_action", "fast_hands", "uncanny_dodge",
-        "weapon_mastery",
+        "expertise", "sneak_attack", "cunning_action", "fast_hands",
+        "second_story_work", "uncanny_dodge", "weapon_mastery",
     ]
     assert resolver.declared_capability(character, "uncanny_dodge") is None
     assert resolver.feature_value(character, "uncanny_dodge", "damage_multiplier") == 0.5
@@ -652,7 +652,8 @@ def test_uncanny_dodge_is_not_owned_below_level_five() -> None:
     _runtime, resolver = _resolver()
 
     assert [feature.id for feature in resolver.features_for(_rogue(4))] == [
-        "sneak_attack", "cunning_action", "fast_hands", "weapon_mastery",
+        "expertise", "sneak_attack", "cunning_action", "fast_hands",
+        "second_story_work", "weapon_mastery",
     ]
     assert resolver.declared_capability(_rogue(4), "uncanny_dodge") is None
 

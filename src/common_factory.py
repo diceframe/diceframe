@@ -130,7 +130,12 @@ def create_trpg_subsystems(
             proxy_url=proxy_url,
         )
 
-    ruleset_registry = build_default_ruleset_registry(adventures_dir)
+    # A model-client rebuild does not replace installed ruleset authority or
+    # the plugin source that owns its live transports.
+    ruleset_registry = (
+        reuse.ruleset_registry if reuse is not None
+        else build_default_ruleset_registry(adventures_dir)
+    )
     handler = GameHandler(
         registry=registry,
         llm_client=llm_client,

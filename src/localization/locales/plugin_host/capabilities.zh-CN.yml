@@ -1,0 +1,3 @@
+# src/plugin_host/capabilities.py 返回给请求方的提示。
+"zh-CN":
+  no_capability_initializer: "插件类型没有运行时能力初始化器：%{plugin_type}"

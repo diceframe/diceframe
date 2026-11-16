@@ -2113,7 +2113,7 @@ describe('D&D 2024 combat decisions and declarations', () => {
       spells: [{
         spell_ref: 'spell:fire_bolt', name: '火焰箭', level: 3, casting_time: 'action',
         mode: 'spell_attack', available_slot_levels: [3], target_count: 1,
-        lucky_advantage_available: true, maximize_damage_available: true,
+        lucky_advantage_available: true, overchannel_available: true,
       }],
       targets: data.gameplay.combat.actors.map((actor: any) => ({
         actor_id: actor.actor_id, kind: actor.kind, name: actor.name,
@@ -2126,7 +2126,9 @@ describe('D&D 2024 combat decisions and declarations', () => {
     await wrapper.get('[data-tile="spell"]').trigger('click')
     const card = wrapper.get('[data-testid=combat-spell-card]')
     expect(card.text()).toContain('使用幸运优势')
-    expect(card.text()).toContain('过载伤害最大化')
+    // 文案口径是"超限导能：伤害最大化"，与 S0-D2 的声明一致；这里只钉住
+    // "卡片上确实出现了超限导能这个声明"，不复制整句提示。
+    expect(card.text()).toContain('超限导能：伤害最大化')
     const toggles = card.findAll('input[type=checkbox]')
     await toggles[0].setValue(true)
     await toggles[1].setValue(true)
@@ -2135,7 +2137,7 @@ describe('D&D 2024 combat decisions and declarations', () => {
     await flushPromises()
     expect(mocks.submit).toHaveBeenCalledOnce()
     expect(mocks.submit.mock.calls[0][1]).toMatchObject({
-      type: 'cast_spell', spend_luck: true, maximize_damage: true,
+      type: 'cast_spell', spend_luck: true, overchannel: true,
     })
     wrapper.unmount()
   })

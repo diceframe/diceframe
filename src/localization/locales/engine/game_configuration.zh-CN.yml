@@ -1,0 +1,6 @@
+# src/engine/game_configuration.py 返回给请求方的提示。
+"zh-CN":
+  dice_reveal_invalid: "骰子揭示方式仅支持 auto 或 click"
+  luck_timeout_range: "幸运超时需在 0..3600 秒之间（0=禁用）"
+  reward_policy_fields_invalid: "奖励策略无效（mode 或 auto_reward_cap 不合法）"
+  reward_policy_invalid: "奖励策略无效"

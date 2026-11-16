@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pytest
 
 from src.rulesets.dnd2024.resting import Dnd2024RestEngine, RestError
@@ -109,3 +111,29 @@ def test_runtime_rest_returns_legacy_projection_and_canonical_events() -> None:
     assert result["character"]["hp"] == 10
     assert result["character"]["ruleset_character"]["resources"]["hp"] == 10
     assert result["events"][0]["type"] == "spend_hit_die"
+
+
+def test_long_rest_resets_feature_usage_and_short_rest_does_not() -> None:
+    """The feature usage ledger is long-rest scoped, not a class resource pool.
+
+    ``features.usage`` is not a consumable resource: it only ever increases
+    during the day and is cleared by exactly one rest type.  A short rest that
+    silently reset it would give the first free Overchannel back every time.
+    """
+
+    runtime, fighter = _quick_character()
+    engine = Dnd2024RestEngine(runtime.load_bundle("en"))
+    fighter["features"] = {"usage": [{
+        "owner": "subclass:evoker", "feature_id": "overchannel",
+        "scope": "long_rest", "count": 2,
+    }]}
+
+    short = engine.complete_short_rest(deepcopy(fighter), {"d10": [5]})
+    assert "reset_feature_usage" not in [event["type"] for event in short["events"]]
+    assert short["character"]["features"]["usage"][0]["count"] == 2
+
+    long = engine.complete_long_rest(deepcopy(fighter))
+    resets = [event for event in long["events"] if event["type"] == "reset_feature_usage"]
+    assert len(resets) == 1
+    assert (resets[0]["before"], resets[0]["after"]) == (2, 0)
+    assert "usage" not in long["character"].get("features", {})

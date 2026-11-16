@@ -60,6 +60,9 @@ import sys
 
 
 def handle(op, payload):
+    if op == "game_binding":
+        return {"rule_id": payload["rule"]["rule_id"], "runtime_id": "external:t3-sample",
+                "runtime_version": 1, "content_version": "1", "state_schema_version": 1}
     if op == "describe_experience":
         return {"id": "external:t3-sample", "name": "T3 样例规则", "locale": payload.get("locale", "")}
     if op == "builder_choices":
