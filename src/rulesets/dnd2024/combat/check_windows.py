@@ -568,7 +568,10 @@ class CombatCheckWindowsMixin:
         codes: list[str], source: str, target_id: str,
     ) -> dict[str, Any] | None:
         roller_id = str(roller["actor_id"])
+        offered = list(settlement.get("ability_offered") or [])
         for index, code in enumerate(codes):
+            if code in offered:
+                continue
             exclude = tuple(str(item) for item in settlement.get("exclude_bards") or ())
             owner_id = self._ability_check_candidate(
                 instance, combat, code, roller_id, check, exclude,
@@ -589,6 +592,11 @@ class CombatCheckWindowsMixin:
             if die_sides == 0 and not WINDOW_REGISTRY[code].replaces_natural:
                 continue
             remaining = codes[index + 1:]
+            # Cutting Words is per bard; its owners are excluded by the
+            # finisher. Every other face is offered once per check, even if
+            # declined or refunded after an unsuccessful rescue.
+            if code != "cutting_words_ability":
+                settlement["ability_offered"] = [*offered, code]
             settlement["remaining_windows"] = list(remaining)
             return self._build_check_window(
                 instance, code=code, surface="ability_check", owner_id=owner_id,
@@ -624,13 +632,16 @@ class CombatCheckWindowsMixin:
 
         roller_id = str(decision["actor_id"])
         roller = self._actor_view(instance, combat, roller_id)
-        codes = [str(item) for item in decision.get("remaining_windows") or []]
-        if not codes:
-            # A rescued check succeeds: the cut face becomes available; a cut
-            # check that now fails: the roller's own die becomes available.
-            codes = self._ability_window_codes(
-                instance, combat, roller, check, settlement,
-            )
+        # Re-evaluate both polarities, but never reset asking history when
+        # the queue is exhausted. Also seed the held face for older pending
+        # decisions that predate ability_offered.
+        code = str(decision["window_code"])
+        offered = list(settlement.get("ability_offered") or [])
+        if code != "cutting_words_ability" and code not in offered:
+            settlement["ability_offered"] = [*offered, code]
+        codes = self._ability_window_codes(
+            instance, combat, roller, check, settlement,
+        )
         return self._open_ability_window(
             instance, combat, roller, check, settlement, codes,
             str(decision.get("source") or ""),
@@ -759,8 +770,8 @@ class CombatCheckWindowsMixin:
             return []
         if roller.get("kind") not in {"player", "companion"}:
             return []
-        failed = not check.get("success")
         surface = str(settlement.get("surface") or "")
+        failed = not self._nonattack_check_success(check)
         reroll_faces = (
             ("stroke_of_luck_save",)
             if surface == "death_save"
@@ -1316,7 +1327,7 @@ class CombatCheckWindowsMixin:
             check.pop("critical_upgrade", None)
             check["success"] = self._attack_check_success(check)
         else:
-            check["success"] = int(check["total"]) >= int(check["target"])
+            check["success"] = self._nonattack_check_success(check)
         return check
 
     def _reroll_check(
@@ -1345,7 +1356,7 @@ class CombatCheckWindowsMixin:
             key: deepcopy(check[key]) for key in (
                 "type", "kind", "actor_id", "source_actor_id", "ability",
                 "modifier", "check_bonus", "check_bonus_rolls", "aura_bonus",
-                "aura_sources", "target", "repeat_save",
+                "aura_sources", "target", "repeat_save", "death_save_crit_threshold",
             ) if key in check
         }
         rerolled = {
@@ -1372,7 +1383,7 @@ class CombatCheckWindowsMixin:
                 {"code": code, "mode": mode},
             ]
         rerolled["total"] = self._check_total(rerolled, natural)
-        rerolled["success"] = int(rerolled["total"]) >= int(rerolled["target"])
+        rerolled["success"] = self._nonattack_check_success(rerolled)
         return rerolled
 
     def _spend_check_window(
@@ -1436,8 +1447,8 @@ class CombatCheckWindowsMixin:
                 "window_bonus": die,
                 "window_bonus_rolls": [die],
                 "total": total,
-                "success": total >= int(check["target"]),
             })
+            check["success"] = self._nonattack_check_success(check)
             return check
         if code in {"bardic_inspiration", "peerless_skill"}:
             # Add the die to the failed d20 total and re-judge.  A natural 1
@@ -1476,6 +1487,18 @@ class CombatCheckWindowsMixin:
             })
             return check
         raise CombatIntentError("this check window code is not supported")  # pragma: no cover
+
+    @staticmethod
+    def _nonattack_check_success(check: dict[str, Any]) -> bool:
+        """Death-save natural faces override bonuses, just as at settlement."""
+
+        if check.get("kind") == "death_save":
+            natural = int(check.get("natural", 0) or 0)
+            if natural == 1:
+                return False
+            if natural >= int(check.get("death_save_crit_threshold", 20) or 20):
+                return True
+        return int(check["total"]) >= int(check["target"])
 
     @staticmethod
     def _attack_check_success(check: dict[str, Any]) -> bool:

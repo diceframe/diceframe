@@ -2274,16 +2274,21 @@ class CombatResolutionMixin:
         # rather than folded into ``modifier`` so the event still shows a bare
         # d20 plus separately-attributable sources.
         aura = self._saving_throw_aura_bonus(instance, combat, actor)
-        total = roll + check_bonus + int(aura["bonus"])
+        modifier = (
+            int(actor["proficiency_bonus"])
+            if self.features.saving_throw_proficiency_all(character) else 0
+        )
+        total = roll + modifier + check_bonus + int(aura["bonus"])
         check_event = {
             "type": "check.resolved", "kind": "death_save", "actor_id": actor_id,
             "rolls": [value for value in (first, second) if value is not None],
-            "natural": roll, "modifier": 0,
+            "natural": roll, "modifier": modifier,
             "check_bonus": check_bonus,
             "check_bonus_rolls": check_bonus_rolls, "bless_bonus": check_bonus,
             "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
             "total": total,
-            "target": 10, "success": total >= 10,
+            "target": 10,
+            "success": roll != 1 and (roll >= crit_threshold or total >= 10),
             "roll_id": f"death_save:{actor_id}:1",
         }
         if advantage_sources:
