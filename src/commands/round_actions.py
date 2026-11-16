@@ -6,6 +6,7 @@ import logging
 import re
 from typing import Any
 
+from src.commands.dice_resolver import DiceResolver
 from src.engine import progression
 from src.engine.checks import build_check_request, roll_check_request
 from src.engine.character_utils import is_conscious
@@ -97,6 +98,13 @@ def format_check_results_constraint(instance: GameInstance, checks: list[dict]) 
         return ""
     blocks: list[str] = []
     for check in checks:
+        if (
+            check.get("planner_source") == "runtime"
+            or check.get("dice") == "runtime"
+            or check.get("constraint")
+        ):
+            blocks.append(DiceResolver.format_runtime_constraint(instance, check))
+            continue
         dice = str(check.get("dice") or "")
         roll_value = check.get("roll")
         if dice == "d100":

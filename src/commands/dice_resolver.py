@@ -216,8 +216,12 @@ class DiceResolver:
         check: dict[str, Any],
     ) -> str:
         verdict = str(check.get("verdict") or "")
-        if check.get("dice") == "runtime" or check.get("constraint"):
-            return DiceResolver._format_runtime_constraint(instance, check)
+        if (
+            check.get("planner_source") == "runtime"
+            or check.get("dice") == "runtime"
+            or check.get("constraint")
+        ):
+            return DiceResolver.format_runtime_constraint(instance, check)
         if check.get("dice") == "d100":
             threshold = int(check.get("threshold", 1) or 1)
             if check.get("skill"):
@@ -310,7 +314,7 @@ class DiceResolver:
         })
 
     @staticmethod
-    def _format_runtime_constraint(instance: GameInstance, check: dict[str, Any]) -> str:
+    def format_runtime_constraint(instance: GameInstance, check: dict[str, Any]) -> str:
         """Render a runtime-resolved check for the GM prompt.
 
         The ruleset may hand over finished wording; otherwise the platform
@@ -325,7 +329,7 @@ class DiceResolver:
             faces = "+".join(str(int(value)) for value in (check.get("rolls") or []))
             dice = str(check.get("dice") or "")
             detail = f"{subject} {dice}={faces}" if faces else f"{subject} {dice}={check.get('roll')}"
-            total = check.get("total")
+            total = check.get("total", check.get("roll"))
             if isinstance(total, int) and not isinstance(total, bool):
                 detail += f" = {total}"
             target = check.get("dc", check.get("threshold"))

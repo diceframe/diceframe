@@ -3008,6 +3008,20 @@ frontend generic component
 
 ---
 
+### Runtime 叙事检定准备
+
+`dice_system=none` 且声明 `narrative_checks` 的规则通过可选
+`NarrativeCheckResolverRuntime.resolve_narrative_checks` 结算自由文本检定。
+回合准备在 detached aggregate 上规划，阻塞 RPC 在线程中只访问该快照；完成后
+经 authority → state 锁发布 staged transaction，并检查 registry 对象、run、阶段、
+完整输入及运行期检定 generation。abort/reset 递增 generation，防止同轮重试的
+ABA；取消中的线程可继续完成，但不能回调发布 live 状态。已提交到行动上的 runtime
+结果与原 check identity 在叙事失败重试时复用，不随新 planner UUID 重骰。
+提示及重生成按 `planner_source=runtime` 使用通用格式，保留真实骰制、分骰和结果。
+这是现有存档形状上的恢复/并发边界修复，不新增持久 schema。
+
+---
+
 # 22. Generic Combat Extension
 
 通用战斗扩展的目标不是实现“一个万能 TRPG 规则”。

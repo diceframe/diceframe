@@ -206,6 +206,25 @@ async def test_round_processor_hands_free_text_checks_to_the_runtime() -> None:
     assert action["dice_roll_source"] == "runtime"
 
 
+def test_only_unsettled_actions_are_sent_to_runtime_on_replan() -> None:
+    instance = _instance()
+    resolver = _Resolver()
+    settled = instance.action_queue[0]
+    first_request = {"check_id": "original", "actor_uid": "p1", "target": 10}
+    resolve_planned_checks(instance, resolver, [(settled, first_request)])
+    original_result = dict(settled["check_result"])
+    fresh = {"user_id": "p1", "text": "another action"}
+    replanned = {"check_id": "new-planner-id", "actor_uid": "p1", "target": 99}
+    surviving = resolve_planned_checks(instance, resolver, [
+        (settled, replanned),
+        (fresh, {"check_id": "fresh", "actor_uid": "p1"}),
+    ])
+    assert [request["check_id"] for request in resolver.calls[-1]] == ["fresh"]
+    assert surviving[0][1] == {**first_request, "dice_system": "runtime"}
+    assert settled["check_result"] == original_result
+    assert fresh["dice_value"] == 8
+
+
 @pytest.mark.asyncio
 async def test_round_processor_drops_checks_the_runtime_cannot_answer() -> None:
     instance = _instance()
