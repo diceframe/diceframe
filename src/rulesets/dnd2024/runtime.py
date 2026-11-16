@@ -130,7 +130,7 @@ class Dnd2024Runtime:
     # 未声明该能力的 ruleset 不会收到 D&D 专属的 attunement / prepared_spells /
     # land_terrain 参数。land_terrain 是 Circle of the Land 每次长休必须记录的
     # 选择；prepared_spells 是长休时可以发生的一次准备替换。
-    rest_option_names = frozenset({"attunement", "prepared_spells", "land_terrain"})
+    rest_option_names = frozenset({"attunement", "prepared_spells", "land_terrain", "free_cast"})
     capabilities = RulesetCapabilities(
         experience_profile="dnd2024",
         character_builder="professional",
@@ -889,6 +889,7 @@ class Dnd2024Runtime:
         attunement: dict[str, Any] | None = None,
         prepared_spells: dict[str, Any] | None = None,
         land_terrain: str | None = None,
+        free_cast: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         del rule
         canonical = character.get("ruleset_character")
@@ -899,8 +900,12 @@ class Dnd2024Runtime:
             raise ValueError("attunement must be an object")
         if land_terrain is not None and not isinstance(land_terrain, str):
             raise ValueError("land_terrain must be a string")
+        if free_cast is not None and not isinstance(free_cast, dict):
+            raise ValueError("free_cast must be an object")
         engine = Dnd2024RestEngine(bundle)
         if rest == "short":
+            if free_cast is not None:
+                raise ValueError("free_cast can only be changed on a long rest")
             if prepared_spells is not None:
                 raise ValueError("prepared spells can only be changed on a long rest")
             if land_terrain is not None:
@@ -920,6 +925,7 @@ class Dnd2024Runtime:
             )
             result = engine.complete_long_rest(
                 character, land_terrain=land_terrain, prepared_spells=change,
+                free_cast=free_cast,
             )
         else:
             raise ValueError("rest must be short or long")
@@ -945,6 +951,8 @@ class Dnd2024Runtime:
             raise ValueError("prepared spells can only be changed on a long rest")
         if "land_terrain" in options and rest != "long":
             raise ValueError("land_terrain is only valid for a long rest")
+        if "free_cast" in options and rest != "long":
+            raise ValueError("free_cast can only be changed on a long rest")
         checked = self.rest_option_names & set(options)
         if not checked:
             return
@@ -967,6 +975,13 @@ class Dnd2024Runtime:
             engine.parse_prepared_spells(canonical, options["prepared_spells"])
         if "land_terrain" in checked:
             engine.validate_land_terrain(canonical, options["land_terrain"])
+        if "free_cast" in checked:
+            requested = options["free_cast"]
+            if not isinstance(requested, dict):
+                raise ValueError("free_cast must be an object")
+            _, errors = Dnd2024SpellSelection(bundle).rebind_free_cast(canonical, requested)
+            if errors:
+                raise ValueError("; ".join(errors))
 
     @staticmethod
     def validate_rest_context(instance: Any, actor_id: str, rest: str) -> None:
