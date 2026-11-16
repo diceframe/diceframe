@@ -704,6 +704,7 @@ _SUBCLASS_DECLARATIONS = [
     ("class:fighter", 7, "additional_fighting_style", "subclass:champion"),
     ("class:fighter", 15, "superior_critical", "subclass:champion"),
     ("class:fighter", 18, "survivor", "subclass:champion"),
+    ("class:barbarian", 6, "mindless_rage", "subclass:path_of_the_berserker"),
     ("class:barbarian", 10, "retaliation", "subclass:path_of_the_berserker"),
     ("class:rogue", 3, "fast_hands", "subclass:thief"),
     ("class:bard", 3, "cutting_words", "subclass:college_of_lore"),

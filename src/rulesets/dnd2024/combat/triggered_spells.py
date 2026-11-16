@@ -12,6 +12,7 @@ from copy import deepcopy
 from typing import Any
 
 from src.engine.player_control import is_ai_controlled
+from src.rulesets.dnd2024.spells.casting import free_cast_resource, spell_cost_events
 from .action_adapter import (
     double_dice_counts,
     formula_node_from_dice_formula,
@@ -30,28 +31,6 @@ def hit_spell_decision(combat: dict[str, Any], actor_id: str) -> dict[str, Any] 
             row
             for row in combat.get("pending_decisions", [])
             if row.get("kind") == HIT_SPELL_DECISION and row.get("actor_id") == actor_id
-        ),
-        None,
-    )
-
-
-def free_cast_resource(actor: dict[str, Any], spell_ref: str) -> dict[str, Any] | None:
-    # 职业特性免费施放挂在 class resource 上；起源专长（魔法学徒）的
-    # 每长休一次免费施放挂在该专长条目上。两者都可能授予同一法术。
-    grants = [
-        row for row in actor.get("spell_grants", []) if row.get("spell_ref") == spell_ref
-    ]
-    feat_grant = next((row for row in grants if row.get("free_cast_available")), None)
-    if feat_grant is not None:
-        return {"kind": "feat", "feat_ref": feat_grant["feat_ref"]}
-    grant = next((row for row in grants if row.get("resource_id")), None)
-    if grant is None:
-        return None
-    return next(
-        (
-            row
-            for row in actor.get("class_resources", [])
-            if row.get("id") == grant["resource_id"] and int(row.get("current", 0)) > 0
         ),
         None,
     )
@@ -106,37 +85,10 @@ class CombatTriggeredSpellsMixin:
                 "amount": 1,
             }
         ] if spend_action else []
-        if int(spell["level"]) > 0:
-            if slot_level > 0:
-                events.append(
-                    {
-                        "type": "dnd2024.spell.slot_spent",
-                        "actor_id": actor["actor_id"],
-                        "slot_level": slot_level,
-                        "amount": 1,
-                    }
-                )
-            else:
-                resource = free_cast_resource(actor, f"spell:{spell['id']}")
-                if resource is None:
-                    raise CombatIntentError("the free spell cast is not available")
-                if resource.get("kind") == "feat":
-                    events.append(
-                        {
-                            "type": "dnd2024.feat_spell.free_cast_spent",
-                            "actor_id": actor["actor_id"],
-                            "feat_ref": resource["feat_ref"],
-                        }
-                    )
-                    return events
-                events.append(
-                    {
-                        "type": "dnd2024.class_resource.spent",
-                        "actor_id": actor["actor_id"],
-                        "resource_id": resource["id"],
-                        "amount": 1,
-                    }
-                )
+        try:
+            events.extend(spell_cost_events(actor, spell, slot_level))
+        except ValueError as exc:
+            raise CombatIntentError(str(exc)) from exc
         return events
 
     def _finish_hit_spell(
@@ -156,13 +108,24 @@ class CombatTriggeredSpellsMixin:
                 self._actor_view(instance, combat, decision["actor_id"]), "spell_cast",
             ))
         events.extend(self._submit_hit_damage(decision["damage_event"]))
-        total = int(decision["damage_event"]["amount"])
+        # 这条路径同样是"命中落地"：rider（光耀/神圣/原始打击）与命中后条件
+        # （震慑击、散手技巧）在直通路径由 ``_resolve_committed_hit`` 结算，
+        # 决策路径若漏掉它们，会变成"有至圣斩窗口的角色悄悄少了半个特性"。
+        attacker_id = str(decision["actor_id"])
+        rider_events, rider_damage = self._hit_rider_events(
+            combat, target, decision["damage_event"], rng, attacker_id=attacker_id,
+        )
+        events.extend(rider_events)
+        total = int(decision["damage_event"]["amount"]) + rider_damage
         if extra_damage:
             events.append(extra_damage)
             total += int(extra_damage["amount"])
         events.extend(self._concentration_events(instance, combat, target, total, rng))
+        events.extend(self._hit_condition_events(
+            instance, combat, attacker_id, target, decision["damage_event"], rng,
+        ))
         events.extend(self._enemy_zero_hp_feature_events(
-            instance, combat, str(decision["actor_id"]), target, total,
+            instance, combat, attacker_id, target, total,
         ))
         if self._last_hostile_defeated(combat, target, total):
             events.append({"type": "dnd2024.combat.ended", "reason": "victory"})

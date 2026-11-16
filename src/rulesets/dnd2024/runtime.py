@@ -127,8 +127,13 @@ class Dnd2024Runtime:
     runtime_id = "core:dnd2024"
     runtime_version = 1
     # 显式 rest option 契约：generic rest service 只转发这里声明的请求字段；
-    # 未声明该能力的 ruleset 不会收到 D&D 专属的 attunement 参数。
-    rest_option_names = frozenset({"attunement", "prepared_spells"})
+    # 未声明该能力的 ruleset 不会收到 D&D 专属的 attunement / prepared_spells /
+    # land_terrain / free_cast / recovery 参数。land_terrain 是 Circle of the Land
+    # 每次长休必须记录的选择；prepared_spells 是长休时的一次准备替换；free_cast
+    # 是 Spell Mastery 在长休研究法术书时换掉的那一项；recovery 是短休的恢复预算。
+    rest_option_names = frozenset(
+        {"attunement", "prepared_spells", "land_terrain", "free_cast", "recovery"}
+    )
     capabilities = RulesetCapabilities(
         experience_profile="dnd2024",
         character_builder="professional",
@@ -887,6 +892,9 @@ class Dnd2024Runtime:
         hit_die_rolls: dict[str, list[int]] | None = None,
         attunement: dict[str, Any] | None = None,
         prepared_spells: dict[str, Any] | None = None,
+        land_terrain: str | None = None,
+        free_cast: dict[str, Any] | None = None,
+        recovery: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         del rule
         canonical = character.get("ruleset_character")
@@ -895,28 +903,102 @@ class Dnd2024Runtime:
         if attunement is not None and not isinstance(attunement, dict):
             # 同调 payload 是明确的窄契约：非对象直接拒绝，不做猜测式解构。
             raise ValueError("attunement must be an object")
+        if land_terrain is not None and not isinstance(land_terrain, str):
+            raise ValueError("land_terrain must be a string")
+        if free_cast is not None and not isinstance(free_cast, dict):
+            raise ValueError("free_cast must be an object keyed by slot id")
+        if recovery is not None and not isinstance(recovery, dict):
+            raise ValueError("recovery must be an object keyed by feature id")
         engine = Dnd2024RestEngine(bundle)
         if rest == "short":
             if prepared_spells is not None:
                 raise ValueError("prepared spells can only be changed on a long rest")
+            if land_terrain is not None:
+                raise ValueError("land_terrain is only valid for a long rest")
+            if free_cast is not None:
+                raise ValueError("free_cast is only valid for a long rest")
             result = engine.complete_short_rest(
-                character, hit_die_rolls, attunement=attunement,
+                character, hit_die_rolls, attunement=attunement, recovery=recovery,
             )
         elif rest == "long":
             if hit_die_rolls:
                 raise ValueError("hit_die_rolls are only valid for a short rest")
             if attunement is not None:
                 raise ValueError("attunement changes are only valid during a short rest")
+            if recovery is not None:
+                raise ValueError("recovery is only valid for a short rest")
             change = (
                 engine.parse_prepared_spells(character, prepared_spells)
                 if prepared_spells is not None
                 else None
             )
-            result = engine.complete_long_rest(character, prepared_spells=change)
+            result = engine.complete_long_rest(
+                character, land_terrain=land_terrain, prepared_spells=change,
+                free_cast=free_cast,
+            )
         else:
             raise ValueError("rest must be short or long")
         result["character"] = self._live_projection(character, result["character"], bundle)
         return result
+
+    # SRD 5.2.1 Resting 给的是下界（Short Rest 至少 1 小时、Long Rest 至少 8 小时）。
+    # 这里只声明下界对应的分钟数：世界时钟推进由通用休息服务按这个值执行，
+    # 「这一夜过了十小时」这类裁量交给 DM 在裁决时另行推进，不写进规则数据。
+    REST_DURATION_MINUTES = {"short": 60, "long": 480}
+
+    def rest_duration_minutes(self, rest: str) -> int:
+        """Logical minutes this rest consumes; the only source for clock advance."""
+
+        minutes = self.REST_DURATION_MINUTES.get(rest)
+        if minutes is None:
+            raise ValueError("rest must be short or long")
+        return minutes
+
+    def complete_ritual(
+        self, rule: Any, character: dict[str, Any], resource_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Finish a timed ritual (Magical Cunning) on this character.
+
+        Returns the minutes the rite took along with the restored slots: the
+        caller must move the world clock by that much in the same authoritative
+        write, which is what makes the 1 minute real instead of decorative.
+        """
+
+        del rule
+        canonical = character.get("ruleset_character")
+        locale = str(canonical.get("locale") or "") if isinstance(canonical, dict) else ""
+        bundle = self.load_bundle(locale)
+        if resource_id is not None and not isinstance(resource_id, str):
+            raise ValueError("resource_id must be a string")
+        result = Dnd2024RestEngine(bundle).complete_ritual(character, resource_id)
+        result["character"] = self._live_projection(character, result["character"], bundle)
+        return result
+
+    def ritual_options(self, rule: Any, character: dict[str, Any]) -> list[dict[str, Any]]:
+        """Read-only description of the rituals this character could perform."""
+
+        del rule
+        canonical = character.get("ruleset_character")
+        payload = canonical if isinstance(canonical, dict) else character
+        locale = str(payload.get("locale") or "") if isinstance(payload, dict) else ""
+        bundle = self.load_bundle(locale)
+        return Dnd2024RestEngine(bundle).ritual_options(payload)
+
+    def rest_options(self, rule: Any, character: dict[str, Any]) -> dict[str, Any]:
+        """What a Long Rest requires or may change for one character.
+
+        Read-only by contract: it neither mutates the sheet nor opens a rest
+        session.  The client uses it to draw the terrain and study pickers, so
+        the option lists it renders and the checks the engine commits from are
+        the same tables.
+        """
+
+        del rule
+        canonical = character.get("ruleset_character")
+        payload = canonical if isinstance(canonical, dict) else character
+        locale = str(payload.get("locale") or "") if isinstance(payload, dict) else ""
+        bundle = self.load_bundle(locale)
+        return Dnd2024RestEngine(bundle).rest_options(payload)
 
     def validate_rest_options(
         self, instance: Any, actor_id: str, rest: str,
@@ -935,7 +1017,13 @@ class Dnd2024Runtime:
             raise ValueError("attunement changes are only valid during a short rest")
         if "prepared_spells" in options and rest != "long":
             raise ValueError("prepared spells can only be changed on a long rest")
-        checked = {"attunement", "prepared_spells"} & set(options)
+        if "land_terrain" in options and rest != "long":
+            raise ValueError("land_terrain is only valid for a long rest")
+        if "free_cast" in options and rest != "long":
+            raise ValueError("free_cast is only valid for a long rest")
+        if "recovery" in options and rest != "short":
+            raise ValueError("recovery is only valid for a short rest")
+        checked = self.rest_option_names & set(options)
         if not checked:
             return
         uid = str(actor_id).removeprefix("player:")
@@ -955,6 +1043,12 @@ class Dnd2024Runtime:
         if "prepared_spells" in checked:
             # 存入队伍会话之前就拒绝非法值，避免把坏 payload 带到结算阶段。
             engine.parse_prepared_spells(canonical, options["prepared_spells"])
+        if "land_terrain" in checked:
+            engine.validate_land_terrain(canonical, options["land_terrain"])
+        if "free_cast" in checked:
+            engine.validate_free_cast(canonical, options["free_cast"])
+        if "recovery" in checked:
+            engine.validate_short_recovery(canonical, options["recovery"])
 
     @staticmethod
     def validate_rest_context(instance: Any, actor_id: str, rest: str) -> None:
@@ -1292,6 +1386,7 @@ class Dnd2024Runtime:
             "death_save_crit_threshold",
             "check_bonus_rolls",
             "aura_bonus", "aura_sources", "blocked_condition", "blocked_by_aura",
+            "blocked_by_feature",
             "distance", "round", "turn_index", "previous_actor_id", "condition", "reason",
             "spell_ref", "resource", "roll", "successes", "failures", "stable", "dead", "hp",
             "item_ref",

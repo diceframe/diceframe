@@ -296,6 +296,10 @@ async def test_party_rest_rejects_bad_attunement_before_joining(context, rest):
 
 def test_the_dnd2024_runtime_declares_its_rest_options() -> None:
     # 这份声明就是服务层的白名单：多一个不多余，少一个就把合法选项挡在门外。
+    # ``land_terrain`` 是 Circle of the Land 每次长休记录的选择，
+    # ``prepared_spells`` 是长休时的一次准备替换，``free_cast`` 是 Spell Mastery
+    # 研究的那一项，``recovery`` 是短休的恢复预算；通用休息服务转发它们，
+    # 只因运行时声明了它们。
     assert build_default_ruleset_registry().get(RUNTIME_ID).rest_option_names == frozenset(
-        {"attunement", "prepared_spells"}
+        {"attunement", "prepared_spells", "land_terrain", "free_cast", "recovery"}
     )

@@ -564,7 +564,26 @@ class Dnd2024AdvancementEngine:
             current_cantrips = list(before_spell.get("cantrip_refs") or [])
             current_prepared = list(before_spell.get("prepared_spell_refs") or [])
             current_spellbook = list(before_spell.get("spellbook_refs") or [])
-            target_requirements = spell_selection.requirements(class_ref, target_level)
+            # 施法选择按"升级后"的角色状态解析特性归属：Bard 9→10 的那一级
+            # Magical Secrets 才算拥有，用升级前的 9 级读会永远看不到四列表。
+            spell_state = deepcopy(character)
+            spell_state["build"] = {
+                **(character.get("build") or {}),
+                "class_levels": [{"class_ref": class_ref, "level": target_level}],
+            }
+            spell_feature_state = spell_state.get("features")
+            spell_feature_state = (
+                spell_feature_state if isinstance(spell_feature_state, dict) else {}
+            )
+            spell_feature_state["subclass_ref"] = (
+                selected_subclass_ref
+                if selected_subclass_ref == expected_subclass_ref
+                else str(spell_feature_state.get("subclass_ref") or "")
+            )
+            spell_state["features"] = spell_feature_state
+            target_requirements = spell_selection.requirements(
+                class_ref, target_level, spell_state,
+            )
             previous_lists = {
                 "cantrip_refs": current_cantrips,
                 "prepared_spell_refs": current_prepared,
@@ -580,14 +599,30 @@ class Dnd2024AdvancementEngine:
                 if policy is not None and policy.source == "spellbook"
                 else 0
             )
+            open_slots = [
+                slot for slot in spell_selection.grant_slots(target_level, spell_state)
+                if not slot["selected_refs"]
+            ]
+            # 免费施法槽同样"拥有但未选"时要把整块标成 required：11 级的
+            # 秘奥与 18 级的法术精通都必须在这一级做出选择，但它们未提交
+            # 时不算非法（见 `_validate_free_cast`）。
+            open_free = [
+                slot
+                for slot in spell_selection.free_cast_slots(target_level, spell_state)
+                if slot["source"] != "fixed" and not slot["selected"]
+            ]
             spell_choice_required = (
                 len(current_cantrips) != target_requirements["cantrip_count"]
                 or len(current_prepared) != target_requirements["prepared_spell_count"]
                 or spellbook_growth > 0
+                or bool(open_slots)
+                or bool(open_free)
             )
             raw_spell_choices = choices.get("class_spell_choices")
             if spell_choice_required or raw_spell_choices is not None:
-                spell_options = spell_selection.options(class_ref, target_level)
+                spell_options = spell_selection.options(
+                    class_ref, target_level, spell_state,
+                )
                 requirements.append({
                     "id": "class_spell_choices",
                     "kind": "spell_selection",
@@ -607,10 +642,13 @@ class Dnd2024AdvancementEngine:
                     "spellbook_additions": spellbook_growth,
                     "cantrips": spell_options["cantrips"],
                     "leveled_spells": spell_options["leveled_spells"],
+                    "grant_slots": spell_options["grant_slots"],
+                    "free_cast_slots": spell_options["free_cast_slots"],
                 })
                 spell_choices, spell_errors = spell_selection.validate(
                     class_ref, target_level, raw_spell_choices,
                     previous=previous_lists,
+                    character=spell_state,
                 )
                 errors.extend(spell_errors)
             else:
@@ -1262,6 +1300,93 @@ class Dnd2024AdvancementEngine:
                     str(ref) for record in chosen for ref in record["selected_refs"]
                 )
                 continue
+            if choice is not None and choice.kind == "feature_option":
+                # 互斥特性选项（Divine Strike / Potent Spellcasting、Primal
+                # Strike / Potent Spellcasting）的候选就是声明里点名的那些
+                # 特性，不走专长目录，也不存在"未实现"这一档：写进
+                # enabled_options 就等于承诺它已实现。
+                options = [
+                    {
+                        "value": str(ref),
+                        "available": True,
+                        "unavailable_reasons": [],
+                    }
+                    for ref in choice.enabled_options
+                ]
+                requirements.append({
+                    "id": f"feature_choice:{definition.owner}:{definition.id}:{choice.id}",
+                    "kind": "feature_choice",
+                    "required": True,
+                    "owner": definition.owner,
+                    "feature_id": definition.id,
+                    "choice_id": choice.id,
+                    "count": choice.count,
+                    "options": options,
+                })
+                slot = [
+                    index for index, record in enumerate(submitted)
+                    if record["owner"] == definition.owner
+                    and record["feature_id"] == definition.id
+                    and record["choice_id"] == choice.id
+                ]
+                if len(slot) > 1:
+                    errors.append(
+                        f"feature choice {definition.id} was submitted more than once"
+                    )
+                    matched.update(slot)
+                    continue
+                if not slot:
+                    errors.append(
+                        f"feature choice {definition.id} requires a selection at this level"
+                    )
+                    continue
+                matched.add(slot[0])
+                raw_refs = submitted[slot[0]]["selected_refs"]
+                if not isinstance(raw_refs, list) or not all(
+                    isinstance(ref, str) for ref in raw_refs
+                ):
+                    errors.append(
+                        f"feature choice {definition.id} selected_refs must be strings"
+                    )
+                    continue
+                allowed = set(choice.enabled_options)
+                picked: list[str] = []
+                bad = False
+                for ref in raw_refs:
+                    candidate = (
+                        str(ref) if str(ref).startswith("feature:")
+                        else f"feature:{ref}"
+                    )
+                    if candidate not in allowed:
+                        errors.append(
+                            f"{ref} is not a declared option of {definition.id}"
+                        )
+                        bad = True
+                        continue
+                    if candidate in picked:
+                        errors.append(
+                            f"feature choice {definition.id} selected_refs repeats an option"
+                        )
+                        bad = True
+                        continue
+                    picked.append(candidate)
+                if len(picked) != choice.count:
+                    if not bad:
+                        # 空清单也必须炸：静默放行会让角色"没选"却升级成功，
+                        # 之后所有依赖该选项的机械都读成"从未选择"。
+                        errors.append(
+                            f"feature choice {definition.id} must select exactly "
+                            f"{choice.count} option(s)"
+                        )
+                    continue
+                records.append({
+                    "owner": definition.owner,
+                    "feature_id": definition.id,
+                    "choice_id": choice.id,
+                    "selected_refs": picked,
+                    "granted_level": target_level,
+                })
+                continue
             enabled = set(choice.enabled_options)
             projected: list[dict[str, Any]] = []
             for option in self._feat_options(
@@ -1563,7 +1688,7 @@ class Dnd2024AdvancementEngine:
             for level, maximum in slot_max.items()
         }
         tracks = snapshot["tracks"]
-        spellcasting["class"] = {
+        next_magic = {
             **deepcopy(previous),
             "class_ref": preview["class_ref"],
             "ability": class_entity.get("spellcasting_ability"),
@@ -1589,6 +1714,26 @@ class Dnd2024AdvancementEngine:
             ),
             "concentration": previous.get("concentration"),
         }
+        grant_choices = preview["diff"].get("class_spell_choices", {}).get(
+            "spell_grant_choices"
+        )
+        if isinstance(grant_choices, dict) and grant_choices:
+            # 授予槽位与地形选择都是玩家选择：升级只合并本次提交的槽位，
+            # 不能把 Land 已经选好的地形写丢。
+            merged = deepcopy(previous.get("spell_grant_choices") or {})
+            merged.update(deepcopy(grant_choices))
+            next_magic["spell_grant_choices"] = merged
+        free_cast = preview["diff"].get("class_spell_choices", {}).get(
+            "free_cast_slots"
+        )
+        if isinstance(free_cast, dict) and free_cast:
+            # 免费施法槽的记录同时装着"选了哪个法术"和"还剩几次"：这里的
+            # 合并只覆盖本次提交的槽位，替换 arcanum 不会顺手把已消耗的
+            # 次数刷回满值（`_free_cast_record` 保留原计数）。
+            merged_free = deepcopy(previous.get("free_cast_slots") or {})
+            merged_free.update(deepcopy(free_cast))
+            next_magic["free_cast_slots"] = merged_free
+        spellcasting["class"] = next_magic
 
     def _update_derived(self, character: dict[str, Any]) -> None:
         level = int(character["build"]["level"])
