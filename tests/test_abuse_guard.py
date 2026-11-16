@@ -6,10 +6,13 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from src.webui.abuse_guard import (
     ABUSE_GUARD_KEY,
+    WRITE_PER_IP_LIMIT,
+    WRITE_PER_IP_LIMIT_ENV,
     AbuseGuard,
     SlidingWindowLimiter,
     _is_ai_request,
     abuse_guard_middleware,
+    write_per_ip_limit_from_env,
 )
 from src.webui.services.room_password import mark_room_password_rejected
 
@@ -450,3 +453,24 @@ async def test_rotating_addresses_inside_one_slash_64_shares_every_bucket():
         wrong,
     )
     assert other.status == 403
+
+
+# ---------------------------------------------------------------------------
+# per-IP write budget override
+# ---------------------------------------------------------------------------
+
+def test_write_budget_defaults_to_the_production_limit(monkeypatch) -> None:
+    monkeypatch.delenv(WRITE_PER_IP_LIMIT_ENV, raising=False)
+    assert write_per_ip_limit_from_env() == WRITE_PER_IP_LIMIT == 60
+
+
+def test_write_budget_reads_the_harness_override(monkeypatch) -> None:
+    monkeypatch.setenv(WRITE_PER_IP_LIMIT_ENV, "300")
+    assert write_per_ip_limit_from_env() == 300
+
+
+@pytest.mark.parametrize("raw", ["", "  ", "not-a-number", "0", "-5"])
+def test_write_budget_ignores_unusable_overrides(monkeypatch, raw: str) -> None:
+    # 一个写坏的 env 不能把限流关掉，也不能让写请求全被拒。
+    monkeypatch.setenv(WRITE_PER_IP_LIMIT_ENV, raw)
+    assert write_per_ip_limit_from_env() == WRITE_PER_IP_LIMIT

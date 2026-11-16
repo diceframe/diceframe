@@ -1,0 +1,8 @@
+# src/engine/currency/codec.py 返回给请求方的提示。
+"zh-CN":
+  amount_invalid: "货币金额非法: %{amount}"
+  amount_not_exact: "金额 %{text} %{unit} 无法精确转换为整数个 %{base_unit}"
+  amount_not_positive: "货币金额必须大于 0"
+  canonical_amount_not_integer: "canonical 金额必须是整数: %{amount}"
+  currency_system_missing: "缺少规则货币结构，无法解析金额"
+  unknown_unit: "未知货币单位: %{unit_id}"
