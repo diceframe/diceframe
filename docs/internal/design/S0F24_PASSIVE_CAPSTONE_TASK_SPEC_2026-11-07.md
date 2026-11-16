@@ -177,3 +177,148 @@ git status --short
 - RNG、重放、存档与权限证据：
 - 与契约的偏差及原因：
 - 未决事项（不得把非目标列为已实现）：
+
+## 11. 执行报告
+
+- 实际基线：`47c82fb7`（S0-F23 执行报告提交），分支 `feat/dnd2024-s0f20-combat-start`
+- Python：`E:/Github/diceframe/.venv/Scripts/python.exe`（3.13）；ruff/mypy：`C:/Python314/Scripts/`（读 pyproject，锁 3.11）
+- 提交：`e2e5770e`（feat）/ `8b6c965f`（test）/ 本文件同批（docs）
+
+### 11.1 四项声明与真实授予
+
+四条 `class_feature_catalog` 声明，`source_ref` 分别 `srd-5.2.1:p30:indomitable-might`、`p30:primal-champion`、`p52:body-and-mind`、`p63:slippery-mind`；`progression_catalogs/srd_classes.json` 里 Barbarian 18/20、Monk 20、Rogue 15 原本就列了这四个 id，本切片只补 canonical 定义，没有改 progression。
+
+| 特性 | owner | 等级 | parameters |
+|---|---|---|---|
+| `indomitable_might` | `class:barbarian` | 18 | `strength_total_replacement: true` |
+| `primal_champion` | `class:barbarian` | 20 | `ability_bonus_str: 4`、`ability_bonus_con: 4`、`ability_score_cap: 25` |
+| `body_and_mind` | `class:monk` | 20 | `ability_bonus_dex: 4`、`ability_bonus_wis: 4`、`ability_score_cap: 25` |
+| `slippery_mind` | `class:rogue` | 15 | `saving_throw_proficiencies: ["wis", "cha"]` |
+
+- 授予只由等级表决定：`has_feature` 在阈值那一级为真、低一级为假，别的职业到 20 级也不获得。往 `build.feature_ids` 里写四个 id 的伪造卡不获得任何效果（`test_a_forged_feature_id_on_the_sheet_grants_nothing`）。
+- 中英文标签两条 locale 里原本就有（`Primal Champion`/原初冠军、`Body and Mind`/身心合一、`Slippery Mind`/圆滑心智、`Indomitable Might`/不屈之力），本切片未改 locale 文件。
+
+### 11.2 属性 +4 与 25 上限：净替换记账
+
+`apply_feature_ability_bonuses(abilities, grants, applied)` 是唯一入口：先把上次给的点数减掉得到 `base`，再加这次的点数，`record[ability] = raised - base` 写进 `derived.ability_bonus_applied`。
+
+- 每属性独立 `min(25, base+4)`：17→21、21→25、24→25、25→25、8→12（`test_primal_champion_adds_four_within_the_cap`）。
+- 上限只约束被声明的属性，`str` 到 25 不影响另外四项（`test_the_cap_only_bounds_the_score_it_names`）。
+- 净替换带来三条性质，全部有用例：同一张卡重复应用不再加（`test_applying_the_bonus_twice_changes_nothing`）、失去资格把点数收回（`test_losing_the_feature_gives_the_points_back`）、中间拿过的 ASI 不被吞掉（`test_an_asi_and_the_feature_do_not_eat_each_other`）。
+- `build.base_abilities` 与 `build.background_ability_bonuses` 原样保留（`test_the_build_record_is_never_rewritten`）。
+- 发放点在 `preview_next_level` 的 `ability_increases` 之后、Con 进入 HP 公式之前；`diff["ability_bonus_applied"]` 随预览返回，`apply_next_level` 落到 `derived`，空字典时删除键。
+
+### 11.3 Slippery Mind：合并同一集合，来源单独记
+
+- `_update_derived` 把 `ability:wis`/`ability:cha` 并进已有的 `proficiencies.saving_throw_refs` 集合，PB 仍只在算加值时加一次，所以职业本来就给的豁免不会翻倍（`test_a_proficient_save_never_doubles_the_bonus`：dex/int 不变、wis/cha 恰好 `mod + PB`）。
+- 来源写在 `derived.saving_throw_proficiency_sources = {"wis": "slippery_mind", "cha": "slippery_mind"}`；建卡路径 `derive()` 同一条规则，并把这两条 ref 的来源写成特性 id 而不是 `class:rogue`（`build.grants_with_sources`）。
+- 直接建卡只支持 1 级，所以 `derive()` 那一段在真实建卡里走不到 15 级；保留它是为了让"谁能给熟练"只有一个答案，不留一条只有升级才存在的规则。
+
+### 11.4 Indomitable Might：替换总值，不动骰面
+
+`_strength_total_replacement(target, ability, total)` 在 `combat/resolution.py`，返回 `(用来判定的 total, 审计字段)`：
+
+- 只在 `ability == "str"` 且角色真实拥有该特性时介入；`ordinary_total >= Str score` 时原样返回并记 `total_replaced=false`，否则返回 Str score 并记 `total_replaced=true`。
+- 审计字段固定四个：`ordinary_total`、`replacement_score`、`total_replaced`、`feature_id`。`natural`、`rolls`、`modifier` 一个都不写，所以天然 3 + 2 的事件仍是 `natural=3 / rolls=[3] / ordinary_total=5 / total=21`（`test_the_natural_face_is_never_rewritten`）。
+- 顺序是"先合成再替换"：天然 1 加上一串加值到 22 就保持 22，不会回落到 `max(natural, score) + modifier`（`test_modifiers_are_summed_before_the_replacement`）。
+- 不掷骰、不加骰、不重掷：审计字段里没有骰面也没有掷骰记录，RNG 顺序与基线一致（`test_no_die_is_rolled_for_the_replacement`）。
+- 替换后的 total 直接参与 `success = total >= DC`；替换不制造 `critical`，也不取消天然骰的既有分支（死亡豁免是另一条函数，见 11.7 的用例）。
+- 接入点：`_hit_condition_events`（Stunning Strike）、`_open_hand_events`（Open Hand Push 的 Str save）、`_spell_events` 的 `saving_throw` 分支、`_channel_events` 的 divine_spark / turn_undead / abjure_foes、`_repeat_save_check`。auto-fail 分支（麻痹/昏迷自动失败）不经过替换，`total=0` 保持 `success=False`。
+- 公共 feed：`runtime._recent_combat_events` 的 `allowed_fields` 增加三个数字字段，`feature_id` 本来就在白名单里（`test_the_public_feed_keeps_the_audit_fields` 通过真实投影验证）。
+
+### 11.5 改动文件对照白名单
+
+| 白名单 | 实际改动 |
+|---|---|
+| 1 `content/class_feature_catalogs/srd_class_features.json` | 四条声明 |
+| 2/3 `locales/en|zh-CN/...` | 未改：四个标签基线已存在 |
+| 4 `features/resolver.py` | `saving_throw_proficiency_sources`、`ability_bonuses`、`strength_total_replacement`、两个校验 + passive flag 元组 |
+| 5 `character/derivation.py` | `apply_feature_ability_bonuses`；`derive()` 合并单项豁免熟练与来源 |
+| 6 `character/reconciliation.py` | 未改：`reconcile` 只读已存 `abilities`，不会再从 base 重算（`test_armor_class_is_derived_from_the_new_scores_not_a_snapshot` 验证换装协调后 AC 仍按新属性） |
+| 7 `combat/resolution.py` | `INDOMITABLE_MIGHT` 常量、`_strength_total_replacement`、六处豁免结算点接线 |
+| 8 `combat/view.py` | 未改：actor view 已投影 `abilities`/`skill_values`/`saving_throws`，没有新增字段 |
+| 9 `runtime.py` | `_recent_combat_events` 白名单三字段 |
+| 10 `tests/rulesets/test_dnd2024_passive_capstones.py` | 新建，54 例 |
+| 11 本任务书 | 追加本节 |
+
+白名单外没有改动。
+
+### 11.6 测试 1–24 逐项
+
+| # | 覆盖用例 | 结果 |
+|---|---|---|
+| 1 | `test_each_feature_arrives_exactly_at_its_own_level`(4)、`test_another_class_never_owns_the_feature`(4) | 通过 |
+| 2 | `test_primal_champion_adds_four_within_the_cap`(5)、`test_the_cap_only_bounds_the_score_it_names`、`test_primal_champion_raises_strength_and_constitution` | 通过 |
+| 3 | `test_body_and_mind_only_moves_dexterity_and_wisdom` | 通过 |
+| 4 | `test_the_build_record_is_never_rewritten`、`test_applying_the_bonus_twice_changes_nothing`、`test_losing_the_feature_gives_the_points_back`、`test_an_asi_and_the_feature_do_not_eat_each_other` | 通过 |
+| 5 | `test_the_new_scores_reach_every_derived_number`、`test_a_dexterity_feature_moves_initiative_armor_class_and_skills` | 通过（法术 DC 见 11.9） |
+| 6 | `test_constitution_raises_hit_points_once` | 通过 |
+| 7 | `test_armor_class_is_derived_from_the_new_scores_not_a_snapshot` | 通过 |
+| 8 | `test_slippery_mind_adds_wisdom_and_charisma` | 通过 |
+| 9 | `test_a_proficient_save_never_doubles_the_bonus`、`test_the_two_new_saves_follow_the_ability_and_the_bonus` | 通过 |
+| 10 | `test_malformed_ability_bonuses_fail_closed`(6)、`test_malformed_proficiency_grants_fail_closed`(5)、`test_a_truthy_replacement_flag_fails_closed`、`test_a_cap_without_a_bonus_fails_closed` | 通过 |
+| 11 | `test_a_low_total_becomes_the_strength_score` | 通过 |
+| 12 | `test_a_total_at_or_above_the_score_is_left_alone` | 通过 |
+| 13 | `test_the_natural_face_is_never_rewritten` | 通过 |
+| 14 | `test_modifiers_are_summed_before_the_replacement` | 通过 |
+| 15 | `test_only_strength_reads_the_replacement`、`test_an_attack_roll_never_reads_the_replacement`、`test_a_death_save_never_reads_the_replacement` | 通过 |
+| 16 | `test_the_natural_face_is_never_rewritten`（DC 15 由 fail 转 success，未生成 `critical`） | 通过 |
+| 17 | `test_the_replacement_score_follows_the_current_strength` | 通过 |
+| 18 | `test_no_die_is_rolled_for_the_replacement` | 通过 |
+| 19 | — | 未覆盖，见 11.9 |
+| 20 | `test_a_character_without_the_feature_keeps_its_total`、`test_a_forged_feature_id_on_the_sheet_grants_nothing` | 通过 |
+| 21 | `test_the_public_feed_keeps_the_audit_fields` | 通过 |
+| 22 | `test_the_sheet_round_trip_keeps_the_new_scores`、`test_the_advancement_is_deterministic` | 通过 |
+| 23 | 聚焦 54 + 邻接 170 + 全量 2404 | 通过 |
+| 24 | 见 11.7 | 通过 |
+
+### 11.7 门禁输出
+
+```
+python -m pytest tests/rulesets/test_dnd2024_passive_capstones.py -q
+54 passed, 3 warnings in 13.07s
+
+python -m pytest tests/rulesets/test_dnd2024_draconic_resilience.py \
+  tests/rulesets/test_dnd2024_character_builder.py tests/rulesets/test_dnd2024_progression.py \
+  tests/rulesets/test_dnd2024_rage.py tests/rulesets/test_dnd2024_survivor.py -q
+170 passed, 5 warnings in 200.15s
+
+python -m pytest tests/rulesets -q -n 6 --dist loadfile    # 最终树
+2404 passed, 73 warnings in 489.39s (0:08:09)
+python -m pytest tests/rulesets -q          # 串行，同一份代码的对照
+2404 passed, 46 warnings in 2453.30s (0:40:53)
+
+ruff check（resolver / character / combat / runtime / progression / 新测试）
+All checks passed!
+mypy
+Success: no issues found in 102 source files
+git diff --check
+（无输出，exit 0）
+```
+
+基线对照：F23 收尾时 `tests/rulesets` 为 2350 passed，本切片 +54 例 → 2404 passed / 0 failed，无新增失败。
+
+专门的证据（按要求单独列出）：
+
+- 25 上限：`17→21 / 21→25 / 24→25 / 25→25 / 8→12`，见 `test_primal_champion_adds_four_within_the_cap`。
+- 熟练不双倍：Rogue 15 的 dex/int 豁免与 14 级完全一致，wis/cha 恰好 `mod + PB`。
+- natural 不变：`natural=3 / rolls=[3] / ordinary_total=5 / total=21 / total_replaced=true`。
+- total 后替换：天然 1 + 加值到 22 时保持 22（不替换），到 2 时替换成 21。
+
+### 11.8 与契约的偏差及原因
+
+1. **审计字段名用 `feature_id`，与 channel 效果的 `feature_id` 同键**。本切片的 channel 豁免属性是 Con/Wis，结构上不会走到替换分支，所以不会互相覆盖；若将来出现 Str 属性的引导神力，这个键会冲突，届时应换成 `replacement_feature_id`。
+2. **21/24/25 三档只在纯函数上验证**。19 级要拿到 21/24/25 必须靠 Epic Boon 越过 ASI 的 20 上限，而本切片的升级路径没有把 Boon 的属性增长纳入断言范围；`apply_feature_ability_bonuses` 是唯一实现，端到端的 17→21 与 20→24 另有覆盖。
+3. **测试 19（Wild Shape）未覆盖**：引擎没有 Wild Shape，F3 的"保留 class feature 的形态"在本仓不存在，写一个占位用例只会假绿。
+4. **测试 5 的"法术 DC"未覆盖**：Barbarian/Monk/Rogue 都不是施法者，四个特性也不落在施法职业上；技能（`skill_values`）、先攻、AC、被动感知、豁免都已覆盖。
+5. **`derive()` 的 Slippery Mind 合并是防御性代码**：建卡只支持 1 级，15 级角色只能由升级产生，所以真实路径不会经过它；保留的理由是"谁能给熟练"只应有一个答案。
+6. **Con +4 对当前 HP 的影响沿用升级既有规则**：受伤角色升级后 HP 增加量等于 `diff.hp.gain`（含 38 点回溯体质），本切片没有新增治疗事件，也没有改动这条规则；`test_constitution_raises_hit_points_once` 断言的是"只加一次、第二次协调不再加"。
+7. **`_strength_total_replacement` 的接线点是六个**，不是"所有 check 事件"：`reaction_spells.py` 的 Con 豁免是硬编码属性，`check_windows.py` 的窗口面只服务 Dex/Hide 与条件重复豁免，都不具备 Strength 面；硬接进去只会增加无测试覆盖的分支。
+
+### 11.9 未决事项
+
+1. **Indomitable Might 没有端到端可打的 Strength 检定面**：引擎没有擒抱/推撞/通用 Strength 检定意图，SRD 里有 `save: "str"` 的法术一条也没实现（`spell_effects` 只有 dex/con/wis），Open Hand Push 的 Str save 打的是敌人。所以 11–14、18 走授权函数 + 真实 actor view，15/16 的"攻击、死亡豁免不读它"是真跑出来的。要补端到端，需要先有 Str 检定面（属 F21 之后的新切片）。
+2. **`ability_bonuses` 只在升级路径生效**：`derive()` 不重算高级角色的属性（`reconcile` 读已存 `abilities`），所以"直接建 20 级角色"这条路要等建卡支持高等级时再接，届时 `derive()` 必须调用同一个 `apply_feature_ability_bonuses`，否则会出现第二个加值入口。
+3. **Epic Boon 的属性增长**：Boon 能越过 20，但 Boon 的声明与结算不在本切片；Primal Champion 与 Boon 同级的顺序（谁先加、上限怎么套）未验证。
+4. **`total_replaced=false` 时也写审计四字段**：契约只要求"替换发生时"记录，多记一份"没替换"的证据是为了让公共 feed 能区分"没这特性"和"有特性但没触发"，代价是每个 Str 豁免多四个键。
+5. **前端未接**：`replacement_score`/`ordinary_total` 还没有展示位；按 F23 的惯例，展示另开切片。
