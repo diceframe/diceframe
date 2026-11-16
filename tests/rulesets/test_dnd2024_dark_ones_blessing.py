@@ -304,10 +304,11 @@ def test_the_trigger_payload_is_one_closed_four_key_set(payload) -> None:
         resolver_for(bundle, payload)
 
 
-def test_the_declared_payload_is_exactly_the_four_keys() -> None:
+def test_the_declared_payload_includes_srd_other_kill_range() -> None:
     bundle = Dnd2024Runtime().load_bundle("en")
     definition = catalog_definition(bundle.get("class_feature_catalog", "srd_class_features"))
-    assert set(definition["parameters"]) == PAYLOAD_KEYS
+    assert set(definition["parameters"]) == PAYLOAD_KEYS | {"other_defeat_range_ft"}
+    assert definition["parameters"]["other_defeat_range_ft"] == 10
     assert definition["source_ref"] == "srd-5.2.1:p76:dark-ones-blessing"
     assert definition["owner"] == "subclass:fiend_patron"
     assert definition["minimum_level"] == 3
@@ -462,11 +463,11 @@ def test_the_amount_follows_the_current_level_and_charisma() -> None:
     assert resources(instance)["temp_hp"] == event["amount"]
 
 
-# --- matrix 11-12: only the source, and no distance ----------------------
+# --- matrix 11-12: nearby other kills and unrestricted own kills --------
 
-@pytest.mark.parametrize("enemy_position", [5, 60])
-def test_a_teammates_kill_grants_nothing_at_any_distance(enemy_position) -> None:
-    """11. Another creature's kill pays that creature, never a bystander."""
+@pytest.mark.parametrize("enemy_position", [5, 10, 15, 60])
+def test_teammate_kill_uses_enemy_to_owner_ten_foot_range(enemy_position) -> None:
+    """SRD 5.2.1 p76: someone else's kill within 10 feet also grants THP."""
 
     _runtime, engine, instance = party_instance(
         positions={"gm": 0, "ally": 0}, enemy_position=enemy_position,
@@ -474,8 +475,13 @@ def test_a_teammates_kill_grants_nothing_at_any_distance(enemy_position) -> None
     set_turn(engine, instance, "player:ally")
     result = attack(engine, instance, actor_id="player:ally", rolls=[10, 4, 1])
 
-    assert temp_events(result) == []
-    assert "temp_hp" not in resources(instance)
+    if enemy_position <= 10:
+        assert len(temp_events(result)) == 1
+        assert temp_event(result)["target_id"] == "player:gm"
+        assert resources(instance)["temp_hp"] == 5
+    else:
+        assert temp_events(result) == []
+        assert "temp_hp" not in resources(instance)
 
 
 def test_a_ranged_kill_needs_no_distance() -> None:

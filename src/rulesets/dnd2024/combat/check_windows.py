@@ -568,7 +568,10 @@ class CombatCheckWindowsMixin:
         codes: list[str], source: str, target_id: str,
     ) -> dict[str, Any] | None:
         roller_id = str(roller["actor_id"])
+        offered = list(settlement.get("ability_offered") or [])
         for index, code in enumerate(codes):
+            if code in offered:
+                continue
             exclude = tuple(str(item) for item in settlement.get("exclude_bards") or ())
             owner_id = self._ability_check_candidate(
                 instance, combat, code, roller_id, check, exclude,
@@ -589,6 +592,11 @@ class CombatCheckWindowsMixin:
             if die_sides == 0 and not WINDOW_REGISTRY[code].replaces_natural:
                 continue
             remaining = codes[index + 1:]
+            # Cutting Words is per bard; its owners are excluded by the
+            # finisher. Every other face is offered once per check, even if
+            # declined or refunded after an unsuccessful rescue.
+            if code != "cutting_words_ability":
+                settlement["ability_offered"] = [*offered, code]
             settlement["remaining_windows"] = list(remaining)
             return self._build_check_window(
                 instance, code=code, surface="ability_check", owner_id=owner_id,
@@ -624,13 +632,16 @@ class CombatCheckWindowsMixin:
 
         roller_id = str(decision["actor_id"])
         roller = self._actor_view(instance, combat, roller_id)
-        codes = [str(item) for item in decision.get("remaining_windows") or []]
-        if not codes:
-            # A rescued check succeeds: the cut face becomes available; a cut
-            # check that now fails: the roller's own die becomes available.
-            codes = self._ability_window_codes(
-                instance, combat, roller, check, settlement,
-            )
+        # Re-evaluate both polarities, but never reset asking history when
+        # the queue is exhausted. Also seed the held face for older pending
+        # decisions that predate ability_offered.
+        code = str(decision["window_code"])
+        offered = list(settlement.get("ability_offered") or [])
+        if code != "cutting_words_ability" and code not in offered:
+            settlement["ability_offered"] = [*offered, code]
+        codes = self._ability_window_codes(
+            instance, combat, roller, check, settlement,
+        )
         return self._open_ability_window(
             instance, combat, roller, check, settlement, codes,
             str(decision.get("source") or ""),
@@ -747,24 +758,18 @@ class CombatCheckWindowsMixin:
         order never hides a cheaper option -- it only fixes which one is asked
         first, which is what makes a replay reproducible.
 
-        A death save is the one surface that does not take the reroll faces:
-        its tally branches on the face alone and the death-save contract keeps
-        one settled result per turn (the deviation S0-E3 recorded).  A second
-        face would make that record ambiguous, so only the faces that do not
-        replay the roll are offered -- Stroke of Luck rewrites the d20 and
-        Dark One's Own Luck adds a die to the roll already made.
+        Death saves use the same reroll faces, but natural 1 remains a failure
+        regardless of the total. Only replacing the natural face can save it.
         """
 
         if roller.get("side") != "party":
             return []
         if roller.get("kind") not in {"player", "companion"}:
             return []
-        failed = not check.get("success")
         surface = str(settlement.get("surface") or "")
-        # 死亡豁免与其它豁免同一套重掷面：重掷是"换一颗新骰并强制采用"，
-        # 旧的天然面不复存在，所以 natural 1 的两重失败只对被换掉的那颗骰
-        # 生效，重掷后面临的是新骰。真正不能被骰子救的只有"在原骰上加值"
-        # 这一类（见下方 skip_dool）。
+        failed = not self._nonattack_check_success(check)
+        # Replacement/reroll faces can rescue a natural 1 even when its total
+        # reaches 10; adding a bonus die cannot change that natural face.
         reroll_faces = ("stroke_of_luck_save", "indomitable", "disciplined_survivor")
         pairs: list[tuple[str, str]] = []
         if failed:
@@ -777,8 +782,7 @@ class CombatCheckWindowsMixin:
             # (Stroke of Luck, and now the rerolls above) still can, which is
             # why only Dark One's Own Luck is skipped here.
             skip_dool = (
-                str(settlement.get("surface") or "") == "death_save"
-                and int(check.get("natural", 0) or 0) == 1
+                surface == "death_save" and int(check.get("natural", 0) or 0) == 1
             )
             owner_id = "" if skip_dool else self._dool_owner(instance, roller)
             if owner_id:
@@ -1318,7 +1322,7 @@ class CombatCheckWindowsMixin:
             check.pop("critical_upgrade", None)
             check["success"] = self._attack_check_success(check)
         else:
-            check["success"] = int(check["total"]) >= int(check["target"])
+            check["success"] = self._nonattack_check_success(check)
         return check
 
     def _reroll_check(
@@ -1347,11 +1351,7 @@ class CombatCheckWindowsMixin:
             key: deepcopy(check[key]) for key in (
                 "type", "kind", "actor_id", "source_actor_id", "ability",
                 "modifier", "check_bonus", "check_bonus_rolls", "aura_bonus",
-                "aura_sources", "target", "repeat_save",
-                # 重掷只换骰面，不换这条豁免的判定规则：死亡豁免的暴击阈值
-                # 来自特性（Disciplined Survivor 之类），丢了就会把 18+ 的
-                # 成功当成普通成功。
-                "death_save_crit_threshold",
+                "aura_sources", "target", "repeat_save", "death_save_crit_threshold",
             ) if key in check
         }
         rerolled = {
@@ -1378,7 +1378,7 @@ class CombatCheckWindowsMixin:
                 {"code": code, "mode": mode},
             ]
         rerolled["total"] = self._check_total(rerolled, natural)
-        rerolled["success"] = int(rerolled["total"]) >= int(rerolled["target"])
+        rerolled["success"] = self._nonattack_check_success(rerolled)
         return rerolled
 
     def _spend_check_window(
@@ -1442,8 +1442,8 @@ class CombatCheckWindowsMixin:
                 "window_bonus": die,
                 "window_bonus_rolls": [die],
                 "total": total,
-                "success": total >= int(check["target"]),
             })
+            check["success"] = self._nonattack_check_success(check)
             return check
         if code in {"bardic_inspiration", "peerless_skill"}:
             # Add the die to the failed d20 total and re-judge.  A natural 1
@@ -1482,6 +1482,18 @@ class CombatCheckWindowsMixin:
             })
             return check
         raise CombatIntentError("this check window code is not supported")  # pragma: no cover
+
+    @staticmethod
+    def _nonattack_check_success(check: dict[str, Any]) -> bool:
+        """Death-save natural faces override bonuses, just as at settlement."""
+
+        if check.get("kind") == "death_save":
+            natural = int(check.get("natural", 0) or 0)
+            if natural == 1:
+                return False
+            if natural >= int(check.get("death_save_crit_threshold", 20) or 20):
+                return True
+        return int(check["total"]) >= int(check["target"])
 
     @staticmethod
     def _attack_check_success(check: dict[str, Any]) -> bool:

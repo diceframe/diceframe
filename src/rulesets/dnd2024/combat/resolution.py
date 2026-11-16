@@ -1486,10 +1486,9 @@ class CombatResolutionMixin:
 
         Called at every final damage landing point with the damage that
         settlement actually delivered -- after resistance, saves and riders --
-        so the trigger agrees with the existing defeat check.  Only the
-        source's own features are resolved: another party member never
-        benefits, no matter how close it stands, because the rule rewards the
-        creature that did the reducing.
+        so the trigger agrees with the existing defeat check. SRD 5.2.1 p76
+        also grants the benefit when someone else defeats an enemy within
+        the feature owner's declared range.
 
         Features opt in through the closed ``trigger`` / ``temp_hp_ability`` /
         ``temp_hp_class_ref`` / ``temp_hp_minimum`` payload; the engine never
@@ -1504,10 +1503,21 @@ class CombatResolutionMixin:
         # damage that does not reach 0 is not a defeat at all.
         if dealt <= 0 or hp_before <= 0 or hp_before - dealt > 0:
             return []
-        kind, _raw = _actor_kind(source_actor_id)
-        if kind not in {"player", "companion"}:
-            return []
-        view = self._actor_view(instance, combat, source_actor_id)
+        events: list[dict[str, Any]] = []
+        for row in self._all_targets(instance, combat):
+            recipient_id = str(row["actor_id"])
+            kind, _raw = _actor_kind(recipient_id)
+            if kind in {"player", "companion"}:
+                events.extend(self._defeat_recipient_events(
+                    instance, combat, source_actor_id, target, recipient_id,
+                ))
+        return events
+
+    def _defeat_recipient_events(
+        self, instance: Any, combat: dict[str, Any], source_actor_id: str,
+        target: dict[str, Any], recipient_id: str,
+    ) -> list[dict[str, Any]]:
+        view = self._actor_view(instance, combat, recipient_id)
         character = self._feature_character(view)
         state = self.features.class_state(character)
         if state is None:
@@ -1518,6 +1528,12 @@ class CombatResolutionMixin:
             parameters = definition.parameters
             if parameters.get("trigger") != ENEMY_REDUCED_TO_ZERO_HP:
                 continue
+            if recipient_id != source_actor_id:
+                radius = parameters.get("other_defeat_range_ft")
+                if radius is None or self._distance(
+                    combat, recipient_id, str(target["actor_id"]),
+                ) > radius:
+                    continue
             ability = parameters.get("temp_hp_ability")
             class_ref = parameters.get("temp_hp_class_ref")
             minimum = parameters.get("temp_hp_minimum")
@@ -1541,7 +1557,7 @@ class CombatResolutionMixin:
             amount = max(minimum, modifier + state[1])
             events.append({
                 "type": "resource.changed", "resource": "temp_hp",
-                "target_id": source_actor_id, "source_actor_id": source_actor_id,
+                "target_id": recipient_id, "source_actor_id": source_actor_id,
                 "defeated_actor_id": str(target["actor_id"]),
                 "delta": amount, "amount": amount, "rolls": [],
                 "feature_id": definition.id, "owner": definition.owner,
@@ -2258,16 +2274,21 @@ class CombatResolutionMixin:
         # rather than folded into ``modifier`` so the event still shows a bare
         # d20 plus separately-attributable sources.
         aura = self._saving_throw_aura_bonus(instance, combat, actor)
-        total = roll + check_bonus + int(aura["bonus"])
+        modifier = (
+            int(actor["proficiency_bonus"])
+            if self.features.saving_throw_proficiency_all(character) else 0
+        )
+        total = roll + modifier + check_bonus + int(aura["bonus"])
         check_event = {
             "type": "check.resolved", "kind": "death_save", "actor_id": actor_id,
             "rolls": [value for value in (first, second) if value is not None],
-            "natural": roll, "modifier": 0,
+            "natural": roll, "modifier": modifier,
             "check_bonus": check_bonus,
             "check_bonus_rolls": check_bonus_rolls, "bless_bonus": check_bonus,
             "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
             "total": total,
-            "target": 10, "success": total >= 10,
+            "target": 10,
+            "success": roll != 1 and (roll >= crit_threshold or total >= 10),
             "roll_id": f"death_save:{actor_id}:1",
         }
         if advantage_sources:
