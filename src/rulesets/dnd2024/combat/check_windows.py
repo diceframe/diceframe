@@ -275,7 +275,7 @@ class CombatCheckWindowsMixin:
         successful save (or no DOOL owner) is returned byte-for-byte.
         """
 
-        events = self._concentration_events(target, damage, rng)
+        events = self._concentration_events(instance, combat, target, damage, rng)
         if not events or events[0].get("success"):
             return events
         owner_id = self._dool_owner(instance, target, failed=True)

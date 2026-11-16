@@ -1270,7 +1270,7 @@ export interface RulesetCombatSpell extends JsonObject {
   /** The server exposes this only when the spell attack can still spend a Lucky point. */
   lucky_advantage_available?: boolean
   /** The server exposes this only when Overchannel can legally maximize this casting. */
-  maximize_damage_available?: boolean
+  overchannel_available?: boolean
 }
 
 export interface RulesetCombatReactionFeature extends JsonObject {

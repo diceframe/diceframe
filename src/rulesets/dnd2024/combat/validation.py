@@ -17,6 +17,13 @@ from ..character.attunement import (
     item_requires_attunement,
     owned_ref_counts,
 )
+from ..features.models import ClassFeatureError
+from ..features.resources import (
+    OVERCHANNEL_FEATURE_ID,
+    OVERCHANNEL_OWNER,
+    OVERCHANNEL_SPELL_CLASS,
+    feature_usage_count,
+)
 from ..items.activation import (
     ItemActivationError,
     validate_activation_declaration,
@@ -718,21 +725,36 @@ class CombatValidationMixin:
                 raise CombatIntentError("spell resist_type choice is required")
         elif intent.get("resist_type") is not None:
             raise CombatIntentError("this spell does not take a resist_type")
-        maximize = intent.get("maximize_damage")
-        if maximize is not None and not isinstance(maximize, bool):
-            raise CombatIntentError("maximize_damage must be a boolean")
-        if maximize:
+        maximise = intent.get("overchannel")
+        if maximise is not None and not isinstance(maximise, bool):
+            raise CombatIntentError("overchannel must be a boolean")
+        if maximise:
             character = self._feature_character(actor)
-            max_slot = int(self.features.feature_value(
-                character, "overchannel", "max_slot_level", 5,
-            ) or 0)
-            if not self.features.has_feature(character, "overchannel") or max_slot < 1:
+            if not self.features.has_feature(
+                character, OVERCHANNEL_FEATURE_ID, owner=OVERCHANNEL_OWNER,
+            ):
                 raise CombatIntentError("overchannel is required to maximize damage")
+            # 列表归属来自官方目录的 `class_refs`；学派不是门槛。
+            if OVERCHANNEL_SPELL_CLASS not in spell["class_refs"]:
+                raise CombatIntentError("overchannel only applies to Wizard spells")
             if effect["mode"] not in {"spell_attack", "saving_throw", "automatic_damage"} \
                     or not effect.get("damage"):
                 raise CombatIntentError("this spell does not deal damage")
+            max_slot = int(self.features.feature_value(
+                character, OVERCHANNEL_FEATURE_ID, "maximum_slot_level", 0,
+                owner=OVERCHANNEL_OWNER,
+            ) or 0)
             if not 1 <= int(slot_level) <= max_slot:
-                raise CombatIntentError("maximized casting requires a spell slot of level 1-5")
+                raise CombatIntentError(
+                    f"maximized casting requires a spell slot of level 1-{max_slot}"
+                )
+            # 坏计数必须在这里炸掉，不能落成"首次免费"。
+            try:
+                feature_usage_count(
+                    character, OVERCHANNEL_OWNER, OVERCHANNEL_FEATURE_ID,
+                )
+            except ClassFeatureError as exc:
+                raise CombatIntentError(str(exc)) from exc
         if effect["mode"] == "teleport":
             distance = intent.get("teleport_distance")
             if isinstance(distance, bool) or not isinstance(distance, int) or distance == 0:

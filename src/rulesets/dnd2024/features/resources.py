@@ -189,6 +189,145 @@ def resource_state(
     return state if isinstance(state, Mapping) else {}
 
 
+USAGE_SCOPE_LONG_REST = "long_rest"
+FEATURE_USAGE_SCOPES = frozenset({USAGE_SCOPE_LONG_REST})
+
+# The only feature declared with a long-rest usage counter today.  The owner is
+# part of the identity on purpose: a short feature id alone would let another
+# subclass's `overchannel` share the same counter.
+OVERCHANNEL_FEATURE_ID = "overchannel"
+OVERCHANNEL_OWNER = "subclass:evoker"
+OVERCHANNEL_SPELL_CLASS = "class:wizard"
+
+
+def feature_usage_records(character: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """Validated copy of ``features.usage``; a missing key means no uses.
+
+    This is the whole ``count`` contract: entries are identified by
+    ``(owner, feature_id, scope)``, so the short id alone is never enough.
+    Anything unreadable raises instead of collapsing to zero -- treating a
+    corrupted save as "never used" would hand out a free maximized cast.
+    """
+
+    features = character.get("features") if isinstance(character, Mapping) else None
+    features = features if isinstance(features, Mapping) else {}
+    raw = features.get("usage")
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ClassFeatureError("features.usage must be an array")
+    records: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for item in raw:
+        if not isinstance(item, Mapping):
+            raise ClassFeatureError("features.usage entries must be objects")
+        owner = str(item.get("owner") or "")
+        feature_id = str(item.get("feature_id") or "")
+        scope = str(item.get("scope") or "")
+        if not owner or not feature_id:
+            raise ClassFeatureError("features.usage needs an owner and a feature id")
+        if scope not in FEATURE_USAGE_SCOPES:
+            raise ClassFeatureError(f"features.usage scope is unknown: {scope!r}")
+        count = item.get("count")
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ClassFeatureError(
+                "features.usage count must be a non-negative integer"
+            )
+        key = (owner, feature_id, scope)
+        if key in seen:
+            raise ClassFeatureError(
+                f"features.usage duplicates {owner}.{feature_id}"
+            )
+        seen.add(key)
+        records.append({
+            "owner": owner, "feature_id": feature_id, "scope": scope, "count": count,
+        })
+    return records
+
+
+def feature_usage_count(
+    character: Mapping[str, Any] | None,
+    owner: str,
+    feature_id: str,
+    scope: str = USAGE_SCOPE_LONG_REST,
+) -> int:
+    """How many times ``(owner, feature_id)`` was used in this ``scope``."""
+
+    for record in feature_usage_records(character):
+        if (
+            record["owner"] == owner
+            and record["feature_id"] == feature_id
+            and record["scope"] == scope
+        ):
+            return int(record["count"])
+    return 0
+
+
+def set_feature_usage_count(
+    character: dict[str, Any],
+    owner: str,
+    feature_id: str,
+    scope: str,
+    count: int,
+) -> None:
+    """Write one counter; zero drops the record so saves stay compact."""
+
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        raise ClassFeatureError("features.usage count must be a non-negative integer")
+    if scope not in FEATURE_USAGE_SCOPES:
+        raise ClassFeatureError(f"features.usage scope is unknown: {scope!r}")
+    if not isinstance(character, dict):
+        raise ClassFeatureError("character is not writable")
+    records = feature_usage_records(character)
+    found = False
+    kept: list[dict[str, Any]] = []
+    for record in records:
+        if (record["owner"], record["feature_id"], record["scope"]) == (
+            owner, feature_id, scope,
+        ):
+            record = {**record, "count": count}
+            found = True
+        if record["count"]:
+            kept.append(record)
+    if not found and count:
+        kept.append({
+            "owner": owner, "feature_id": feature_id, "scope": scope, "count": count,
+        })
+    _store_usage(character, kept)
+
+
+def reset_feature_usage(
+    character: dict[str, Any], scope: str = USAGE_SCOPE_LONG_REST,
+) -> list[dict[str, Any]]:
+    """Clear every non-zero counter in ``scope`` and report what was cleared."""
+
+    if scope not in FEATURE_USAGE_SCOPES:
+        raise ClassFeatureError(f"features.usage scope is unknown: {scope!r}")
+    if not isinstance(character, dict):
+        raise ClassFeatureError("character is not writable")
+    reset = [
+        record for record in feature_usage_records(character)
+        if record["scope"] == scope and record["count"]
+    ]
+    kept = [
+        record for record in feature_usage_records(character)
+        if not (record["scope"] == scope and record["count"])
+    ]
+    _store_usage(character, kept)
+    return reset
+
+
+def _store_usage(character: dict[str, Any], records: list[dict[str, Any]]) -> None:
+    features = character.get("features")
+    if not isinstance(features, dict):
+        features = {}
+        character["features"] = features
+    if records:
+        features["usage"] = records
+    else:
+        features.pop("usage", None)
+
+
 @dataclass(frozen=True, slots=True)
 class ResourceDefinition:
     """Presentation-safe view of one class resource the character owns."""

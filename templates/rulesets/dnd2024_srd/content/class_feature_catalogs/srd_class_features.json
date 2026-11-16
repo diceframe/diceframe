@@ -340,14 +340,37 @@
           "resource_id": "paladins_smite"
         },
         {
+          "id": "aura_of_protection",
+          "owner": "class:paladin",
+          "minimum_level": 6,
+          "source_ref": "srd-5.2.1:p55:aura-of-protection",
+          "summary": "While not Incapacitated, you and allies within 10 feet gain a saving-throw bonus equal to your Charisma modifier (minimum +1); only one such aura benefits a creature at a time.",
+          "parameters": {
+            "aura_range_ft": 10,
+            "aura_save_bonus_ability": "cha",
+            "aura_save_bonus_minimum": 1
+          }
+        },
+        {
           "id": "aura_of_devotion",
           "owner": "subclass:oath_of_devotion",
           "minimum_level": 7,
           "source_ref": "srd-5.2.1:p56:aura-of-devotion",
-          "summary": "You and allies within your Aura (10 feet) have Immunity to the Charmed condition.",
+          "summary": "You and allies in your Aura of Protection have Immunity to Charmed; an existing Charmed condition has no effect while there.",
           "parameters": {
-            "aura_range": 10,
-            "aura_immune_conditions": ["charmed"]
+            "aura_source_feature_id": "aura_of_protection",
+            "aura_condition_immunities": ["charmed"]
+          }
+        },
+        {
+          "id": "aura_expansion",
+          "owner": "class:paladin",
+          "minimum_level": 18,
+          "source_ref": "srd-5.2.1:p55:aura-expansion",
+          "summary": "Your Aura of Protection is now a 30-foot Emanation.",
+          "parameters": {
+            "aura_expands_feature_id": "aura_of_protection",
+            "aura_range_override_ft": 30
           }
         }
       ]
@@ -601,12 +624,14 @@
           "id": "dark_ones_blessing",
           "owner": "subclass:fiend_patron",
           "minimum_level": 3,
-          "source_ref": "srd-5.2.1:p58:dark-ones-blessing",
-          "summary": "When you reduce an enemy to 0 HP, or someone else reduces your enemy to 0 HP within 10 feet of you, you gain temporary hit points equal to your Charisma modifier plus your Warlock level (minimum 1).",
+          "source_ref": "srd-5.2.1:p76:dark-ones-blessing",
+          "summary": "When you reduce an enemy to 0 Hit Points, you gain Temporary Hit Points equal to your Charisma modifier plus your Warlock level (minimum of 1).",
           "parameters": {
-            "defeat_temp_hp_ability": "cha",
-            "defeat_temp_hp_add_class_level": true,
-            "defeat_share_range_ft": 10
+            "trigger": "enemy_reduced_to_zero_hp",
+            "temp_hp_ability": "cha",
+            "temp_hp_class_ref": "class:warlock",
+            "temp_hp_minimum": 1,
+            "other_defeat_range_ft": 10
           }
         },
         {
@@ -643,12 +668,12 @@
           "owner": "subclass:evoker",
           "minimum_level": 14,
           "source_ref": "srd-5.2.1:p82:overchannel",
-          "summary": "When you cast a Wizard spell of level 1-5 that deals damage, you can maximize its damage. After the spell resolves, you immediately take 2d12 Necrotic damage per spell slot level, ignoring Resistance and Immunity.",
+          "summary": "When you cast a Wizard spell with a level 1-5 spell slot that deals damage, you can maximize its damage. The first use before a Long Rest costs nothing; each later use deals escalating Necrotic damage to you right after the cast, ignoring Resistance and Immunity.",
           "parameters": {
-            "max_slot_level": 5,
-            "cost_dice_per_slot": 2,
-            "cost_die_sides": 12,
-            "cost_damage_type": "necrotic"
+            "maximum_slot_level": 5,
+            "usage_scope": "long_rest",
+            "self_damage_die": 12,
+            "initial_self_damage_dice": 2
           }
         }
       ]

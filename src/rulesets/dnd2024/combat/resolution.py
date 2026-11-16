@@ -6,6 +6,13 @@ from copy import deepcopy
 from typing import Any
 
 from src.rulesets.dnd2024.character.builder import ability_modifier
+from src.rulesets.dnd2024.features.resolver import ENEMY_REDUCED_TO_ZERO_HP
+from src.rulesets.dnd2024.features.resources import (
+    OVERCHANNEL_FEATURE_ID,
+    OVERCHANNEL_OWNER,
+    USAGE_SCOPE_LONG_REST,
+    feature_usage_count,
+)
 from ..character.attunement import AttunementError, canonical_item_ref
 from ..items.activation import (
     ItemActivationError,
@@ -530,7 +537,7 @@ class CombatResolutionMixin:
             ))
         else:
             events.extend(self._miss_mastery_events(
-                combat, actor, target, weapon, modifier, damage_type, rng,
+                instance, combat, actor, target, weapon, modifier, damage_type, rng,
             ))
         events.extend(self._consume_attack_conditions(actor_id, target_id, actor, target))
         return events
@@ -558,8 +565,9 @@ class CombatResolutionMixin:
         return effect
 
     def _miss_mastery_events(
-        self, combat: dict[str, Any], actor: dict[str, Any], target: dict[str, Any],
-        weapon: dict[str, Any], modifier: int, damage_type: str, rng: Any,
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        target: dict[str, Any], weapon: dict[str, Any], modifier: int,
+        damage_type: str, rng: Any,
     ) -> list[dict[str, Any]]:
         """Graze: fixed damage on a miss, with no damage dice.
 
@@ -585,7 +593,7 @@ class CombatResolutionMixin:
             event["resisted"] = True
             event["resistance"] = resistance
         events: list[dict[str, Any]] = [event]
-        events.extend(self._concentration_events(target, damage, rng))
+        events.extend(self._concentration_events(instance, combat, target, damage, rng))
         if self._last_hostile_defeated(combat, target, damage):
             events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         return events
@@ -702,7 +710,7 @@ class CombatResolutionMixin:
 
         events = list(self._submit_hit_damage(damage_event))
         events.extend(self._concentration_with_dool(instance, combat, target, damage, rng))
-        events.extend(self._enemy_defeated_feature_events(
+        events.extend(self._enemy_zero_hp_feature_events(
             instance, combat, attacker_id, target, damage,
         ))
         if self._last_hostile_defeated(combat, target, damage):
@@ -712,7 +720,7 @@ class CombatResolutionMixin:
     def _maybe_overchannel(self, intent: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
         """门控已由 _validate_spell 完成（fail closed）；此处只做变换。"""
 
-        if not intent.get("maximize_damage"):
+        if not intent.get("overchannel"):
             return node
         return maximize_dice_nodes(node)
 
@@ -730,6 +738,8 @@ class CombatResolutionMixin:
         if effect["mode"] == "triggered_damage":
             return self._triggered_spell_events(instance, combat, intent, rng)
         slot_level = int(intent.get("slot_level", spell["level"]) or 0)
+        # 一次施法只有一个启用状态：所有目标、所有射线共享它。
+        overchannel = bool(intent.get("overchannel"))
         target_ids = intent.get("target_ids")
         if not isinstance(target_ids, list):
             target_ids = [intent.get("target_id")]
@@ -753,10 +763,13 @@ class CombatResolutionMixin:
                 "type": "dnd2024.concentration.started", "actor_id": actor_id,
                 "spell_ref": spell_ref, "target_ids": target_ids,
             })
-        events.append({
+        cast_event = {
             "type": "dnd2024.spell.cast", "actor_id": actor_id, "spell_ref": spell_ref,
             "slot_level": slot_level, "target_ids": target_ids,
-        })
+        }
+        if overchannel:
+            cast_event["overchannel"] = True
+        events.append(cast_event)
         # Lucky's advantage face declares one extra source for the first
         # spell attack roll of this cast; validation proves the pool.
         spend_luck = bool(intent.get("spend_luck")) and str(effect["mode"]) == "spell_attack"
@@ -840,19 +853,26 @@ class CombatResolutionMixin:
                         "damage_type": damage_type,
                         "critical": critical, "rolls": rolls,
                     }
+                    if overchannel:
+                        damage_event["overchannel"] = True
                     if resistance:
                         damage_event["resisted"] = True
                         damage_event["resistance"] = resistance
                     events.append(damage_event)
-                    events.extend(self._concentration_events(target, damage, rng))
-                    prior_dealt = dealt.get(target_id, 0)
-                    dealt[target_id] = prior_dealt + damage
-                    events.extend(self._enemy_defeated_feature_events(
-                        instance, combat, actor_id, target, dealt[target_id],
-                        prior_damage=prior_dealt,
-                    ))
-                    if target["kind"] == "enemy" and target["hp"] - dealt[target_id] <= 0:
+                    events.extend(self._concentration_events(instance, combat, target, damage, rng))
+                    dealt[target_id] = dealt.get(target_id, 0) + damage
+                    total_dealt = dealt[target_id]
+                    if (
+                        target["kind"] == "enemy"
+                        and target["hp"] - total_dealt <= 0
+                        and target_id not in defeated_targets
+                    ):
+                        # 只有首次跨过 0 HP 的那一束触发；同批次后续射线照旧
+                        # 产生伤害事件，但不再授予第二次临时 HP。
                         defeated_targets.add(target_id)
+                        events.extend(self._enemy_zero_hp_feature_events(
+                            instance, combat, actor_id, target, total_dealt,
+                        ))
                 consumed_events = self._consume_attack_conditions(
                     actor_id, target_id, visible_actor, visible_target,
                 )
@@ -875,6 +895,7 @@ class CombatResolutionMixin:
                         "actor_id": target_id, "source_actor_id": actor_id,
                         "ability": save_ability, "rolls": [], "natural": 0,
                         "modifier": modifier, "check_bonus": 0, "check_bonus_rolls": [],
+                        "aura_bonus": 0, "aura_sources": [],
                         "total": 0,
                         "target": actor["spell_save_dc"], "success": False,
                         "auto_failed": True,
@@ -905,7 +926,10 @@ class CombatResolutionMixin:
                         self.catalog.conditions, target["conditions"], "saving_throw", rng,
                     )
                     check_bonus = sum(row["roll"] for row in check_bonus_rolls)
-                    total = roll + modifier + check_bonus
+                    # 光环加值单独成项：modifier 仍是角色本来的豁免值，Bless
+                    # 仍只占 check_bonus，三者不互相吞并，事件可逐项对账。
+                    aura = self._saving_throw_aura_bonus(instance, combat, target)
+                    total = roll + modifier + check_bonus + int(aura["bonus"])
                     succeeded = total >= int(actor["spell_save_dc"])
                     check_event = {
                         "type": "check.resolved", "kind": "saving_throw", "actor_id": target_id,
@@ -913,6 +937,7 @@ class CombatResolutionMixin:
                         "rolls": [value for value in (first, second) if value is not None],
                         "natural": roll, "modifier": modifier,
                         "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
+                        "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
                         "total": total,
                         "target": actor["spell_save_dc"], "success": succeeded,
                     }
@@ -940,19 +965,24 @@ class CombatResolutionMixin:
                             "damage_type": damage_type,
                             "critical": False, "rolls": rolls,
                         }
+                        if overchannel:
+                            damage_event["overchannel"] = True
                         if resistance:
                             damage_event["resisted"] = True
                             damage_event["resistance"] = resistance
                         events.append(damage_event)
-                        events.extend(self._concentration_events(target, damage, rng))
-                        prior_dealt = dealt.get(target_id, 0)
-                        dealt[target_id] = prior_dealt + damage
-                        events.extend(self._enemy_defeated_feature_events(
-                            instance, combat, actor_id, target, dealt[target_id],
-                            prior_damage=prior_dealt,
-                        ))
-                        if target["kind"] == "enemy" and target["hp"] - dealt[target_id] <= 0:
+                        events.extend(self._concentration_events(instance, combat, target, damage, rng))
+                        dealt[target_id] = dealt.get(target_id, 0) + damage
+                        total_dealt = dealt[target_id]
+                        if (
+                            target["kind"] == "enemy"
+                            and target["hp"] - total_dealt <= 0
+                            and target_id not in defeated_targets
+                        ):
                             defeated_targets.add(target_id)
+                            events.extend(self._enemy_zero_hp_feature_events(
+                                instance, combat, actor_id, target, total_dealt,
+                            ))
             elif mode == "automatic_damage":
                 damage_node = spell_formula_node(
                     str(effect["damage"]), effect.get("upcast_damage"),
@@ -968,19 +998,24 @@ class CombatResolutionMixin:
                     "damage_type": damage_type,
                     "critical": False, "rolls": rolls,
                 }
+                if overchannel:
+                    damage_event["overchannel"] = True
                 if resistance:
                     damage_event["resisted"] = True
                     damage_event["resistance"] = resistance
                 events.append(damage_event)
-                events.extend(self._concentration_events(target, damage, rng))
-                prior_dealt = dealt.get(target_id, 0)
-                dealt[target_id] = prior_dealt + damage
-                events.extend(self._enemy_defeated_feature_events(
-                    instance, combat, actor_id, target, dealt[target_id],
-                    prior_damage=prior_dealt,
-                ))
-                if target["kind"] == "enemy" and target["hp"] - dealt[target_id] <= 0:
+                events.extend(self._concentration_events(instance, combat, target, damage, rng))
+                dealt[target_id] = dealt.get(target_id, 0) + damage
+                total_dealt = dealt[target_id]
+                if (
+                    target["kind"] == "enemy"
+                    and target["hp"] - total_dealt <= 0
+                    and target_id not in defeated_targets
+                ):
                     defeated_targets.add(target_id)
+                    events.extend(self._enemy_zero_hp_feature_events(
+                        instance, combat, actor_id, target, total_dealt,
+                    ))
                 succeeded = True
             elif mode == "healing":
                 healing_node = spell_formula_node(
@@ -1084,16 +1119,29 @@ class CombatResolutionMixin:
                 or (mode == "saving_throw" and not succeeded)
                 or mode in {"buff", "debuff"}
             )
-            # 光环条件免疫：命中则根本不产生 condition.applied，并把首个
-            # 声明来源写回本次豁免事件（仅拦截时携带，事件类型不变）。
-            blocked_by_aura = ""
-            if condition and condition_applies and mode == "saving_throw":
-                blocked_by_aura = self._aura_immune_conditions(
-                    instance, combat, target,
-                ).get(condition, "")
+            # 光环条件免疫：命中则根本不产生 condition.applied，并把拦截来源
+            # 写回本次豁免事件（没有 check event 时改用一条 message 留痕）。
+            # 豁免本身仍然是失败——被免疫的是条件的落地，不是掷骰结果。
+            blocked_by_aura: dict[str, str] | None = None
+            if condition and condition_applies:
+                blocked_by_aura = self._aura_condition_immunity_source(
+                    instance, combat, target, condition,
+                )
             if blocked_by_aura:
                 if save_check_index is not None:
+                    events[save_check_index]["blocked_condition"] = condition
                     events[save_check_index]["blocked_by_aura"] = blocked_by_aura
+                else:
+                    # 免疫不依赖豁免：buff/debuff/自动伤害同样经过这里。这些
+                    # 路径没有 check event 可挂，但被吞掉的条件必须留痕，否则
+                    # 只能靠怀疑；用既有 message 类型，不新增事件类型。
+                    events.append({
+                        "type": "dnd2024.combat.message", "target_id": target_id,
+                        "text": f"{condition} has no effect inside an aura",
+                        "condition": condition,
+                        "blocked_condition": condition,
+                        "blocked_by_aura": blocked_by_aura,
+                    })
             elif condition and condition_applies:
                 applied = {
                     "type": "condition.applied", "target_id": target_id,
@@ -1145,6 +1193,52 @@ class CombatResolutionMixin:
                     "type": "dnd2024.position.changed", "actor_id": target_id,
                     "distance": direction * int(effect["push"]), "forced": True,
                 })
+        # 使用计数与自伤都落在法术效果之后、胜利判定之前：计数是这次施法的
+        # 一部分，自伤是"施法后立即"的代价，二者都不该被战斗结束顺序吞掉。
+        if overchannel:
+            character = self._feature_character(actor)
+            before = feature_usage_count(
+                character, OVERCHANNEL_OWNER, OVERCHANNEL_FEATURE_ID,
+                USAGE_SCOPE_LONG_REST,
+            )
+            use_index = before + 1
+            events.append({
+                "type": "dnd2024.feature_usage.changed",
+                "actor_id": actor_id,
+                "owner": OVERCHANNEL_OWNER,
+                "feature_id": OVERCHANNEL_FEATURE_ID,
+                "scope": USAGE_SCOPE_LONG_REST,
+                "spell_ref": spell_ref,
+                "slot_level": slot_level,
+                "before_count": before,
+                "after_count": use_index,
+                "use_index": use_index,
+            })
+            if use_index >= 2:
+                # 第 N 次（N ≥ 2）：每环阶掷 N 个 d12 黯蚀。声明式基数 2 加上
+                # "每再用一次 +1d12"，与 SRD 原文的递增表述一一对应。
+                base = int(self.features.feature_value(
+                    character, OVERCHANNEL_FEATURE_ID, "initial_self_damage_dice", 2,
+                    owner=OVERCHANNEL_OWNER,
+                ) or 0)
+                sides = int(self.features.feature_value(
+                    character, OVERCHANNEL_FEATURE_ID, "self_damage_die", 12,
+                    owner=OVERCHANNEL_OWNER,
+                ) or 0)
+                per_level = base + (use_index - 2)
+                cost_node = formula_node_from_dice_formula(
+                    f"{per_level * slot_level}d{sides}"
+                )
+                cost, cost_rolls = roll_damage_node(cost_node, rng)
+                # 无视抗性与免疫：不走 _resist_damage；临时 HP 仍由 reducer 先吸收。
+                events.append({
+                    "type": "resource.changed", "resource": "hp", "target_id": actor_id,
+                    "delta": -cost, "amount": cost, "damage_type": "necrotic",
+                    "overchannel": True, "overchannel_cost": True,
+                    "ignore_resistance": True, "ignore_immunity": True,
+                    "rolls": cost_rolls,
+                })
+                events.extend(self._concentration_events(instance, combat, actor, cost, rng))
         living_enemy_ids = {
             _enemy_actor(enemy_id)
             for enemy_id, enemy in combat.get("enemies", {}).items()
@@ -1152,27 +1246,6 @@ class CombatResolutionMixin:
         }
         if living_enemy_ids and living_enemy_ids.issubset(defeated_targets):
             events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
-        if intent.get("maximize_damage"):
-            # 超限导能自伤：整道施法结算与胜利判定之后一次性落账（RNG 末位），
-            # 无视抗性与免疫，因此不经 _resist_damage。
-            character = self._feature_character(actor)
-            per_slot = int(self.features.feature_value(
-                character, "overchannel", "cost_dice_per_slot", 2,
-            ) or 0)
-            sides = int(self.features.feature_value(
-                character, "overchannel", "cost_die_sides", 12,
-            ) or 0)
-            damage_type = str(self.features.feature_value(
-                character, "overchannel", "cost_damage_type", "necrotic",
-            ) or "")
-            cost_node = formula_node_from_dice_formula(f"{per_slot * slot_level}d{sides}")
-            cost, cost_rolls = roll_damage_node(cost_node, rng)
-            events.append({
-                "type": "resource.changed", "resource": "hp", "target_id": actor_id,
-                "delta": -cost, "amount": cost, "damage_type": damage_type,
-                "overchannel_cost": True, "rolls": cost_rolls,
-            })
-            events.extend(self._concentration_events(actor, cost, rng))
         return events
 
     def _movement_events(
@@ -1247,77 +1320,92 @@ class CombatResolutionMixin:
                 })
         return events
 
-    def _enemy_defeated_feature_events(
-        self, instance: Any, combat: dict[str, Any], attacker_id: str,
-        target: dict[str, Any], damage: int, prior_damage: int = 0,
+    def _enemy_zero_hp_feature_events(
+        self, instance: Any, combat: dict[str, Any], source_actor_id: str,
+        target: dict[str, Any], damage_taken: int,
     ) -> list[dict[str, Any]]:
-        """Temp-HP grants from owned features that trigger on a defeated enemy.
+        """Temp-HP grants owned by the creature that reduced this enemy to 0 HP.
 
-        Called at every damage landing point with the *final* damage (after
-        resistance, saves and riders), so the trigger agrees with the existing
-        defeat check.  In multi-hit spell batches (extra rays/beams onto the
-        same target) callers pass the per-target damage accumulated for this
-        cast plus the prior accumulated damage, matching the batch defeat check
-        that also uses the accumulated total.  Only the settlement that first
-        crosses the threshold triggers, so repeated beams on one target cannot
-        grant the same feature twice.  Features opt in through the closed
-        parameter set ``defeat_temp_hp_ability`` /
-        ``defeat_temp_hp_add_class_level`` / ``defeat_share_range_ft``; the
-        engine never branches on a feature name.
+        Called at every final damage landing point with the damage that
+        settlement actually delivered -- after resistance, saves and riders --
+        so the trigger agrees with the existing defeat check. SRD 5.2.1 p76
+        also grants the benefit when someone else defeats an enemy within
+        the feature owner's declared range.
 
-        Path a: the holder is the attacker (no range limit).  Path b: someone
-        else defeated the enemy while the holder is within the declared share
-        radius.  One event per holder and settlement, keep-max handled by the
-        reducer.
+        Features opt in through the closed ``trigger`` / ``temp_hp_ability`` /
+        ``temp_hp_class_ref`` / ``temp_hp_minimum`` payload; the engine never
+        branches on a feature, class or subclass name.
         """
 
         if target.get("kind") != "enemy":
             return []
-        hp = int(target.get("hp", 0) or 0)
-        dealt = int(damage)
-        prior = int(prior_damage)
-        # Only the settlement that first crosses the defeat threshold triggers.
-        # A target already defeated by an earlier ray of the same batch keeps
-        # taking its damage events but grants no second defeat feature.
-        if hp <= 0 or hp - prior <= 0 or hp - dealt > 0:
+        dealt = int(damage_taken)
+        hp_before = int(target.get("hp", 0) or 0)
+        # A target already at 0 HP was defeated earlier and cannot be farmed;
+        # damage that does not reach 0 is not a defeat at all.
+        if dealt <= 0 or hp_before <= 0 or hp_before - dealt > 0:
             return []
-        target_id = str(target["actor_id"])
         events: list[dict[str, Any]] = []
-        for raw_actor_id in combat.get("initiative") or []:
-            actor_id = str(raw_actor_id)
-            kind, _raw = _actor_kind(actor_id)
-            if kind not in {"player", "companion"}:
+        for row in self._all_targets(instance, combat):
+            recipient_id = str(row["actor_id"])
+            kind, _raw = _actor_kind(recipient_id)
+            if kind in {"player", "companion"}:
+                events.extend(self._defeat_recipient_events(
+                    instance, combat, source_actor_id, target, recipient_id,
+                ))
+        return events
+
+    def _defeat_recipient_events(
+        self, instance: Any, combat: dict[str, Any], source_actor_id: str,
+        target: dict[str, Any], recipient_id: str,
+    ) -> list[dict[str, Any]]:
+        view = self._actor_view(instance, combat, recipient_id)
+        character = self._feature_character(view)
+        state = self.features.class_state(character)
+        if state is None:
+            # 没有职业的同伴残表不拥有任何职业特性。
+            return []
+        events: list[dict[str, Any]] = []
+        for definition in self.features.features_for(character):
+            parameters = definition.parameters
+            if parameters.get("trigger") != ENEMY_REDUCED_TO_ZERO_HP:
                 continue
-            view = self._actor_view(instance, combat, actor_id)
-            character = self._feature_character(view)
-            state = self.features.class_state(character)
-            if state is None:
-                # 同伴残表没有职业，按"不拥有任何职业特性"处理。
+            if recipient_id != source_actor_id:
+                radius = parameters.get("other_defeat_range_ft")
+                if radius is None or self._distance(
+                    combat, recipient_id, str(target["actor_id"]),
+                ) > radius:
+                    continue
+            ability = parameters.get("temp_hp_ability")
+            class_ref = parameters.get("temp_hp_class_ref")
+            minimum = parameters.get("temp_hp_minimum")
+            if not isinstance(ability, str) or not isinstance(class_ref, str):
                 continue
-            for definition in self.features.features_for(character):
-                ability = definition.parameters.get("defeat_temp_hp_ability")
-                if not isinstance(ability, str) or not ability:
-                    continue
-                share = definition.parameters.get("defeat_share_range_ft")
-                eligible = actor_id == attacker_id
-                if not eligible and isinstance(share, int) and not isinstance(share, bool):
-                    eligible = self._distance(combat, actor_id, target_id) <= share
-                if not eligible:
-                    continue
-                modifier = ability_modifier(
-                    int((view.get("abilities") or {}).get(ability, 10) or 10)
+            if isinstance(minimum, bool) or not isinstance(minimum, int):
+                continue
+            class_id = class_ref.removeprefix("class:")
+            if not class_id:
+                continue
+            if state[0] != class_id:
+                # 授予生效却拿不到对应职业等级，说明目录与成长表已经不一致：
+                # 任何"凑一个等级"的回退都会算错数值，必须显式失败。
+                raise CombatIntentError(
+                    f"{definition.id}.temp_hp_class_ref is {class_ref} but the "
+                    f"owning character's class is {state[0]}"
                 )
-                level = (
-                    state[1]
-                    if definition.parameters.get("defeat_temp_hp_add_class_level") is True
-                    else 0
-                )
-                events.append({
-                    "type": "resource.changed", "resource": "temp_hp",
-                    "target_id": actor_id, "amount": max(1, modifier + level),
-                    "feature_id": definition.id,
-                })
-                break
+            modifier = ability_modifier(
+                int((view.get("abilities") or {}).get(ability, 10) or 10)
+            )
+            amount = max(minimum, modifier + state[1])
+            events.append({
+                "type": "resource.changed", "resource": "temp_hp",
+                "target_id": recipient_id, "source_actor_id": source_actor_id,
+                "defeated_actor_id": str(target["actor_id"]),
+                "delta": amount, "amount": amount, "rolls": [],
+                "feature_id": definition.id, "owner": definition.owner,
+                "ability": ability, "ability_modifier": modifier,
+                "class_ref": class_ref, "class_level": state[1],
+            })
         return events
 
     @staticmethod
@@ -1653,6 +1741,7 @@ class CombatResolutionMixin:
                     "source_actor_id": str(meta.get("source_actor_id") or ""),
                     "ability": ability, "rolls": [], "natural": 0,
                     "modifier": modifier, "check_bonus": 0, "check_bonus_rolls": [],
+                    "aura_bonus": 0, "aura_sources": [],
                     "total": 0,
                     "target": dc, "success": False, "auto_failed": True,
                     "repeat_save": True,
@@ -1680,7 +1769,10 @@ class CombatResolutionMixin:
                 self.catalog.conditions, actor["conditions"], "saving_throw", rng,
             )
             check_bonus = sum(row["roll"] for row in check_bonus_rolls)
-            total = roll + modifier + check_bonus
+            # 光环按本次回合末结算时的位置与失能状态求值，不用施放时快照；
+            # 快照里只有 DC 和豁免属性，这两项不随移动变化。
+            aura = self._saving_throw_aura_bonus(instance, combat, actor)
+            total = roll + modifier + check_bonus + int(aura["bonus"])
             success = total >= dc
             check_event = {
                 "type": "check.resolved", "kind": "saving_throw",
@@ -1690,6 +1782,7 @@ class CombatResolutionMixin:
                 "rolls": [value for value in (first, second) if value is not None],
                 "natural": roll, "modifier": modifier,
                 "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
+                "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
                 "total": total, "target": dc, "success": success,
                 "repeat_save": True,
             }
@@ -1817,12 +1910,19 @@ class CombatResolutionMixin:
             self.catalog.conditions, actor["conditions"], "saving_throw", rng,
         )
         check_bonus = sum(row["roll"] for row in check_bonus_rolls)
-        total = roll + check_bonus
+        # Aura of Protection covers death saves too.  The bonus is itemised
+        # rather than folded into ``modifier`` so the event still shows a bare
+        # d20 plus separately-attributable sources.
+        aura = self._saving_throw_aura_bonus(instance, combat, actor)
+        total = roll + check_bonus + int(aura["bonus"])
         check_event = {
             "type": "check.resolved", "kind": "death_save", "actor_id": actor_id,
             "rolls": [value for value in (first, second) if value is not None],
-            "natural": roll, "check_bonus": check_bonus,
-            "check_bonus_rolls": check_bonus_rolls, "total": total,
+            "natural": roll, "modifier": 0,
+            "check_bonus": check_bonus,
+            "check_bonus_rolls": check_bonus_rolls, "bless_bonus": check_bonus,
+            "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
+            "total": total,
             "target": 10, "success": total >= 10,
         }
         if advantage_sources:

@@ -81,6 +81,10 @@ def main() -> int:
         env["TRPG_DATA_DIR"] = str(data_dir)
         env["DICEFRAME_E2E_DATA_DIR"] = str(data_dir)
         env["TRPG_WEB_PORT"] = str(PORT)
+        # 整套 smoke 都从 127.0.0.1 写，单窗口峰值已到 62，超过生产默认的 60/IP/分钟，
+        # 429 会落在当时正在跑的那条 spec 上（通常是把面板打成不渲染的 peer-connect）。
+        # 这里只抬本轮测试服务器的预算，产品默认值不动，也不许用例自己重试 429。
+        env["DICEFRAME_ABUSE_WRITE_PER_IP_LIMIT"] = "300"
         with log_file.open("w", encoding="utf-8") as output:
             server = subprocess.Popen(
                 [sys.executable, str(ROOT / "web_server.py")],

@@ -36,6 +36,7 @@ from .models import (
     FeatureView,
 )
 from .resources import (
+    FEATURE_USAGE_SCOPES,
     ClassResourceDeclaration,
     Dnd2024ClassResourceCatalog,
     ResourceDefinition,
@@ -45,6 +46,28 @@ from .resources import (
 
 def _humanize(feature_id: str) -> str:
     return str(feature_id).replace("_", " ").strip().title()
+
+
+# The defeat-trigger payload is one closed four-key set.  ``trigger`` names the
+# only supported event; the other three describe the temp-HP formula.  Keeping
+# the names in one place means the loader and the combat helper can never
+# disagree about which keys exist.
+_DEFEAT_TRIGGER_KEYS = (
+    "trigger", "temp_hp_ability", "temp_hp_class_ref", "temp_hp_minimum",
+)
+# The one trigger this slice understands.  It is exported because the combat
+# settlement reads the same name: a loader that accepts a trigger the engine
+# never fires would ship a silently inert feature.
+ENEMY_REDUCED_TO_ZERO_HP = "enemy_reduced_to_zero_hp"
+_DEFEAT_TRIGGERS = frozenset({ENEMY_REDUCED_TO_ZERO_HP})
+# Parameters the previous implementation accepted.  A declaration that still
+# carries them describes a rule SRD 5.2.1 does not have, so loading fails
+# instead of quietly ignoring the extra keys.
+_RETIRED_DEFEAT_KEYS = (
+    "defeat_temp_hp_ability",
+    "defeat_temp_hp_add_class_level",
+    "defeat_share_range_ft",
+)
 
 
 class Dnd2024ClassFeatureResolver:
@@ -1041,6 +1064,7 @@ class Dnd2024ClassFeatureResolver:
                     f"class feature {definition.id} references an unknown class table"
                 )
             self._validate_owner_grant(definition, progression_catalog)
+            self._validate_aura_parameters(definition)
             for key, value in definition.parameters.items():
                 if key == "crit_threshold":
                     if (
@@ -1205,40 +1229,76 @@ class Dnd2024ClassFeatureResolver:
                 "turn_start_regen_ability as a pair"
             )
 
-    @staticmethod
-    def _validate_defeat_trigger_parameters(definition: ClassFeatureDefinition) -> None:
+    def _validate_defeat_trigger_parameters(self, definition: ClassFeatureDefinition) -> None:
         """Fail closed on the defeat-trigger payload.
 
-        The payload is a closed set: the temp-HP ability code plus two optional
-        knobs (a class-level flag and a share radius).  A payload that declares
-        any of them without the ability would silently resolve to nothing, so it
-        is rejected at load time instead of becoming an inert feature.
+        The payload is one closed four-key set: what triggers it, which ability
+        feeds the formula, which class level the formula adds, and the floor.
+        Declaring a subset would leave the formula with either no ability or no
+        level, which resolves to a silently wrong or inert feature -- so a
+        partial set is rejected at load time rather than at settlement.
+
+        Optional other_defeat_range_ft also grants the benefit for someone
+        else's kill measured from the defeated enemy to the feature owner
+        (Dark One's Blessing, SRD 5.2.1 p76).
         """
 
         parameters = definition.parameters
-        keys = (
-            "defeat_temp_hp_ability",
-            "defeat_temp_hp_add_class_level",
-            "defeat_share_range_ft",
-        )
-        if not any(key in parameters for key in keys):
-            return
-        ability = parameters.get("defeat_temp_hp_ability")
-        if not isinstance(ability, str) or ability not in ABILITY_IDS:
+        retired = [key for key in _RETIRED_DEFEAT_KEYS if key in parameters]
+        if retired:
+            # Retired formula keys remain rejected at the catalog boundary.
             raise ClassFeatureError(
-                f"{definition.id}.defeat_temp_hp_ability must name an ability"
+                f"{definition.id} declares the retired parameter {retired[0]}"
             )
-        flag = parameters.get("defeat_temp_hp_add_class_level")
-        if "defeat_temp_hp_add_class_level" in parameters and not isinstance(flag, bool):
-            raise ClassFeatureError(
-                f"{definition.id}.defeat_temp_hp_add_class_level must be a boolean"
-            )
-        share = parameters.get("defeat_share_range_ft")
-        if "defeat_share_range_ft" in parameters and (
-            isinstance(share, bool) or not isinstance(share, int) or not 1 <= share <= 120
+        radius = parameters.get("other_defeat_range_ft")
+        if "other_defeat_range_ft" in parameters and (
+            isinstance(radius, bool) or not isinstance(radius, int) or radius <= 0
         ):
             raise ClassFeatureError(
-                f"{definition.id}.defeat_share_range_ft must be an integer from 1 to 120"
+                f"{definition.id}.other_defeat_range_ft must be a positive integer"
+            )
+        keys = _DEFEAT_TRIGGER_KEYS
+        # Only claim a ``trigger`` key this payload actually owns.  Another
+        # slice may declare its own trigger name on a different feature, and
+        # rejecting it here would couple two unrelated payloads.
+        formula_keys = [key for key in keys if key != "trigger" and key in parameters]
+        if not formula_keys and parameters.get("trigger") not in _DEFEAT_TRIGGERS:
+            return
+        missing = [key for key in keys if key not in parameters]
+        if missing:
+            raise ClassFeatureError(
+                f"{definition.id} must declare {' / '.join(keys)} together; "
+                f"missing {' / '.join(missing)}"
+            )
+        trigger = parameters.get("trigger")
+        if trigger not in _DEFEAT_TRIGGERS:
+            raise ClassFeatureError(
+                f"{definition.id}.trigger must be one of {sorted(_DEFEAT_TRIGGERS)}"
+            )
+        ability = parameters.get("temp_hp_ability")
+        if not isinstance(ability, str) or ability not in ABILITY_IDS:
+            raise ClassFeatureError(
+                f"{definition.id}.temp_hp_ability must name an ability"
+            )
+        class_ref = parameters.get("temp_hp_class_ref")
+        if not isinstance(class_ref, str) or not class_ref.startswith("class:"):
+            raise ClassFeatureError(
+                f"{definition.id}.temp_hp_class_ref must be a class:<id> reference"
+            )
+        class_id = class_ref.removeprefix("class:")
+        progression = self.progression
+        if (
+            not class_id
+            or progression is None
+            or class_id not in progression.classes
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.temp_hp_class_ref names an unknown class table"
+            )
+        minimum = parameters.get("temp_hp_minimum")
+        if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 1:
+            raise ClassFeatureError(
+                f"{definition.id}.temp_hp_minimum must be an integer of at least 1"
             )
 
     @staticmethod
@@ -1259,6 +1319,132 @@ class Dnd2024ClassFeatureResolver:
             raise ClassFeatureError(
                 f"{definition.id}.speed_bonus_ft must be an integer from 1 to 120"
             )
+
+    def _validate_aura_parameters(self, definition: ClassFeatureDefinition) -> None:
+        """Fail closed on the aura declaration contract.
+
+        An aura is three separate declarations that only mean something
+        together: the base aura owns the range and the saving-throw bonus, an
+        expansion names a base aura and overrides its range, and a condition
+        immunity names the base aura it rides on.  Nothing here names Paladin
+        -- the relation is catalog data, so the shape is reusable -- and a
+        dangling or self-referential relation is rejected at load because the
+        consumer would otherwise project no aura at all and say nothing.
+        """
+
+        parameters = definition.parameters
+        # 同一 id 可能同时存在于 class 与 subclass 两个 owner 下，按 id 收集后
+        # 只认真的声明了范围的那一条，避免拿错 owner 的同名条目。
+        index = self.catalog.features_by_key
+
+        def _base_aura(feature_id: Any) -> ClassFeatureDefinition | None:
+            if not isinstance(feature_id, str) or not feature_id:
+                return None
+            for candidate in index.values():
+                if candidate.id == feature_id and "aura_range_ft" in candidate.parameters:
+                    return candidate
+            return None
+
+        for key in ("aura_range_ft", "aura_range_override_ft"):
+            value = parameters.get(key)
+            if key in parameters and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 1
+            ):
+                raise ClassFeatureError(
+                    f"{definition.id}.{key} must be a positive integer"
+                )
+
+        has_ability = "aura_save_bonus_ability" in parameters
+        has_minimum = "aura_save_bonus_minimum" in parameters
+        if has_ability != has_minimum:
+            raise ClassFeatureError(
+                f"{definition.id} must declare aura_save_bonus_ability and "
+                f"aura_save_bonus_minimum together"
+            )
+        if has_ability:
+            ability = parameters["aura_save_bonus_ability"]
+            if not isinstance(ability, str) or ability not in ABILITY_IDS:
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_save_bonus_ability must name an ability"
+                )
+            minimum = parameters["aura_save_bonus_minimum"]
+            if (
+                isinstance(minimum, bool) or not isinstance(minimum, int)
+                or minimum < 1
+            ):
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_save_bonus_minimum must be an integer "
+                    f"of at least 1"
+                )
+
+        # 豁免加值必须挂在一个有范围的基础光环上，否则它永远不会生效。
+        bonus_declared = has_ability or "aura_save_bonus_minimum" in parameters
+        if bonus_declared and "aura_range_ft" not in parameters:
+            raise ClassFeatureError(
+                f"{definition.id} declares a saving-throw bonus without aura_range_ft"
+            )
+
+        has_immunities = "aura_condition_immunities" in parameters
+        has_source = "aura_source_feature_id" in parameters
+        if has_immunities != has_source:
+            raise ClassFeatureError(
+                f"{definition.id} must declare aura_source_feature_id and "
+                f"aura_condition_immunities together"
+            )
+        if has_immunities:
+            immunities = parameters["aura_condition_immunities"]
+            if not isinstance(immunities, list) or not immunities:
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_condition_immunities must be a non-empty list"
+                )
+            if any(not isinstance(code, str) or not code for code in immunities):
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_condition_immunities must hold condition ids"
+                )
+            if len(set(immunities)) != len(immunities):
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_condition_immunities repeats a condition"
+                )
+            unsupported = sorted(code for code in immunities if code != "charmed")
+            if unsupported:
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_condition_immunities does not support "
+                    f"{', '.join(unsupported)} yet"
+                )
+            source = _base_aura(parameters["aura_source_feature_id"])
+            if source is None:
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_source_feature_id must name a base aura"
+                )
+
+        has_override = "aura_range_override_ft" in parameters
+        has_expands = "aura_expands_feature_id" in parameters
+        if has_override != has_expands:
+            raise ClassFeatureError(
+                f"{definition.id} must declare aura_expands_feature_id and "
+                f"aura_range_override_ft together"
+            )
+        if has_expands:
+            expanded = _base_aura(parameters["aura_expands_feature_id"])
+            if expanded is None or expanded.id == definition.id:
+                raise ClassFeatureError(
+                    f"{definition.id}.aura_expands_feature_id must name another base aura"
+                )
+            # 扩展链必须收敛：A 覆盖 B、B 又覆盖 A 时，"有效范围"取决于从哪
+            # 条开始折叠，任何确定性说法都是假的，因此整条链拒绝加载。
+            seen = {definition.id}
+            cursor = expanded.id
+            while cursor:
+                if cursor in seen:
+                    raise ClassFeatureError(
+                        f"{definition.id}.aura_expands_feature_id forms a cycle"
+                    )
+                seen.add(cursor)
+                following = _base_aura(cursor)
+                if following is None:
+                    break
+                next_id = following.parameters.get("aura_expands_feature_id")
+                cursor = next_id if isinstance(next_id, str) and next_id else ""
 
     @staticmethod
     def _validate_defense_parameters(definition: ClassFeatureDefinition) -> None:
@@ -1291,17 +1477,17 @@ class Dnd2024ClassFeatureResolver:
     def _validate_overchannel_parameters(definition: ClassFeatureDefinition) -> None:
         """Fail closed on the maximize-damage contract.
 
-        A typo in the slot cap or the self-damage dice would silently change
-        how much a maximized cast costs, so each declared knob is range-checked
-        at load time.  Missing knobs are fine: consumers fall back to their
-        documented defaults.
+        A typo in the slot cap, the self-damage die or the base cost would
+        silently change how much a maximized cast costs, so each declared knob
+        is range-checked at load time.  Missing knobs are fine: consumers fall
+        back to their documented defaults.
         """
 
         parameters = definition.parameters
         for key, low, high in (
-            ("max_slot_level", 1, 9),
-            ("cost_dice_per_slot", 1, 10),
-            ("cost_die_sides", 2, 20),
+            ("maximum_slot_level", 1, 9),
+            ("self_damage_die", 2, 20),
+            ("initial_self_damage_dice", 1, 10),
         ):
             value = parameters.get(key)
             if key in parameters and (
@@ -1311,10 +1497,9 @@ class Dnd2024ClassFeatureResolver:
                 raise ClassFeatureError(
                     f"{definition.id}.{key} must be an integer from {low} to {high}"
                 )
-        damage_type = parameters.get("cost_damage_type")
-        if "cost_damage_type" in parameters and (
-            not isinstance(damage_type, str) or not damage_type
-        ):
+        scope = parameters.get("usage_scope")
+        if "usage_scope" in parameters and scope not in FEATURE_USAGE_SCOPES:
             raise ClassFeatureError(
-                f"{definition.id}.cost_damage_type must name a damage type"
+                f"{definition.id}.usage_scope must be one of "
+                f"{sorted(FEATURE_USAGE_SCOPES)}"
             )

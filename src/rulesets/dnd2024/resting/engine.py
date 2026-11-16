@@ -12,6 +12,7 @@ from src.rulesets.dnd2024.character.attunement import apply_short_rest_attunemen
 from src.rulesets.dnd2024.character.attunement import owned_ref_counts
 from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.features.resources import reset_feature_usage
 from src.rulesets.dnd2024.items.charges import ChargesError, recharge_for_rest
 from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
 from src.rulesets.dnd2024.spells.feat_spells import concentration_holder, restore_feat_free_casts
@@ -256,6 +257,17 @@ class Dnd2024RestEngine:
         self._recover_spell_slots(character, "long", events)
         if prepared_spells:
             events.extend(self._apply_prepared_spells(character, prepared_spells))
+        # 长休作用域的特性使用计数只在这里清零：短休、战斗结束、回合结束、
+        # 升级与语言切换都不得动它，否则"首次免费"会被反复刷新。
+        for record in reset_feature_usage(character):
+            events.append({
+                "type": "reset_feature_usage",
+                "owner": record["owner"],
+                "feature_id": record["feature_id"],
+                "scope": record["scope"],
+                "before": record["count"],
+                "after": 0,
+            })
         for feat_ref in restore_feat_free_casts(character):
             events.append({"type": "restore_feat_spell", "feat_ref": feat_ref})
         holder = concentration_holder(character)
