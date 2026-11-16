@@ -300,5 +300,5 @@ def test_the_dnd2024_runtime_declares_its_rest_options() -> None:
     # ``prepared_spells`` 是长休时的一次准备替换；通用休息服务转发它们，
     # 只因运行时声明了它们。
     assert build_default_ruleset_registry().get(RUNTIME_ID).rest_option_names == frozenset(
-        {"attunement", "prepared_spells", "land_terrain"}
+        {"attunement", "prepared_spells", "land_terrain", "free_cast"}
     )
