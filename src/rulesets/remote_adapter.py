@@ -12,11 +12,12 @@ from copy import deepcopy
 from typing import Any, Callable
 
 from src.rulesets.contracts import RulesetCapabilities
+from src.rulesets import remote_event_receipts
 from src.rulesets.runtime_probe import RuntimeProbeClient, RuntimeProbeError, RuntimeProbeLedger
 
 
-MAX_EVENT_LEDGER_ROWS = 4096
-MAX_EVENT_BATCH_ID_LENGTH = 200
+MAX_EVENT_LEDGER_ROWS = remote_event_receipts.MAX_EVENT_LEDGER_ROWS
+MAX_EVENT_BATCH_ID_LENGTH = remote_event_receipts.MAX_EVENT_BATCH_ID_LENGTH
 MAX_SHEET_BRIDGE_ROWS = 64
 MAX_CHARACTER_SHEET_BYTES = 262_144
 
@@ -167,6 +168,11 @@ class RemoteRulesetRuntimeAdapter:
         """
 
         dto = self._dto(instance, "instance")
+        if isinstance(dto, dict):
+            modules = dto.get("modules")
+            slot = modules.get("ruleset_runtime") if isinstance(modules, dict) else None
+            if isinstance(slot, dict) and "event_ledger" in slot:
+                slot["event_ledger"] = remote_event_receipts.child_ledger(slot["event_ledger"])
         if not isinstance(dto, dict) or not self.capabilities.adventure_projection:
             return dto
         if self._adventure_resolver is None:
@@ -341,14 +347,30 @@ class RemoteRulesetRuntimeAdapter:
         return result
 
     def apply_event_batch(self, instance: Any, batch: dict[str, Any]) -> dict[str, Any]:
+        from src.engine.modules import ruleset_runtime
+
+        remote_event_receipts.batch_identity(batch)
+        scope = _game_scope(instance)
+        ruleset_runtime.require_writable(instance)
+        if ruleset_runtime.bound_runtime_id(instance) != self.runtime_id:
+            raise RuntimeProbeError("remote event batch runtime binding mismatch")
+        # Read without materializing/repairing any live module on rejection.
+        slot = instance.modules.get("ruleset_runtime", {})
+        current = deepcopy(slot.get("event_ledger", []))
+        replayed = remote_event_receipts.replay(
+            current, batch, self.runtime_id, self.runtime_version, scope,
+        )
+        if replayed is not None:
+            return replayed
         instance_dto = self._instance_dto(instance)
         result = self._call(
             "apply_event_batch",
             {"instance": instance_dto, "batch": batch},
             live_state=instance_dto,
-            request_id=(f"batch:{_game_scope(instance)}:{batch['batch_id']}"
-                        if isinstance(batch.get("batch_id"), str) and batch["batch_id"] else None),
-            receipt_payload={"batch": deepcopy(batch)},
+            request_id=f"batch:{scope}:{batch['batch_id']}",
+            # A transport success is not an application receipt. After rollback
+            # it may be reused only against the very same aggregate pre-image.
+            receipt_payload={"batch": deepcopy(batch), "base": remote_event_receipts.digest(instance_dto)},
         )
         if not isinstance(result, dict):
             raise RuntimeProbeError("remote apply_event_batch result must be an object")
@@ -360,11 +382,16 @@ class RemoteRulesetRuntimeAdapter:
         if bridge_keys.intersection(result):
             state, ledger = self._validate_state_bridge(instance, batch, result)
             sheets = self._validate_sheet_bridge(instance, result)
-            from src.engine.modules import ruleset_runtime
-
-            binding = ruleset_runtime.binding(instance)
-            if str(binding.get("id") or "") != self.runtime_id:
-                raise RuntimeProbeError("remote event batch runtime binding mismatch")
+            public_result = {key: deepcopy(value) for key, value in result.items()
+                             if key not in bridge_keys}
+            # A rejected/no-op child must not smuggle a post-image into a new
+            # ledger version. Historical replays were already handled above.
+            if result.get("ok") is False or result.get("applied") is False or result.get("replayed") is True:
+                raise RuntimeProbeError("remote bridge did not apply a new batch")
+            ledger = remote_event_receipts.record(
+                current, ledger, batch, public_result,
+                self.runtime_id, self.runtime_version, scope,
+            )
             # Validation above is deliberately complete before any owner slot
             # is touched.  A malformed child response therefore cannot leave
             # state, ledger and sheets half-updated.
@@ -374,8 +401,7 @@ class RemoteRulesetRuntimeAdapter:
                 ruleset_runtime.replace_event_ledger(instance, ledger)
             for uid, sheet in sheets.items():
                 instance.set_character_sheet(uid, sheet)
-            return {key: deepcopy(value) for key, value in result.items()
-                    if key not in bridge_keys}
+            return public_result
         return result
 
     def _validate_sheet_bridge(
@@ -401,7 +427,8 @@ class RemoteRulesetRuntimeAdapter:
             raise RuntimeProbeError("remote character sheet bridge needs a roster")
         sheets: dict[str, dict[str, Any]] = {}
         for uid, sheet in raw.items():
-            if not isinstance(uid, str) or not uid or uid not in players:
+            if (not isinstance(uid, str) or not uid or uid not in players
+                    or not isinstance(players[uid], dict)):
                 raise RuntimeProbeError("remote character sheet bridge names an unknown seat")
             if not isinstance(sheet, dict):
                 raise RuntimeProbeError("remote character sheet must be an object")
@@ -447,6 +474,8 @@ class RemoteRulesetRuntimeAdapter:
         for row in ledger:
             if not isinstance(row, dict):
                 raise RuntimeProbeError("remote event ledger row must be an object")
+            if remote_event_receipts.RECEIPT_KEY in row:
+                raise RuntimeProbeError("remote event ledger contains reserved host receipt metadata")
             batch_id = str(row.get("batch_id") or "").strip()
             if not batch_id or len(batch_id) > MAX_EVENT_BATCH_ID_LENGTH:
                 raise RuntimeProbeError("remote event ledger row has an invalid batch id")
@@ -454,9 +483,9 @@ class RemoteRulesetRuntimeAdapter:
                 raise RuntimeProbeError("remote event ledger contains duplicate batch ids")
             ids.append(batch_id)
 
-        from src.engine.modules import ruleset_runtime
-
-        current = ruleset_runtime.event_ledger(instance)
+        current = remote_event_receipts.child_ledger(
+            instance.modules.get("ruleset_runtime", {}).get("event_ledger", []),
+        )
         if not isinstance(current, list) or len(current) > MAX_EVENT_LEDGER_ROWS:
             raise RuntimeProbeError("host event ledger is invalid")
         current_ids: list[str] = []

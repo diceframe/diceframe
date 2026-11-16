@@ -144,7 +144,9 @@ def test_remote_ruleset_adapter_applies_only_opaque_state_and_ledger_dtos():
     result = runtime.apply_event_batch(instance, {"batch_id": "b1"})
     assert result == {"ok": True, "applied": True}
     assert ruleset_runtime.state(instance)["opaque"] == {"hp": 9}
-    assert ruleset_runtime.event_ledger(instance) == [{"batch_id": "b1"}]
+    # Host application metadata persists beside the opaque child event.
+    assert runtime._instance_dto(instance)["modules"]["ruleset_runtime"]["event_ledger"] == [{"batch_id": "b1"}]
+    assert ruleset_runtime.event_ledger(instance)[0]["_host_remote_apply_v1"]["child_row"] is True
 
 
 def test_remote_state_bridge_rejects_history_replacement_without_mutating_live_state():
