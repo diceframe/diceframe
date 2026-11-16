@@ -238,6 +238,61 @@ def derive_speed(
 
 _ARMOR_CATEGORIES = frozenset({"light", "medium", "heavy"})
 
+
+def derive_jump_distances(
+    abilities: Mapping[str, int], *, ability: str = "str",
+) -> dict[str, Any]:
+    """The jump distances an ability score and its modifier produce.
+
+    A Long Jump covers up to the *score*; a High Jump covers ``3`` plus the
+    *modifier*, floored at zero.  A standing jump is half the corresponding
+    running distance, and the halving happens before anything else reads the
+    number -- rounding up would hand out distance the rule does not grant.
+
+    ``ability`` is the score that is read, not an extra bonus: Second-Story Work
+    swaps Strength for Dexterity, so the caller passes ``dex`` and the Strength
+    score stops mattering.  Reach (``1.5 x height``) is deliberately absent: the
+    canonical record carries no height fact, so publishing a reach here would be
+    inventing one.
+    """
+
+    score = int(abilities[str(ability)])
+    high_jump = max(0, 3 + ability_modifier(score))
+    long_jump = max(0, score)
+    return {
+        "jump_ability": str(ability),
+        "long_jump_ft": long_jump,
+        "standing_long_jump_ft": long_jump // 2,
+        "high_jump_ft": high_jump,
+        "standing_high_jump_ft": high_jump // 2,
+    }
+
+
+def derive_movement_profile(
+    speed: int,
+    abilities: Mapping[str, int],
+    features: Dnd2024ClassFeatureResolver,
+    character: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """The special Speeds and jump distances that ride on the derived Speed.
+
+    Climb and Swim Speeds equal the *current* Speed, so they are re-derived here
+    instead of being stored as independent numbers; a mode nobody declared is
+    ``0`` rather than the Speed, because "no Climb Speed" is a real answer that
+    decides whether the extra-per-foot cost applies.
+
+    Order matters only in that this must run after ``derive_speed``: the profile
+    copies that result and never recomputes it.
+    """
+
+    modes = features.movement_modes(character)
+    return {
+        "climb_speed": int(speed) if modes["climb"] else 0,
+        "swim_speed": int(speed) if modes["swim"] else 0,
+        **derive_jump_distances(abilities, ability=features.jump_ability(character)),
+    }
+
+
 def derive_armor_training_state(
     abilities: Mapping[str, int],
     equipped_item_refs: Iterable[str],
@@ -393,6 +448,11 @@ class CharacterDerivationMixin:
         armor_training = derive_armor_training_state(
             abilities, item_refs, armor_category_refs, self.bundle,
         )
+        derived_speed = derive_speed(
+            int(species["speed"]),
+            feature_bonus=features.speed_bonus(feature_proxy),
+            armor_training=armor_training,
+        )
 
         hit_die = int(class_entity["hit_die"])
         con_modifier = ability_modifier(abilities["con"])
@@ -542,10 +602,9 @@ class CharacterDerivationMixin:
                 "proficiency_bonus": prof,
                 "armor_class": armor_class,
                 "initiative": initiative,
-                "speed": derive_speed(
-                    int(species["speed"]),
-                    feature_bonus=features.speed_bonus(feature_proxy),
-                    armor_training=armor_training,
+                "speed": derived_speed,
+                **derive_movement_profile(
+                    derived_speed, abilities, features, feature_proxy,
                 ),
                 "armor_training": armor_training,
                 "passive_perception": passive_perception,

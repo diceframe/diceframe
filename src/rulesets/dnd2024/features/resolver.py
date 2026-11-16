@@ -458,6 +458,46 @@ class Dnd2024ClassFeatureResolver:
                     total += scaled
         return total
 
+    def movement_modes(self, character: Mapping[str, Any] | None) -> dict[str, bool]:
+        """The special Speeds the owned declarations grant.
+
+        Roving's "+10 feet while you aren't wearing Heavy armor" is a Speed
+        bonus, and ``speed_bonus`` drops it under Heavy armor.  The Climb and
+        Swim Speeds the same feature grants are unconditional: Heavy armor
+        removes the +10, not those two Speeds.  That asymmetry is the rule, so
+        this reads *owned* declarations while the Speed bonus reads only
+        *active* ones.
+
+        A mode is a yes/no fact, never a number: the distance always equals the
+        character's own current Speed, which ``derive_speed`` owns.
+        """
+
+        climb = swim = False
+        for definition in self.features_for(character):
+            if definition.parameters.get("climb_speed_from_speed") is True:
+                climb = True
+            if definition.parameters.get("swim_speed_from_speed") is True:
+                swim = True
+        return {"climb": climb, "swim": swim}
+
+    def jump_ability(self, character: Mapping[str, Any] | None) -> str:
+        """The ability that sets jump distance; default is Strength.
+
+        Second-Story Work permits Dexterity instead of Strength (SRD p64).
+        The derived profile reports the largest legal jump, not a forced
+        substitution that could reduce the character's normal jump distance.
+        """
+
+        abilities = (character or {}).get("abilities") or {}
+        best = "str"
+        for definition in self.features_for(character):
+            ability = definition.parameters.get("jump_ability")
+            if isinstance(ability, str) and ability and int(
+                abilities.get(ability, 10)
+            ) > int(abilities.get(best, 10)):
+                best = ability
+        return best
+
     def feature_max_hp_bonus(self, character: Mapping[str, Any] | None) -> int:
         """The Hit Point maximum increase granted by owned features.
 
@@ -497,6 +537,26 @@ class Dnd2024ClassFeatureResolver:
         name = str(key)
         return [
             definition.id
+            for definition in self.features_for(character)
+            if definition.parameters.get(name)
+        ]
+
+    def feature_flag_source_rows(
+        self,
+        character: Mapping[str, Any] | None,
+        key: str,
+    ) -> list[dict[str, str]]:
+        """Owned declaration identities whose boolean parameter ``key`` is truthy.
+
+        Same order and same ownership as :meth:`feature_flag_sources`, but each
+        row carries the ``owner`` as well: provenance that only names a local id
+        cannot tell two subclasses' identically-named features apart, and the
+        reported source list is the only record a client sees.
+        """
+
+        name = str(key)
+        return [
+            {"code": definition.id, "owner": definition.owner}
             for definition in self.features_for(character)
             if definition.parameters.get(name)
         ]
@@ -1107,6 +1167,7 @@ class Dnd2024ClassFeatureResolver:
             self._validate_defeat_trigger_parameters(definition)
             self._validate_defense_parameters(definition)
             self._validate_speed_parameters(definition)
+            self._validate_movement_parameters(definition)
             self._validate_overchannel_parameters(definition)
             if definition.resource_id:
                 declaration = self.resources.declaration(
@@ -1202,17 +1263,17 @@ class Dnd2024ClassFeatureResolver:
         threshold = parameters.get("death_save_crit_threshold")
         if "death_save_crit_threshold" in parameters and (
             isinstance(threshold, bool) or not isinstance(threshold, int)
-            or not 2 <= threshold <= 19
+            or not 2 <= threshold <= 20
         ):
             raise ClassFeatureError(
-                f"{definition.id}.death_save_crit_threshold must be an integer from 2 to 19"
+                f"{definition.id}.death_save_crit_threshold must be an integer from 2 to 20"
             )
         base = parameters.get("turn_start_regen_base")
         if "turn_start_regen_base" in parameters and (
-            isinstance(base, bool) or not isinstance(base, int) or base < 0
+            isinstance(base, bool) or not isinstance(base, int) or base < 1
         ):
             raise ClassFeatureError(
-                f"{definition.id}.turn_start_regen_base must be a non-negative integer"
+                f"{definition.id}.turn_start_regen_base must be a positive integer"
             )
         ability = parameters.get("turn_start_regen_ability")
         if "turn_start_regen_ability" in parameters and (
@@ -1318,6 +1379,30 @@ class Dnd2024ClassFeatureResolver:
         ):
             raise ClassFeatureError(
                 f"{definition.id}.speed_bonus_ft must be an integer from 1 to 120"
+            )
+
+    @staticmethod
+    def _validate_movement_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on the special-Speed and jump contract.
+
+        ``climb_speed_from_speed`` / ``swim_speed_from_speed`` are flags, not
+        amounts: the distance always equals the character's current Speed, so a
+        ``False`` or a number would promise a mode the resolver cannot honour.
+        ``jump_ability`` names the score that sets the jump distance, and a typo
+        there would silently fall back to Strength -- the very substitution the
+        Thief feature exists to make.
+        """
+
+        parameters = definition.parameters
+        for key in ("climb_speed_from_speed", "swim_speed_from_speed"):
+            if key in parameters and parameters[key] is not True:
+                raise ClassFeatureError(
+                    f"{definition.id}.{key} must be true when declared"
+                )
+        ability = parameters.get("jump_ability")
+        if "jump_ability" in parameters and ability not in ("str", "dex"):
+            raise ClassFeatureError(
+                f"{definition.id}.jump_ability must be str or dex"
             )
 
     def _validate_aura_parameters(self, definition: ClassFeatureDefinition) -> None:

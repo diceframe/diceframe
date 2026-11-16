@@ -89,9 +89,6 @@ WINDOW_REGISTRY: dict[str, WindowEntry] = {
     ),
 }
 
-# Cutting Words reaches a creature the bard can see within 60 feet.
-CUTTING_WORDS_RANGE_FT = 60
-
 
 class CombatCheckWindowsMixin:
     """Offer, validate, and finish post-roll check/damage windows."""
@@ -149,6 +146,22 @@ class CombatCheckWindowsMixin:
             return 0
         return sides
 
+    def _cutting_words_range(self, actor: dict[str, Any]) -> int:
+        """The declared reach of Cutting Words, or 0 when it is unusable.
+
+        The reach lives in the catalog (``parameters.range_ft``) so a second
+        subclass with a different reach needs no code change; an absent or
+        malformed declaration closes the window rather than falling back to a
+        remembered 60.
+        """
+
+        value = self.features.feature_value(
+            self._feature_character(actor), "cutting_words", "range_ft", 0,
+        )
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            return 0
+        return value
+
     def _cutting_words_bards(
         self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
         exclude: tuple[str, ...] = (),
@@ -188,7 +201,10 @@ class CombatCheckWindowsMixin:
                 continue
             if self._window_die_sides(actor, "cutting_words_check") == 0:
                 continue
-            if self._distance(combat, actor_id, str(attacker["actor_id"])) > CUTTING_WORDS_RANGE_FT:
+            range_ft = self._cutting_words_range(actor)
+            if range_ft == 0:
+                continue
+            if self._distance(combat, actor_id, str(attacker["actor_id"])) > range_ft:
                 continue
             bards.append(actor_id)
         return bards
@@ -307,7 +323,10 @@ class CombatCheckWindowsMixin:
     ) -> dict[str, Any]:
         entry = WINDOW_REGISTRY[code]
         return {
-            "decision_id": f"check-window:{code}:{source}:{roller_id}",
+            # The owner is part of the id: two bards reacting to the same
+            # attack are two distinct decisions, and a code-only id would make
+            # the second one replay the first one's cleared row.
+            "decision_id": f"check-window:{code}:{source}:{owner_id}",
             "kind": CHECK_WINDOW_DECISION,
             "surface": surface,
             "window_code": code,
@@ -389,7 +408,30 @@ class CombatCheckWindowsMixin:
                     code,
                 ),
             )
-        return None
+        # Every named code has been offered.  Cutting Words is priced per bard,
+        # not per attack: once the first bard declined (or spent and the attack
+        # still hits), a second qualified bard gets its own serial turn.  Bards
+        # that already had this face are excluded, so this cannot loop.
+        handled = (
+            *exclude,
+            *(str(item) for item in settlement.get("check_declined_bards") or ()),
+        )
+        owner_id = self._attack_check_candidate(
+            instance, combat, "cutting_words_check", attacker, defender, check, handled,
+        )
+        if not owner_id:
+            return None
+        settlement["remaining_windows"] = []
+        return self._build_check_window(
+            instance, code="cutting_words_check", surface="attack", owner_id=owner_id,
+            check=check, settlement=settlement,
+            source=str(settlement["intent"].get("intent_id") or ""),
+            roller_id=str(attacker["actor_id"]), attacker_id=str(attacker["actor_id"]),
+            target_id=str(defender["actor_id"]), remaining_windows=[],
+            die_sides=self._window_die_sides(
+                self._actor_view(instance, combat, owner_id), "cutting_words_check",
+            ),
+        )
 
     def _damage_window_offer(
         self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
@@ -548,6 +590,10 @@ class CombatCheckWindowsMixin:
                 "check_penalty_rolls": [die],
             })
             check["success"] = self._attack_check_success(check)
+            if not check["success"] and check.get("critical_upgrade"):
+                # The critical was the hit's own upgrade; without the hit there
+                # is nothing left to be a critical of.
+                check["critical"] = False
             return check
         if code == "dark_ones_own_luck":
             total = int(check.get("total", check.get("natural", 0)) or 0) + die
@@ -563,12 +609,18 @@ class CombatCheckWindowsMixin:
 
     @staticmethod
     def _attack_check_success(check: dict[str, Any]) -> bool:
-        """Attack success after a window: a natural 1 always misses."""
+        """Attack success after a window: a natural 1 always misses.
+
+        A critical from the d20 itself always hits.  A critical that was only
+        *upgraded* after the hit landed (a paralyzed target within 5 feet) is
+        not a d20 fact: it survives only while the reduced total still reaches
+        the AC, which is exactly what a Cutting Words cut can take away.
+        """
 
         natural = int(check.get("natural", 0) or 0)
         if natural == 1:
             return False
-        if bool(check.get("critical")):
+        if bool(check.get("critical")) and not bool(check.get("critical_upgrade")):
             return True
         return int(check["total"]) >= int(check["target"])
 
@@ -606,6 +658,18 @@ class CombatCheckWindowsMixin:
                     events.append({"type": "dnd2024.decision.pending", **next_window})
                     return events
         elif check.get("success"):
+            # A declined window still used up this bard's turn at the check
+            # face: the next candidate has to be someone else, or the same
+            # bard would be offered the same face forever.  The damage face
+            # keeps its own exclusion list instead, because declining costs
+            # nothing and the bard may still spend on the damage roll.
+            if str(decision["window_code"]) == "cutting_words_check":
+                declined = tuple(
+                    str(item) for item in settlement.get("check_declined_bards") or ()
+                )
+                settlement["check_declined_bards"] = list(
+                    (*declined, str(decision["window_owner_id"]))
+                )
             next_window = self._next_attack_check_window(
                 instance, combat, decision, check, settlement,
             )

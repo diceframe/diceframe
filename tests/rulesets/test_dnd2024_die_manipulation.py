@@ -17,7 +17,9 @@ from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.combat.action_adapter import (
     double_dice_counts,
     maximize_dice_nodes,
+    roll_damage_node,
 )
+from src.rulesets.dnd2024.combat.primitives import CombatIntentError
 from src.rulesets.dnd2024.features import (
     Dnd2024ClassFeatureCatalog,
     Dnd2024ClassFeatureResolver,
@@ -279,7 +281,9 @@ def test_catalog_declares_cleric_and_wizard_features() -> None:
         supreme = catalog.features["supreme_healing"]
         overchannel = catalog.features["overchannel"]
         assert supreme.class_id == "cleric"
+        assert supreme.owner == "subclass:life_domain"
         assert supreme.minimum_level == 17
+        assert supreme.source_ref == "srd-5.2.1:p40:supreme-healing"
         assert dict(supreme.parameters) == {}
         assert overchannel.class_id == "wizard"
         assert overchannel.minimum_level == 14
@@ -306,6 +310,18 @@ def test_feature_ownership_follows_levels(runtime, cleric17, cleric16, wizard14,
     assert resolver.has_feature(cleric16["ruleset_character"], "supreme_healing") is False
     assert resolver.has_feature(wizard14["ruleset_character"], "overchannel") is True
     assert resolver.has_feature(wizard13["ruleset_character"], "overchannel") is False
+    # The feature view carries the subclass owner, not the class.
+    owned = [
+        item for item in resolver.features_for(cleric17["ruleset_character"])
+        if item.id == "supreme_healing"
+    ]
+    assert [(item.owner, item.minimum_level) for item in owned] == [
+        ("subclass:life_domain", 17),
+    ]
+    assert not [
+        item for item in resolver.features_for(cleric16["ruleset_character"])
+        if item.id == "supreme_healing"
+    ]
 
 
 # --- T3: AST transform -----------------------------------------------------
@@ -358,20 +374,53 @@ def test_maximize_dice_nodes_transforms_only_dice() -> None:
     assert maximize_dice_nodes(double_dice_counts({"op": "dice", "formula": "2d8"})) == {
         "op": "constant", "value": 32,
     }
+    # The task-book example: 3d4 + 2 → 14 (12 maximized dice plus the flat 2).
+    assert maximize_dice_nodes({
+        "op": "add",
+        "args": [
+            {"op": "dice", "formula": "3d4"},
+            {"op": "constant", "value": 2},
+        ],
+    }) == {
+        "op": "add",
+        "args": [
+            {"op": "constant", "value": 12},
+            {"op": "constant", "value": 2},
+        ],
+    }
+    # Malformed dice fail closed instead of becoming zero.
+    for bad in ({"op": "dice", "formula": "2d"}, {"op": "dice", "formula": "0d6"}):
+        with pytest.raises(CombatIntentError):
+            maximize_dice_nodes(bad)
+    with pytest.raises(CombatIntentError):
+        maximize_dice_nodes(["not", "a", "node"])  # type: ignore[arg-type]
+
+    # A constant-only tree evaluates to its value with an empty dice trace.
+    assert roll_damage_node({"op": "constant", "value": 16}, SequenceRng([])) == (16, [])
 
 
 # --- T4: Supreme Healing on cure_wounds ------------------------------------
 
 def test_supreme_healing_maximizes_cure_wounds_without_rng(cleric17, runtime) -> None:
     engine, instance = new_combat(runtime, cleric17)
+    max_hp = int(canonical(instance)["resources"]["max_hp"])
+    amount = 16 + heal_modifier(instance)
+    set_hp(instance, 50)
     result, rng = cast_result(engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[99])
     assert result["ok"], result
     assert engine.apply_batch(instance, result["event_batch"])["applied"]
+    assert int(canonical(instance)["resources"]["hp"]) == 50 + amount
     assert rng.values == [99], "maximized dice must not consume RNG"
     healed = healing_to(result, "player:gm")
-    assert healed["amount"] == 16 + heal_modifier(instance)
+    assert healed["amount"] == amount
     assert healed["rolls"] == []
     assert healed["maximized"] is True
+
+    # The event keeps the full amount; the cap is the reducer's job.
+    set_hp(instance, max_hp)
+    result = cast(engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[99])
+    assert healing_to(result, "player:gm")["amount"] == amount
+    assert int(canonical(instance)["resources"]["hp"]) == max_hp
 
 
 # --- T5: Supreme Healing scales with the slot ------------------------------
@@ -387,6 +436,13 @@ def test_supreme_healing_maximizes_upcast_dice(cleric17, runtime) -> None:
     assert healed["rolls"] == []
     assert healed["maximized"] is True
 
+    result = cast(engine, instance, "spell:healing_word", 1, ["player:gm"], rolls=[99])
+    healed = healing_to(result, "player:gm")
+    # 2d4 base, maximized to 8.
+    assert healed["amount"] == 8 + modifier
+    assert healed["rolls"] == []
+    assert healed["maximized"] is True
+
     result = cast(engine, instance, "spell:healing_word", 2, ["player:gm"], rolls=[99])
     healed = healing_to(result, "player:gm")
     # 2d4 base + 2d4 per extra slot level → 4d4, all maximized.
@@ -399,11 +455,14 @@ def test_supreme_healing_maximizes_upcast_dice(cleric17, runtime) -> None:
 
 def test_cure_wounds_below_seventeen_still_rolls(cleric16, runtime) -> None:
     engine, instance = new_combat(runtime, cleric16)
-    result = cast(engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[4, 5])
+    result, rng = cast_result(
+        engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[4, 5],
+    )
     healed = healing_to(result, "player:gm")
     assert healed["rolls"] == [4, 5]
     assert healed["amount"] == 9 + heal_modifier(instance)
     assert "maximized" not in healed
+    assert rng.values == [], "an unmaximized heal must consume its dice"
 
 
 # --- T7: temporary HP is not healing ---------------------------------------
@@ -419,6 +478,103 @@ def test_supreme_healing_does_not_touch_temp_hp(cleric17, runtime) -> None:
     assert temp["amount"] == 9
     assert temp["rolls"] == [2, 3]
     assert "maximized" not in temp
+
+
+# --- T7b: the owner is part of the identity, not just the short id ---------
+
+def test_supreme_healing_is_owner_scoped(runtime, cleric17, wizard14) -> None:
+    """The short id alone must not be enough to maximize a heal.
+
+    The three sheet mutations below are negative for a short-id lookup too, so
+    the decisive assertions are the owner variants: if ``owner`` were ignored,
+    those lookups would answer True on a real 17th-level Life Cleric.
+    """
+
+    resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle(LOCALE))
+    canonical_sheet = cleric17["ruleset_character"]
+    assert resolver.has_feature(
+        canonical_sheet, "supreme_healing", owner="subclass:life_domain",
+    ) is True
+    assert resolver.has_feature(
+        canonical_sheet, "supreme_healing", owner="class:cleric",
+    ) is False
+    assert resolver.has_feature(
+        canonical_sheet, "supreme_healing", owner="subclass:college_of_lore",
+    ) is False
+
+    no_subclass = deepcopy(canonical_sheet)
+    no_subclass["features"].pop("subclass_ref", None)
+    assert resolver.has_feature(no_subclass, "supreme_healing") is False
+
+    foreign = deepcopy(canonical_sheet)
+    foreign["features"]["subclass_ref"] = "subclass:college_of_lore"
+    assert resolver.has_feature(foreign, "supreme_healing") is False
+
+    forged = deepcopy(wizard14["ruleset_character"])
+    forged["features"]["subclass_ref"] = "subclass:life_domain"
+    assert resolver.has_feature(forged, "supreme_healing") is False
+
+
+# --- T7c: a 17th-level cleric without the owner still rolls ----------------
+
+def test_a_seventeen_level_cleric_without_the_owner_does_not_maximize(
+    runtime, cleric17,
+) -> None:
+    sheet = deepcopy(cleric17)
+    sheet["ruleset_character"]["features"].pop("subclass_ref", None)
+    engine, instance = new_combat(runtime, sheet)
+    result, rng = cast_result(
+        engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[4, 5],
+    )
+    assert result["ok"], result
+    healed = healing_to(result, "player:gm")
+    assert healed["rolls"] == [4, 5]
+    assert "maximized" not in healed
+    assert healed["amount"] == 9 + heal_modifier(instance)
+    assert rng.values == [], "an unmaximized heal must still consume the RNG"
+
+
+# --- T7d: the blocked heal still maximizes, but pays out nothing -----------
+
+def test_cannot_regain_hp_blocks_the_maximized_heal(cleric17, runtime) -> None:
+    engine, instance = new_combat(runtime, cleric17)
+    canonical(instance)["conditions"] = {"cannot_regain_hp": True}
+    set_hp(instance, 10)
+    result, rng = cast_result(
+        engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[99],
+    )
+    assert result["ok"], result
+    healed = healing_to(result, "player:gm")
+    assert healed["delta"] == 0
+    assert healed["amount"] == 0
+    assert healed["blocked_by"] == "cannot_regain_hp"
+    assert healed["rolls"] == []
+    assert healed["maximized"] is True
+    assert rng.values == [99], "the blocked heal must not roll"
+    assert engine.apply_batch(instance, result["event_batch"])["applied"]
+    assert int(canonical(instance)["resources"]["hp"]) == 10
+
+
+# --- T7e: replaying a maximized heal is a no-op ---------------------------
+
+def test_the_maximized_heal_replays_without_a_second_payout(cleric17, runtime) -> None:
+    engine, instance = new_combat(runtime, cleric17)
+    set_hp(instance, 10)
+    result, _rng = cast_result(
+        engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[99],
+    )
+    assert healing_to(result, "player:gm")["maximized"] is True
+    assert engine.apply_batch(instance, result["event_batch"])["applied"]
+    hp_after = int(canonical(instance)["resources"]["hp"])
+    slots_after = canonical(instance)["spellcasting"]["class"]["slots_current"]
+    assert hp_after == 10 + 16 + heal_modifier(instance)
+
+    # The batch carries the extra ``maximized`` audit key; replaying it must
+    # neither pay out twice nor reject the unknown-for-the-reducer field.
+    replay = engine.apply_batch(instance, result["event_batch"])
+    assert replay["applied"] is False
+    assert int(canonical(instance)["resources"]["hp"]) == hp_after
+    assert canonical(instance)["spellcasting"]["class"]["slots_current"] == slots_after
 
 
 # --- T8: intent validation fails closed ------------------------------------

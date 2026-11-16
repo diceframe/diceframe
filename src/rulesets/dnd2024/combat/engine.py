@@ -832,7 +832,7 @@ class Dnd2024CombatEngine(
                 # 自由遭遇不属于任何冒险包；把这个事实写进权威状态，界面才能
                 # 持续显示“自由战斗”，而叙事文本无法改变它。
                 resolved_intent.update({"mode": "sandbox", "adventure_binding": None})
-            events.append(self._start_combat_event(instance, resolved_intent, rng))
+            events.extend(self._start_combat_event(instance, resolved_intent, rng))
         elif intent_type == "combat.end":
             events.append({"type": "dnd2024.combat.ended", "reason": "gm"})
         elif intent_type == "combat.message":

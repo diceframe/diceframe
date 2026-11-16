@@ -12,6 +12,7 @@ from src.rulesets.dnd2024.character.builder import ABILITY_IDS, ability_modifier
 from src.rulesets.dnd2024.character.derivation import (
     derive_armor_class,
     derive_armor_training_state,
+    derive_movement_profile,
     derive_speed,
 )
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
@@ -1508,6 +1509,11 @@ class Dnd2024AdvancementEngine:
                 feature_bonus=self._feature_resolver.speed_bonus(character),
                 armor_training=armor_training,
             )
+            # 攀爬/游泳速度与跳跃距离都挂在当前 Speed 上，升级当次就要跟着变，
+            # 否则升到 Ranger 6 拿到 Roving 之后，爬速要等下一次换装才出现。
+            derived.update(derive_movement_profile(
+                derived["speed"], abilities, self._feature_resolver, character,
+            ))
         class_ref = str(character["build"]["class_levels"][0]["class_ref"])
         class_entity = self.bundle.get("class", _class_id(class_ref)) or {}
         spell_ability = str(class_entity.get("spellcasting_ability") or "")

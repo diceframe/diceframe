@@ -213,7 +213,9 @@ class CombatResolutionMixin:
             return self._companion(instance, raw_id).get("ruleset_character") or {}
         return {}
 
-    def _start_combat_event(self, instance: Any, intent: dict[str, Any], rng: Any) -> dict[str, Any]:
+    def _start_combat_event(
+        self, instance: Any, intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
         enemies: dict[str, dict[str, Any]] = {}
         initiatives: list[dict[str, Any]] = []
         positions: dict[str, int] = {}
@@ -265,7 +267,9 @@ class CombatResolutionMixin:
         initiatives.sort(key=lambda row: (-int(row["total"]), row["kind"] != "player", row["actor_id"]))
         order = [row["actor_id"] for row in initiatives]
         first = self._actor_view_from_data(instance, enemies, order[0], companions)
-        return {
+        # 战斗开始的第一回合也是"自己的回合开始"：首行动者与后续回合共用
+        # 同一个 turn-start 辅助，不能因为批次里没有 turn.advanced 就跳过。
+        return [{
             "type": "dnd2024.combat.started", "round": 1, "initiative": order,
             "initiative_rolls": initiatives, "enemies": enemies, "positions": positions,
             "economy": self._fresh_economy(first), "position_mode": "theater",
@@ -275,7 +279,7 @@ class CombatResolutionMixin:
             "origin_step_id": str(intent.get("origin_step_id") or ""),
             "mode": str(intent.get("mode") or "sandbox"),
             "adventure_binding": deepcopy(intent.get("adventure_binding")),
-        }
+        }, *self._turn_start_regen_events(first)]
 
     @staticmethod
     def _spell_end_trigger_events(
@@ -498,6 +502,11 @@ class CombatResolutionMixin:
         if crit_threshold != 20:
             # 默认 20 时不写字段，避免对既有事件消费方的无谓扰动。
             check_event["crit_threshold"] = crit_threshold
+        if crit_on_hit:
+            # 这是"命中之后"才升级的重击，不是 d20 本身掷出的重击。标记出来，
+            # 掷后窗口才知道扣减总数可以把它退回普通命中甚至失手；不标记的话
+            # ``critical`` 会被当成必中，Cutting Words 就永远改不成 miss。
+            check_event["critical_upgrade"] = True
         rage_sustain = bool(
             target["kind"] == "enemy" and "rage" in actor["conditions"]
             and str((combat.get("economy") or {}).get("actor_id") or "") == str(actor_id)
@@ -1024,8 +1033,13 @@ class CombatResolutionMixin:
                 )
                 if effect.get("add_spell_ability"):
                     healing_node = heal_ability_modifier_node(healing_node, actor)
+                # Owner-scoped on purpose: the short id alone would let any
+                # future class that declares a same-named feature turn this
+                # heal into a maximized one.
                 maximized = self.features.has_feature(
-                    self._feature_character(actor), "supreme_healing",
+                    self._feature_character(actor),
+                    "supreme_healing",
+                    owner="subclass:life_domain",
                 )
                 if maximized:
                     healing_node = maximize_dice_nodes(healing_node)
@@ -1852,37 +1866,63 @@ class CombatResolutionMixin:
         """Turn-start regeneration for the actor whose turn just began.
 
         Gated by the Bloodied rule (``1 <= hp <= max_hp // 2``): a downed,
-        dead, stable, full or merely wounded actor never ticks.  The amount is
-        fixed by the declaration (``base + ability modifier``), never rolled,
-        and multiple declarations take the single largest base instead of
-        stacking.  ``cannot_regain_hp`` blocks the healing with a zero-delta
+        dead, stable, full or merely wounded actor never ticks.  Each owned
+        declaration is evaluated on its own and emits its own event, so two
+        future features never collapse into one unattributable number.  The
+        amount is fixed by the declaration (``base + ability modifier``), never
+        rolled.  ``cannot_regain_hp`` blocks the healing with a zero-delta
         event so the reducer stays purely mechanical.
         """
 
+        if actor.get("kind") not in {"player", "companion"}:
+            # Enemies carry no class features, and the start-of-combat view for
+            # them is built from raw data without a character slice.
+            return []
         hp = int(actor["hp"])
-        maximum = int(actor["max_hp"])
+        maximum = int(actor.get("max_hp", 0) or 0)
         if hp < 1 or maximum <= 0 or hp > maximum // 2:
             return []
         character = self._feature_character(actor)
-        base, source_id = self.features.max_feature_value_source(
-            character, "turn_start_regen_base", 0,
-        )
-        if base <= 0:
-            return []
-        ability = str(
-            self.features.feature_value(character, source_id, "turn_start_regen_ability", "con")
-        )
-        amount = max(0, base + ability_modifier(int(character["abilities"].get(ability, 10) or 0)))
-        if amount <= 0:
-            return []
-        blocked = "cannot_regain_hp" in actor["conditions"]
-        return [{
-            "type": "resource.changed", "resource": "hp",
-            "target_id": actor["actor_id"],
-            "delta": 0 if blocked else amount, "amount": 0 if blocked else amount,
-            "healing": True, "feature_id": source_id,
-            **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
-        }]
+        # A condition whose duration ends at this very turn start is already
+        # gone by the time the reducer applies ``turn.advanced``; reading the
+        # pre-expiry view would block the heal one round too many.
+        live_conditions = {
+            condition_id: value
+            for condition_id, value in (actor.get("conditions") or {}).items()
+            if not (
+                isinstance(value, dict)
+                and value.get("duration") in {"actor_turn_start", "target_turn_start"}
+            )
+        }
+        blocked = "cannot_regain_hp" in live_conditions
+        events: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for definition in self.features.active_features_for(character):
+            base = definition.parameters.get("turn_start_regen_base")
+            ability = definition.parameters.get("turn_start_regen_ability")
+            if base is None or not isinstance(ability, str):
+                continue
+            identity = (definition.owner, definition.id)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            modifier = ability_modifier(
+                int(character["abilities"].get(ability, 10) or 0)
+            )
+            amount = int(base) + modifier
+            if amount <= 0:
+                continue
+            events.append({
+                "type": "resource.changed", "resource": "hp",
+                "target_id": actor["actor_id"],
+                "delta": 0 if blocked else amount, "amount": 0 if blocked else amount,
+                "healing": True, "rolls": [],
+                "feature_id": definition.id, "owner": definition.owner,
+                "trigger": "turn_start", "base": int(base),
+                "ability": ability, "ability_modifier": modifier,
+                **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
+            })
+        return events
 
     def _death_save_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
@@ -1891,7 +1931,7 @@ class CombatResolutionMixin:
         actor = self._actor_view(instance, combat, actor_id)
         character = self._feature_character(actor)
         advantage_sources = list(
-            self.features.feature_flag_sources(character, "death_save_advantage")
+            self.features.feature_flag_source_rows(character, "death_save_advantage")
         )
         crit_threshold = int(self.features.min_feature_value(
             character, "death_save_crit_threshold", 20,
@@ -1900,7 +1940,9 @@ class CombatResolutionMixin:
         # unconditionally; validation proves the pool exists and has a point.
         spend_luck = bool(intent.get("spend_luck"))
         if spend_luck:
-            advantage_sources.append("lucky")
+            # Lucky is a feat, not a class feature: it has no class owner to
+            # report, and the pre-existing attack-roll provenance says the same.
+            advantage_sources.append({"code": "lucky", "mode": "advantage"})
         first = int(rng.randint(1, 20))
         second = int(rng.randint(1, 20)) if advantage_sources else None
         roll = max(first, second) if second is not None else first
@@ -1928,11 +1970,12 @@ class CombatResolutionMixin:
         if advantage_sources:
             check_event["advantage_mode"] = "advantage"
             check_event["advantage_sources"] = [
-                {"code": source_id, "mode": "advantage"}
-                for source_id in advantage_sources
+                {**source, "mode": "advantage"} for source in advantage_sources
             ]
         if crit_threshold != 20:
-            check_event["crit_threshold"] = crit_threshold
+            # Named for this save on purpose: ``crit_threshold`` already means
+            # the attack crit range elsewhere in the same event shape.
+            check_event["death_save_crit_threshold"] = crit_threshold
         events: list[dict[str, Any]] = []
         if spend_luck:
             events.append({
@@ -1964,7 +2007,7 @@ class CombatResolutionMixin:
 
         actor_id = str(actor["actor_id"])
         roll = int(check.get("natural", 0) or 0)
-        crit_threshold = int(check.get("crit_threshold", 20) or 20)
+        crit_threshold = int(check.get("death_save_crit_threshold", 20) or 20)
         successes = int(actor["death_saves"].get("successes", 0) or 0)
         failures = int(actor["death_saves"].get("failures", 0) or 0)
         hp = 0
@@ -1982,6 +2025,11 @@ class CombatResolutionMixin:
         return [
             {
                 "type": "dnd2024.death_save.resolved", "actor_id": actor_id,
+                # §4.5.4 asks for the natural face, but
+                # test_dark_ones_own_luck_adds_a_d10_to_a_failed_death_save
+                # pins the window-boosted total here and sits outside this
+                # slice's file whitelist.  Recorded as a deviation instead of
+                # changing another slice's test.
                 "roll": int(check.get("total", roll) or roll),
                 "successes": min(successes, 3), "failures": min(failures, 3),
                 "stable": stable, "dead": dead, "hp": hp,
