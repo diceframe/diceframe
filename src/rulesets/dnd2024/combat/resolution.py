@@ -53,6 +53,10 @@ from .primitives import (
     RELENTLESS_RAGE_DECISION,
     SUPERIOR_DEFENSE_CONDITION,
     SUPERIOR_DEFENSE_DURATION,
+    DIVINE_SENSE_CONDITION,
+    DIVINE_SENSE_DURATION,
+    TURN_UNDEAD_DURATION,
+    TURN_UNDEAD_MAX_ROUNDS,
     CombatIntentError,
     RAGE_MAX_ROUNDS,
     UNARMED_STRIKE_REF,
@@ -2669,6 +2673,10 @@ class CombatResolutionMixin:
         # 多道射线/多目标按目标累计本次伤害：每束都用施法前的 HP 判断会漏掉
         # 几束合计才击倒的目标，全部敌人倒下时战斗也不会结束。
         dealt: dict[str, int] = {}
+        # 真正恢复了 HP 的目标（被 ``cannot_regain_hp`` 拦住的不算）：法术
+        # 治疗的两个 rider 都以"实际恢复"为前提，所以这份名单由结算过程
+        # 自己记，而不是事后从事件猜。
+        healed_targets: list[str] = []
         # 同一次施法的多道射线共用一个事件批次：已消耗条件只在局部隐藏，
         # 事件仍在批次末尾统一移除，状态写入时机不变。
         consumed_conditions: set[tuple[str, str]] = set()
@@ -2928,6 +2936,11 @@ class CombatResolutionMixin:
                     **({"maximized": True} if maximized else {}),
                     **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
                 })
+                if not blocked and healing > 0:
+                    healed_targets.append(target_id)
+                    events.extend(self._healing_rider_events(
+                        actor, target_id, target, slot_level, spell, actor_id,
+                    ))
                 succeeded = True
             elif mode == "temp_hp":
                 # 升环是固定加值，不走 spell_formula_node 的同面骰 upcast 参数。
@@ -3143,6 +3156,14 @@ class CombatResolutionMixin:
         # 提升的祝福打击落在本次施法末：临时 HP 不是"命中后的效果"，它与
         # 目标是否真的掉血无关，所以不挂在任何单个目标的结算链上。
         events.extend(self._cantrip_temp_hp_events(actor, actor_id, spell, effect, intent))
+        # Blessed Healer 按"这次施法"结算一次，所以落在目标循环之外：三个
+        # 目标吃到的是一次治疗后的 2+环阶，而不是三份。
+        if slot_level > 0 and any(
+            target_id != actor_id for target_id in healed_targets
+        ):
+            events.extend(self._blessed_healer_events(
+                actor, actor_id, slot_level, spell,
+            ))
         living_enemy_ids = {
             _enemy_actor(enemy_id)
             for enemy_id, enemy in combat.get("enemies", {}).items()
@@ -3630,6 +3651,26 @@ class CombatResolutionMixin:
                 events.extend(self._hide_events(
                     instance, combat, {"actor_id": actor_id}, rng, spend_action=False,
                 ))
+            elif action.kind == "divine_spark":
+                events.extend(self._divine_spark_events(
+                    instance, combat, actor_id, actor, capability, intent, rng,
+                ))
+            elif action.kind == "turn_undead":
+                events.extend(self._turn_undead_events(
+                    instance, combat, actor_id, actor, capability, intent, rng,
+                ))
+            elif action.kind == "preserve_life":
+                events.extend(self._preserve_life_events(
+                    actor, capability, intent,
+                ))
+            elif action.kind == "divine_sense":
+                events.extend(self._divine_sense_events(
+                    instance, actor, capability,
+                ))
+            elif action.kind == "lay_on_hands":
+                events.extend(self._lay_on_hands_events(
+                    instance, combat, actor_id, capability, intent,
+                ))
             elif action.kind == "heal":
                 # 特性声明的治疗骰 + 等级加值；事件形状与法术治疗分支一致。
                 character = self._feature_character(actor)
@@ -3866,6 +3907,409 @@ class CombatResolutionMixin:
             )),
             "source_actor_id": actor_id, "feature_id": feature_id,
         }]
+
+    def _healing_rider_events(
+        self, actor: dict[str, Any], target_id: str, target: dict[str, Any],
+        slot_level: int, spell: dict[str, Any], actor_id: str,
+    ) -> list[dict[str, Any]]:
+        """Disciple of Life: 2 plus the slot's level, per healed creature.
+
+        The feature's sentence is "a spell you cast with a spell slot", so a
+        free cast, a Channel Divinity option and Lay On Hands are all outside
+        it -- those restore Hit Points without spending a slot.  ``slot_level``
+        is therefore the whole test, and it is the *real* level of the slot
+        that was spent, so an upcast Cure Wounds pays 2 + the higher level.
+        """
+
+        if slot_level <= 0:
+            return []
+        character = self._feature_character(actor)
+        flat = self.features.feature_value(
+            character, "disciple_of_life", "rider_flat", 0,
+        )
+        if not flat:
+            return []
+        per_level = int(self.features.feature_value(
+            character, "disciple_of_life", "rider_per_slot_level", 1,
+        ) or 0)
+        bonus = int(flat) + per_level * slot_level
+        blocked = "cannot_regain_hp" in (target.get("conditions") or {})
+        return [{
+            "type": "resource.changed", "resource": "hp", "target_id": target_id,
+            "delta": 0 if blocked else bonus,
+            "amount": 0 if blocked else bonus,
+            "healing": True, "rolls": [],
+            "feature_id": "disciple_of_life", "rider": "disciple_of_life",
+            "source_spell_ref": f"spell:{spell['id']}",
+            "slot_level": slot_level, "rider_target_id": target_id,
+            **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
+        }]
+
+    def _blessed_healer_events(
+        self, actor: dict[str, Any], actor_id: str, slot_level: int,
+        spell: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Blessed Healer: heal yourself once per qualifying cast.
+
+        "One or more creatures other than yourself" is a property of the whole
+        cast, so the caller decides whether the condition held; this method
+        only prices the once-per-cast amount.
+        """
+
+        if slot_level <= 0:
+            return []
+        character = self._feature_character(actor)
+        flat = self.features.feature_value(
+            character, "blessed_healer", "rider_flat", 0,
+        )
+        if not flat:
+            return []
+        per_level = int(self.features.feature_value(
+            character, "blessed_healer", "rider_per_slot_level", 1,
+        ) or 0)
+        bonus = int(flat) + per_level * slot_level
+        blocked = "cannot_regain_hp" in (actor.get("conditions") or {})
+        return [{
+            "type": "resource.changed", "resource": "hp", "target_id": actor_id,
+            "delta": 0 if blocked else bonus,
+            "amount": 0 if blocked else bonus,
+            "healing": True, "rolls": [],
+            "feature_id": "blessed_healer", "rider": "blessed_healer",
+            "source_spell_ref": f"spell:{spell['id']}",
+            "slot_level": slot_level, "rider_target_id": actor_id,
+            **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
+        }]
+
+    def _spark_die_count(
+        self, character: Any, feature_id: str,
+    ) -> int:
+        """How many d8 Divine Spark rolls at this Cleric level.
+
+        The tiers are declared as two parallel arrays (levels and dice) because
+        the feature catalog only carries scalars; the level is the *declaring
+        class's* level, so a Cleric 6 / Fighter 14 rolls one d8, not four.
+        """
+
+        levels = self.features.feature_value(
+            character, feature_id, "spark_tier_levels", [1],
+        ) or []
+        counts = self.features.feature_value(
+            character, feature_id, "spark_tier_counts", [1],
+        ) or []
+        state = self.features.class_state(character)
+        level = int(state[1]) if state else 0
+        count = 1
+        best = -1
+        for threshold, amount in zip(levels, counts):
+            try:
+                gate = int(threshold)
+                dice = int(amount)
+            except (TypeError, ValueError):
+                continue
+            if level >= gate and gate > best:
+                best = gate
+                count = max(1, dice)
+        return count
+
+    def _divine_spark_events(
+        self, instance: Any, combat: dict[str, Any], actor_id: str,
+        actor: dict[str, Any], capability: Any, intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Divine Spark: one d8 per tier plus Wisdom, as healing or as damage.
+
+        Both modes roll the same dice.  Only the healing mode is maximised by
+        Supreme Healing -- the damage mode is damage, and the Wisdom modifier
+        is a flat bonus in both, so "maximise the dice" never becomes
+        "maximise the total".
+        """
+
+        target_id = str(intent.get("target_id") or "")
+        target = self._actor_view(instance, combat, target_id)
+        character = self._feature_character(actor)
+        feature_id = capability.feature_id
+        die = str(self.features.feature_value(
+            character, feature_id, "spark_die", "d8",
+        ) or "d8")
+        count = self._spark_die_count(character, feature_id)
+        ability = str(self.features.feature_value(
+            character, feature_id, "spark_ability", "wis",
+        ) or "wis")
+        bonus = ability_modifier(
+            int((actor.get("abilities") or {}).get(ability, 10) or 10)
+        )
+        minimum = int(self.features.feature_value(
+            character, feature_id, "spark_minimum", 1,
+        ) or 1)
+        node: dict[str, Any] = formula_node_from_dice_formula(f"{count}{die}")
+        if bonus:
+            node = {"op": "add", "args": [
+                node, {"op": "constant", "value": bonus},
+            ]}
+        if str(intent.get("spark_mode") or "") == "heal":
+            maximized = self.features.has_feature(
+                character, "supreme_healing", owner="subclass:life_domain",
+            )
+            if maximized:
+                node = maximize_dice_nodes(node)
+            amount, rolls = roll_damage_node(node, rng)
+            amount = max(minimum, amount)
+            blocked = "cannot_regain_hp" in (target.get("conditions") or {})
+            return [{
+                "type": "resource.changed", "resource": "hp", "target_id": target_id,
+                "delta": 0 if blocked else amount,
+                "amount": 0 if blocked else amount,
+                "healing": True, "rolls": rolls,
+                "feature_id": feature_id, "channel_effect": "divine_spark",
+                **({"maximized": True} if maximized else {}),
+                **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
+            }]
+        amount, rolls = roll_damage_node(node, rng)
+        save_ability = str(self.features.feature_value(
+            character, feature_id, "spark_save_ability", "con",
+        ) or "con")
+        dc = int(actor.get("spell_save_dc", 0) or 0)
+        roll = int(rng.randint(1, 20))
+        modifier = int((target.get("saving_throws") or {}).get(save_ability, 0) or 0)
+        total = roll + modifier
+        saved = total >= dc
+        events: list[dict[str, Any]] = [{
+            "type": "check.resolved", "kind": "saving_throw",
+            "actor_id": target_id, "ability": save_ability,
+            "rolls": [roll], "natural": roll, "modifier": modifier,
+            "total": total, "target": dc, "success": saved,
+            "feature_id": feature_id, "channel_effect": "divine_spark",
+        }]
+        if saved:
+            # "half as much damage" rounds down, and resistance applies after
+            # the halving -- the same order every save-for-half spell uses.
+            amount //= 2
+        damage_type = str(intent.get("damage_type") or "")
+        amount, resistance = self._resist_damage(target, amount, damage_type)
+        if amount <= 0:
+            return events
+        damage_event: dict[str, Any] = {
+            "type": "resource.changed", "resource": "hp", "target_id": target_id,
+            "delta": -amount, "amount": amount, "damage_type": damage_type,
+            "critical": False, "rolls": rolls,
+            "feature_id": feature_id, "channel_effect": "divine_spark",
+        }
+        if resistance:
+            damage_event["resisted"] = True
+            damage_event["resistance"] = resistance
+        relentless = self._relentless_rage_marker(instance, target)
+        if relentless:
+            damage_event["relentless"] = relentless
+        events.append(damage_event)
+        events.extend(
+            self._concentration_events(instance, combat, target, amount, rng)
+        )
+        if target["kind"] == "enemy" and target["hp"] - amount <= 0:
+            events.extend(self._enemy_zero_hp_feature_events(
+                instance, combat, actor_id, target, amount,
+            ))
+        return events
+
+    def _turn_undead_events(
+        self, instance: Any, combat: dict[str, Any], actor_id: str,
+        actor: dict[str, Any], capability: Any, intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Turn Undead: one Wisdom save per chosen Undead, then two conditions.
+
+        The effects are ordinary conditions carrying their own enders, so the
+        damage sweep and the source's incapacitation need no branch of their
+        own here.  ``flees_from`` is a guided fact for the enemy AI: it records
+        "move away from this actor", it does not move anything itself.
+        """
+
+        character = self._feature_character(actor)
+        feature_id = capability.feature_id
+        save_ability = str(self.features.feature_value(
+            character, feature_id, "turn_save_ability", "wis",
+        ) or "wis")
+        duration = str(self.features.feature_value(
+            character, feature_id, "turn_duration", TURN_UNDEAD_DURATION,
+        ) or TURN_UNDEAD_DURATION)
+        turns = int(self.features.feature_value(
+            character, feature_id, "turn_turns", TURN_UNDEAD_MAX_ROUNDS,
+        ) or TURN_UNDEAD_MAX_ROUNDS)
+        conditions = [
+            str(code) for code in (
+                self.features.feature_value(
+                    character, feature_id, "turn_conditions",
+                    ["frightened", "incapacitated"],
+                ) or []
+            ) if str(code)
+        ]
+        ends_on_damage = bool(self.features.feature_value(
+            character, feature_id, "turn_ends_on_damage", True,
+        ))
+        dc = int(actor.get("spell_save_dc", 0) or 0)
+        events: list[dict[str, Any]] = []
+        for target_id in [str(item) for item in (intent.get("target_ids") or [])]:
+            target = self._actor_view(instance, combat, target_id)
+            roll = int(rng.randint(1, 20))
+            modifier = int(
+                (target.get("saving_throws") or {}).get(save_ability, 0) or 0
+            )
+            total = roll + modifier
+            saved = total >= dc
+            events.append({
+                "type": "check.resolved", "kind": "saving_throw",
+                "actor_id": target_id, "ability": save_ability,
+                "rolls": [roll], "natural": roll, "modifier": modifier,
+                "total": total, "target": dc, "success": saved,
+                "feature_id": feature_id, "channel_effect": "turn_undead",
+            })
+            if saved:
+                continue
+            for condition_id in conditions:
+                events.append({
+                    "type": "condition.applied", "target_id": target_id,
+                    "condition": condition_id,
+                    "duration": duration, "turns_remaining": turns,
+                    "source_actor_id": actor_id, "feature_id": feature_id,
+                    "channel_effect": "turn_undead",
+                    "ends_on_damage": ends_on_damage,
+                    "ends_on_source_incapacitated": True,
+                    "flees_from": actor_id,
+                })
+        return events
+
+    def _preserve_life_events(
+        self, actor: dict[str, Any], capability: Any, intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Preserve Life: one fixed budget, divided by the intent.
+
+        The budget is answered from the declaring class's level every time it
+        is used instead of being stored as a resource: it exists only for this
+        action, so a leftover point cannot be carried into the next one.  Each
+        positive share is its own ``resource.changed`` event -- two creatures
+        healed by one action are two facts, not one total.
+        """
+
+        character = self._feature_character(actor)
+        feature_id = capability.feature_id
+        per_level = int(self.features.feature_value(
+            character, feature_id, "preserve_life_per_level", 5,
+        ) or 5)
+        state = self.features.class_state(character)
+        level = int(state[1]) if state else 0
+        budget = per_level * level
+        events: list[dict[str, Any]] = []
+        for row in intent.get("allocations") or []:
+            if not isinstance(row, dict):
+                continue
+            amount = int(row.get("amount", 0) or 0)
+            if amount <= 0:
+                continue
+            events.append({
+                "type": "resource.changed", "resource": "hp",
+                "target_id": str(row.get("target_id") or ""),
+                "delta": amount, "amount": amount,
+                "healing": True, "rolls": [],
+                "feature_id": feature_id, "channel_effect": "preserve_life",
+                "pool_total": budget, "allocated_amount": amount,
+            })
+        return events
+
+    def _divine_sense_events(
+        self, instance: Any, actor: dict[str, Any], capability: Any,
+    ) -> list[dict[str, Any]]:
+        """Divine Sense: a self-scoped detection window, not a pool spend.
+
+        The sensing itself is projected privately by the view layer when this
+        condition is present; the event only records the window and its
+        radius, so replaying the ledger reconstructs the same permission
+        without re-deriving who could see what.
+        """
+
+        character = self._feature_character(actor)
+        feature_id = capability.feature_id
+        minutes = int(self.features.feature_value(
+            character, feature_id, "sense_duration_minutes", 10,
+        ) or 10)
+        actor_id = str(actor["actor_id"])
+        creature_types = [
+            str(kind) for kind in (
+                self.features.feature_value(
+                    character, feature_id, "sense_creature_types",
+                    ["celestial", "fiend", "undead"],
+                ) or []
+            ) if str(kind)
+        ]
+        return [{
+            "type": "condition.applied", "target_id": actor_id,
+            "condition": DIVINE_SENSE_CONDITION,
+            "duration": DIVINE_SENSE_DURATION,
+            "duration_minutes": minutes,
+            "expires_at_minute": self._logical_minutes(instance) + minutes,
+            "range_ft": int(self.features.feature_value(
+                character, feature_id, "sense_range_ft", 60,
+            ) or 60),
+            "creature_types": creature_types,
+            "ends_on_incapacitated": bool(self.features.feature_value(
+                character, feature_id, "ends_on_incapacitated", True,
+            )),
+            "source_actor_id": actor_id, "feature_id": feature_id,
+        }]
+
+    def _lay_on_hands_events(
+        self, instance: Any, combat: dict[str, Any], actor_id: str,
+        capability: Any, intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Lay On Hands: pay the pool the *requested* amount, then heal.
+
+        The pool is charged with what the player asked for, not with what the
+        target could actually take: a 30-point Lay On Hands on a creature
+        missing 4 Hit Points costs 30 and heals 4.  The condition removals are
+        charged before any healing is applied, and neither half heals -- those
+        points are spent to remove a condition, exactly as the feature says.
+        """
+
+        pool_id = capability.pool_resource_id
+        if not pool_id:  # pragma: no cover - catalog validation guards this
+            raise CombatIntentError("Lay On Hands has no pool to spend from")
+        character = deepcopy(self._canonical_actor_character(instance, actor_id))
+        pool = resource_state(character, pool_id)
+        current = int(pool.get("current", 0) or 0)
+        amount = int(intent.get("healing_amount", 0) or 0)
+        conditions = [str(code) for code in (intent.get("remove_conditions") or [])]
+        cost = int(self.features.feature_value(
+            character, capability.feature_id, "condition_cost", 5,
+        ) or 5)
+        total = amount + cost * len(conditions)
+        if total <= 0:
+            raise CombatIntentError(
+                "Lay On Hands needs healing or a condition to remove"
+            )
+        if total > current:
+            raise CombatIntentError(
+                "the Lay On Hands pool does not hold that many points"
+            )
+        target_id = str(intent.get("target_id") or "")
+        target = self._actor_view(instance, combat, target_id)
+        events: list[dict[str, Any]] = [{
+            "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+            "resource_id": pool_id, "amount": total,
+            "feature_id": capability.feature_id,
+        }]
+        if amount > 0:
+            blocked = "cannot_regain_hp" in (target.get("conditions") or {})
+            events.append({
+                "type": "resource.changed", "resource": "hp", "target_id": target_id,
+                "delta": 0 if blocked else amount,
+                "amount": 0 if blocked else amount,
+                "healing": True, "rolls": [],
+                "feature_id": capability.feature_id,
+                "channel_effect": "lay_on_hands",
+                **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
+            })
+        for condition_id in conditions:
+            events.append({
+                "type": "condition.removed", "target_id": target_id,
+                "condition": condition_id, "reason": "lay_on_hands",
+            })
+        return events
 
     def _font_of_magic_events(
         self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],

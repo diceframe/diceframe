@@ -62,6 +62,8 @@ from .primitives import (
     INTENT_TYPES,
     PERSISTENT_RAGE_DURATION,
     RAGE_MAX_ROUNDS,
+    DIVINE_SENSE_DURATION,
+    TURN_UNDEAD_DURATION,
     TURN_WINDOW_CLOSED_EVENT,
     UNARMED_STRIKE_REF,
     CombatIntentError,
@@ -1042,6 +1044,8 @@ class Dnd2024CombatEngine(
         # 一条事件而不是某个分支里顺手改的状态。
         events.extend(self._turn_window_closure_events(combat, intent))
         events.extend(self._incapacitation_cleanup_events(instance, combat, events))
+        events.extend(self._source_incapacitation_events(instance, combat, events))
+        events.extend(self._timed_condition_expiry_events(instance, combat))
         # 世界时钟驱动的到期：一场在一分钟内结束的战斗会把效果留在身上，
         # 只要之后还有任何战斗意图或时钟越过那一分钟就会被清掉。end_turn
         # 由回合推进处统一查两个上限，这里不能重复发同一条移除事件。
@@ -1131,6 +1135,117 @@ class Dnd2024CombatEngine(
                     "condition": condition_id, "reason": "incapacitated",
                 })
         return cleanup
+
+    def _source_incapacitation_events(
+        self, instance: Any, combat: dict[str, Any], events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Effects that end when their *source* becomes Incapacitated or dies.
+
+        Turn Undead is written that way: "This effect ends early on the
+        creature if it takes any damage, if you have the Incapacitated
+        condition, or if you die".  The ender is therefore not the bearer's
+        own state but the caster's, and the bearer may be any actor on the
+        table -- so the sweep runs once per batch over every condition that
+        names a source, instead of a branch inside the caster's damage path.
+        """
+
+        lost: set[str] = set()
+        for event in events:
+            if event.get("type") != "condition.applied":
+                continue
+            target_id = str(event.get("target_id") or "")
+            if target_id:
+                lost.add(target_id)
+        cleanup: list[dict[str, Any]] = []
+        for source_id in lost:
+            try:
+                view = self._actor_view(instance, combat, source_id)
+            except CombatIntentError:  # pragma: no cover - source came from an event
+                continue
+            conditions = dict(view.get("conditions") or {})
+            for event in events:
+                if (
+                    event.get("type") == "condition.applied"
+                    and str(event.get("target_id") or "") == source_id
+                ):
+                    conditions.setdefault(str(event.get("condition") or ""), {})
+            flags = condition_flags(self.catalog.conditions, conditions)
+            if not (flags["incapacitated"] or "dead" in conditions):
+                continue
+            for other_id in self._combat_actor_ids(instance, combat):
+                if other_id == source_id:
+                    continue
+                try:
+                    other = self._actor_view(instance, combat, other_id)
+                except CombatIntentError:  # pragma: no cover - actor came from combat
+                    continue
+                for condition_id, meta in (other.get("conditions") or {}).items():
+                    if not isinstance(meta, dict):
+                        continue
+                    if not meta.get("ends_on_source_incapacitated"):
+                        continue
+                    if str(meta.get("source_actor_id") or "") != source_id:
+                        continue
+                    cleanup.append({
+                        "type": "condition.removed", "target_id": other_id,
+                        "condition": condition_id, "reason": "source incapacitated",
+                    })
+        return cleanup
+
+    def _combat_actor_ids(
+        self, instance: Any, combat: dict[str, Any],
+    ) -> list[str]:
+        """Every actor currently on the battlefield, in a stable order."""
+
+        ids = [
+            _player_actor(str(uid))
+            for uid in sorted(getattr(instance, "players", {}) or {})
+        ]
+        party = (
+            ruleset_runtime.state(instance).get("ruleset_state", {}) or {}
+        ).get("party", {}) or {}
+        ids.extend(
+            _companion_actor(str(companion_id))
+            for companion_id in sorted(party.get("companions", {}) or {})
+        )
+        ids.extend(
+            _enemy_actor(str(enemy_id))
+            for enemy_id in sorted((combat.get("enemies") or {}))
+        )
+        return ids
+
+    def _timed_condition_expiry_events(
+        self, instance: Any, combat: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """End effects that run on the world clock rather than on turns.
+
+        Divine Sense lasts ten minutes and is not tied to a fight; a combat
+        that ends before the clock passes must leave it in place, and a clock
+        that passes outside combat must still end it.  Every intent sweeps the
+        same limit, so no second timer exists to disagree with the ledger.
+        """
+
+        now = self._logical_minutes(instance)
+        events: list[dict[str, Any]] = []
+        for actor_id in self._combat_actor_ids(instance, combat):
+            try:
+                view = self._actor_view(instance, combat, actor_id)
+            except CombatIntentError:  # pragma: no cover - actor came from combat
+                continue
+            for condition_id, meta in (view.get("conditions") or {}).items():
+                if not isinstance(meta, dict):
+                    continue
+                if meta.get("duration") != DIVINE_SENSE_DURATION:
+                    continue
+                expires_at = meta.get("expires_at_minute")
+                if isinstance(expires_at, bool) or not isinstance(expires_at, int):
+                    continue
+                if now >= expires_at:
+                    events.append({
+                        "type": "condition.removed", "target_id": actor_id,
+                        "condition": condition_id, "reason": "ten minutes passed",
+                    })
+        return events
 
     def add_player_to_active_combat(self, instance: Any, user_id: str) -> dict[str, Any]:
         """Enroll a newly joined player after the current combat actor.
@@ -1382,6 +1497,11 @@ class Dnd2024CombatEngine(
                 "mode": str(combat.get("mode") or ""),
                 "adventure_binding": deepcopy(combat.get("adventure_binding")),
                 "bardic_instances": self._active_bardic_view(instance, combat),
+                # 私有侦测只交给持有者本人：同一条 combat 视图对别人是空的。
+                "private_senses": (
+                    self._divine_sense_projection(instance, combat, viewer_id)
+                    if combat.get("status") == "active" else {}
+                ),
                 "actors": actors,
             },
             "encounter_presets": self.encounter_presets(),
@@ -2150,6 +2270,20 @@ class Dnd2024CombatEngine(
                     # "Until the start of your next turn": the source actor's
                     # turn has just begun, so this instance expires now.
                     target_conditions.pop(condition_id, None)
+                    continue
+                if value.get("duration") == TURN_UNDEAD_DURATION:
+                    # 1 分钟在回合制里就是十个自己的回合：每到自己回合结束
+                    # 减一，归零移除。计数放在条件上，所以中断、存档、重放
+                    # 都读同一份事实，不需要外部计时器。计时属于**持有着**
+                    # 的回合，而不是施法者的回合，因此这一支在下面的
+                    # ``source_actor_id`` 过滤之前。
+                    if target_id != previous_actor_id:
+                        continue
+                    remaining = int(value.get("turns_remaining", 0) or 0) - 1
+                    if remaining <= 0:
+                        target_conditions.pop(condition_id, None)
+                    else:
+                        value["turns_remaining"] = remaining
                     continue
                 if value.get("source_actor_id") != previous_actor_id:
                     continue

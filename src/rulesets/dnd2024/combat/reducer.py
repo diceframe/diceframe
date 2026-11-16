@@ -874,6 +874,7 @@ class CombatReducerMixin:
                 return
             resources["hp"] = next_hp
             conditions = character.setdefault("conditions", {})
+            self._end_damage_conditions(conditions, before, next_hp, event)
             if resources["hp"] <= 0:
                 conditions["unconscious"] = {"source": "zero_hp"}
                 # 昏迷即失能：狂暴立即结束。
@@ -893,11 +894,39 @@ class CombatReducerMixin:
                 conditions["death_saves"] = {"successes": 0, "failures": 0}
         elif kind == "enemy":
             enemy = snapshot["ruleset_state"]["combat"]["enemies"][raw_id]
-            enemy["hp"] = max(0, min(int(enemy["max_hp"]), int(enemy["hp"]) + delta))
+            before_hp = int(enemy["hp"])
+            enemy["hp"] = max(0, min(int(enemy["max_hp"]), before_hp + delta))
+            self._end_damage_conditions(
+                enemy.setdefault("conditions", {}), before_hp, int(enemy["hp"]), event,
+            )
             if enemy["hp"] <= 0:
                 enemy.setdefault("conditions", {})["defeated"] = {"source": "zero_hp"}
         else:
             raise EventBatchError("HP target actor is invalid")
+
+    @staticmethod
+    def _end_damage_conditions(
+        conditions: dict[str, Any], before_hp: int, after_hp: int,
+        event: dict[str, Any],
+    ) -> None:
+        """Remove the conditions whose own text says damage ends them.
+
+        Turn Undead is the first such effect: "this effect ends early on the
+        creature if it takes any damage".  The flag lives on the condition, so
+        a later effect with the same wording needs no branch here.
+
+        ``turn_effect_preserved`` is how one *specific* damage source opts out:
+        Sear Undead damages the turned Undead without ending the turn, and that
+        sentence belongs to the damage event, not to this sweep.  Protection
+        from Pose is not required either -- only a *reduction in Hit Points*
+        ends an effect, so a fully resisted hit leaves it in place.
+        """
+
+        if after_hp >= before_hp or event.get("turn_effect_preserved"):
+            return
+        for condition_id, meta in list(conditions.items()):
+            if isinstance(meta, dict) and meta.get("ends_on_damage"):
+                conditions.pop(condition_id, None)
 
     def _open_relentless_rage(
         self, snapshot: dict[str, Any], target_id: str, before: int,

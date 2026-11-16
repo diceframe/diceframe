@@ -149,6 +149,16 @@ def _blocked_reason(
                 f"not enough {name}: this capability needs {resource_cost.amount}, "
                 f"the character has {int(definition.current)}"
             )
+    pool_id = capability.pool_resource_id
+    if pool_id:
+        # 池的支出额由意图决定，所以这里只回答"池里还有没有至少一点"：
+        # 空池的能力照样要被列出来带着原因，而不是变成一个可点的按钮。
+        pool = definitions.get(pool_id)
+        name = catalog.label(pool_id, pool_id)
+        if pool is None:
+            return f"{name} is not available to this character"
+        if int(pool.current) < 1:
+            return f"{name} is empty"
     action = capability.cost.action
     if action and context.remaining(action) < 1:
         return f"the {action.replace('_', ' ')} has already been spent"
@@ -190,6 +200,7 @@ def combat_capabilities(
                 blocked_reason=blocked,
                 requires_hostile_target=capability.requires_hostile_target,
                 costs=_cost_views(catalog, capability, context, definitions),
+                target_kind=capability.target_kind,
             ))
     return tuple(result)
 

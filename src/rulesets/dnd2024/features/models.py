@@ -35,6 +35,13 @@ ACTION_KINDS = frozenset({
     # 全部抗性"。三者都不产生攻击或移动，但都必须走同一套资源/经济结算，
     # 所以作为封闭 kind 声明而不是让客户端拼事件。
     "temp_hp", "invisible", "resistance_all",
+    # Channel Divinity 的效果各自是一个封闭 kind：它们的成本同为一次引导，
+    # 但目标数量、是否要豁免、以及"分配一个预算"这三件事没有任何共同形状，
+    # 合成一个 kind 只会让结算按 intent 字段猜分支。
+    "divine_spark", "turn_undead", "preserve_life", "divine_sense",
+    # 圣疗从 track 池按请求量扣款，声明里给不出固定 amount，所以池只做可用性
+    # 判定，真实扣减由结算发一条按意图金额的 class_resource.spent。
+    "lay_on_hands",
 })
 ACTION_COST_KINDS = ("bonus_action", "action")
 # 回合开始窗口的支付键。与动作成本互斥：一个能力要么花动作，要么只在自己
@@ -67,6 +74,12 @@ SKILL_CHOICE_GRANTS = frozenset({"expertise"})
 # 消费方校验，不能被这张表的闭集误伤。
 CHECK_WINDOW_TRIGGERS = frozenset({
     "attack_roll_success", "grant", "own_check_failure", "save_failure",
+})
+# 一个能力允许声明的目标集。``creature`` 是"另一个活着的生物"（可以是友方，
+# 不能是自己），``bloodied_creature`` 追加"结算时已受伤过半"这一条，
+# ``undead`` 只接受亡灵，``none`` 表示不取目标（例如自身侦测）。
+TARGET_KINDS = frozenset({
+    "none", "creature", "bloodied_creature", "undead", "hostile",
 })
 
 
@@ -185,7 +198,20 @@ class CapabilityAction:
 
 @dataclass(frozen=True, slots=True)
 class FeatureCapability:
-    """A combat capability a class feature grants."""
+    """A combat capability a class feature grants.
+
+    ``target_kind`` is the closed vocabulary of legal target sets, and it is
+    *not* the same question as ``requires_hostile_target``: a Divine Spark may
+    target any living creature except the caster, a Lay On Hands may also
+    target the caster, and Turn Undead only accepts Undead.  Spelling the set
+    out here is what lets validation and the availability projection agree
+    without re-reading the effect kind.
+
+    ``pool_resource_id`` names a resource whose *remaining amount* gates
+    availability but whose spend is decided per intent (Lay On Hands).  A
+    fixed ``ResourceCost`` cannot express "up to what is left", so the pool is
+    only checked here and charged at resolution.
+    """
 
     id: str
     feature_id: str
@@ -195,6 +221,8 @@ class FeatureCapability:
     requires_condition: str | None = None
     forbidden_condition: str | None = None
     once_per_turn: bool = False
+    target_kind: str = "none"
+    pool_resource_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -669,6 +697,17 @@ class Dnd2024ClassFeatureCatalog:
                     f"{feature_id}.trigger must be one of "
                     f"{sorted(CHECK_WINDOW_TRIGGERS)} when range_ft is declared"
                 )
+        target_range_ft = parameters.get("target_range_ft")
+        if "target_range_ft" in parameters and (
+            isinstance(target_range_ft, bool) or not isinstance(target_range_ft, int)
+            or target_range_ft <= 0
+        ):
+            # ``target_range_ft`` 是"这次能力能打多远"，与上面的掷后窗口
+            # 互不相干：窗口的 ``range_ft`` 描述的是"事件发生时才判定射程"，
+            # 两者写成同一个键会让一个纯粹的距离声明被迫带一个 trigger。
+            raise ClassFeatureError(
+                f"{feature_id}.target_range_ft must be a positive integer"
+            )
         resource_id = str(raw.get("resource_id") or "")
         if resource_id:
             resource_id = _require_id(resource_id, f"{feature_id}.resource_id")
@@ -782,6 +821,16 @@ class Dnd2024ClassFeatureCatalog:
         once_per_turn = raw.get("once_per_turn", False)
         if not isinstance(once_per_turn, bool):
             raise ClassFeatureError(f"{capability_id}.once_per_turn must be a boolean")
+        target_kind = str(raw.get("target_kind") or "none")
+        if target_kind not in TARGET_KINDS:
+            raise ClassFeatureError(
+                f"{capability_id}.target_kind is not a known target set: {target_kind!r}"
+            )
+        pool_resource_id = str(raw.get("pool_resource_id") or "")
+        if pool_resource_id and not _ID_RE.fullmatch(pool_resource_id):
+            raise ClassFeatureError(
+                f"{capability_id}.pool_resource_id is not a canonical id"
+            )
         return FeatureCapability(
             id=capability_id,
             feature_id=feature_id,
@@ -793,6 +842,8 @@ class Dnd2024ClassFeatureCatalog:
             requires_condition=requires_condition or None,
             forbidden_condition=forbidden_condition or None,
             once_per_turn=once_per_turn,
+            target_kind=target_kind,
+            pool_resource_id=pool_resource_id,
         )
 
     def label(self, key: str, default: str = "") -> str:
@@ -872,6 +923,7 @@ class CombatCapabilityView:
     blocked_reason: str
     requires_hostile_target: bool
     costs: tuple[CapabilityCostView, ...]
+    target_kind: str = "none"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -881,5 +933,6 @@ class CombatCapabilityView:
             "available": self.available,
             "blocked_reason": self.blocked_reason,
             "requires_target": self.requires_hostile_target,
+            "target_kind": self.target_kind,
             "costs": [cost.to_dict() for cost in self.costs],
         }

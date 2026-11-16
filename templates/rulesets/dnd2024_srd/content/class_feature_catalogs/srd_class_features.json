@@ -75,6 +75,9 @@
     "bonus_proficiencies": "Bonus Proficiencies",
     "brutal_strike": "Brutal Strike",
     "channel_divinity": "Channel Divinity",
+    "divine_spark": "Divine Spark",
+    "turn_undead": "Turn Undead",
+    "divine_sense": "Divine Sense",
     "circle_of_the_land_spells": "Circle of the Land Spells",
     "cleric_subclass": "Cleric Subclass",
     "contact_patron": "Contact Patron",
@@ -476,6 +479,62 @@
     "paladin": {
       "source_ref": "srd-5.2.1:p54:paladins-smite",
       "features": [
+        {
+          "id": "lay_on_hands",
+          "minimum_level": 1,
+          "resource_id": "lay_on_hands",
+          "source_ref": "srd-5.2.1:p53:lay-on-hands",
+          "summary": "You have a pool of healing power that replenishes on a Long Rest. As a Bonus Action, you can touch a creature and restore a number of Hit Points from that pool, or expend 5 Hit Points from the pool to remove the Poisoned condition.",
+          "parameters": {
+            "target_range_ft": 5,
+            "pool_per_level": 5,
+            "condition_cost": 5,
+            "removable_conditions": ["poisoned"]
+          },
+          "capabilities": [
+            {
+              "id": "lay_on_hands",
+              "target_kind": "creature",
+              "pool_resource_id": "lay_on_hands",
+              "cost": {"bonus_action": 1},
+              "actions": [{"kind": "lay_on_hands", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "channel_divinity",
+          "minimum_level": 3,
+          "resource_id": "channel_divinity",
+          "source_ref": "srd-5.2.1:p55:channel-divinity",
+          "summary": "You can use this class's Channel Divinity twice. You regain one of its expended uses when you finish a Short Rest, and you regain all expended uses when you finish a Long Rest. Divine Sense is a Bonus Action of this class.",
+          "parameters": {
+            "channel_effects": ["divine_sense"],
+            "sense_range_ft": 60,
+            "sense_duration_minutes": 10,
+            "sense_creature_types": ["celestial", "fiend", "undead"],
+            "ends_on_incapacitated": true
+          },
+          "capabilities": [
+            {
+              "id": "divine_sense",
+              "target_kind": "none",
+              "cost": {"bonus_action": 1},
+              "actions": [{"kind": "divine_sense", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "restoring_touch",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p54:restoring-touch",
+          "summary": "When you use Lay On Hands, you can also remove one or more of these conditions from the target: Blinded, Charmed, Deafened, Frightened, Paralyzed, or Stunned. You expend 5 Hit Points from the pool for each condition removed.",
+          "parameters": {
+            "condition_cost": 5,
+            "removable_conditions": [
+              "blinded", "charmed", "deafened", "frightened", "paralyzed", "stunned"
+            ]
+          }
+        },
         {
           "id": "oath_of_devotion_spells",
           "owner": "subclass:oath_of_devotion",
@@ -1488,6 +1547,96 @@
     "cleric": {
       "source_ref": "srd-5.2.1:p40:cleric-features",
       "features": [
+        {
+          "id": "channel_divinity",
+          "minimum_level": 2,
+          "resource_id": "channel_divinity",
+          "source_ref": "srd-5.2.1:p37:channel-divinity",
+          "summary": "You can use this class's Channel Divinity twice. Each time you use it, choose which Channel Divinity effect to create: Divine Spark or Turn Undead. You regain one expended use when you finish a Short Rest, and all expended uses when you finish a Long Rest.",
+          "parameters": {
+            "channel_effects": ["divine_spark", "turn_undead"],
+            "spark_target_range_ft": 30,
+            "spark_die": "d8",
+            "spark_tier_levels": [1, 7, 13, 18],
+            "spark_tier_counts": [1, 2, 3, 4],
+            "spark_ability": "wis",
+            "spark_minimum": 1,
+            "spark_damage_types": ["necrotic", "radiant"],
+            "spark_save_ability": "con",
+            "turn_target_range_ft": 30,
+            "turn_save_ability": "wis",
+            "turn_duration": "turn_undead",
+            "turn_turns": 10,
+            "turn_conditions": ["frightened", "incapacitated"],
+            "turn_ends_on_damage": true
+          },
+          "capabilities": [
+            {
+              "id": "divine_spark",
+              "target_kind": "creature",
+              "cost": {
+                "action": 1,
+                "resources": [{"id": "channel_divinity", "amount": 1}]
+              },
+              "actions": [{"kind": "divine_spark", "count": 1}]
+            },
+            {
+              "id": "turn_undead",
+              "target_kind": "undead",
+              "cost": {
+                "action": 1,
+                "resources": [{"id": "channel_divinity", "amount": 1}]
+              },
+              "actions": [{"kind": "turn_undead", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "preserve_life",
+          "owner": "subclass:life_domain",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p40:preserve-life",
+          "summary": "As a Magic action, expend a use of Channel Divinity to restore a number of Hit Points equal to five times your Cleric level, divided among Bloodied creatures within 30 feet of yourself.",
+          "parameters": {
+            "target_range_ft": 30,
+            "preserve_life_per_level": 5,
+            "requires_bloodied": true,
+            "half_hp_cap": true
+          },
+          "capabilities": [
+            {
+              "id": "preserve_life",
+              "target_kind": "bloodied_creature",
+              "cost": {
+                "action": 1,
+                "resources": [{"id": "channel_divinity", "amount": 1}]
+              },
+              "actions": [{"kind": "preserve_life", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "disciple_of_life",
+          "owner": "subclass:life_domain",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p40:disciple-of-life",
+          "summary": "When a spell you cast with a spell slot restores Hit Points to a creature, that creature regains additional Hit Points equal to 2 plus the spell slot's level.",
+          "parameters": {
+            "rider_flat": 2,
+            "rider_per_slot_level": 1
+          }
+        },
+        {
+          "id": "blessed_healer",
+          "owner": "subclass:life_domain",
+          "minimum_level": 6,
+          "source_ref": "srd-5.2.1:p40:blessed-healer",
+          "summary": "Immediately after you cast a spell with a spell slot that restores Hit Points to one or more creatures other than yourself, you regain Hit Points equal to 2 plus the spell slot's level.",
+          "parameters": {
+            "rider_flat": 2,
+            "rider_per_slot_level": 1
+          }
+        },
         {
           "id": "life_domain_spells",
           "owner": "subclass:life_domain",

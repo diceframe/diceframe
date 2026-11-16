@@ -26,6 +26,13 @@ SUPERIOR_DEFENSE_DURATION = "superior_defense"
 # 回合开始窗口的关闭事件。窗口本身存在 economy 上（它不消耗任何经济，只是
 # "此刻允许支付"的记号），所以关闭它同样是一条事件，而不是某处直接改状态。
 TURN_WINDOW_CLOSED_EVENT = "dnd2024.turn_window.closed"
+# 驱散亡灵与神圣感知各自的条件域。前者是"每个受影响生物身上的一分钟状态"
+# （目标自己的回合按轮推进），后者是"施法者自己身上的一段侦测"（按分钟计时，
+# 失能即结束），两者都不属于 combat 域，所以各有一个 duration。
+TURN_UNDEAD_DURATION = "turn_undead"
+TURN_UNDEAD_MAX_ROUNDS = 10
+DIVINE_SENSE_CONDITION = "divine_sense"
+DIVINE_SENSE_DURATION = "divine_sense"
 
 
 def combat_turn_slots(combat: dict[str, Any]) -> list[dict[str, Any]]:
