@@ -11,6 +11,7 @@ from src.generation_limits import DEFAULT_TEXT_GEN_MAX_TOKENS
 import asyncio
 import json
 import logging
+import tempfile
 import time
 from copy import deepcopy
 from pathlib import Path
@@ -24,6 +25,9 @@ from src.engine.game_state import GameState
 from src.engine import persistence
 from src.webui.services.adventure_materialization import materialize_world_seed
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
+from src.creator import CreatorProjectStore
+from src.creator.worker_jobs import MAX_LEASE_SECONDS, MAX_RESULT_BYTES, WorkerJobError, WorkerJobStore
+from src.creator.worker import WorkerPolicy, run_worker
 
 from src.engine.participant_view import Viewer
 from src.lorebook.store import LorebookStore
@@ -38,14 +42,18 @@ from src.rulesets.builtin import (
     default_adventure_runtime_requirement,
     default_module_runtime_requirement,
 )
+from src.rulesets.plugin_runtime_source import PluginRulesetRuntimeSource
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.engine.world_template import load_world_template
 from src.content_modules.projection import ContentProjectionService
 from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, lorebooks, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls, check_reveals, seat_tokens, storytelling
 from src.webui.services import lorebook_usage
+from src.webui.services.ui_actions import UiActionDependencies, dispatch_ui_action
 from src.webui.services import standing_portraits
 from src.webui.services import combat_extension as combat_extension_service
 from src.webui.services import adventure_runtime
+from src.gameplays.builtin import DEFAULT_GAMEPLAYS
+from src.gameplays.contracts import GameplayProviderRegistry, project_gameplay_view
 from src.game_profiles.service import ProfileService, ProfileDependencies
 from src.webui.services.ai_seats import AISeatDependencies, AISeatRuntime, AISeatService
 from src.webui.services.check_decisions import CheckDecisionDependencies, CheckDecisionService
@@ -163,6 +171,7 @@ class WebAPI:
                  text_gen_max_tokens: int = DEFAULT_TEXT_GEN_MAX_TOKENS, plugin_host=None, hub_client=None,
                  speech_service=None, asr_service=None, imagegen_service=None,
                  ruleset_registry: RulesetRuntimeRegistry | None = None,
+                 gameplay_provider_registry: GameplayProviderRegistry | None = None,
                  content_cache_dir: Path | None = None,
                  content_mirrors: Any | None = None,
                  config_state: dict | None = None,
@@ -170,10 +179,24 @@ class WebAPI:
                  assistant_agent_max_tokens: int = 4096,
                  assistant_agent_task_max_tokens: int = DEFAULT_TASK_MAX_TOKENS):
         self._reg = registry
+        self._creator_projects = CreatorProjectStore(
+            self._reg.save_dir.parent / "creator-projects.json",
+            # P1-03：Creator 验证/构建复用与安装同源的深度校验器。
+            package_checker=self._creator_package_checker,
+        )
+        self._creator_worker_jobs = WorkerJobStore(self._reg.save_dir.parent / "creator-worker-jobs.json")
+        # 启动装配期收敛崩溃遗留的 running 回执（孤儿租约），避免回执永久卡在 running。
+        recovered = self._creator_worker_jobs.recover_expired()
+        if recovered:
+            logger.warning("已收敛 %d 个 Creator worker 孤儿回执为 interrupted", len(recovered))
         self._lore = lorebook
         self._mem = memory
         self._rules_dir = rules_dir
         self._handler = handler
+        # External gameplay owners may be injected at the composition root.
+        # An empty registry is intentional: unsupported modes receive a
+        # read-only diagnostic instead of entering the TRPG view by default.
+        self._gameplay_providers = gameplay_provider_registry or GameplayProviderRegistry()
         self._config_state = config_state if config_state is not None else {}
         self._ai_seat_runtime = AISeatRuntime(config_state=lambda: self._config_state)
         self._ai_seats = AISeatService(AISeatDependencies(
@@ -789,6 +812,7 @@ class WebAPI:
             economy_auto_reward_settings=self.economy_auto_reward_settings,
             resolve_reward=self.resolve_reward_as_gm,
             settle_adventure_completion=self._settle_adventure_completion_for,
+            gameplay_registry=DEFAULT_GAMEPLAYS,
         )
         self._map_dependencies = maps.MapDependencies(
             get_instance=self._reg.get,
@@ -1032,6 +1056,10 @@ class WebAPI:
             generate_rule=self.generate_rule, generate_image=self.generate_generated_image,
             invoke_plugin_tool=self.invoke_plugin_tool, update_plugin=self.update_plugin_config,
             runtime_logs=lambda: assistant_runtime_log_context(self._reg.save_dir.parent),
+            creator_projects=self._creator_projects,
+            worker_jobs=self._creator_worker_jobs,
+            run_creator_worker=self.run_creator_worker,
+            build_creator_project=self.build_creator_project,
         ))
         def agent_game_players(game_key, owner):
             instance = self.get_game_instance(game_key)
@@ -1166,8 +1194,54 @@ class WebAPI:
 
     # ---- 规则辅助 ----
 
+    def list_gameplays(self) -> dict[str, Any]:
+        """W2「规则与玩法」页：玩法模式只读投影（不暴露 provider 实现）。
+
+        数据源合并两处事实：内置 TRPG 模式（``DEFAULT_GAMEPLAYS``，核心管线
+        直接管，始终可用）与外部 provider 注册的扩展玩法（接线不完整如实
+        标注，fail closed）。
+        """
+
+        from src.gameplays.builtin import DEFAULT_GAMEPLAYS
+
+        registry = self._gameplay_providers
+        rows: dict[str, dict[str, Any]] = {}
+        for mode_id in sorted(DEFAULT_GAMEPLAYS.mode_ids()):
+            mode = DEFAULT_GAMEPLAYS.get(mode_id)
+            if mode is None:
+                continue
+            rows[mode_id] = {
+                "mode_id": mode.mode_id,
+                "progression_mode": mode.progression_mode,
+                "bot_surface": mode.bot_surface,
+                "source": "builtin",
+                "available": True,
+            }
+        for mode_id in sorted(registry.gameplays.mode_ids()):
+            if mode_id in rows:
+                continue
+            mode = registry.gameplays.get(mode_id)
+            if mode is None:
+                continue
+            provider_registered = registry.get(mode_id) is not None
+            turn_driver_bound = registry.driver_for(mode_id) is not None
+            rows[mode_id] = {
+                "mode_id": mode.mode_id,
+                "progression_mode": mode.progression_mode,
+                "bot_surface": mode.bot_surface,
+                "source": "provider",
+                "provider_registered": provider_registered,
+                "turn_driver_bound": turn_driver_bound,
+                # fail closed 可见性：接线不完整的玩法如实标注，不冒充可用。
+                "available": provider_registered and turn_driver_bound,
+            }
+        return {"ok": True, "gameplays": sorted(rows.values(), key=lambda row: row["mode_id"])}
+
     def list_plugins(self) -> dict[str, Any]:
         return plugins.list_plugins(self._plugin_host_dependencies)
+
+    def list_plugin_dependencies(self) -> dict[str, Any]:
+        return plugins.list_plugin_dependencies(self._plugin_host_dependencies)
 
     def list_modules(self) -> dict[str, Any]:
         return modules.list_modules(self._module_dependencies)
@@ -1259,6 +1333,26 @@ class WebAPI:
             require_content_pack=False,
         )
 
+    def _creator_package_checker(self, payload: bytes) -> list[str]:
+        """Creator 构建/验证回调：对 .dfplugin 字节跑与安装同源的深度校验。"""
+
+        errors: list[str] = []
+
+        def collect(directory: Any, manifest: dict[str, Any]) -> None:
+            try:
+                self.validate_module_package(directory, manifest)
+            except ValueError as exc:
+                errors.append(str(exc))
+
+        if getattr(self, "_plugins", None) is None:
+            # 测试构造未接宿主：没有可用的深度校验器，不阻塞构建。
+            return errors
+        try:
+            self._plugins.validate_package(payload, collect)
+        except ValueError as exc:
+            errors.append(str(exc))
+        return errors
+
     def guard_module_mutation(self, plugin_id: str, action: str) -> None:
         """Package-mutation hook shared by every install/uninstall path."""
 
@@ -1277,6 +1371,41 @@ class WebAPI:
             package_validator=self.validate_module_package,
             content_module_guard=self.guard_module_mutation,
         )
+
+    def attach_plugin_ruleset_runtime_source(self, plugin_host: Any) -> dict[str, Any]:
+        """T3 组合根接线点：外部规则 runtime 插件 ↔ RulesetRuntimeRegistry。
+
+        构建同步桥、挂到 plugin_host 的生命周期通知上，并立即做一次初始
+        同步（启动期 ``discover()`` 早于本接线，不会触发通知）。返回初始
+        同步报告（registered/removed/failed），供启动日志与验收记录使用。
+        """
+
+        source = PluginRulesetRuntimeSource(self._ruleset_registry)
+        plugin_host.set_ruleset_runtime_listener(lambda: source.sync(plugin_host))
+        self._plugin_ruleset_runtime_source = source
+        return source.sync(plugin_host)
+
+    def adopt_plugin_ruleset_runtime_source(self, previous: "WebAPI") -> None:
+        """Transfer source ownership after a model/API-only rebuild commits.
+
+        The registry is deliberately reused by the subsystem factory. Keep the
+        existing listener and transports, and prevent teardown of the old API
+        from closing the source now owned by its replacement.
+        """
+        source = getattr(previous, "_plugin_ruleset_runtime_source", None)
+        if source is None:
+            return
+        if self._ruleset_registry is not previous._ruleset_registry:
+            raise ValueError("plugin runtime source requires the same ruleset registry")
+        self._plugin_ruleset_runtime_source = source
+        previous._plugin_ruleset_runtime_source = None
+
+    def close_plugin_ruleset_runtime_source(self) -> None:
+        """关闭同步桥持有的全部外部 runtime 子进程（组合根 teardown 调用）。"""
+
+        source = getattr(self, "_plugin_ruleset_runtime_source", None)
+        if source is not None:
+            source.close()
 
     async def get_official_announcement(self, language: str = "zh-CN") -> dict[str, Any]:
         return await self._announcements.fetch(language)
@@ -1331,8 +1460,8 @@ class WebAPI:
     async def assistant_agent_run(self, owner, messages, language, context, session_id, emit):
         return await self._assistant_agent.run(owner, messages, language, context, session_id, emit)
 
-    async def assistant_agent_confirm(self, owner, session_id, approval_id, plan_digest, approved):
-        return await self._assistant_agent.confirm(owner, session_id, approval_id, plan_digest, approved)
+    async def assistant_agent_confirm(self, owner, session_id, approval_id, plan_digest, approved, emit=None):
+        return await self._assistant_agent.confirm(owner, session_id, approval_id, plan_digest, approved, emit=emit)
 
     async def assistant_agent_review(self, owner, session_id, draft_id, draft):
         return await self._assistant_agent.review(owner, session_id, draft_id, draft)
@@ -1343,8 +1472,8 @@ class WebAPI:
     def assistant_agent_capabilities(self, owner, query='', domain='', offset=0):
         return self._assistant_agent.capabilities(owner, query, domain, offset)
 
-    async def assistant_agent_resume(self, owner, session_id, approval_id, plan_digest):
-        return await self._assistant_agent.resume(owner, session_id, approval_id, plan_digest)
+    async def assistant_agent_resume(self, owner, session_id, approval_id, plan_digest, emit=None):
+        return await self._assistant_agent.resume(owner, session_id, approval_id, plan_digest, emit=emit)
 
     def assistant_agent_authorize(self, owner, session_id, mode, scope, domains, max_steps):
         return self._assistant_agent.authorize(owner, session_id, mode, scope, domains, max_steps)
@@ -1366,6 +1495,225 @@ class WebAPI:
 
     def list_plugin_types(self) -> dict[str, Any]:
         return plugins.list_plugin_types()
+
+    def list_plugin_ui(self) -> dict[str, Any]:
+        describe_action = getattr(getattr(self, "application_actions", None), "describe", None)
+        return plugins.list_plugin_ui(plugins.PluginHostDependencies(
+            plugin_host=self._plugins,
+            describe_action=describe_action if callable(describe_action) else None,
+        ))
+
+    def prebuilt_plugin_ui_descriptor(self, plugin_id: str) -> dict[str, Any]:
+        return plugins.prebuilt_ui_descriptor(
+            plugins.PluginHostDependencies(plugin_host=self._plugins), plugin_id,
+        )
+
+    def prebuilt_plugin_ui_asset_path(self, plugin_id: str, relative_path: str):
+        return plugins.prebuilt_ui_asset_path(
+            plugins.PluginHostDependencies(plugin_host=self._plugins),
+            plugin_id, relative_path,
+        )
+
+    def project_plugin_ui(
+        self, plugin_id: str, projection: dict[str, Any],
+    ) -> dict[str, Any]:
+        describe_action = getattr(getattr(self, "application_actions", None), "describe", None)
+        return plugins.project_plugin_ui(
+            plugins.PluginHostDependencies(
+                plugin_host=self._plugins,
+                describe_action=describe_action if callable(describe_action) else None,
+            ),
+            plugin_id,
+            projection,
+        )
+
+    async def dispatch_ui_action(
+        self, action_name: str, owner_id: str, arguments: Any,
+    ) -> dict[str, Any]:
+        return await dispatch_ui_action(
+            UiActionDependencies(self.application_actions),
+            action_name,
+            owner_id,
+            arguments,
+        )
+
+    def list_creator_projects(self, owner_id: str) -> dict[str, Any]:
+        return self._creator_projects.list(owner_id)
+
+    def list_creator_worker_jobs(
+        self, owner_id: str, project_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self._creator_worker_jobs.list(owner_id, project_id)
+
+    async def run_creator_worker(
+        self,
+        owner_id: str,
+        project_id: str,
+        *,
+        expected_revision: int,
+        command: list[str],
+        cwd: str = ".",
+        source_trust: str = "trusted",
+        idempotency_key: str | None = None,
+        policy: WorkerPolicy | None = None,
+    ) -> dict[str, Any]:
+        """Run one revision-scoped Creator command and persist its receipt."""
+
+        # 回执上限与执行预算必须同源：输出预算超过 MAX_RESULT_BYTES 会让成功任务
+        # 在 complete() 落盘时才失败。stdout/stderr 各自截断到预算，所以预算取
+        # 回执上限的一半再减去信封余量，保证两路满载时回执 JSON 仍在限内。
+        # 租约必须覆盖执行超时，否则超时收尾必撞租约过期异常。
+        worker_policy = policy or WorkerPolicy(output_bytes=MAX_RESULT_BYTES // 2 - 512)
+        project = self._creator_projects.read(owner_id, project_id)["project"]
+        if project.get("revision") != expected_revision:
+            raise ValueError("工程版本已变化，请重新读取后再执行 worker")
+        created = self._creator_worker_jobs.create(
+            owner_id, project_id, command,
+            cwd=cwd, source_trust=source_trust,
+            idempotency_key=idempotency_key,
+        )
+        row = created["job"]
+        if created.get("reused") and row.get("status") == "completed":
+            return {"ok": True, "reused": True, "job": row, "result": row.get("result")}
+        claim = self._creator_worker_jobs.claim(
+            owner_id, row["id"],
+            lease_seconds=min(int(worker_policy.timeout_seconds) + 30, MAX_LEASE_SECONDS),
+        )
+        with tempfile.TemporaryDirectory(
+            prefix=f"creator-worker-{project_id}-",
+            dir=str(self._reg.save_dir.parent),
+        ) as workspace_name:
+            workspace = Path(workspace_name).resolve()
+            for relative, content in (project.get("files") or {}).items():
+                target = (workspace / str(relative).replace("\\", "/")).resolve()
+                if workspace not in target.parents:
+                    self._creator_worker_jobs.fail(
+                        owner_id, row["id"], claim["lease_id"], "worker file escaped workspace",
+                    )
+                    raise ValueError("工程文件路径越界")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(str(content), encoding="utf-8")
+            try:
+                result = await run_worker(
+                    command,
+                    project_root=workspace,
+                    cwd=cwd,
+                    policy=worker_policy,
+                    source_trust=source_trust,
+                )
+            except Exception as exc:
+                receipt = self._creator_worker_jobs.fail(
+                    owner_id, row["id"], claim["lease_id"], str(exc),
+                )
+                return {"ok": False, "job": receipt["job"], "error": str(exc)}
+        # 收尾调用自身也可能失败（租约过期 / 回执超限）；此时返回结构化错误，
+        # 不让 WorkerJobError 冒泡成路由 409，把回执永久卡在 running。
+        last_known = claim["job"]
+        try:
+            if result.get("status") == "timeout":
+                receipt = self._creator_worker_jobs.fail(
+                    owner_id, row["id"], claim["lease_id"], "worker timed out", timeout=True,
+                )
+            else:
+                receipt = self._creator_worker_jobs.complete(
+                    owner_id, row["id"], claim["lease_id"], result,
+                )
+        except WorkerJobError as exc:
+            return {"ok": False, "job": last_known, "error": str(exc)}
+        return {"ok": bool(result.get("ok")), "job": receipt["job"], "result": result}
+
+    def create_creator_project(
+        self, owner_id: str, name: str, source: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return self._creator_projects.create(owner_id, name, source=source)
+
+    def read_creator_project(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        return self._creator_projects.read(owner_id, project_id)
+
+    def update_creator_project(
+        self,
+        owner_id: str,
+        project_id: str,
+        *,
+        expected_revision: int,
+        files: dict[str, str] | None = None,
+        remove: list[str] | None = None,
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        return self._creator_projects.update(
+            owner_id,
+            project_id,
+            expected_revision=expected_revision,
+            files=files,
+            remove=remove,
+            name=name,
+        )
+
+    def validate_creator_project(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        return self._creator_projects.validate(owner_id, project_id)
+
+    def preview_creator_project(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        return self._creator_projects.preview(owner_id, project_id)
+
+    def delete_creator_project(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        return self._creator_projects.delete(owner_id, project_id)
+
+    def build_creator_project(
+        self, owner_id: str, project_id: str, *, expected_revision: int,
+    ) -> dict[str, Any]:
+        result = self._creator_projects.build(
+            owner_id, project_id, expected_revision=expected_revision,
+        )
+        if not result.get("ok") or self._plugins is None:
+            if result.get("ok") and self._plugins is None:
+                return {"ok": False, "error": "插件宿主未启用，无法完成包预检"}
+            return result
+        payload = result["payload"]
+        try:
+            checked = self._plugins.validate_package(
+                payload, lambda _directory, manifest: {
+                    "ok": True,
+                    "id": str(manifest.get("id") or ""),
+                    "version": str(manifest.get("version") or ""),
+                },
+            )
+        except ValueError as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "project_id": result["project_id"],
+                "revision": result["revision"],
+                "digest": result["digest"],
+            }
+        return {key: value for key, value in result.items() if key != "payload"} | {
+            "validation": checked,
+            "payload": payload,
+        }
+
+    def prepare_creator_submission(
+        self, owner_id: str, project_id: str, *, expected_revision: int,
+    ) -> dict[str, Any]:
+        """Return release metadata only; uploading remains an explicit user action."""
+
+        result = self.build_creator_project(
+            owner_id, project_id, expected_revision=expected_revision,
+        )
+        if not result.get("ok"):
+            return result
+        manifest = result.get("manifest") if isinstance(result.get("manifest"), dict) else {}
+        version = str(manifest.get("version") or "0.0.0")
+        return {
+            key: value for key, value in result.items() if key not in {"payload"}
+        } | {
+            "submission": {
+                "filename": result.get("filename", ""),
+                "release_tag": f"v{version}",
+                "artifact_sha256": result.get("artifact_sha256", ""),
+                "revision": result.get("revision"),
+                "requires_manual_upload": True,
+                "requires_user_review": True,
+            },
+        }
 
     def list_speech_voices(self) -> dict[str, Any]:
         return self._web_speech.list_voices()
@@ -1458,6 +1806,19 @@ class WebAPI:
     def read_plugin_docs(self, plugin_id: str) -> dict[str, Any]:
         return plugins.read_plugin_docs(self._plugin_host_dependencies, plugin_id)
 
+    def list_plugin_rulebooks(self, plugin_id: str, *, viewer_is_gm: bool = False) -> dict[str, Any]:
+        return plugins.list_plugin_rulebooks(
+            self._plugin_host_dependencies, plugin_id, viewer_is_gm=viewer_is_gm,
+        )
+
+    def read_plugin_rulebook(
+        self, plugin_id: str, book_id: str, *, viewer_is_gm: bool = False,
+    ) -> dict[str, Any]:
+        return plugins.read_plugin_rulebook(
+            self._plugin_host_dependencies, plugin_id, book_id,
+            viewer_is_gm=viewer_is_gm,
+        )
+
     async def update_plugin_config(self, plugin_id: str, changes: dict[str, Any]) -> dict[str, Any]:
         if changes.get("enabled") is False:
             modules.assert_module_action_allowed(
@@ -1491,6 +1852,16 @@ class WebAPI:
         result = await plugins.install_plugin(
             self._plugin_lifecycle_dependencies, payload, overwrite,
             expected_plugin_type=expected_plugin_type,
+        )
+        if result.get("ok"):
+            self.refresh_content_sources()
+        return result
+
+    async def install_plugin_group(
+        self, payloads: list[bytes], overwrite: bool = False,
+    ) -> dict[str, Any]:
+        result = await plugins.install_plugin_group(
+            self._plugin_lifecycle_dependencies, payloads, overwrite,
         )
         if result.get("ok"):
             self.refresh_content_sources()
@@ -1882,6 +2253,105 @@ class WebAPI:
             viewer_uid,
             viewer_is_gm,
         )
+
+    def gameplay_view(self, game_key: str, viewer_uid: str, viewer_is_gm: bool = False) -> dict[str, Any]:
+        """Project an owner-supplied non-TRPG gameplay view.
+
+        This boundary deliberately does not infer a provider from the mode
+        name or fall back to the narrative TRPG view.  Built-in narrative
+        modes keep their existing endpoint; external providers are registered
+        explicitly by the composition root.
+        """
+
+        instance = self.get_game_instance(game_key)
+        if instance is None:
+            return {"ok": False, "code": "GAME_NOT_FOUND", "read_only": True}
+        mode_id = str(adventure_runtime_state.play_mode(instance) or "free")
+        result = project_gameplay_view(
+            self._gameplay_providers,
+            mode_id,
+            instance,
+            str(viewer_uid or ""),
+            viewer_is_gm=bool(viewer_is_gm),
+        )
+        if result.get("ok") and isinstance(result.get("view"), dict):
+            view = dict(result["view"])
+            raw_ui = view.get("ui")
+            if raw_ui is not None:
+                try:
+                    from src.webui.ui_extension_probe import (
+                        normalize_declarative_descriptor,
+                        project_declarative_descriptor,
+                    )
+
+                    descriptor = normalize_declarative_descriptor(raw_ui)
+                    view["ui"] = project_declarative_descriptor(descriptor, view)
+                except (TypeError, ValueError) as exc:
+                    return {
+                        "ok": False,
+                        "code": "GAMEPLAY_VIEW_UNAVAILABLE",
+                        "mode_id": mode_id,
+                        "read_only": True,
+                        "diagnostic": str(exc),
+                    }
+            result["view"] = view
+        return result
+
+    async def gameplay_action(
+        self,
+        game_key: str,
+        viewer_uid: str,
+        viewer_is_gm: bool,
+        action: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        instance = self.get_game_instance(game_key)
+        if instance is None:
+            return {"ok": False, "code": "GAME_NOT_FOUND"}
+        mode_id = str(adventure_runtime_state.play_mode(instance) or "free")
+        try:
+            result = await self._gameplay_providers.dispatch_action(
+                mode_id, instance, str(viewer_uid or ""), bool(viewer_is_gm), action, arguments,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return {
+                "ok": False,
+                "code": "GAMEPLAY_ACTION_UNAVAILABLE",
+                "mode_id": mode_id,
+                "error": str(exc),
+            }
+        return {"ok": True, "mode_id": mode_id, "result": result}
+
+    def gameplay_slot(
+        self, game_key: str, viewer_uid: str, viewer_is_gm: bool, slot: str,
+    ) -> dict[str, Any]:
+        """Project an owner-defined create/character/GM slot for a bound mode."""
+
+        instance = self.get_game_instance(game_key)
+        if instance is None:
+            return {"ok": False, "code": "GAME_NOT_FOUND", "read_only": True}
+        mode_id = str(adventure_runtime_state.play_mode(instance) or "free")
+        try:
+            self._gameplay_providers.validate_instance(mode_id, instance)
+            view = self._gameplay_providers.project_slot(
+                mode_id, instance, str(viewer_uid or ""), bool(viewer_is_gm), slot,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return {
+                "ok": False,
+                "code": "GAMEPLAY_SLOT_UNAVAILABLE",
+                "mode_id": mode_id,
+                "slot": slot,
+                "read_only": True,
+                "diagnostic": str(exc),
+            }
+        return {
+            "ok": True,
+            "mode_id": mode_id,
+            "slot": slot,
+            "read_only": bool(view.get("read_only", False)),
+            "view": view,
+        }
 
     def game_adventure_projection(
         self, game_key: str, *, viewer_is_gm: bool, viewer_uid: str = "",
@@ -2558,12 +3028,29 @@ class WebAPI:
             None,
         )
         if card is not None:
+            instance = self.get_game_instance(game_key)
+            target_rule = (
+                self._character_dependencies.rules.load_rule_for_game(instance)
+                if instance is not None
+                else None
+            )
+            source_rule_id = str(card.get("rule_id") or "").strip()
+            target_rule_id = str(getattr(target_rule, "rule_id", "") or "").strip()
+            if source_rule_id and target_rule_id and source_rule_id != target_rule_id:
+                return {
+                    "ok": False,
+                    "error_code": "INCOMPATIBLE_RULESET_CHARACTER",
+                    "error": "角色卡规则与当前对局规则不兼容，请先复制或转换角色卡",
+                    "source_rule_id": source_rule_id,
+                    "target_rule_id": target_rule_id,
+                }
             result = await characters.adopt_library_card(
                 self._character_dependencies, game_key, user_id, card,
                 gm_authority=gm_authority,
             )
             if result.get("error_code") != "RULESET_CHARACTER_OPERATION_REQUIRED":
                 return result
+
         return await ruleset_characters.adopt_character_card(
             self._ruleset_character_dependencies, game_key, user_id, card_id,
             gm_authority=gm_authority,

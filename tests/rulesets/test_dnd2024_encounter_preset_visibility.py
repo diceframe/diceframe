@@ -228,7 +228,8 @@ async def test_player_intent_response_with_enemy_automation_has_no_stat_blocks(
     import src.webui.services.ruleset_gameplay as gameplay_service
 
     # Seed 3 rolls initiative p1 -> goblin -> gm for this encounter.
-    monkeypatch.setattr(gameplay_service.random, "SystemRandom", lambda: random.Random(3))
+    # P0 修复后默认 RNG 走模块接缝 _default_rng，构造期解析，monkeypatch 生效。
+    monkeypatch.setattr(gameplay_service, "_default_rng", lambda: random.Random(3))
     registry = GameRegistry(tmp_path / "saves")
     instance, runtime, encounter = _pending_encounter(registry)
     headers = _SEAT if viewer == "seat" else _P2P_GUEST

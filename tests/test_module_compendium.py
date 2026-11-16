@@ -107,6 +107,38 @@ def test_list_modules_separates_modules_from_legacy_packs(env) -> None:
     assert by_id["legacy-pack"]["is_module"] is False
 
 
+def test_list_modules_capability_badges(env) -> None:
+    """W1 能力名牌：按包实际贡献推导，不猜测（拍板 A）。"""
+    api, _ = env
+    result = modules_service.list_modules(_Deps(api._plugins, api._adventure_source_registry))
+    by_id = {item["id"]: item for item in result["modules"]}
+    # 冒险模组：冒险（profile + 冒险数）+ 资料（NPC 贡献）。
+    assert by_id["castle-module"]["capabilities"] == ["adventure", "materials"]
+    # legacy-pack 无任何内容贡献 → 不出现名牌（不猜）。
+    assert by_id["legacy-pack"]["capabilities"] == []
+
+
+def test_list_modules_rule_capability_comes_from_rule_contributions(env) -> None:
+    """带规则模板贡献的包 → 「规则」名牌；无贡献的包不出现该名牌。"""
+    api, _ = env
+    host = api._plugins
+    plugins_root = host.plugins_dir
+    _make_module(plugins_root / "rule-pack", module_id="rule-pack", profile=None, contributes={"rules": ["rules/*.json"]})
+    rules_dir = plugins_root / "rule-pack" / "rules"
+    rules_dir.mkdir(parents=True)
+    (rules_dir / "t3sample.json").write_text(
+        json.dumps({"rule_id": "t3-sample", "rule_name": "T3 样例"}), encoding="utf-8",
+    )
+    _, runtime = host._load_runtime(plugins_root / "rule-pack")
+    runtime.status = "enabled"
+    host.plugins["rule-pack"] = runtime
+    host.contributions.register_static_plugin(runtime.manifest, runtime.directory)
+
+    result = modules_service.list_modules(_Deps(host, api._adventure_source_registry))
+    by_id = {item["id"]: item for item in result["modules"]}
+    assert by_id["rule-pack"]["capabilities"] == ["rules"]
+
+
 def test_module_detail_groups_content_and_adventures(env) -> None:
     api, _ = env
     result = modules_service.module_detail(_Deps(api._plugins, api._adventure_source_registry), "castle-module")

@@ -783,6 +783,10 @@ function toggleTaskWorkspace() {
 .assistant-head-copy strong {
   color: var(--df-accent-strong);
   font-size: 15px;
+  /* 长会话标题与创作工坊侧一致：省略，不撑爆头部。 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .assistant-head-copy span {

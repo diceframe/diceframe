@@ -213,6 +213,10 @@ class ConfigStore:
         cors_env_value = str(env.get("TRPG_WEB_CORS_ORIGINS") or "").strip()
         cors_config_value = cors_env_value or str(saved.get("web_cors_origins") or "")
         embedding_enabled = saved.get("embedding_enabled", False)
+        embedding_source = str(saved.get("embedding_source", "external") or "external")
+        if embedding_source not in {"external", "local"}:
+            embedding_source = "external"
+        embedding_local_model_id = str(saved.get("embedding_local_model_id", "") or "")
         embedding_model = saved.get("embedding_model", "nomic-embed-text")
         access_token = next(
             (
@@ -257,6 +261,8 @@ class ConfigStore:
                 if is_provider_secret_key(key)
             },
             "embedding_enabled": embedding_enabled,
+            "embedding_source": embedding_source,
+            "embedding_local_model_id": embedding_local_model_id,
             "embedding_model": embedding_model,
             "embedding_max_input": int(saved.get("embedding_max_input", 0)),
             "fallback1_enabled": saved.get("fallback1_enabled", False),

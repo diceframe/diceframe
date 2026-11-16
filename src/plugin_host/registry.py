@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from src.content.contracts import ResourceRef, asset_local_id, canonical_id
@@ -95,7 +96,7 @@ class ContributionRegistry:
         for item in kept:
             self._add(item)
 
-    def register_static_plugin(self, manifest: PluginManifest, plugin_dir: Path) -> list[PluginContribution]:
+    def register_static_plugin(self, manifest: Mapping[str, Any], plugin_dir: Path) -> list[PluginContribution]:
         plugin_type = str(manifest.get("plugin_type") or "")
         mapping = plugin_type_descriptor(plugin_type).get("contributes")
         if not mapping:
@@ -131,6 +132,22 @@ class ContributionRegistry:
         if not kind:
             return list(self._items)
         return [item for item in self._items if item.kind == kind]
+
+    def validate_static_plugin(
+        self, manifest: PluginManifest, plugin_dir: Path, *, replacing_plugin_id: str = "",
+    ) -> None:
+        """Preflight one package against the complete installed registry.
+
+        Installation must reject cross-plugin conflicts before touching the
+        live directory.  The clone keeps the real registry unchanged.
+        """
+
+        clone = ContributionRegistry()
+        for item in self._items:
+            clone._add(item)
+        if replacing_plugin_id:
+            clone.clear_plugin(str(replacing_plugin_id))
+        clone.register_static_plugin(manifest, plugin_dir)
 
     def find(self, kind: str, key: str, *, plugin_id: str = "") -> PluginContribution | None:
         if plugin_id:
@@ -193,7 +210,7 @@ def _validate_pattern(pattern: str) -> None:
 
 
 def _contribution_from_path(
-    manifest: PluginManifest,
+    manifest: Mapping[str, Any],
     plugin_dir: Path,
     kind: str,
     path: Path,

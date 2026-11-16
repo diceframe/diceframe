@@ -86,7 +86,10 @@ def test_missing_runtime_binding_resolves_to_legacy() -> None:
             "combat_action_effects": False,
             "combat_resource_pools": False,
             "combat_scheduler": "",
+            "sequential_checks": False,
+            "composite_action": False,
             "narrative_turns": False,
+            "narrative_checks": False,
             "adventure_formats": ("diceframe:adventure-graph-v2",),
         },
     }

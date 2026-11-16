@@ -14,6 +14,8 @@ from src.engine import action_gate as gate
 from src.engine.game_instance import GameInstance, GameState
 from src.engine.memory_outbox import queue_memory_delivery
 from src.engine.modules import economy_state
+from src.engine.modules import adventure_runtime_state
+from src.gameplays.contracts import GameplayRegistry
 from src.engine.player_control import get_control, set_control
 from src.webui.services import characters, ruleset_gameplay, turns
 from src.engine.modules import ruleset_runtime
@@ -359,6 +361,27 @@ async def test_service_earlier_rejections_never_retry_or_query_economy(rejection
     assert instance.to_dict() == before
     drain.assert_not_called()
     settings.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_unknown_gameplay_fails_closed_before_the_narrative_pipeline() -> None:
+    instance = instance_with_seats()
+    adventure_runtime_state.replace_play_mode(instance, "werewolf")
+    deps = turn_dependencies(instance, gameplay_registry=GameplayRegistry())
+    before = deepcopy(instance.to_dict())
+
+    result = await turns.submit_action(deps, "game", "actor", "look")
+
+    assert result == {
+        "status": 409,
+        "payload": {
+            "ok": False,
+            "error_code": "UNSUPPORTED_GAMEPLAY",
+            "error": "当前客户端/服务端未安装玩法扩展：werewolf",
+            "play_mode": "werewolf",
+        },
+    }
+    assert instance.to_dict() == before
 
 
 @pytest.mark.asyncio

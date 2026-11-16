@@ -6,6 +6,7 @@ import logging
 from typing import List, Dict
 
 from .delta import MemoryStore
+from .embedding_profile import profile_for_client
 
 logger = logging.getLogger("trpg")
 
@@ -112,6 +113,7 @@ async def recall_best(store: MemoryStore, game_key: str, text: str,
             if emb:
                 vector_results = store.recall_by_vector(
                     game_key, emb, limit=limit, viewer_is_gm=viewer_is_gm,
+                    embedding_profile=profile_for_client(emb_client),
                 )
                 if vector_results:
                     logger.debug("向量召回: %d 条", len(vector_results))

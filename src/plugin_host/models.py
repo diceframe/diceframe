@@ -41,3 +41,7 @@ class PluginRuntime:
     # DNDMOD-04：content-pack 声明的 ruleset catalogs（declared-only 目录）。
     ruleset_catalogs_root: Path | None = None
     ruleset_catalog_directories: tuple[str, ...] = ()
+    # D01：正式 rulebooks manifest projection; source files remain package-owned.
+    rulebooks: tuple[dict[str, Any], ...] = ()
+    # U02：prebuilt UI entrypoint/assets; source files remain package-owned.
+    prebuilt_ui: dict[str, Any] | None = None

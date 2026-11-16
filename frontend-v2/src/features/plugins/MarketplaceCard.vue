@@ -46,6 +46,8 @@ const { t } = useLocale()
     </p>
     <div class="tag-row">
       <NTag v-if="item.plugin_type" size="small">{{ typeLabel }}</NTag>
+      <NTag v-if="item.listing_status === 'paused'" type="warning" size="small">{{ t('pluginListingPaused') }}</NTag>
+      <NTag v-else-if="item.listing_status === 'withdrawn'" type="error" size="small">{{ t('pluginListingWithdrawn') }}</NTag>
       <NTag v-if="item.support?.level === 'partial'" type="warning" size="small">{{ t('pluginSupportPartial') }}</NTag>
       <NTag v-if="item.support?.level === 'reserved'" type="error" size="small">{{ t('pluginSupportReserved') }}</NTag>
       <NTag v-if="item.trust_level === 'official'" type="success" size="small">{{ t('pluginTrustOfficial') }}</NTag>
@@ -55,6 +57,7 @@ const { t } = useLocale()
       <NTag v-else-if="item.risk_level === 'declarative'" type="success" size="small">{{ t('pluginRiskDeclarative') }}</NTag>
       <NTag v-else-if="item.risk_level === 'unrestricted-process'" type="error" size="small">{{ t('pluginRiskProcess') }}</NTag>
       <NTag v-if="item.commit_sha" type="info" size="small">{{ t('pluginSourcePinned') }}</NTag>
+      <NTag v-if="item.approved_artifact_sha256" type="success" size="small">{{ t('pluginArtifactApproved') }}</NTag>
       <NTag v-if="item.update_policy === 'approval-required'" type="error" size="small">{{ t('pluginUpdateApprovalRequired') }}</NTag>
       <NTag v-if="item.installed" type="success" size="small">{{ t('installedVersion', { version: item.installed_version || '' }) }}</NTag>
       <NTag v-if="item.installed && hasNewerVersion" type="warning" size="small">{{ t('newVersionAvailable', { version: item.latest?.version || item.version || '' }) }}</NTag>

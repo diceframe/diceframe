@@ -10,6 +10,7 @@ import ipaddress
 import logging
 import secrets
 import time
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -19,6 +20,9 @@ from aiohttp import web
 from src.ai_providers import resolve_provider
 from src.common_factory import close_model_clients
 from src.memory.embedding import EmbeddingClient
+from src.memory.embedding_profile import profile_for_client
+from src.memory.local_embedding import list_installed_models
+from src.memory.model_catalog import LocalModelManager, ModelCatalogError
 from src.network_proxy import (
     effective_proxy_url,
     is_supported_proxy_url,
@@ -77,6 +81,38 @@ class ConfigController:
 
     async def get(self, request: web.Request) -> web.Response:
         public = self.dependencies.public_config()
+        if request.get("owner_authenticated", False):
+            subsystems = request.app.get("subsystems")
+            memory_store = getattr(subsystems, "memory_store", None)
+            models_dir = (
+                Path(memory_store.db_path).parent / "models"
+                if memory_store is not None else Path("data") / "models"
+            )
+            public["embedding_local_models"] = list_installed_models(models_dir)
+            try:
+                public["embedding_model_catalog"] = LocalModelManager(
+                    models_dir,
+                    proxy_url=effective_proxy_url(
+                        bool(self.dependencies.state.get("proxy_enabled")),
+                        self.dependencies.state.get("proxy_url", ""),
+                    ),
+                ).catalog()
+            except ModelCatalogError as exc:
+                public["embedding_model_catalog"] = []
+                self.logger.warning("本地 embedding 模型目录无效：%s", exc)
+            if memory_store is not None:
+                public["embedding_status"] = memory_store.embedding_status(
+                    profile=(
+                        profile_for_client(memory_store.embedding_client)
+                        if memory_store.embedding_client is not None else None
+                    )
+                )
+                rebuild_task = request.app.get("_embedding_backfill_task")
+                if rebuild_task is not None and not rebuild_task.done():
+                    public["embedding_status"]["state"] = "rebuilding"
+                rebuild_error = request.app.get("_embedding_backfill_error")
+                if rebuild_error:
+                    public["embedding_status"]["rebuild_error"] = str(rebuild_error)
         # Defaults can contain private Keeper instructions; anonymous bootstrap
         # clients and invited seats must not receive the owner profile.
         if not request.get("owner_authenticated", False) and request.get(ACCESS_PASSWORD_CONFIGURED_KEY) is not False:
@@ -316,6 +352,12 @@ class ConfigController:
                 )
                 self.logger.exception("AI 服务商插件重启失败")
 
+        previous_api = app.get("api")
+        if new_api is not previous_api and callable(
+            getattr(new_api, "adopt_plugin_ruleset_runtime_source", None)
+        ):
+            new_api.adopt_plugin_ruleset_runtime_source(previous_api)
+
         if model_runtime_changed and subsystems is not None:
             dependencies.activate_api_runtime(subsystems, new_api)
             app["subsystems"] = subsystems
@@ -349,16 +391,13 @@ class ConfigController:
                         "关闭旧 Embedding 客户端失败",
                         exc_info=True,
                     )
-        embedding_now = state.get("embedding_enabled", False) and bool(
-            resolve_provider(state, state.get("embedding_provider_ref", ""))
+        embedding_source = str(state.get("embedding_source") or "external")
+        embedding_now = bool(state.get("embedding_enabled")) and (
+            embedding_source == "local"
+            or bool(resolve_provider(state, state.get("embedding_provider_ref", "")))
         )
         if model_runtime_changed and embedding_now and subsystems is not None:
-            try:
-                count = await subsystems.memory_store.embed_all_pending()
-                if count:
-                    self.logger.info("[Embedding] 配置更新后补齐 %d 条向量记忆", count)
-            except Exception:
-                self.logger.warning("配置更新后 embedding 补齐失败", exc_info=True)
+            self.schedule_embedding_rebuild(app, subsystems)
         payload: dict[str, Any] = {
             "ok": True,
             "access_password_changed": access_password_changed,
@@ -368,6 +407,28 @@ class ConfigController:
         if plugin_warning:
             payload["warning"] = plugin_warning
         return web.json_response(payload)
+
+    def schedule_embedding_rebuild(self, app: Any, subsystems: Any) -> None:
+        """Start a cancellable, non-blocking rebuild for the active profile."""
+
+        previous = app.get("_embedding_backfill_task")
+        if previous is not None and not previous.done():
+            previous.cancel()
+        app["_embedding_backfill_task"] = asyncio.create_task(
+            self._run_embedding_rebuild(subsystems), name="embedding-profile-rebuild",
+        )
+
+    async def _run_embedding_rebuild(self, subsystems: Any) -> None:
+        try:
+            while True:
+                count = await subsystems.memory_store.embed_all_pending()
+                if not count:
+                    return
+                await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.logger.warning("后台 embedding profile 重建失败", exc_info=True)
 
     @staticmethod
     async def _close_candidate_runtime(
@@ -533,6 +594,16 @@ class ConfigController:
     async def test_embedding(self, request: web.Request) -> web.Response:
         body = await request.json()
         state = self.dependencies.state
+        # 2026-11-12 计划 §5：按来源分流测试。本地来源此前没有测试路径——
+        # embedding_provider_ref 为空导致必然报「Base URL 非法或不允许」。
+        embedding_source = str(
+            body.get("embedding_source") or state.get("embedding_source") or "external"
+        ).strip().lower()
+        if embedding_source == "local":
+            return await self._test_embedding_local(
+                request,
+                model_id=str(body.get("embedding_local_model_id") or "").strip(),
+            )
         provider = resolve_provider(state, str(body.get("provider_id") or ""))
         if provider:
             base_url = clean_text_value(body.get("base_url")) or provider["base_url"]
@@ -579,6 +650,49 @@ class ConfigController:
             )
         finally:
             await client.close()
+
+    async def _test_embedding_local(self, request: web.Request, model_id: str = "") -> web.Response:
+        """本地来源的向量测试：真实加载 ONNX 并跑一次推理，回报维数与耗时。"""
+
+        state = self.dependencies.state
+        model_id = model_id or str(state.get("embedding_local_model_id") or "").strip()
+        if not model_id:
+            return web.json_response(
+                {"ok": False, "source": "local", "error": "请先选择要测试的本地模型"},
+            )
+        subsystems = request.app.get("subsystems")
+        memory_store = getattr(subsystems, "memory_store", None)
+        models_dir = (
+            Path(memory_store.db_path).parent / "models"
+            if memory_store is not None else Path("data") / "models"
+        )
+        from src.memory.local_embedding import LocalModelError, LocalOnnxEmbeddingBackend
+
+        start = time.time()
+        try:
+            backend = LocalOnnxEmbeddingBackend(models_dir, model_id)
+        except LocalModelError as exc:
+            return web.json_response(
+                {"ok": False, "source": "local", "error": f"本地模型加载失败：{exc}"},
+            )
+        try:
+            embedding = await backend.embed("测试")
+            elapsed = round(time.time() - start, 2)
+            if embedding and len(embedding) > 0:
+                return web.json_response(
+                    {
+                        "ok": True,
+                        "source": "local",
+                        "model": model_id,
+                        "dimension": len(embedding),
+                        "elapsed": elapsed,
+                    }
+                )
+            return web.json_response(
+                {"ok": False, "source": "local", "error": "本地模型返回异常", "elapsed": elapsed},
+            )
+        finally:
+            await backend.close()
 
     async def test_proxy(self, request: web.Request) -> web.Response:
         body = await request.json()

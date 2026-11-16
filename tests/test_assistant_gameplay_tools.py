@@ -187,3 +187,30 @@ async def test_real_adventure_command_adapter_enforces_gm_and_run_fences(tmp_pat
     # A second dispatch cannot duplicate the completed node or any outcome.
     second = await complete.handler(args, "gm")
     assert not second["ok"]
+
+
+@pytest.mark.asyncio
+async def test_ruleset_actions_unavailable_reads_as_information_not_failure():
+    """自由文本规则的 get_ruleset_available_actions 是产品语义，不是故障。
+
+    服务端返回 RULESET_INTENTS_UNAVAILABLE 时，工具降级为
+    ok=True + available=False 的说明性结果：运行日志不再把每次探询
+    记成失败，agent 也不会把 409 语义当成可重试错误。
+    """
+    game = _Game()
+    viewers = {"alice": SimpleNamespace(is_member=True, is_gm=False, uid="alice")}
+    deps = GameplayToolDependencies(
+        get_game=lambda key: game if key == "game" else None,
+        viewer_for=lambda instance, owner: viewers[owner],
+        available_ruleset_actions=lambda *args: {
+            "ok": False,
+            "code": "RULESET_INTENTS_UNAVAILABLE",
+            "error": "该规则继续使用自由文本回合流程",
+        },
+    )
+    tool = next(item for item in gameplay_tools(deps) if item.name == "get_ruleset_available_actions")
+    result = await tool.handler({"game_key": "game"}, "alice")
+    assert result["ok"] is True
+    assert result["available"] is False
+    assert result["actions"] == []
+    assert "自由文本" in result["reason"]

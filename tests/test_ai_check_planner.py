@@ -194,6 +194,17 @@ def test_normalize_check_specs_accepts_valid_entries_and_rejects_bad_player() ->
     assert errors == ["checks[1] player 不存在或本轮未行动"]
 
 
+def test_legacy_rules_keep_one_main_check_per_player():
+    instance = make_instance()
+    planned, errors = normalize_check_specs(instance, make_rule(), [
+        {"player": "p1", "attribute": "str", "target": 12},
+        {"player": "p1", "attribute": "dex", "target": 12},
+    ])
+
+    assert len(planned) == 1
+    assert errors == ["checks[1] 同一玩家每轮只允许一个主检定"]
+
+
 @pytest.mark.parametrize("attribute", ["str", "力量", "Strength"])
 def test_d20_attribute_key_and_localized_names_are_accepted(attribute: str) -> None:
     instance = make_instance()

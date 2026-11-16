@@ -309,6 +309,12 @@ label:has(> input[type=checkbox])>input, label:has(> input[type=radio])>input {
   font-size: 26px;
 }
 
+/* compact 模式缩小字号 */
+.view-title.is-compact h1,
+.content-page-heading.is-compact h1 {
+  font-size: clamp(18px, 1.8vw, 24px) !important;
+}
+
 .view-title p {
   margin: 4px 0;
   color: var(--df-text-muted);
@@ -3154,6 +3160,8 @@ body.light input, body.light textarea, body.light select {
   font: 600 13px / 1.4 var(--df-font-body);
   text-decoration: none;
   cursor: pointer;
+  text-align: center;
+  vertical-align: middle;
 }
 
 .content-button:hover {

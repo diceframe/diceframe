@@ -394,9 +394,9 @@ function coverStyle(card: GalleryCard): Record<string, string> {
 
 <template>
   <section class="view archive-page worlds-page">
-    <ContentPageHeader
-      class="view-title archive-hero worlds-page-heading"
-      kicker="WORLD ATLAS"
+    <ContentPageHeader compact
+      class="view-title"
+      kicker="WORLD LORE"
       :title="t('navWorlds')"
       :description="copy.intro"
     />

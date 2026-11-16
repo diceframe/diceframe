@@ -116,7 +116,7 @@ async function deleteMemory(item: MemoryEntry) {
 
 <template>
   <section class="view archive-page memory-page">
-    <ContentPageHeader class="archive-hero memory-page-heading" kicker="CAMPAIGN MEMORY" :title="t('memoryArchive')" :description="game ? `${t('currentSave')}: ${game}` : t('noSaveSelectedHint')">
+    <ContentPageHeader compact class="memory-page-heading" kicker="CAMPAIGN MEMORY" :title="t('memoryArchive')" :description="game ? `${t('currentSave')}: ${game}` : t('noSaveSelectedHint')">
       <template #actions>
         <div class="memory-search">
           <input v-model="keyword" :placeholder="t('searchByEntity')" @keyup.enter="search" :disabled="!game" />

@@ -34,6 +34,11 @@
   --df-radius-sm: 6px;
   --df-radius-md: 8px;
   --df-radius-lg: 12px;
+  /* Layout spacing tokens — use these instead of hard-coding rem values */
+  --df-card-padding: 1.1rem 1.25rem;
+  --df-card-padding-sm: .75rem .9rem;
+  --df-section-gap: 1.5rem;
+  --df-item-gap: .75rem;
   --df-bg-atmosphere-image: url("/v2-assets/ui/dark-fantasy-atmosphere.jpg");
   --df-bg-scene-image: url("/v2-assets/ui/campaign-mountain-city.jpg");
   --df-bg-ruins-image: url("/v2-assets/ui/campaign-moonlit-ruins.jpg");
