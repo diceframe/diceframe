@@ -190,6 +190,42 @@ class Dnd2024SpellSelection:
             slots.append(row)
         return slots
 
+    def rest_free_cast_rows(
+        self, character: Mapping[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """The free-cast slots a Long Rest may re-choose, with their candidates.
+
+        Only slots that declare a rest replacement are listed: Signature Spells
+        prints no study rule, so showing it in a rest panel would offer a change
+        ``rebind_free_cast`` refuses.  ``rest_replace`` travels with the row so
+        the client can enforce the same budget the engine enforces, instead of
+        hard-coding "one spell per rest" in the view.
+        """
+
+        state = self.features.class_state(character)
+        if state is None:
+            return []
+        _class_id, level = state
+        rows: list[dict[str, Any]] = []
+        for row in self.free_cast_slots(level, character):
+            budget = int(row.get("rest_replace") or 0)
+            if budget < 1:
+                continue
+            chosen = str(row.get("spell_ref") or "")
+            spell = self.catalog.get(chosen) if chosen else None
+            rows.append({
+                "slot_id": row["slot_id"],
+                "feature_id": row["feature_id"],
+                "spell_level": int(row["spell_level"]),
+                "recharge": str(row["recharge"]),
+                "spell_ref": chosen,
+                "spell_name": str((spell or {}).get("name") or ""),
+                "rest_replace": budget,
+                "valid": bool(row["valid"]),
+                "options": [dict(option) for option in row.get("options") or ()],
+            })
+        return rows
+
     def _free_cast_options(
         self, row: Mapping[str, Any], character: Mapping[str, Any] | None,
     ) -> list[dict[str, Any]]:
