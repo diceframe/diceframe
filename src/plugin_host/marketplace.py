@@ -353,6 +353,43 @@ def _declared_rulesets(manifest: dict[str, Any]) -> list[str]:
     ]
 
 
+def _derive_capabilities(raw: list[str], manifest: dict) -> list[str]:
+    """Derive high-level capability tags from raw capabilities + manifest contributions.
+
+    Old packs declared low-level caps like 'content.rule', 'content.world'.
+    The frontend filters by high-level tags: adventure, rules, ui, materials.
+    Map both so old packs appear in the right category chips.
+    """
+    caps = set(raw)
+    contributions = manifest.get("contributions") or {}
+
+    # adventure: has adventure_resources contribution or adventure cap
+    if contributions.get("adventure_resources") or any(
+        "adventure" in c for c in raw
+    ):
+        caps.add("adventure")
+
+    # rules: has rules contribution or any content.rule cap
+    if contributions.get("rules") or any("rule" in c for c in raw):
+        caps.add("rules")
+
+    # ui: has ui-related caps
+    if any(c in ("ui", "voice.preset", "voice.assets", "channel.group", "channel.private") for c in raw):
+        caps.add("ui")
+
+    # materials: has world/character/lorebook contributions or caps
+    if (
+        contributions.get("worlds")
+        or contributions.get("world_templates")
+        or contributions.get("lorebooks")
+        or contributions.get("character_templates")
+        or any(c in ("content.world", "content.character-template", "content.lorebook", "content.map") for c in raw)
+    ):
+        caps.add("materials")
+
+    return sorted(caps)
+
+
 def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -494,7 +531,10 @@ def _normalize_market_item(item: Any) -> dict[str, Any] | None:
         "verified": bool(item.get("commit_sha") or item.get("approved_commit")) or distribution == "bundled",
         "installable": installable,
         "verification_error": verification_error,
-        "capabilities": _string_list(manifest.get("capabilities") or item.get("capabilities")),
+        "capabilities": _derive_capabilities(
+            _string_list(manifest.get("capabilities") or item.get("capabilities")),
+            manifest,
+        ),
         "min_app_version": _min_app_version(item, manifest),
         "needs_core_update": needs_core_update(_min_app_version(item, manifest)),
         "docs": str(manifest.get("docs") or item.get("docs") or urls.get("documentation") or ""),

@@ -41,17 +41,31 @@ def strip_reasoning_from_content(text: str) -> str:
 
 
 def _disable_thinking_for_deepseek_v4(provider: "ProviderConfig") -> bool:
-    """DiceFrame 对官方 DeepSeek V4 使用非思考模式。
-
-    DeepSeek V4 默认开启思考模式；当前客户端不消费 ``reasoning_content``，
-    该模式还不接受强制 ``tool_choice``，会让普通正文和严格 JSON 的输出预算
-    被推理耗尽。仅针对官方端点和 V4 模型显式关闭，避免向其他 OpenAI 兼容
-    供应商发送私有参数。
-    """
+    """官方 DeepSeek V4 端点检测（向后兼容，内部使用）。"""
     return (
         provider.model_name.strip().lower().startswith("deepseek-v4")
         and "api.deepseek.com" in provider.base_url.strip().lower()
     )
+
+
+def _thinking_suppression_for_tool_calls(provider: "ProviderConfig") -> dict[str, Any]:
+    """返回应附加到工具调用请求体、用于关闭思考模式的参数。
+
+    优先级：
+    1. ``provider.reasoning_effort`` 显式配置 → ``{"reasoning_effort": value}``
+    2. 官方 DeepSeek V4 端点 → ``{"thinking": {"type": "disabled"}}``（已验证格式）
+    3. OpenAI 兼容格式 → ``{"reasoning_effort": "none"}``
+       transport 层（OpenAIChatTransport）会自动协商：若端点返回 400
+       unsupported_parameter，则撤掉参数重试，此后永不再发。
+    4. Anthropic 格式 → 空字典（Anthropic 有独立的 thinking 控制路径）
+    """
+    if provider.reasoning_effort is not None:
+        return {"reasoning_effort": provider.reasoning_effort}
+    if _disable_thinking_for_deepseek_v4(provider):
+        return {"thinking": {"type": "disabled"}}
+    if provider.api_format != "anthropic":
+        return {"reasoning_effort": "none"}
+    return {}
 
 
 def length_retry_budgets(base_max_tokens: int) -> tuple[int, ...]:
@@ -101,6 +115,9 @@ class ProviderConfig:
     model_name: str
     api_format: str = "openai"
     fallback: bool = False
+    reasoning_effort: str | None = None
+    """工具调用路径的思考强度覆盖（``"none"``/``"off"``/``"low"`` 等）。
+    非 None 时优先于自动检测，传入 ``reasoning_effort`` 请求参数。"""
 
 
 @dataclass
@@ -362,8 +379,7 @@ class LLMClient:
             "max_tokens": max_tokens,
             "tools": tools,
         }
-        if _disable_thinking_for_deepseek_v4(provider):
-            body["thinking"] = {"type": "disabled"}
+        body.update(_thinking_suppression_for_tool_calls(provider))
         if force_tool_choice:
             body["tool_choice"] = {
                 "type": "function",

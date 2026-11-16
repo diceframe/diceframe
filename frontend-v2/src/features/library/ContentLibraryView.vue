@@ -21,6 +21,14 @@ type ContentLanguageFilter = 'all' | Locale
 
 const { locale, t } = useLocale()
 const copy = computed(() => contentHubCopy(locale.value))
+// W6 分区页签：把原本 sr-only 的类型筛选变成可见页签条（拍板 ①）。
+const LIBRARY_TABS = computed(() => [
+  { value: 'all' as ContentFilter, label: copy.value.contentAll },
+  { value: 'adventure' as ContentFilter, label: copy.value.adventuresFilter },
+  { value: 'world' as ContentFilter, label: copy.value.worldsFilter },
+  { value: 'lorebook' as ContentFilter, label: copy.value.lorebooksFilter },
+  { value: 'source' as ContentFilter, label: copy.value.sourcesFilter },
+])
 const adventures = ref<AdventureSummary[]>([])
 const worlds = ref<WorldSummary[]>([])
 const lorebooks = ref<LibraryLorebook[]>([])
@@ -193,12 +201,28 @@ function moduleCount(item: ModuleSummary): number {
 
     <form class="library-filters" @submit.prevent>
       <label class="library-search"><NIcon :component="SearchOutline" /><input v-model="search" type="search" :aria-label="copy.title" :placeholder="copy.searchPlaceholder" data-testid="library-search"></label>
-      <label class="sr-only" for="library-content-filter">{{ copy.title }}</label><select id="library-content-filter" v-model="contentFilter" aria-label="Content type" data-testid="library-content-filter"><option value="all">{{ copy.contentAll }}</option><option value="adventure">{{ copy.adventuresFilter }}</option><option value="world">{{ copy.worldsFilter }}</option><option value="lorebook">{{ copy.lorebooksFilter }}</option><option value="source">{{ copy.sourcesFilter }}</option></select>
       <select v-model="languageFilter" :aria-label="t('contentLanguage')" data-testid="library-language-filter"><option value="all">{{ copy.contentLanguageAll }}</option><option v-for="option in CONTENT_LANGUAGE_OPTIONS" :key="option.value" :value="option.value">{{ t(option.labelKey) }}</option></select>
       <select v-model="runtimeFilter" :aria-label="copy.adventuresSection" data-testid="library-rule-filter"><option value="all">{{ copy.allRulesets }}</option><option v-for="[id, label] in runtimeOptions" :key="id" :value="id">{{ label }}</option></select>
       <select v-model="sourceFilter" :aria-label="copy.adventuresSection" data-testid="library-source-filter"><option value="all">{{ copy.allAdventureSources }}</option><option value="builtin">{{ copy.builtIn }}</option><option value="user">{{ copy.user }}</option><option value="plugin">{{ copy.contentPack }}</option></select>
       <button type="button" class="content-button library-refresh" :disabled="loading" @click="load">{{ copy.refresh }}</button>
     </form>
+
+    <!-- W6：分区页签（拍板 ①）——世界/冒险资产不再是无入口的隐藏页，
+         管理入口放在对应页签的区块头部。 -->
+    <div class="library-tabs" role="tablist" data-testid="library-tabs">
+      <button
+        v-for="tab in LIBRARY_TABS"
+        :key="tab.value"
+        type="button"
+        role="tab"
+        :aria-selected="contentFilter === tab.value"
+        :class="{ active: contentFilter === tab.value }"
+        :data-testid="`library-tab-${tab.value}`"
+        @click="contentFilter = tab.value"
+      >
+        {{ tab.label }}
+      </button>
+    </div>
 
     <div v-if="error" class="content-state content-state-error" role="alert"><p>{{ error }}</p><button type="button" class="content-button" data-testid="library-retry" @click="load">{{ copy.refresh }}</button></div>
     <div v-else-if="loading" class="content-state" role="status"><p>{{ copy.loading }}</p></div>
@@ -236,6 +260,10 @@ function moduleCount(item: ModuleSummary): number {
 
 <style scoped>
 .content-hub { display: grid; gap: 1.25rem; }
+/* W6 分区页签条。 */
+.library-tabs { display: flex; flex-wrap: wrap; gap: .45rem; }
+.library-tabs button { padding: .4rem 1rem; border: 1px solid var(--df-border-soft); border-radius: 999px; background: transparent; color: var(--df-text-muted); font-size: .85rem; font-weight: 600; cursor: pointer; }
+.library-tabs button.active { color: var(--df-text); border-color: var(--df-interactive); background: color-mix(in srgb, var(--df-interactive) 12%, var(--df-surface-1)); }
 .hub-section { display: grid; gap: .8rem; }
 .hub-section-heading { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
 .hub-section-heading h2 { margin: 0; font-size: 1.2rem; }

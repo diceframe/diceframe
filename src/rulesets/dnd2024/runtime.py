@@ -1082,6 +1082,7 @@ class Dnd2024Runtime:
 
     def prepare_intent_submission(
         self, intent: dict[str, Any], requester_id: str, requester_is_gm: bool,
+        instance: Any = None,
     ) -> dict[str, Any]:
         prepared = deepcopy(intent)
         intent_type = str(prepared.get("type") or "")

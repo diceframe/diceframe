@@ -99,14 +99,16 @@ def test_remote_mutation_identity_replays_from_ledger_after_adapter_restart(tmp_
     first = RemoteRulesetRuntimeAdapter(
         "external:demo", 1, RulesetCapabilities(), transport, ledger_path=ledger,
     )
-    first.resolve_intent({}, {"intent_id": "i1"}, type("Rng", (), {"getstate": lambda self: ("s", 1)})())
+    # P1-01 复审：收据身份需要服务器权威的 (game_key, run_id)——空实例会被 fail closed。
+    instance = {"game_key": ["web", "room-a", "alice"], "run_id": "run-a"}
+    first.resolve_intent(instance, {"intent_id": "i1"}, type("Rng", (), {"getstate": lambda self: ("s", 1)})())
     second = RemoteRulesetRuntimeAdapter(
         "external:demo", 1, RulesetCapabilities(),
         lambda _request: (_ for _ in ()).throw(AssertionError("ledger replay must avoid transport")),
         ledger_path=ledger,
     )
     replayed = second.resolve_intent(
-        {}, {"intent_id": "i1"}, type("Rng", (), {"getstate": lambda self: ("s", 1)})(),
+        instance, {"intent_id": "i1"}, type("Rng", (), {"getstate": lambda self: ("s", 1)})(),
     )
     assert replayed["event_batch"]["batch_id"] == "b1"
     assert len(calls) == 1
@@ -137,7 +139,9 @@ def test_remote_ruleset_adapter_applies_only_opaque_state_and_ledger_dtos():
     result = runtime.apply_event_batch(instance, {"batch_id": "b1"})
     assert result == {"ok": True, "applied": True}
     assert ruleset_runtime.state(instance)["opaque"] == {"hp": 9}
-    assert ruleset_runtime.event_ledger(instance) == [{"batch_id": "b1"}]
+    from src.rulesets.remote_event_receipts import child_ledger
+
+    assert child_ledger(ruleset_runtime.event_ledger(instance)) == [{"batch_id": "b1"}]
 
 
 def test_remote_state_bridge_rejects_history_replacement_without_mutating_live_state():

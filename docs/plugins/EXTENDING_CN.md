@@ -49,9 +49,18 @@ python scripts/validate_content_module.py dist/plugins/plugin-id-1.0.0.dfplugin 
 3. handler 返回 JSON object；可以返回 `handled`、替换后 `payload` 或 `outputs`。输出只使用宿主校验的 text/card/image 结构，不绕过路径、数量和长度限制。
 4. 参考 `plugins/examples/bridge-customizer/`，测试阶段筛选、优先级、平台/类型过滤和 output validation。
 
-## E. 真正新增 Plugin Type
+## E. Ruleset Runtime（外部规则运行时）
 
-先确认它不只是现有 content-pack、tool、provider 或 bot-extension 的新 capability。只有当 process mode、lifecycle 或安全语义真的不同时，才新增 plugin type。
+1. 使用 `plugin_type: "ruleset-runtime"`；宿主要求 `ruleset.execute` 权限，进程通过 RuntimeProbe JSON-lines stdio 协议（`protocol_version: 1`）通信——不是插件 JSON-RPC 协议。
+2. manifest 必须声明 `ruleset_runtime` 块：`runtime_id`（全局唯一，不得与内置 runtime 重名）、`runtime_version`（正整数）、`capabilities`（`RulesetCapabilities` 的合法字段，未知键在构建 adapter 时 fail closed）、`timeout_seconds`（0–30）。
+3. `entrypoint` 是 stdio 进程命令；宿主常规启停不拉起该进程——进程由组合根注册表（`PluginRulesetRuntimeSource`）持有：启用即注册并探活，探活失败不注册；停用/卸载即撤销注册并终止子进程。
+4. 包内规则模板用 `contributes.rules` 提供，模板 `runtime` 块绑定 `ruleset_runtime.runtime_id`；版本不足时 resolve 抛 `IncompatibleRulesetRuntimeError`。
+5. runtime 进程必须无状态：所有结算以宿主提供的 instance 状态为准，`apply_event_batch` 只追加 ledger、按 batch_id 判重。重启恢复依赖「宿主持久化状态 + 收据幂等」。
+6. 测试参考 `tests/test_plugin_ruleset_runtimes.py`（真实 zip 安装 + 真实 stdio 子进程 + 重启恢复闭环）。
+
+## F. 真正新增 Plugin Type
+
+先确认它不只是现有 content-pack、tool、provider、bot-extension 或 ruleset-runtime 的新 capability。只有当 process mode、lifecycle 或安全语义真的不同时，才新增 plugin type。
 
 需要逐项检查：
 

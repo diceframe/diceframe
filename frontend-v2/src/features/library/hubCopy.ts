@@ -82,7 +82,7 @@ const zh: ContentHubCopy = {
   open: '打开', editWorld: '编辑世界', useWorld: '用这个世界开局', manageBooks: '管理资料册', startAdventure: '开始冒险', manageSources: '管理内容包', manageAdventures: '查看全部冒险',
   empty: '还没有可显示的内容。', refresh: '刷新', loading: '正在加载…', unavailable: '暂时无法加载内容。',
   worldCount: '{count} 个世界', adventureCount: '{count} 个冒险', sourceCount: '{count} 个内容包', installed: '已安装', disabled: '已停用', unknown: '内容不可读',
-  contentPack: '内容包', adventureModule: '冒险模组', noWorlds: '还没有世界。', noLorebooks: '还没有资料册。', noAdventures: '还没有冒险包。', noSources: '还没有安装内容包。',
+  contentPack: '内容包', adventureModule: '冒险内容包', noWorlds: '还没有世界。', noLorebooks: '还没有资料册。', noAdventures: '还没有冒险包。', noSources: '还没有安装内容包。',
   sourceHint: '内容包可以包含冒险、资料册、角色模板和资源；是否能开始冒险由具体冒险和规则兼容性决定。', builtIn: '内置', user: '我的创作', noMatches: '没有匹配项。', notPlayable: '暂不可用', contentAll: '全部内容', adventuresFilter: '冒险包', worldsFilter: '世界', lorebooksFilter: '资料册', sourcesFilter: '内容包', allRulesets: '全部规则', allAdventureSources: '全部冒险来源', clearFilters: '清除筛选', contentLanguageAll: '全部语言', searchPlaceholder: '搜索世界、冒险、资料册或内容包', ruleset: '规则', worldPolicy: '世界策略', source: '来源', version: '版本', fixedWorld: '使用指定世界', portableWorld: '可搭配其他世界', agnosticWorld: '不限世界', unknownRuntime: '规则需求未声明', chooseWorld: '请选择推荐世界', openCreateHint: '请进入创建游戏处理规则与世界兼容性',
 }
 

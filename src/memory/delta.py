@@ -99,10 +99,14 @@ def _viewer_filter(query, *, viewer_is_gm: bool):
     )
 
 
-def _active_query(game_key: str):
-    return MemoryEntry.select().where(
-        (MemoryEntry.game_key == str(game_key)) & _ACTIVE,
-    )
+def _active_query(game_key: str | None):
+    query = MemoryEntry.select().where(_ACTIVE)
+    # A global rebuild/recall passes None. Converting it to the literal string
+    # "None" silently selected zero rows and made the rebuild worker report a
+    # stalled model even when the local model itself was healthy.
+    if game_key is not None:
+        query = query.where(MemoryEntry.game_key == str(game_key))
+    return query
 
 
 class MemoryStore:
@@ -801,7 +805,9 @@ class MemoryStore:
             "total_active": total,
             "ready_current_profile": ready,
             "pending": pending,
-            "state": "ready" if pending == 0 else ("disabled" if not active_profile else "rebuilding"),
+            # "rebuilding" 只由 WebUI 在确实存在后台任务时覆盖；这里的
+            # 基础状态不能把“有待处理数据”误报成“任务正在运行”。
+            "state": "ready" if pending == 0 else ("disabled" if not active_profile else "pending"),
         }
 
 

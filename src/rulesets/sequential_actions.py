@@ -267,7 +267,8 @@ def execute_sequential_plan(
                           "reason": "dependency_failed" if blocked else "plan_aborted"})
             continue
         try:
-            resolved = runtime.resolve_sequential_step(staged, deepcopy(step), rng)
+            # 计划 ID 由服务端确定性传入：步骤收据身份 = game/run + 计划 + 步骤。
+            resolved = runtime.resolve_sequential_step(staged, deepcopy(step), rng, str(plan["intent_id"]))
         except (ValueError, KeyError, TypeError) as exc:
             return _error("SEQUENTIAL_STEP_REJECTED", str(exc), step_id=step_id)
         if not isinstance(resolved, dict) or not resolved.get("ok"):

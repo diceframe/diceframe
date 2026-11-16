@@ -12,11 +12,9 @@ import {
 } from '@/api/modules'
 import { useConfirm } from '@/composables/useConfirm'
 import { useLocale } from '@/composables/useLocale'
-import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
 import ModuleResourceBrowser from './resources/ModuleResourceBrowser.vue'
-import { contentKindLabel, moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
-import { libraryCopy } from '@/features/library/copy'
-import type { Locale, MessageKey } from '@/i18n'
+import { contentKindLabel, formatModuleBlocker, moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
+import type { MessageKey } from '@/i18n'
 
 const route = useRoute()
 const router = useRouter()
@@ -37,7 +35,6 @@ function statusLabel(status: string): string {
 function deliveryLabel(mode: string): string {
   return deliveryKeys[mode] ? t(deliveryKeys[mode]) : mode
 }
-const library = computed(() => libraryCopy(locale.value))
 const { confirm } = useConfirm()
 const moduleId = computed(() => String(route.params.moduleId || ''))
 const module = ref<ModuleDetail | null>(null)
@@ -116,45 +113,6 @@ const actionButtons = computed(() => [
     variant: 'danger',
   },
 ])
-
-type ModuleIdentityCopy = {
-  title: string
-  description: string
-  identityLabel: string
-  identityHint: string
-  packageLabel: string
-  packageHint: string
-}
-
-const identityCopies: Record<Locale, ModuleIdentityCopy> = {
-  'zh-CN': {
-    title: '来源与复制说明', description: '选择包内冒险开局，或查看资料并创建可编辑的内容副本。',
-    identityLabel: '内容包身份', identityHint: '包名称、ID 和版本帮助你认出来源；需要分享或排查问题时，可以据此准确说明使用的是哪一份内容。',
-    packageLabel: '复制方式', packageHint: '可复制的资料会在资源列表提供“创建副本”；规则、地图等由所属系统管理的资料会保持只读。',
-  },
-  en: {
-    title: 'Source and copy notes', description: 'See where this content came from and which resources you can copy into your library to edit.',
-    identityLabel: 'Package identity', identityHint: 'The package name, ID, and version help you recognize the source and describe exactly which content you are using when sharing or troubleshooting.',
-    packageLabel: 'Copy options', packageHint: 'Resources you can edit offer a “Create copy” action in the resource list. Rules and maps managed by their ruleset remain read-only.',
-  },
-  ja: {
-    title: 'ソースとコピーについて', description: 'このコンテンツの出所と、自分のライブラリにコピーして編集できる資料を確認できます。',
-    identityLabel: 'コンテンツの出所', identityHint: 'パッケージ名、ID、バージョンで出所を確認できます。共有や問題の確認時にも、どのコンテンツかを正確に伝えられます。',
-    packageLabel: 'コピーできる資料', packageHint: '編集できる資料には一覧に「コピーを作成」入口があります。ルールセットが管理するルールやマップは読み取り専用です。',
-  },
-  de: {
-    title: 'Quelle und Kopie', description: 'Hier sehen Sie, woher dieser Inhalt kommt und welche Ressourcen Sie zum Bearbeiten in Ihre Bibliothek kopieren können.',
-    identityLabel: 'Inhaltsquelle', identityHint: 'Paketname, ID und Version zeigen, aus welcher Quelle der Inhalt stammt. So lässt sich bei Fragen genau angeben, welche Ausgabe verwendet wird.',
-    packageLabel: 'Kopiermöglichkeiten', packageHint: 'Bearbeitbare Ressourcen bieten in der Liste „Kopie erstellen“. Regeln und Karten, die vom Regelsystem verwaltet werden, bleiben schreibgeschützt.',
-  },
-  ru: {
-    title: 'Источник и копирование', description: 'Здесь указано, откуда взялся этот контент и какие материалы можно скопировать в свою библиотеку для редактирования.',
-    identityLabel: 'Источник контента', identityHint: 'Название пакета, ID и версия помогают узнать источник. При обмене или разборе проблемы по ним можно точно указать используемый контент.',
-    packageLabel: 'Возможности копирования', packageHint: 'Для материалов, которые можно редактировать, в списке есть действие «Создать копию». Правила и карты, которыми управляет система правил, остаются только для чтения.',
-  },
-}
-
-const identity = computed(() => identityCopies[locale.value] || identityCopies.en)
 
 function launch(adventureId: string) {
   if (!canLaunch.value) return
@@ -265,246 +223,242 @@ async function run(action: ModuleAction) {
     <p v-if="error" class="error-text">{{ error }}</p>
     <p v-if="status" class="module-status" role="status">{{ status }}</p>
     <div v-if="!module" class="module-detail-fallback" data-testid="module-fallback-navigation">
-      <nav class="module-detail-fallback-actions" :aria-label="t('modulesBack')">
+      <nav class="module-detail-fallback-actions">
         <a href="#/modules" class="content-button">{{ t('modulesBack') }}</a>
-        <a href="#/library" class="content-button">{{ library.backLibrary }}</a>
       </nav>
       <p v-if="!error" class="muted" data-testid="module-loading">{{ t('modulesLoading') }}</p>
     </div>
+
     <template v-if="module">
-      <ContentPageHeader
-        kicker="CONTENT PACKS"
-        :title="module.name"
-        :description="`${module.version} · ${isDisabled ? t('modulesDisabledBadge') : t('modulesInstalledBadge')}`"
-      >
-        <template #actions>
-          <RouterLink :to="{ name: 'modules' }" class="content-button content-button-primary">{{ t('modulesBack') }}</RouterLink>
-        </template>
-      </ContentPageHeader>
-
-      <section class="module-identity-card" data-testid="module-identity-note">
-        <div class="module-identity-heading">
-          <div>
-            <p class="eyebrow">{{ identity.title }}</p>
-            <p class="module-identity-description">{{ identity.description }}</p>
+      <!-- ── 顶栏 ── -->
+      <div class="mod-header">
+        <RouterLink :to="{ name: 'modules' }" class="mod-back-link">← {{ t('modulesBack') }}</RouterLink>
+        <div class="mod-header-main">
+          <div class="mod-header-identity">
+            <p class="mod-header-eyebrow">{{ moduleCategoryLabel(module, copy) }}</p>
+            <h1 class="mod-header-title">{{ module.name }}</h1>
+            <p class="mod-header-meta">
+              <span>v{{ module.version }}</span>
+              <span :class="['mod-status-badge', isDisabled ? 'is-disabled' : 'is-enabled']">
+                {{ isDisabled ? t('modulesDisabledBadge') : t('modulesInstalledBadge') }}
+              </span>
+            </p>
           </div>
-          <span class="module-status-badge" :class="{ 'is-disabled': isDisabled }">
-            {{ isDisabled ? t('modulesDisabledBadge') : t('modulesInstalledBadge') }}
-          </span>
-        </div>
-        <dl class="module-quick-facts">
-          <div><dt>{{ identity.identityLabel }}</dt><dd>{{ module.id }}</dd></div>
-          <div><dt>{{ t('modulesVersionLabel') }}</dt><dd>{{ module.version }}</dd></div>
-          <div><dt>{{ copy.contentProfile }}</dt><dd>{{ moduleCategoryLabel(module, copy) }}</dd></div>
-        </dl>
-        <div class="module-identity-notes">
-          <p><strong>{{ identity.identityLabel }}</strong>{{ identity.identityHint }}</p>
-          <p><strong>{{ identity.packageLabel }}</strong>{{ identity.packageHint }}</p>
-        </div>
-      </section>
-
-      <section class="module-detail-section module-actions-section" data-testid="module-actions">
-        <div class="module-section-heading">
-          <div>
-            <p class="eyebrow">{{ t('modulesActions') }}</p>
-            <h2>{{ t('modulesActions') }}</h2>
+          <!-- 操作按钮 -->
+          <div class="mod-header-actions" data-testid="module-action-toolbar">
+            <button
+              v-for="item in actionButtons"
+              :key="item.action"
+              type="button"
+              class="mod-action-btn"
+              :class="item.variant"
+              :disabled="busy !== '' || Boolean(item.guard && !guardFor(item.guard).allowed)"
+              @click="run(item.action)"
+            >
+              <span v-if="busy === item.action" class="mod-action-busy">…</span>
+              {{ item.label }}
+            </button>
           </div>
-          <span v-if="busy" class="module-busy-label" role="status">{{ t('modulesLoading') }}</span>
         </div>
-        <p v-if="!guardFor('update').allowed || !guardFor('uninstall').allowed" class="error-text" data-testid="module-action-blocked">
+        <p v-if="!guardFor('update').allowed || !guardFor('uninstall').allowed" class="mod-blocked-hint error-text">
           {{ t('modulesActionBlocked', { count: boundGames.length }) }}
         </p>
-        <div class="module-actions module-action-toolbar" data-testid="module-action-toolbar">
-          <button
-            v-for="item in actionButtons"
-            :key="item.action"
-            type="button"
-            class="content-button"
-            :class="{ 'content-button-primary': item.variant === 'secondary', danger: item.variant === 'danger' }"
-            :disabled="busy !== '' || Boolean(item.guard && !guardFor(item.guard).allowed)"
-            @click="run(item.action)"
-          >{{ item.label }}</button>
-        </div>
-      </section>
+      </div>
 
-      <section class="module-detail-section" data-testid="module-adventures">
-        <div class="module-section-heading">
-          <div>
-            <p class="eyebrow">{{ copy.packLabel }}</p>
-            <h2>{{ module.adventures.length ? (canLaunch ? copy.playableAdventures : copy.installedAdventures) : moduleInventory(module) === 'resources' ? copy.resourcePack : copy.packLabel }}</h2>
+      <!-- ── 主内容两列 ── -->
+      <div class="mod-layout">
+        <!-- 左列 -->
+        <div class="mod-left">
+
+          <!-- 冒险列表 -->
+          <section v-if="module.adventures.length" class="mod-card" data-testid="module-adventures">
+            <h2 class="mod-card-title">{{ canLaunch ? copy.playableAdventures : copy.installedAdventures }}</h2>
+            <p v-if="isDisabled" class="muted">{{ copy.disabledAdventures }}</p>
+            <ul class="mod-adventure-list">
+              <li v-for="adv in module.adventures" :key="adv.adventure_id" class="mod-adventure-row">
+                <div class="mod-adventure-copy">
+                  <strong>{{ adv.name || adv.adventure_id }}</strong>
+                  <small>{{ adv.adventure_id }} · v{{ adv.version }}</small>
+                  <p v-if="adv.summary" class="muted">{{ adv.summary }}</p>
+                </div>
+                <button type="button" class="mod-action-btn secondary" :disabled="!canLaunch || busy !== ''" @click="launch(adv.adventure_id)">
+                  {{ t('moduleAdventureLaunch') }}
+                </button>
+              </li>
+            </ul>
+            <p v-if="!canLaunch" class="muted mod-launch-hint">{{ t('moduleAdventureLaunchBlocked') }}</p>
+          </section>
+
+          <!-- 资源内容包（无冒险）启动 -->
+          <section v-else-if="moduleInventory(module) === 'resources'" class="mod-card">
+            <h2 class="mod-card-title">{{ copy.resourcePack }}</h2>
+            <p class="muted">{{ copy.noFixedStory }}</p>
+            <button v-if="module.lorebooks?.length" type="button" class="mod-action-btn secondary mod-launch-btn" :disabled="!canLaunch || busy !== ''" @click="launchWithPack">
+              {{ t('moduleLorebookLaunch') }}
+            </button>
+            <p v-if="!canLaunch" class="muted mod-launch-hint">{{ t('moduleAdventureLaunchBlocked') }}</p>
+          </section>
+
+          <!-- 资料册 -->
+          <section v-if="(module.lorebooks || []).length" class="mod-card" data-testid="module-lorebooks">
+            <h2 class="mod-card-title">{{ t('modulesLorebooks') }}</h2>
+            <ul class="mod-lorebook-list">
+              <li v-for="book in (module.lorebooks || [])" :key="book.id" class="mod-lorebook-item">
+                <div class="mod-lorebook-row">
+                  <div class="mod-lorebook-info">
+                    <strong>{{ book.name }}</strong>
+                    <small>{{ book.language }}<template v-if="typeof book.entry_count === 'number'"> · {{ t('modulesLorebookEntries', { count: book.entry_count }) }}</template></small>
+                  </div>
+                  <div class="mod-lorebook-controls">
+                    <span class="mod-lorebook-origin" :data-catalog="book.catalog === true">
+                      {{ book.catalog ? t('modulesLorebookInPack') : t('modulesLorebookInLibrary') }}
+                    </span>
+                    <button v-if="book.catalog && book.key" type="button" class="mod-lorebook-toggle" :aria-expanded="openLorebook === book.id" @click="toggleLorebook(book)">
+                      {{ openLorebook === book.id ? t('modulesLorebookClose') : t('modulesLorebookOpen') }}
+                    </button>
+                  </div>
+                </div>
+                <div v-if="openLorebook === book.id" class="mod-lorebook-entries" data-testid="module-lorebook-entries">
+                  <p v-if="lorebookEntryBusy === book.id" class="muted">{{ t('modulesLorebookEntriesLoading') }}</p>
+                  <p v-else-if="lorebookEntryErrors[book.id]" class="muted">{{ t('modulesLorebookEntriesFailed') }}</p>
+                  <template v-else>
+                    <article v-for="(entry, i) in (lorebookEntries[book.id] || [])" :key="entry.id || i" class="mod-entry">
+                      <strong>{{ entry.name || entry.id }}</strong>
+                      <p>{{ entry.content }}</p>
+                    </article>
+                    <p v-if="lorebookHidden[book.id]" class="muted">{{ t('modulesLorebookHiddenNote', { count: lorebookHidden[book.id] }) }}</p>
+                    <p class="muted">{{ t('modulesLorebookReadonlyNote') }}</p>
+                  </template>
+                </div>
+              </li>
+            </ul>
+            <p v-if="(module.lorebooks || []).some(b => b.catalog)" class="muted mod-lorebook-hint">{{ t('modulesLorebookPackHint') }}</p>
+          </section>
+
+          <!-- 资源浏览 -->
+          <ModuleResourceBrowser :key="moduleId" :module-id="moduleId" />
+        </div>
+
+        <!-- 右列：元信息 -->
+        <aside class="mod-right">
+          <!-- 内容数量 -->
+          <div class="mod-side-card" data-testid="module-content">
+            <h3 class="mod-side-title">{{ copy.resourceContributions }}</h3>
+            <ul class="mod-content-list">
+              <li v-for="(items, kind) in module.content" :key="kind">
+                <span>{{ contentKindLabel(kind, locale) }}</span>
+                <strong>{{ items.length }}</strong>
+              </li>
+            </ul>
           </div>
-          <span class="module-section-count">{{ module.adventures.length }}</span>
-        </div>
-        <p v-if="module.inventory_status === 'unknown'" class="muted" role="status">{{ copy.inventoryUnknown }}</p>
-        <p v-else-if="!module.adventures.length && moduleInventory(module) === 'resources'" class="muted">{{ copy.noFixedStory }}</p>
-        <p v-if="isDisabled && module.adventures.length" class="muted">{{ copy.disabledAdventures }}</p>
-        <ul v-if="module.adventures.length" class="module-adventure-list"><li v-for="adventure in module.adventures" :key="adventure.adventure_id" class="module-adventure-card">
-          <div class="module-adventure-copy"><strong>{{ adventure.name || adventure.adventure_id }}</strong><small>{{ adventure.adventure_id }} · {{ adventure.version }}</small><p v-if="adventure.summary">{{ adventure.summary }}</p></div>
-          <button type="button" class="content-button content-button-primary" :disabled="!canLaunch || busy !== ''" @click="launch(adventure.adventure_id)">{{ t('moduleAdventureLaunch') }}</button>
-        </li></ul>
-        <p v-if="module.adventures.length && !canLaunch" class="muted">{{ t('moduleAdventureLaunchBlocked') }}</p>
-      </section>
 
-      <section class="module-detail-section" data-testid="module-content">
-        <div class="module-section-heading">
-          <div><p class="eyebrow">{{ copy.resourceContributions }}</p><h2>{{ copy.resourceContributions }}</h2></div>
-          <span class="module-section-count">{{ Object.values(module.content || {}).reduce((total, items) => total + items.length, 0) }}</span>
-        </div>
-        <ul class="module-content-list"><li v-for="(items, kind) in module.content" :key="kind"><span>{{ contentKindLabel(kind, locale) }} · <strong>{{ items.length }}</strong></span></li></ul>
-      </section>
+          <!-- 兼容性 -->
+          <div class="mod-side-card" data-testid="module-compatibility">
+            <h3 class="mod-side-title">{{ t('modulesCompatibility') }}</h3>
+            <p v-if="compatibility?.blockers?.length" class="error-text">{{ compatibility.blockers.map(blocker => formatModuleBlocker(blocker, locale)).join(locale === 'zh-CN' ? '；' : '; ') }}</p>
+            <p v-else class="mod-compat-ok">{{ t('modulesCompatible') }}</p>
+            <p v-if="compatibility?.warnings?.length" class="muted">{{ compatibility.warnings.join(', ') }}</p>
+          </div>
 
-      <ModuleResourceBrowser :key="moduleId" :module-id="moduleId" />
-
-      <details class="module-detail-section module-technical" data-testid="module-compatibility" :open="Boolean(compatibility?.blockers?.length)">
-        <summary>{{ t('modulesCompatibility') }}</summary>
-        <p v-if="compatibility?.blockers?.length" class="error-text">{{ compatibility.blockers.join(', ') }}</p>
-        <p v-else>{{ t('modulesCompatible') }}</p>
-        <p v-if="compatibility?.warnings?.length" class="muted">{{ compatibility.warnings.join(', ') }}</p>
-      </details>
-
-      <details class="module-detail-section module-technical" data-testid="module-metadata">
-        <summary>{{ t('modulesMetadata') }}</summary>
-        <dl class="module-facts">
-          <div><dt>{{ t('modulesModuleId') }}</dt><dd>{{ module.id }}</dd></div>
-          <div><dt>{{ copy.contentProfile }}</dt><dd>{{ moduleCategoryLabel(module, copy) }} <code>{{ module.content_profile }}</code></dd></div>
-          <div><dt>{{ t('modulesVersionLabel') }}</dt><dd>{{ module.version }}</dd></div>
-          <div><dt>{{ t('modulesStatus') }}</dt><dd>{{ statusLabel(module.status) }} <code>{{ module.status }}</code></dd></div>
-          <div><dt>{{ t('modulesContentDelivery') }}</dt><dd>{{ deliveryLabel(module.content_delivery_mode) }} <code>{{ module.content_delivery_mode }}</code></dd></div>
-        </dl>
-      </details>
-
-      <section class="module-detail-section" data-testid="module-lorebooks">
-        <h2>{{ t('modulesLorebooks') }}</h2>
-        <p v-if="!(module.lorebooks || []).length" class="muted">{{ t('modulesNoLorebooks') }}</p>
-        <template v-else>
-          <ul class="module-lorebook-list">
-            <li v-for="book in (module.lorebooks || [])" :key="book.id" class="module-lorebook-item">
-              <div class="module-lorebook-row">
-                <span>
-                  <b>{{ book.name }}</b>
-                  <small>
-                    {{ book.language }}<template v-if="typeof book.entry_count === 'number'"> · {{ t('modulesLorebookEntries', { count: book.entry_count }) }}</template>
-                  </small>
-                </span>
-                <span class="module-lorebook-actions">
-                  <button
-                    v-if="book.catalog && book.key"
-                    type="button"
-                    class="module-lorebook-open"
-                    :aria-expanded="openLorebook === book.id"
-                    @click="toggleLorebook(book)"
-                  >{{ openLorebook === book.id ? t('modulesLorebookClose') : t('modulesLorebookOpen') }}</button>
-                  <span class="module-lorebook-origin" :data-catalog="book.catalog === true">
-                    {{ book.catalog ? t('modulesLorebookInPack') : t('modulesLorebookInLibrary') }}
-                  </span>
-                </span>
+          <!-- 技术信息 -->
+          <details class="mod-side-card mod-technical" data-testid="module-metadata">
+            <summary>{{ t('modulesMetadata') }}</summary>
+            <dl class="mod-facts">
+              <div><dt>{{ t('modulesModuleId') }}</dt><dd>{{ module.id }}</dd></div>
+              <div><dt>{{ t('modulesVersionLabel') }}</dt><dd>{{ module.version }}</dd></div>
+              <div><dt>{{ t('modulesStatus') }}</dt><dd>{{ statusLabel(module.status) }}</dd></div>
+              <div><dt>{{ t('modulesContentDelivery') }}</dt><dd>{{ deliveryLabel(module.content_delivery_mode) }}</dd></div>
+              <div v-for="runtime in module.required_runtimes || []" :key="runtime.id">
+                <dt>{{ locale === 'zh-CN' ? '需要运行时' : 'Requires runtime' }}</dt>
+                <dd>{{ runtime.id }} ≥{{ runtime.minimum_version }}</dd>
               </div>
-              <div v-if="openLorebook === book.id" class="module-lorebook-entries" data-testid="module-lorebook-entries">
-                <p v-if="lorebookEntryBusy === book.id" class="muted">{{ t('modulesLorebookEntriesLoading') }}</p>
-                <p v-else-if="lorebookEntryErrors[book.id]" class="muted">{{ t('modulesLorebookEntriesFailed') }}</p>
-                <template v-else>
-                  <article v-for="(entry, index) in (lorebookEntries[book.id] || [])" :key="entry.id || index">
-                    <b>{{ entry.name || entry.id }}</b>
-                    <p>{{ entry.content }}</p>
-                  </article>
-                  <p v-if="lorebookHidden[book.id]" class="muted">{{ t('modulesLorebookHiddenNote', { count: lorebookHidden[book.id] }) }}</p>
-                  <p class="muted">{{ t('modulesLorebookReadonlyNote') }}</p>
-                </template>
-              </div>
-            </li>
-          </ul>
-          <p v-if="(module.lorebooks || []).some(book => book.catalog)" class="muted">{{ t('modulesLorebookPackHint') }}</p>
-          <button
-            v-if="!module.adventures.length"
-            type="button"
-            class="content-button content-button-primary module-lorebook-launch"
-            :disabled="!canLaunch || busy !== ''"
-            @click="launchWithPack"
-          >{{ t('moduleLorebookLaunch') }}</button>
-          <p v-if="!module.adventures.length && !canLaunch" class="muted">{{ t('moduleAdventureLaunchBlocked') }}</p>
-        </template>
-      </section>
+            </dl>
+          </details>
 
-      <details class="module-detail-section module-technical" data-testid="module-usage">
-        <summary>{{ t('modulesInUse') }}</summary>
-        <p>{{ t('modulesGameCount', { count: usage?.total_games ?? boundGames.length }) }}</p>
-        <p v-if="!boundGames.length" class="muted">{{ t('modulesBoundNone') }}</p>
-        <ul v-else>
-          <li v-for="game in boundGames" :key="game.game_key">{{ game.game_key }} · {{ game.adventure_id }}</li>
-        </ul>
-      </details>
-
+          <!-- 使用中的存档 -->
+          <details class="mod-side-card" data-testid="module-usage">
+            <summary>{{ t('modulesInUse') }} ({{ usage?.total_games ?? boundGames.length }})</summary>
+            <p v-if="!boundGames.length" class="muted">{{ t('modulesBoundNone') }}</p>
+            <ul v-else class="mod-game-list">
+              <li v-for="game in boundGames" :key="game.game_key">{{ game.game_key }}</li>
+            </ul>
+          </details>
+        </aside>
+      </div>
     </template>
   </section>
 </template>
 
 <style scoped>
+.module-status { margin: 0; color: var(--df-success); font-size: .88rem; }
 .module-detail-fallback { display: grid; gap: 1rem; padding-top: 1rem; }
 .module-detail-fallback-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
-.module-detail-fallback-actions .content-button { min-width: 10rem; }
-.module-detail-section { margin-top: 1.5rem; padding: 1.25rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: linear-gradient(145deg, color-mix(in srgb, var(--df-surface-1) 94%, var(--df-interactive) 6%), var(--df-surface-1)); }
-.module-detail-section h2 { margin: 0; font-size: 1.15rem; }
-.module-detail-section > p { margin: .65rem 0 0; }
-.module-identity-card { display: grid; gap: 1.1rem; padding: 1.25rem; border: 1px solid color-mix(in srgb, var(--df-interactive) 36%, var(--df-border-soft)); border-radius: var(--df-radius-lg); background: linear-gradient(135deg, color-mix(in srgb, var(--df-interactive) 12%, var(--df-surface-1)), var(--df-surface-1) 64%); box-shadow: 0 12px 28px color-mix(in srgb, var(--df-canvas) 42%, transparent); }
-.module-identity-heading { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }
-.module-identity-heading .eyebrow, .module-section-heading .eyebrow { margin: 0 0 .3rem; color: var(--df-interactive-strong); font-size: .7rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
-.module-identity-description { margin: 0; color: var(--df-text-muted); line-height: 1.55; }
-.module-status-badge { display: inline-flex; align-items: center; min-height: 28px; padding: .25rem .65rem; border: 1px solid color-mix(in srgb, var(--df-success) 50%, var(--df-border-soft)); border-radius: 999px; color: var(--df-success); background: color-mix(in srgb, var(--df-success) 10%, var(--df-surface-1)); font-size: .76rem; font-weight: 700; white-space: nowrap; }
-.module-status-badge.is-disabled { border-color: color-mix(in srgb, var(--df-warning) 50%, var(--df-border-soft)); color: var(--df-warning); background: color-mix(in srgb, var(--df-warning) 10%, var(--df-surface-1)); }
-.module-quick-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; margin: 0; }
-.module-quick-facts > div { min-width: 0; padding: .65rem .75rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: color-mix(in srgb, var(--df-surface-2) 74%, transparent); }
-.module-quick-facts dt { color: var(--df-text-muted); font-size: .72rem; }
-.module-quick-facts dd { margin: .25rem 0 0; overflow-wrap: anywhere; font-weight: 700; }
-.module-identity-notes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
-.module-identity-notes p { margin: 0; color: var(--df-text-muted); font-size: .82rem; line-height: 1.55; }
-.module-identity-notes strong { display: block; margin-bottom: .2rem; color: var(--df-text); font-size: .78rem; }
-.module-actions-section { border-color: color-mix(in srgb, var(--df-interactive) 30%, var(--df-border-soft)); }
-.module-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .8rem; }
-.module-section-count { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; padding-inline: .45rem; border: 1px solid var(--df-border-soft); border-radius: 999px; color: var(--df-text-muted); font-size: .78rem; }
-.module-busy-label { color: var(--df-text-muted); font-size: .78rem; }
-.module-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
-.module-actions .content-button { min-width: 7rem; min-height: 42px; }
-.module-actions .danger { border-color: color-mix(in srgb, var(--df-danger) 60%, var(--df-border-soft)); color: var(--df-danger); }
-.module-status { margin: 1rem 0 0; color: var(--df-success); }
-.module-adventure-list { list-style: none; display: grid; gap: .7rem; margin: 1rem 0 0; padding: 0; }
-.module-adventure-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; padding: .9rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: color-mix(in srgb, var(--df-surface-2) 75%, transparent); }
-.module-adventure-copy { min-width: 0; flex: 1 1 18rem; }
-.module-adventure-copy strong { display: block; font-size: .97rem; }
-.module-adventure-copy small { display: block; margin-top: .25rem; overflow-wrap: anywhere; color: var(--df-text-muted); }
-.module-adventure-copy p { margin: .45rem 0 0; color: var(--df-text-muted); font-size: .86rem; line-height: 1.5; }
-.module-adventure-card .content-button { min-width: 11rem; }
-.module-lorebook-launch { margin-top: 1rem; }
-.module-content-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: .6rem; list-style: none; margin: 1rem 0 0; padding: 0; }
-.module-content-list li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .7rem .8rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: color-mix(in srgb, var(--df-surface-2) 72%, transparent); }
-.module-content-list li span { color: var(--df-text-muted); }
-.module-content-list li strong { color: var(--df-interactive-strong); }
-.module-lorebook-list { display: grid; gap: .5rem; list-style: none; margin: .6rem 0; padding: 0; }
-.module-lorebook-list li { display: grid; gap: .5rem; padding: .7rem .8rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: color-mix(in srgb, var(--df-surface-2) 72%, transparent); }
-.module-lorebook-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
-.module-lorebook-actions { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; justify-content: flex-end; }
-.module-lorebook-open { padding: .2rem .55rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: var(--df-control-bg); color: var(--df-interactive-strong); font-size: .76rem; cursor: pointer; }
-.module-lorebook-entries { display: grid; gap: .55rem; padding-top: .5rem; border-top: 1px dashed var(--df-border-soft); }
-.module-lorebook-entries article { display: grid; gap: .2rem; }
-.module-lorebook-entries article p { margin: 0; color: var(--df-text-secondary); font-size: .8rem; line-height: 1.7; white-space: pre-wrap; }
-.module-lorebook-list b { display: block; font-size: .9rem; }
-.module-lorebook-list small { display: block; color: var(--df-text-muted); font-size: .78rem; }
-.module-lorebook-origin { color: var(--df-text-muted); font-size: .78rem; white-space: nowrap; }
-.module-lorebook-origin[data-catalog='true'] { color: var(--df-interactive-strong); }
-.module-technical { padding: 0; overflow: hidden; }
-.module-technical summary { cursor: pointer; min-height: 48px; display: flex; align-items: center; padding: .7rem 1.25rem; font-weight: 700; list-style-position: inside; }
-.module-technical[open] summary { border-bottom: 1px solid var(--df-border-soft); }
-.module-technical > :not(summary) { margin-inline: 1.25rem; }
-.module-technical > p:last-child, .module-technical > ul:last-child, .module-technical > .module-facts:last-child { margin-bottom: 1.25rem; }
-.module-facts { display: grid; gap: .45rem; margin-top: 1rem; }
-.module-facts > div { display: grid; grid-template-columns: minmax(7rem, .35fr) minmax(0, 1fr); gap: .8rem; padding-bottom: .45rem; border-bottom: 1px solid color-mix(in srgb, var(--df-border-soft) 60%, transparent); }
-.module-facts dt { color: var(--df-text-muted); font-size: .8rem; }
-.module-facts dd { margin: 0; overflow-wrap: anywhere; }
-@media (max-width: 640px) {
-  .module-identity-heading, .module-section-heading { align-items: stretch; flex-direction: column; }
-  .module-status-badge, .module-section-count { align-self: flex-start; }
-  .module-quick-facts, .module-identity-notes { grid-template-columns: 1fr; }
-  .module-actions { display: grid; grid-template-columns: 1fr; }
-  .module-actions .content-button, .module-adventure-card .content-button { width: 100%; }
-  .module-detail-section, .module-identity-card { padding: 1rem; }
-}
+.mod-back-link { display: inline-flex; align-items: center; gap: .3rem; color: var(--df-text-muted); font-size: .84rem; text-decoration: none; margin-bottom: .9rem; }
+.mod-back-link:hover { color: var(--df-text); }
+.mod-header { display: grid; gap: .4rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--df-border-soft); }
+.mod-header-main { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.mod-header-eyebrow { margin: 0 0 .3rem; color: var(--df-interactive-strong); font-size: .7rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+.mod-header-title { margin: 0 0 .4rem; font-family: var(--df-font-title, inherit); font-size: clamp(1.3rem, 2.5vw, 2rem); line-height: 1.2; }
+.mod-header-meta { display: flex; align-items: center; gap: .6rem; margin: 0; }
+.mod-header-meta span { color: var(--df-text-muted); font-size: .84rem; }
+.mod-status-badge { display: inline-flex; align-items: center; padding: .18rem .55rem; border-radius: 999px; font-size: .74rem; font-weight: 700; border: 1px solid; }
+.mod-status-badge.is-enabled { border-color: color-mix(in srgb, var(--df-success) 50%, var(--df-border-soft)); color: var(--df-success); background: color-mix(in srgb, var(--df-success) 10%, transparent); }
+.mod-status-badge.is-disabled { border-color: color-mix(in srgb, var(--df-warning) 50%, var(--df-border-soft)); color: var(--df-warning); background: color-mix(in srgb, var(--df-warning) 10%, transparent); }
+.mod-header-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.mod-blocked-hint { margin: .3rem 0 0; font-size: .82rem; }
+.mod-action-btn { display: inline-flex; align-items: center; gap: .4rem; min-height: 36px; padding: 0 .9rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); color: var(--df-text); font: .88rem/1 inherit; cursor: pointer; white-space: nowrap; transition: background .12s, border-color .12s; }
+.mod-action-btn:hover { background: var(--df-surface-1); border-color: var(--df-interactive); }
+.mod-action-btn:disabled { opacity: .55; cursor: not-allowed; }
+.mod-action-btn.secondary { border-color: color-mix(in srgb, var(--df-interactive) 50%, var(--df-border-soft)); color: var(--df-interactive-strong); background: color-mix(in srgb, var(--df-interactive) 8%, var(--df-surface-2)); }
+.mod-action-btn.danger { border-color: color-mix(in srgb, var(--df-danger) 55%, var(--df-border-soft)); color: var(--df-danger-strong); }
+.mod-action-busy { font-size: .9em; opacity: .7; }
+.mod-launch-btn { margin-top: .6rem; }
+.mod-launch-hint { margin-top: .4rem; font-size: .8rem; }
+.mod-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 1.5rem; margin-top: 1.5rem; align-items: start; }
+.mod-left { display: grid; gap: 1.25rem; }
+.mod-right { display: grid; gap: .85rem; }
+.mod-card { padding: 1.1rem 1.25rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-1); }
+.mod-card-title { margin: 0 0 .75rem; font-size: 1rem; font-weight: 700; }
+.mod-adventure-list { list-style: none; display: grid; gap: .6rem; margin: 0; padding: 0; }
+.mod-adventure-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; padding: .8rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); }
+.mod-adventure-copy { flex: 1 1 16rem; min-width: 0; display: grid; gap: .2rem; }
+.mod-adventure-copy strong { font-size: .95rem; }
+.mod-adventure-copy small { color: var(--df-text-muted); font-size: .78rem; }
+.mod-adventure-copy p { margin: 0; color: var(--df-text-muted); font-size: .84rem; line-height: 1.5; }
+.mod-lorebook-list { list-style: none; display: grid; gap: .5rem; margin: 0; padding: 0; }
+.mod-lorebook-item { display: grid; gap: .5rem; }
+.mod-lorebook-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .65rem .75rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); }
+.mod-lorebook-info { display: grid; gap: .1rem; min-width: 0; }
+.mod-lorebook-info strong { font-size: .88rem; }
+.mod-lorebook-info small { color: var(--df-text-muted); font-size: .76rem; }
+.mod-lorebook-controls { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; justify-content: flex-end; }
+.mod-lorebook-toggle { padding: .2rem .55rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: transparent; color: var(--df-interactive-strong); font-size: .76rem; cursor: pointer; }
+.mod-lorebook-origin { color: var(--df-text-muted); font-size: .76rem; white-space: nowrap; }
+.mod-lorebook-origin[data-catalog="true"] { color: var(--df-interactive-strong); }
+.mod-lorebook-entries { display: grid; gap: .5rem; padding: .65rem .75rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); }
+.mod-entry { display: grid; gap: .18rem; padding-bottom: .45rem; border-bottom: 1px solid color-mix(in srgb, var(--df-border-soft) 50%, transparent); }
+.mod-entry:last-child { border-bottom: 0; padding-bottom: 0; }
+.mod-entry strong { font-size: .86rem; }
+.mod-entry p { margin: 0; color: var(--df-text-secondary); font-size: .8rem; line-height: 1.6; white-space: pre-wrap; }
+.mod-lorebook-hint { margin-top: .4rem; font-size: .8rem; }
+.mod-side-card { padding: .85rem 1rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
+.mod-side-title { margin: 0 0 .6rem; font-size: .88rem; font-weight: 700; }
+.mod-content-list { list-style: none; display: grid; gap: .3rem; margin: 0; padding: 0; }
+.mod-content-list li { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .3rem 0; border-bottom: 1px solid color-mix(in srgb, var(--df-border-soft) 55%, transparent); }
+.mod-content-list li:last-child { border-bottom: 0; }
+.mod-content-list li span { color: var(--df-text-muted); font-size: .82rem; }
+.mod-content-list li strong { color: var(--df-interactive-strong); font-size: .88rem; }
+.mod-compat-ok { margin: 0; color: var(--df-success); font-size: .84rem; font-weight: 600; }
+.mod-technical { overflow: hidden; }
+.mod-technical summary { cursor: pointer; font-size: .84rem; font-weight: 700; color: var(--df-text-muted); list-style: none; }
+.mod-technical[open] summary { color: var(--df-text); margin-bottom: .5rem; }
+.mod-facts { display: grid; gap: .4rem; margin: 0; }
+.mod-facts > div { display: grid; grid-template-columns: auto 1fr; gap: .6rem; padding-bottom: .35rem; border-bottom: 1px solid color-mix(in srgb, var(--df-border-soft) 50%, transparent); }
+.mod-facts > div:last-child { border-bottom: 0; }
+.mod-facts dt { color: var(--df-text-muted); font-size: .78rem; white-space: nowrap; }
+.mod-facts dd { margin: 0; overflow-wrap: anywhere; font-size: .82rem; }
+.mod-game-list { list-style: none; display: grid; gap: .3rem; margin: .4rem 0 0; padding: 0; }
+.mod-game-list li { font-size: .8rem; color: var(--df-text-muted); overflow-wrap: anywhere; }
+@media (max-width: 800px) { .mod-layout { grid-template-columns: 1fr; } .mod-right { grid-row: 1; } }
+@media (max-width: 520px) { .mod-header-main { flex-direction: column; } .mod-header-actions { width: 100%; } }
 </style>

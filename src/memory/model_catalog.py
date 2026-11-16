@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 from hashlib import sha256
 import json
+import shutil
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import aiohttp
 
@@ -88,16 +89,156 @@ class LocalModelManager:
     """Download only catalog-approved files into the controlled model directory."""
 
     def __init__(self, models_dir: Path, *, catalog_path: Path | None = None,
-                 proxy_url: str = ""):
+                 proxy_url: str = "", mirror_manager: Any | None = None):
         self.models_dir = Path(models_dir)
         self.catalog_path = catalog_path or self.models_dir / "catalog.json"
         self.default_catalog_path = Path(__file__).with_name("default_model_catalog.json")
         self.proxy_url = str(proxy_url or "").strip() or None
+        self.mirror_manager = mirror_manager
         self._locks: dict[str, asyncio.Lock] = {}
 
     def _catalog_entries(self) -> list[dict[str, Any]]:
-        path = self.catalog_path if self.catalog_path.exists() else self.default_catalog_path
-        return load_catalog(path)
+        """内置/本地目录 + 远端目录缓存合并（W5-2）。
+
+        合并策略：用户自己的 data/models/catalog.json 优先；内置兜底目录允许
+        被管理员刷新得到的远端同 id 条目替换，以便模型版本和状态能更新。远端
+        新 id 追加到列表末尾。候选条目照常列出，但 install() 拒绝安装。
+        """
+
+        custom_catalog = self.catalog_path.exists()
+        path = self.catalog_path if custom_catalog else self.default_catalog_path
+        entries = load_catalog(path)
+        positions = {entry["id"]: index for index, entry in enumerate(entries)}
+        remote_path = self.models_dir / "remote-catalog.json"
+        if remote_path.exists():
+            try:
+                for entry in load_catalog(remote_path):
+                    model_id = entry["id"]
+                    if model_id not in positions:
+                        entries.append(entry)
+                        positions[model_id] = len(entries) - 1
+                    elif not custom_catalog:
+                        entries[positions[model_id]] = entry
+            except ModelCatalogError:
+                # 远端缓存损坏不能拖垮目录：忽略并保留原样（下次刷新覆盖）。
+                pass
+        return entries
+
+    async def refresh_remote_catalog(self, url: str) -> dict[str, Any]:
+        """W5-2：管理员触发拉取远端目录（index 或 diceframe-models 分片）。
+
+        fail closed：仅 https、单响应 ≤ 1MB、必须通过 load_catalog 同一校验；
+        通过后原子写入 remote-catalog.json 缓存，读取路径（_catalog_entries）
+        永不发起网络请求。
+        """
+
+        url = str(url or "").strip()
+        parsed = urlsplit(url)
+        if not url.startswith("https://") or not parsed.hostname:
+            raise ModelCatalogError("remote catalog url must be https")
+        async with aiohttp.ClientSession() as session:
+            raw = await self._fetch_remote_json(session, url)
+            raw = await self._expand_catalog_index(session, url, raw)
+        # 与 load_catalog 同一校验（临时落盘复用既有契约，避免第二套规则）。
+        staging = self.models_dir / ".remote-catalog.staging.json"
+        staging.parent.mkdir(parents=True, exist_ok=True)
+        staging.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+        try:
+            entries = load_catalog(staging)
+        finally:
+            staging.unlink(missing_ok=True)
+        destination = self.models_dir / "remote-catalog.json"
+        destination.write_text(json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return {"ok": True, "url": url, "models": [entry["id"] for entry in entries]}
+
+    async def _fetch_remote_json(self, session: aiohttp.ClientSession, url: str) -> dict[str, Any]:
+        parsed = urlsplit(url)
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise ModelCatalogError("remote catalog url must be https")
+        payload: bytes
+        mirror = self.mirror_manager
+        if mirror is not None and parsed.hostname.lower() in {"raw.githubusercontent.com", "github.com"}:
+            result = await mirror.fetch_github_url(url, binary=True, max_bytes=1024 * 1024, resolve=False)
+            if not result.ok or result.data is None:
+                raise ModelCatalogError(f"remote catalog fetch failed: {result.error or 'all mirrors failed'}")
+            payload = result.data if isinstance(result.data, bytes) else str(result.data).encode("utf-8")
+        else:
+            async with session.get(
+                url, allow_redirects=True, proxy=self.proxy_url,
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as response:
+                if response.status != 200:
+                    raise ModelCatalogError(f"remote catalog fetch failed: HTTP {response.status}")
+                final = urlsplit(str(response.url))
+                if final.scheme != "https" or not final.hostname:
+                    raise ModelCatalogError("remote catalog redirected to an unsafe URL")
+                payload = await response.content.read(1024 * 1024 + 1)
+        if len(payload) > 1024 * 1024:
+            raise ModelCatalogError("remote catalog exceeds 1MB")
+        try:
+            raw = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ModelCatalogError("remote catalog cannot be parsed") from exc
+        if not isinstance(raw, dict):
+            raise ModelCatalogError("remote catalog root must be an object")
+        return raw
+
+    async def _expand_catalog_index(
+        self,
+        session: aiohttp.ClientSession,
+        index_url: str,
+        raw: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Resolve diceframe-models ``catalog/index.json`` into loader shards.
+
+        A direct shard already has ``files`` and is returned unchanged.  The
+        repository index instead points at ``models/<id>/<version>.json``;
+        those paths are relative to the repository root, not the ``catalog/``
+        directory containing the index.
+        """
+
+        models = raw.get("models")
+        if not isinstance(models, list) or not any(
+            isinstance(item, dict) and item.get("file") and "files" not in item
+            for item in models
+        ):
+            return raw
+        if int(raw.get("catalog_version", 0)) != 1:
+            raise ModelCatalogError("unsupported model catalog version")
+        if len(models) > 64:
+            raise ModelCatalogError("remote catalog contains too many shards")
+        resolved: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for pointer in models:
+            if not isinstance(pointer, dict):
+                raise ModelCatalogError("remote catalog index entry is invalid")
+            model_id = _safe_id(pointer.get("id"))
+            file_ref = str(pointer.get("file") or "").strip()
+            if not file_ref or file_ref.startswith("/") or ".." in Path(file_ref).parts:
+                raise ModelCatalogError(f"model {model_id} shard path is invalid")
+            if file_ref.startswith("models/"):
+                shard_url = urljoin(index_url, "../" + file_ref)
+            else:
+                shard_url = urljoin(index_url, file_ref)
+            shard = await self._fetch_remote_json(session, shard_url)
+            shard_models = shard.get("models")
+            if not isinstance(shard_models, list):
+                raise ModelCatalogError(f"model {model_id} shard is invalid")
+            candidates = [
+                item for item in shard_models
+                if isinstance(item, dict) and str(item.get("id") or "") == model_id
+            ]
+            if len(candidates) != 1:
+                raise ModelCatalogError(f"model {model_id} is missing from its shard")
+            if model_id in seen:
+                raise ModelCatalogError(f"duplicate model id: {model_id}")
+            seen.add(model_id)
+            selected = dict(candidates[0])
+            for key in ("status", "recommended", "summary"):
+                if key in pointer:
+                    selected[key] = pointer[key]
+            resolved.append(selected)
+        return {"catalog_version": 1, "models": resolved}
 
     def catalog(self) -> list[dict[str, Any]]:
         entries = self._catalog_entries()
@@ -109,10 +250,30 @@ class LocalModelManager:
                 "version": str(entry.get("version") or ""),
                 "dimension": int(entry.get("dimension") or 0),
                 "license": str(entry.get("license") or ""),
+                # W5：卡片展示需要预估下载体积（catalog 固定清单的 size 之和）。
+                "size_bytes": sum(int(item.get("size") or 0) for item in entry.get("files") or []),
                 "status": installed.get(entry["id"], {}).get("status", "not_installed"),
             }
             for entry in entries
         ]
+
+    def uninstall(self, model_id: str, *, active_model_id: str = "") -> dict[str, Any]:
+        """删除已安装的本地模型目录（W5）。
+
+        fail closed：路径越界/未安装拒绝；当前启用的模型必须先切换来源或
+        模型再删，避免运行中的 embedding client 指向被删除的权重。
+        """
+
+        model_id = _safe_id(model_id)
+        root = (self.models_dir / model_id).resolve()
+        if root == self.models_dir.resolve() or self.models_dir.resolve() not in root.parents:
+            raise ModelCatalogError("model directory escapes the model storage")
+        if not root.is_dir():
+            raise ModelCatalogError("model is not installed")
+        if active_model_id and model_id == _safe_id(active_model_id):
+            raise ModelCatalogError("model is currently enabled; switch the source or model first")
+        shutil.rmtree(root)
+        return {"ok": True, "model_id": model_id}
 
     async def install(self, model_id: str) -> dict[str, Any]:
         entries = {entry["id"]: entry for entry in self._catalog_entries()}
@@ -120,6 +281,8 @@ class LocalModelManager:
         entry = entries.get(model_id)
         if entry is None:
             raise ModelCatalogError("model is not present in the trusted catalog")
+        if str(entry.get("status") or "released") == "candidate":
+            raise ModelCatalogError("model is a candidate; not installable until benchmarks pass")
         lock = self._locks.setdefault(model_id, asyncio.Lock())
         async with lock:
             version = str(entry.get("version") or "")

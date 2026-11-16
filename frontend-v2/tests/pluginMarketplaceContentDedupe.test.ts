@@ -53,7 +53,7 @@ describe('plugin market does not list content packs', () => {
       },
     })
     const hint = wrapper.get('[data-testid="plugin-market-content-hint"]')
-    expect(hint.text()).toContain('冒险模组和资源包统一在内容包页面的「在线内容包」里安装。')
+    expect(hint.text()).toContain('冒险内容包和资源内容包统一在内容包页面的「在线内容包」里安装。')
     expect(hint.get('a').attributes('href')).toBe('/modules')
     expect(wrapper.find('.mode-tabs').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('内容市场')

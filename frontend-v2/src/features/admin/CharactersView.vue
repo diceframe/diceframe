@@ -915,7 +915,7 @@ async function onWizardChainCancel() {
 
 <template>
   <section class="view archive-page characters-page">
-    <ContentPageHeader class="view-title archive-hero characters-page-heading" kicker="CHARACTER ROSTER" :title="t('characterManagement')" :description="journeyCopy.description">
+    <ContentPageHeader compact class="view-title characters-page-heading" kicker="CHARACTER ROSTER" :title="t('characterManagement')" :description="journeyCopy.description">
       <template #actions>
         <div class="actions character-page-actions">
           <template v-if="activePane === 'library'">

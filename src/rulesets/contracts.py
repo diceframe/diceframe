@@ -160,6 +160,7 @@ class AuthoritativeIntentHooks(Protocol):
 
     def prepare_intent_submission(
         self, intent: dict[str, Any], requester_id: str, requester_is_gm: bool,
+        instance: Any,
     ) -> dict[str, Any]: ...
 
     def memory_deltas_from_event_batch(
@@ -185,7 +186,7 @@ class SequentialActionRuntime(Protocol):
     ) -> dict[str, Any]: ...
 
     def resolve_sequential_step(
-        self, instance: Any, step: dict[str, Any], rng: Any,
+        self, instance: Any, step: dict[str, Any], rng: Any, plan_id: str = "",
     ) -> dict[str, Any]: ...
 
     def apply_event_batch(

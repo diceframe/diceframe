@@ -21,7 +21,7 @@ import time
 import zipfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 from .capabilities import (
@@ -37,6 +37,7 @@ from .contracts import (
     AIProviderResolver,
     ListedBridgeExtensionDescriptor,
     ListedToolDescriptor,
+    PluginManifest,
     PluginContributionView,
     PluginPublicDetail,
     PluginStoppedCallback,
@@ -63,6 +64,7 @@ from .requirements import (
     dependency_rows,
     parse_plugin_requirements,
     parse_ruleset_requirements,
+    parse_ruleset_runtime_declaration,
     plugin_version_satisfies,
 )
 from .runtime_protocol import (
@@ -227,6 +229,9 @@ class PluginHost:
         for plugin_id, runtime in self.plugins.items():
             if runtime.status == "active":
                 self._register_contributions(plugin_id, runtime)
+        # 插件集合已重建（含安装/覆盖/恢复路径），外部规则 runtime 可用性可能
+        # 变化：通知组合根重同步注册表（幂等，fail closed，见同步桥）。
+        self._notify_ruleset_runtime_changed()
         return self.list_public()
 
     def _validate_discovered_plugin_dependencies(self) -> None:
@@ -262,9 +267,9 @@ class PluginHost:
         for plugin_id in graph:
             walk(plugin_id)
         for plugin_id in cyclic:
-            stale_runtime = self.plugins.get(plugin_id)
-            if stale_runtime is not None:
-                stale_runtime.status, stale_runtime.error = "failed", "plugin dependency cycle detected"
+            cycle_runtime = self.plugins.get(plugin_id)
+            if cycle_runtime is not None:
+                cycle_runtime.status, cycle_runtime.error = "failed", "plugin dependency cycle detected"
 
         for plugin_id, runtime in self.plugins.items():
             if runtime.status == "failed":
@@ -375,7 +380,7 @@ class PluginHost:
 
         if not isinstance(payloads, list) or not payloads or len(payloads) > 32:
             raise ValueError("插件组必须是 1 到 32 个安装包")
-        candidate: dict[str, tuple[dict[str, Any], Path]] = {}
+        candidate: dict[str, tuple[PluginManifest, Path]] = {}
         temp = tempfile.TemporaryDirectory(
             prefix="plugin-group-plan-",
             dir=str(self.data_dir) if self.data_dir.exists() else None,
@@ -397,7 +402,7 @@ class PluginHost:
                 self._validate_package_before_install(
                     source_dir, dict(runtime.manifest), "",
                 )
-                candidate[plugin_id] = (dict(runtime.manifest), source_dir)
+                candidate[plugin_id] = (cast(PluginManifest, dict(runtime.manifest)), source_dir)
 
             manifests: dict[str, Mapping[str, Any]] = {
                 plugin_id: runtime.manifest
@@ -976,6 +981,39 @@ class PluginHost:
         self._package_validator = package_validator
         self._content_module_guard = content_module_guard
 
+    def set_ruleset_runtime_listener(self, listener: Callable[[], None] | None) -> None:
+        """T3 组合根接线点：影响外部规则 runtime 可用性的插件变更后通知重同步。
+
+        listener（PluginRulesetRuntimeSource.sync）由组合根提供；宿主不感知
+        注册表语义。通知为 fire-and-forget：同步失败只记日志，不阻断插件
+        操作——未注册的 runtime 会在 resolve 时 fail closed。
+        """
+
+        self._ruleset_runtime_listener = listener
+
+    def _notify_ruleset_runtime_changed(self) -> None:
+        listener = getattr(self, "_ruleset_runtime_listener", None)
+        if listener is None:
+            return
+        try:
+            listener()
+        except Exception:
+            self.logger.exception("外部规则 runtime 注册表重同步失败")
+
+    async def _anotify_ruleset_runtime_changed(self) -> None:
+        """异步路径的注册表重同步：探活 RPC 卸到工作线程（P1-04）。
+
+        完成后才返回，调用方（start/stop/uninstall）的后续断言与状态保持
+        确定性；发现（discover）等同步路径继续用同步版本，上限为探活超时。
+        """
+        listener = getattr(self, "_ruleset_runtime_listener", None)
+        if listener is None:
+            return
+        try:
+            await asyncio.to_thread(listener)
+        except Exception:
+            self.logger.exception("外部规则 runtime 注册表重同步失败")
+
     def _guard_package_mutation(self, plugin_id: str, action: str) -> None:
         """Ask the injected guard before changing/removing installed package bytes."""
 
@@ -1175,11 +1213,9 @@ class PluginHost:
                     if target.exists():
                         self._guard_package_mutation(plugin_id, "overwrite")
                     shutil.copytree(source_dir, staging)
-                    existing_runtime = self.plugins.get(plugin_id)
-                    existing_process = existing_runtime.process if existing_runtime else None
-                    was_running[plugin_id] = bool(
-                        existing_process and existing_process.returncode is None
-                    )
+                    installed = self.plugins.get(plugin_id)
+                    process = installed.process if installed else None
+                    was_running[plugin_id] = bool(process and process.returncode is None)
                     entries.append({
                         "plugin_id": plugin_id,
                         "target": str(target),
@@ -1583,6 +1619,7 @@ class PluginHost:
                 shutil.rmtree(data_dir)
         self.plugins.pop(plugin_id, None)
         self._api_tokens.pop(plugin_id, None)
+        await self._anotify_ruleset_runtime_changed()
         return {"id": plugin_id, "uninstalled": True, "data_deleted": bool(delete_data)}
 
     async def start_enabled(self) -> None:
@@ -1642,6 +1679,7 @@ class PluginHost:
         # 启动时只拉起 enabled 的插件；前端开关用 require_enabled=False 强制启动进程。
         if require_enabled and not runtime.config.get("enabled"):
             runtime.status = "disabled"
+            await self._anotify_ruleset_runtime_changed()
             return
         if runtime.process and runtime.process.returncode is None:
             runtime.status = "running"
@@ -1653,14 +1691,17 @@ class PluginHost:
                 generated = True
         if generated:
             self._save_config(plugin_id, runtime)
-        if not self._has_entrypoint(runtime.manifest):
+        if not self._has_entrypoint(runtime.manifest) or self._plugin_type(runtime.manifest) == "ruleset-runtime":
             self._register_contributions(plugin_id, runtime)
             runtime.status, runtime.error = "active", ""
-            # 声明型插件没有进程，"启动"就是"启用"：必须持久化，否则主程序重启后
+            # 声明型插件没有宿主进程，"启动"就是"启用"：必须持久化，否则主程序重启后
             # 又回到 disabled，内容包/模块每次开机都要用户重新点一次启用。
+            # ruleset-runtime 的进程由组合根注册表的 transport 持有（同步桥注册时
+            # 拉起并探活），宿主不走 subprocess/RPC 启动路径。
             if not runtime.config.get("enabled"):
                 runtime.config["enabled"] = True
                 self._save_config(plugin_id, runtime)
+            await self._anotify_ruleset_runtime_changed()
             return
         runtime.status, runtime.error = "starting", ""
         env = self._build_process_env(plugin_id, runtime)
@@ -1917,6 +1958,7 @@ class PluginHost:
                 await self._on_plugin_stopped(plugin_id)
             except Exception:
                 self.logger.exception("插件停止回调失败: %s", plugin_id)
+        await self._anotify_ruleset_runtime_changed()
 
     async def _fail_rpc_runtime(self, runtime: PluginRuntime, error: str) -> None:
         monitor = runtime.monitor_task
@@ -2186,6 +2228,10 @@ class PluginHost:
         # any plugin config or contribution is exposed.  Resolution remains
         # with the ruleset binding owner; the host does not guess or download.
         parse_ruleset_requirements(manifest)
+        if plugin_type == "ruleset-runtime":
+            # T3：外部规则运行时声明在安装时校验一次（fail closed）；注册期
+            # 同步桥会重新解析，两处语义一致。
+            parse_ruleset_runtime_declaration(manifest)
         self._validate_manifest_permissions(manifest)
         self._validate_runtime_permissions(manifest, schema)
         self._validate_entrypoint(manifest, plugin_type)
@@ -2517,7 +2563,7 @@ class PluginHost:
             raise ValueError(t("plugin_host.host.path_outside"))
 
     @staticmethod
-    def _atomic_json(path: Path, value: Mapping[str, Any] | list[dict[str, Any]]) -> None:
+    def _atomic_json(path: Path, value: object) -> None:
         temp = path.with_suffix(path.suffix + ".tmp")
         temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
         temp.replace(path)

@@ -1100,7 +1100,10 @@
     max-width: 100%;
     padding-inline: 12px;
     padding-top: var(--df-page-top-mobile);
-    padding-bottom: 32px;
+    /* 复审 E2E：这个更具体的块此前用 32px 覆盖了 780 行的 92px 底部导航
+       预留——最后一个操作按钮永远滚不到导航上方（CI 实测 1446/1806 vs
+       navTop 786）。恢复导航高度 + 安全区预留。 */
+    padding-bottom: calc(92px + env(safe-area-inset-bottom));
   }
   .view.characters-page > .content-page-heading {
     margin-bottom: 16px !important;

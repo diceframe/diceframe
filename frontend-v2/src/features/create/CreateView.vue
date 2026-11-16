@@ -1033,7 +1033,7 @@ async function create() {
                       <option value="">{{ gameDefault('不使用内容包（内置冒险）', 'No content package (built-in adventures)', 'Kein Inhaltspaket (integrierte Abenteuer)', 'コンテンツパックなし（内蔵冒険）', 'Без пакета контента (встроенные приключения)') }}</option>
                       <option v-for="item in modules" :key="item.id" :value="item.id">{{ item.name }}</option>
                     </select>
-                    <select :aria-label="gameDefault('冒险模组', 'Adventure module', 'Abenteuermodul', '冒険モジュール', 'Модуль приключения')" :value="adventureChoice" :disabled="!catalogueReady" @change="chooseAdventure">
+                    <select :aria-label="gameDefault('冒险内容包', 'Adventure content package', 'Abenteuer-Inhaltspaket', '冒険コンテンツパッケージ', 'Пакет приключения')" :value="adventureChoice" :disabled="!catalogueReady" @change="chooseAdventure">
                       <option value="" disabled>{{ gameDefault('请选择冒险包', 'Choose an adventure package', 'Abenteuerpaket wählen') }}</option>
                       <option v-for="item in availableModuleAdventures" :key="adventureKey(item)" :value="adventureKey(item)" :disabled="adventureDisabled(item)">
                         {{ item.name }} · {{ item.estimated_minutes }} {{ gameDefault('分钟', 'min', 'Min.') }}{{ item.compatibility !== 'compatible' ? gameDefault('（需匹配推荐世界）', ' (requires its recommended world)', ' (benötigt die empfohlene Welt)') : '' }}

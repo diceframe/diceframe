@@ -238,6 +238,31 @@ class TestDeltaApplication:
             store.close()
             path.unlink(missing_ok=True)
 
+    async def test_global_embedding_rebuild_reads_all_games(self, tmp_path):
+        store = MemoryStore(tmp_path / "global-embedding.db")
+        store.open()
+        try:
+            await store.apply_delta("session_a", {
+                "add": [{"entity": "A", "relation": "记录", "value": "第一条"}],
+                "update": [], "forget": [],
+            }, 1)
+            await store.apply_delta("session_b", {
+                "add": [{"entity": "B", "relation": "记录", "value": "第二条"}],
+                "update": [], "forget": [],
+            }, 1)
+
+            async def embed_batch(texts):
+                return [[1.0, 0.0] for _ in texts]
+
+            store.embedding_client = SimpleNamespace(
+                fingerprint=lambda: "global-profile",
+                embed_batch=embed_batch,
+            )
+            assert await store.embed_all_pending() == 2
+            assert store.embedding_status()["pending"] == 0
+        finally:
+            store.close()
+
     async def test_failed_delta_rolls_back_earlier_items(self, tmp_path):
         store = MemoryStore(tmp_path / "memory.db")
         store.open()

@@ -86,15 +86,34 @@ async def api_agent_confirm(request):
         digest = body.get("plan_digest")
         if not isinstance(digest, str) or not re.fullmatch(r"sha256:[a-f0-9]{64}", digest) or not isinstance(body.get("approved"), bool):
             raise ValueError("Invalid confirmation")
-        return web.json_response(await _get_api(request).assistant_agent_confirm(owner, sid, aid, digest, body["approved"]))
-    except PermissionError as exc:
-        return web.json_response({"ok": False, "error": str(exc)}, status=403)
     except (ValueError, TypeError) as exc:
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+    response = web.StreamResponse(headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no"})
+    apply_session_cookie(request, response)
+    await response.prepare(request)
+
+    async def emit(event, payload):
+        wire_event = "message" if event == "delta" else event
+        await response.write(f"event: {wire_event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n".encode())
+
+    try:
+        result = await _get_api(request).assistant_agent_confirm(owner, sid, aid, digest, body["approved"], emit=emit)
+        # Send the JSON result as a special event so the client can update state
+        await response.write(f"event: confirm_result\ndata: {json.dumps(result, ensure_ascii=False)}\n\n".encode())
+        await response.write(b"event: done\ndata: complete\n\n")
+    except PermissionError as exc:
+        await emit("error", {"code": "AGENT_REJECTED", "error": str(exc)})
+    except (ValueError, TypeError) as exc:
+        await emit("error", {"code": "AGENT_REJECTED", "error": str(exc)})
+    except (ConnectionResetError, BrokenPipeError, asyncio.CancelledError):
+        raise
     except Exception:
         logger.exception("DF Agent confirmed operation failed")
-        return web.json_response({"ok": False, "recovery_required": True,
-            "error": "Execution interrupted. Recover the task status before retrying."}, status=500)
+        await emit("error", {"code": "AGENT_FAILED",
+            "error": "执行已中断，请检查状态后重试。"})
+    return response
 
 
 async def api_agent_review(request):
@@ -117,11 +136,33 @@ async def api_agent_resume(request):
         digest = body.get('plan_digest')
         if not isinstance(digest, str) or not re.fullmatch(r'sha256:[a-f0-9]{64}', digest):
             raise ValueError('Invalid execution digest')
-        return web.json_response(await _get_api(request).assistant_agent_resume(owner, sid, aid, digest))
-    except PermissionError as exc:
-        return web.json_response({'ok': False, 'error': str(exc)}, status=403)
     except (ValueError, TypeError) as exc:
         return web.json_response({'ok': False, 'error': str(exc)}, status=400)
+
+    response = web.StreamResponse(headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no"})
+    apply_session_cookie(request, response)
+    await response.prepare(request)
+
+    async def emit(event, payload):
+        wire_event = "message" if event == "delta" else event
+        await response.write(f"event: {wire_event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n".encode())
+
+    try:
+        result = await _get_api(request).assistant_agent_resume(owner, sid, aid, digest, emit=emit)
+        await response.write(f"event: confirm_result\ndata: {json.dumps(result, ensure_ascii=False)}\n\n".encode())
+        await response.write(b"event: done\ndata: complete\n\n")
+    except PermissionError as exc:
+        await emit("error", {"code": "AGENT_REJECTED", "error": str(exc)})
+    except (ValueError, TypeError) as exc:
+        await emit("error", {"code": "AGENT_REJECTED", "error": str(exc)})
+    except (ConnectionResetError, BrokenPipeError, asyncio.CancelledError):
+        raise
+    except Exception:
+        logger.exception("DF Agent resume failed")
+        await emit("error", {"code": "AGENT_FAILED",
+            "error": "执行已中断，请检查状态后重试。"})
+    return response
 
 
 async def api_agent_session(request):

@@ -11,12 +11,38 @@ import json
 from copy import deepcopy
 from typing import Any, Callable
 
+from src.rulesets import remote_event_receipts
 from src.rulesets.contracts import RulesetCapabilities
 from src.rulesets.runtime_probe import RuntimeProbeClient, RuntimeProbeError, RuntimeProbeLedger
 
 
 MAX_EVENT_LEDGER_ROWS = 4096
 MAX_EVENT_BATCH_ID_LENGTH = 200
+
+
+def _game_scope(instance: Any) -> str:
+    """收据请求身份里的服务器权威游戏/Run 隔离段（P1-03；复审 P1-01 收紧）。
+
+    生产入口传入真实的 GameInstance 聚合（game_key / run_id 属性）；测试与
+    DTO 路径允许顶层携带这两个键的字典。缺失身份时 fail closed
+    （RuntimeProbeError）——绝不静默落到跨游戏共享的 unknown 桶。
+    """
+    if isinstance(instance, dict):
+        game_key = instance.get("game_key")
+        run_id = str(instance.get("run_id") or "")
+    else:
+        game_key = getattr(instance, "game_key", None)
+        run_id = str(getattr(instance, "run_id", "") or "")
+    parts = [str(part) for part in (game_key if isinstance(game_key, (list, tuple)) else [])]
+    if run_id:
+        parts.append(run_id)
+    scope = "|".join(part for part in parts if part)
+    if not scope:
+        raise RuntimeProbeError(
+            "external ruleset receipts require server-authoritative game identity "
+            "(game_key and run_id on the instance)",
+        )
+    return scope
 
 
 class RemoteRulesetRuntimeAdapter:
@@ -101,32 +127,48 @@ class RemoteRulesetRuntimeAdapter:
             result = json.loads(json.dumps(result, ensure_ascii=False))
         except (TypeError, ValueError) as exc:
             raise RuntimeProbeError(f"{field} is not JSON serializable") from exc
+        if field == "instance" and isinstance(result, dict):
+            modules = result.get("modules")
+            slot = modules.get("ruleset_runtime") if isinstance(modules, dict) else None
+            if isinstance(slot, dict) and "event_ledger" in slot:
+                slot["event_ledger"] = remote_event_receipts.child_ledger(slot["event_ledger"])
+        return result
+
+    @staticmethod
+    def _rule_dto(rule: Any) -> Any:
+        template = getattr(rule, "template", None)
+        return RemoteRulesetRuntimeAdapter._dto(rule if template is None else template, "rule")
+
+    def game_binding(self, rule: Any, locale: str) -> dict[str, Any]:
+        result = self._call("game_binding", {"rule": self._rule_dto(rule), "locale": locale})
+        if not isinstance(result, dict):
+            raise RuntimeProbeError("remote game_binding result must be an object")
         return result
 
     def describe_experience(self, rule: Any, locale: str) -> dict[str, Any]:
-        return self._call("describe_experience", {"rule": rule, "locale": locale})
+        return self._call("describe_experience", {"rule": self._rule_dto(rule), "locale": locale})
 
     def builder_choices(self, rule: Any, draft: dict[str, Any]) -> dict[str, Any]:
-        return self._call("builder_choices", {"rule": rule, "draft": draft})
+        return self._call("builder_choices", {"rule": self._rule_dto(rule), "draft": draft})
 
     def validate_character(self, rule: Any, draft: dict[str, Any]) -> list[str]:
-        result = self._call("validate_character", {"rule": rule, "draft": draft})
+        result = self._call("validate_character", {"rule": self._rule_dto(rule), "draft": draft})
         if not isinstance(result, list):
             raise RuntimeProbeError("remote validate_character result must be a list")
         return [str(item) for item in result]
 
     def derive_character(self, rule: Any, draft: dict[str, Any]) -> dict[str, Any]:
-        return self._call("derive_character", {"rule": rule, "draft": draft})
+        return self._call("derive_character", {"rule": self._rule_dto(rule), "draft": draft})
 
     def finalize_character(self, rule: Any, draft: dict[str, Any]) -> dict[str, Any]:
-        return self._call("finalize_character", {"rule": rule, "draft": draft})
+        return self._call("finalize_character", {"rule": self._rule_dto(rule), "draft": draft})
 
     def normalize_character_submission(
         self, rule: Any, character: dict[str, Any], locale: str = "",
     ) -> dict[str, Any]:
         return self._call(
             "normalize_character_submission",
-            {"rule": rule, "character": character, "locale": locale},
+            {"rule": self._rule_dto(rule), "character": character, "locale": locale},
         )
 
     def available_intents(self, instance: Any, actor_id: str) -> list[dict[str, Any]]:
@@ -137,11 +179,12 @@ class RemoteRulesetRuntimeAdapter:
 
     def prepare_intent_submission(
         self, intent: dict[str, Any], requester_id: str, requester_is_gm: bool,
+        instance: Any,
     ) -> dict[str, Any]:
         result = self._call(
             "prepare_intent_submission",
             {"intent": intent, "requester_id": requester_id, "requester_is_gm": requester_is_gm},
-            request_id=(f"prepare:{intent['intent_id']}"
+            request_id=(f"prepare:{_game_scope(instance)}:{intent['intent_id']}"
                         if isinstance(intent.get("intent_id"), str) and intent["intent_id"] else None),
             receipt_payload={
                 "intent": deepcopy(intent),
@@ -156,11 +199,45 @@ class RemoteRulesetRuntimeAdapter:
     def validate_intent(self, instance: Any, intent: dict[str, Any]) -> dict[str, Any]:
         return self._call("validate_intent", {"instance": self._dto(instance, "instance"), "intent": intent})
 
+    def validate_sequential_plan(
+        self, instance: Any, plan: dict[str, Any],
+        requester_id: str, requester_is_gm: bool,
+    ) -> dict[str, Any]:
+        result = self._call(
+            "validate_sequential_plan",
+            {"instance": self._dto(instance, "instance"), "plan": plan,
+             "requester_id": requester_id, "requester_is_gm": requester_is_gm},
+            request_id=(f"seq-validate:{_game_scope(instance)}:{plan['intent_id']}"
+                        if isinstance(plan.get("intent_id"), str) and plan["intent_id"] else None),
+            receipt_payload={
+                "plan": deepcopy(plan),
+                "requester_id": requester_id,
+                "requester_is_gm": requester_is_gm,
+            },
+        )
+        if not isinstance(result, dict):
+            raise RuntimeProbeError("remote sequential plan validation must be an object")
+        return result
+
+    def resolve_sequential_step(
+        self, instance: Any, step: dict[str, Any], rng: Any, plan_id: str = "",
+    ) -> dict[str, Any]:
+        # 复审 P1-01：步骤 ID（step-1/step-2）只在单个计划内唯一——收据身份
+        # 必须携带父计划的 intent_id，否则同局连续两个计划会互串步骤结果。
+        return self._call(
+            "resolve_sequential_step",
+            {"instance": self._dto(instance, "instance"), "step": step,
+             "rng": self._dto(rng, "rng"), "plan_id": plan_id},
+            request_id=(f"seq-resolve:{_game_scope(instance)}:{plan_id}:{step['step_id']}"
+                        if isinstance(step.get("step_id"), str) and step["step_id"] else None),
+            receipt_payload={"plan_id": plan_id, "step": deepcopy(step)},
+        )
+
     def resolve_intent(self, instance: Any, intent: dict[str, Any], rng: Any) -> dict[str, Any]:
         return self._call(
             "resolve_intent",
             {"instance": self._dto(instance, "instance"), "intent": intent, "rng": self._dto(rng, "rng")},
-            request_id=(f"intent:{intent['intent_id']}"
+            request_id=(f"intent:{_game_scope(instance)}:{intent['intent_id']}"
                         if isinstance(intent.get("intent_id"), str) and intent["intent_id"] else None),
             receipt_payload={"intent": deepcopy(intent)},
         )
@@ -186,14 +263,26 @@ class RemoteRulesetRuntimeAdapter:
         return result
 
     def apply_event_batch(self, instance: Any, batch: dict[str, Any]) -> dict[str, Any]:
+        from src.engine.modules import ruleset_runtime
+
+        remote_event_receipts.batch_identity(batch)
+        scope = _game_scope(instance)
+        ruleset_runtime.require_writable(instance)
+        if ruleset_runtime.bound_runtime_id(instance) != self.runtime_id:
+            raise RuntimeProbeError("remote event batch runtime binding mismatch")
+        current = deepcopy(instance.modules.get("ruleset_runtime", {}).get("event_ledger", []))
+        replayed = remote_event_receipts.replay(
+            current, batch, self.runtime_id, self.runtime_version, scope,
+        )
+        if replayed is not None:
+            return replayed
         instance_dto = self._dto(instance, "instance")
         result = self._call(
             "apply_event_batch",
             {"instance": instance_dto, "batch": batch},
             live_state=instance_dto,
-            request_id=(f"batch:{batch['batch_id']}"
-                        if isinstance(batch.get("batch_id"), str) and batch["batch_id"] else None),
-            receipt_payload={"batch": deepcopy(batch)},
+            request_id=f"batch:{scope}:{batch['batch_id']}",
+            receipt_payload={"batch": deepcopy(batch), "base": remote_event_receipts.digest(instance_dto)},
         )
         if not isinstance(result, dict):
             raise RuntimeProbeError("remote apply_event_batch result must be an object")
@@ -203,18 +292,17 @@ class RemoteRulesetRuntimeAdapter:
         # or an arbitrary instance patch from the transport.
         if "state" in result or "event_ledger" in result:
             state, ledger = self._validate_state_bridge(instance, batch, result)
-            from src.engine.modules import ruleset_runtime
-
-            binding = ruleset_runtime.binding(instance)
-            if str(binding.get("id") or "") != self.runtime_id:
-                raise RuntimeProbeError("remote event batch runtime binding mismatch")
-            # Validation above is deliberately complete before either owner
-            # slot is touched.  A malformed child response therefore cannot
-            # leave state and ledger half-updated.
+            public_result = {key: deepcopy(value) for key, value in result.items()
+                             if key not in {"state", "event_ledger"}}
+            if result.get("ok") is False or result.get("applied") is False or result.get("replayed") is True:
+                raise RuntimeProbeError("remote bridge did not apply a new batch")
+            ledger = remote_event_receipts.record(
+                current, ledger, batch, public_result,
+                self.runtime_id, self.runtime_version, scope,
+            )
             ruleset_runtime.replace_state(instance, state)
             ruleset_runtime.replace_event_ledger(instance, ledger)
-            return {key: deepcopy(value) for key, value in result.items()
-                    if key not in {"state", "event_ledger"}}
+            return public_result
         return result
 
     def _validate_state_bridge(
@@ -251,7 +339,7 @@ class RemoteRulesetRuntimeAdapter:
 
         from src.engine.modules import ruleset_runtime
 
-        current = ruleset_runtime.event_ledger(instance)
+        current = remote_event_receipts.child_ledger(ruleset_runtime.event_ledger(instance))
         if not isinstance(current, list) or len(current) > MAX_EVENT_LEDGER_ROWS:
             raise RuntimeProbeError("host event ledger is invalid")
         current_ids: list[str] = []
@@ -264,6 +352,12 @@ class RemoteRulesetRuntimeAdapter:
             current_ids.append(row_id)
         if ids[: len(current_ids)] != current_ids:
             raise RuntimeProbeError("remote event ledger must preserve host history")
+        # 复审 P1-02：历史前缀必须与宿主持久账本**逐字段一致**——ID 不变而
+        # 内容被改写同样属于篡改，拒绝写入任何状态。（状态对宿主是不透明
+        # DTO，"无事件却推进状态"无法在桥上判定，由运行时侧的版本化状态
+        # 契约与存档投影负责。）
+        if ledger[: len(current)] != deepcopy(current):
+            raise RuntimeProbeError("remote event ledger rewrote persisted history")
         if len(ids) > len(current_ids):
             expected_batch_id = str(batch.get("batch_id") or "").strip()
             if expected_batch_id and ids[-1] != expected_batch_id:

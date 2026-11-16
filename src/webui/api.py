@@ -42,6 +42,7 @@ from src.rulesets.builtin import (
     default_adventure_runtime_requirement,
     default_module_runtime_requirement,
 )
+from src.rulesets.plugin_runtime_source import PluginRulesetRuntimeSource
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.engine.world_template import load_world_template
 from src.content_modules.projection import ContentProjectionService
@@ -1192,6 +1193,49 @@ class WebAPI:
 
     # ---- 规则辅助 ----
 
+    def list_gameplays(self) -> dict[str, Any]:
+        """W2「规则与玩法」页：玩法模式只读投影（不暴露 provider 实现）。
+
+        数据源合并两处事实：内置 TRPG 模式（``DEFAULT_GAMEPLAYS``，核心管线
+        直接管，始终可用）与外部 provider 注册的扩展玩法（接线不完整如实
+        标注，fail closed）。
+        """
+
+        from src.gameplays.builtin import DEFAULT_GAMEPLAYS
+
+        registry = self._gameplay_providers
+        rows: dict[str, dict[str, Any]] = {}
+        for mode_id in sorted(DEFAULT_GAMEPLAYS.mode_ids()):
+            mode = DEFAULT_GAMEPLAYS.get(mode_id)
+            if mode is None:
+                continue
+            rows[mode_id] = {
+                "mode_id": mode.mode_id,
+                "progression_mode": mode.progression_mode,
+                "bot_surface": mode.bot_surface,
+                "source": "builtin",
+                "available": True,
+            }
+        for mode_id in sorted(registry.gameplays.mode_ids()):
+            if mode_id in rows:
+                continue
+            mode = registry.gameplays.get(mode_id)
+            if mode is None:
+                continue
+            provider_registered = registry.get(mode_id) is not None
+            turn_driver_bound = registry.driver_for(mode_id) is not None
+            rows[mode_id] = {
+                "mode_id": mode.mode_id,
+                "progression_mode": mode.progression_mode,
+                "bot_surface": mode.bot_surface,
+                "source": "provider",
+                "provider_registered": provider_registered,
+                "turn_driver_bound": turn_driver_bound,
+                # fail closed 可见性：接线不完整的玩法如实标注，不冒充可用。
+                "available": provider_registered and turn_driver_bound,
+            }
+        return {"ok": True, "gameplays": sorted(rows.values(), key=lambda row: row["mode_id"])}
+
     def list_plugins(self) -> dict[str, Any]:
         return plugins.list_plugins(self._plugin_host_dependencies)
 
@@ -1327,6 +1371,41 @@ class WebAPI:
             content_module_guard=self.guard_module_mutation,
         )
 
+    def attach_plugin_ruleset_runtime_source(self, plugin_host: Any) -> dict[str, Any]:
+        """T3 组合根接线点：外部规则 runtime 插件 ↔ RulesetRuntimeRegistry。
+
+        构建同步桥、挂到 plugin_host 的生命周期通知上，并立即做一次初始
+        同步（启动期 ``discover()`` 早于本接线，不会触发通知）。返回初始
+        同步报告（registered/removed/failed），供启动日志与验收记录使用。
+        """
+
+        source = PluginRulesetRuntimeSource(self._ruleset_registry)
+        plugin_host.set_ruleset_runtime_listener(lambda: source.sync(plugin_host))
+        self._plugin_ruleset_runtime_source = source
+        return source.sync(plugin_host)
+
+    def adopt_plugin_ruleset_runtime_source(self, previous: "WebAPI") -> None:
+        """Transfer source ownership after a model/API-only rebuild commits.
+
+        The registry is deliberately reused by the subsystem factory. Keep the
+        existing listener and transports, and prevent teardown of the old API
+        from closing the source now owned by its replacement.
+        """
+        source = getattr(previous, "_plugin_ruleset_runtime_source", None)
+        if source is None:
+            return
+        if self._ruleset_registry is not previous._ruleset_registry:
+            raise ValueError("plugin runtime source requires the same ruleset registry")
+        self._plugin_ruleset_runtime_source = source
+        previous._plugin_ruleset_runtime_source = None
+
+    def close_plugin_ruleset_runtime_source(self) -> None:
+        """关闭同步桥持有的全部外部 runtime 子进程（组合根 teardown 调用）。"""
+
+        source = getattr(self, "_plugin_ruleset_runtime_source", None)
+        if source is not None:
+            source.close()
+
     async def get_official_announcement(self, language: str = "zh-CN") -> dict[str, Any]:
         return await self._announcements.fetch(language)
 
@@ -1380,8 +1459,8 @@ class WebAPI:
     async def assistant_agent_run(self, owner, messages, language, context, session_id, emit):
         return await self._assistant_agent.run(owner, messages, language, context, session_id, emit)
 
-    async def assistant_agent_confirm(self, owner, session_id, approval_id, plan_digest, approved):
-        return await self._assistant_agent.confirm(owner, session_id, approval_id, plan_digest, approved)
+    async def assistant_agent_confirm(self, owner, session_id, approval_id, plan_digest, approved, emit=None):
+        return await self._assistant_agent.confirm(owner, session_id, approval_id, plan_digest, approved, emit=emit)
 
     async def assistant_agent_review(self, owner, session_id, draft_id, draft):
         return await self._assistant_agent.review(owner, session_id, draft_id, draft)
@@ -1392,8 +1471,8 @@ class WebAPI:
     def assistant_agent_capabilities(self, owner, query='', domain='', offset=0):
         return self._assistant_agent.capabilities(owner, query, domain, offset)
 
-    async def assistant_agent_resume(self, owner, session_id, approval_id, plan_digest):
-        return await self._assistant_agent.resume(owner, session_id, approval_id, plan_digest)
+    async def assistant_agent_resume(self, owner, session_id, approval_id, plan_digest, emit=None):
+        return await self._assistant_agent.resume(owner, session_id, approval_id, plan_digest, emit=emit)
 
     def assistant_agent_authorize(self, owner, session_id, mode, scope, domains, max_steps):
         return self._assistant_agent.authorize(owner, session_id, mode, scope, domains, max_steps)

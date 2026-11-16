@@ -46,6 +46,10 @@ export const useSettingsStore = defineStore('settings', () => {
     fieldRevisions.set(String(key), (fieldRevisions.get(String(key)) || 0) + 1)
   }
 
+  function isConfigDirty(keys: readonly string[]): boolean {
+    return keys.some(key => JSON.stringify((config.value as Record<string, unknown>)[key]) !== JSON.stringify(lastLoaded[key]))
+  }
+
   function applyLoaded(fresh: AppConfig, savedKeys: string[] | undefined, revisions: Map<string, number>) {
     const next: Record<string, unknown> = { ...fresh }
     for (const [key, value] of Object.entries(config.value)) {
@@ -129,6 +133,7 @@ export const useSettingsStore = defineStore('settings', () => {
       )
     }
     config.value = refreshed
+    lastLoaded = JSON.parse(JSON.stringify(refreshed)) as Record<string, unknown>
     for (const p of providers) secrets.value[providerSecretKey(p.id)] = ''
     return result.warnings || []
   }
@@ -164,6 +169,10 @@ export const useSettingsStore = defineStore('settings', () => {
         ? config.value.embedding_provider_ref || '' : config.value.llm_provider_ref || '').trim()
       body.model = String(kind === 'embedding'
         ? config.value.embedding_model || '' : config.value.model || '').trim()
+      if (kind === 'embedding') {
+        body.embedding_source = String(config.value.embedding_source || 'external').trim()
+        body.embedding_local_model_id = String(config.value.embedding_local_model_id || '').trim()
+      }
     }
     return api<TestResult>(path, { method: 'POST', body: JSON.stringify(body) })
   }
@@ -206,7 +215,7 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   return {
-    config, secrets, loading, error, load, saveSection, saveProviders,
+    config, secrets, loading, error, load, saveSection, saveProviders, isConfigDirty,
     saveAccessPassword, clearProxy, botToken, test, testProvider, fetchProviderModels, setConfigField,
   }
 })

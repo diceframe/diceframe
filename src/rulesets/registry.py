@@ -83,6 +83,15 @@ class RulesetRuntimeRegistry:
             )
         self._runtimes[runtime_id] = runtime
 
+    def unregister(self, runtime_id: str) -> bool:
+        """Remove a runtime registration; idempotent, returns whether it existed.
+
+        组合根用它在插件卸载/停用后撤销动态注册。内置 runtime 的移除同样走
+        这里，由调用方（PluginRulesetRuntimeSource）保证只操作自己注册的项。
+        """
+
+        return self._runtimes.pop(str(runtime_id or "").strip(), None) is not None
+
     def get(self, runtime_id: str, *, minimum_version: int = 1) -> RulesetRuntime:
         runtime = self._runtimes.get(str(runtime_id or "").strip())
         if runtime is None:

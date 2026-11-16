@@ -17,11 +17,13 @@ def _manager(request: web.Request) -> LocalModelManager:
     if models_dir is None:
         raise ModelCatalogError("embedding model storage is not ready")
     state = request.app.get("config_state") or {}
+    plugin_host = request.app.get("plugin_host")
     return LocalModelManager(
         models_dir,
         proxy_url=effective_proxy_url(
             bool(state.get("proxy_enabled")), state.get("proxy_url", ""),
         ),
+        mirror_manager=getattr(plugin_host, "mirrors", None),
     )
 
 
@@ -47,13 +49,65 @@ async def api_embedding_model_install(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "model": result})
 
 
+async def api_embedding_model_uninstall(request: web.Request) -> web.Response:
+    """W5：删除已安装本地模型；当前启用的模型拒绝删除（fail closed）。"""
+
+    denied = _require_confirmed_request(request)
+    if denied is not None:
+        return denied
+    state = request.app.get("config_state") or {}
+    active_model_id = (
+        str(state.get("embedding_local_model_id") or "")
+        if str(state.get("embedding_source") or "") == "local" else ""
+    )
+    try:
+        result = _manager(request).uninstall(
+            request.match_info["model_id"], active_model_id=active_model_id,
+        )
+    except ModelCatalogError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=422)
+    return web.json_response(result)
+
+
+async def api_embedding_catalog_refresh(request: web.Request) -> web.Response:
+    """W5-2：管理员触发拉取远端模型目录（diceframe-models index 或分片）。
+
+    远端缓存写入 data/models/remote-catalog.json；读取路径不发网络请求。
+    """
+
+    denied = _require_confirmed_request(request)
+    if denied is not None:
+        return denied
+    try:
+        body = await request.json()
+        url = str((body or {}).get("url") or "").strip()
+        result = await _manager(request).refresh_remote_catalog(url)
+    except ModelCatalogError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=422)
+    return web.json_response(result)
+
+
 async def _run_rebuild(app: web.Application) -> None:
     subsystems = app.get("subsystems")
     store = getattr(subsystems, "memory_store", None)
     if store is None or store.embedding_client is None:
         return
-    while await store.embed_all_pending():
-        await asyncio.sleep(0)
+    app.pop("_embedding_backfill_error", None)
+    try:
+        while True:
+            processed = await store.embed_all_pending()
+            if processed:
+                await asyncio.sleep(0)
+                continue
+            if store.embedding_status().get("pending", 0):
+                detail = str(getattr(store.embedding_client, "last_error", "") or "").strip()
+                app["_embedding_backfill_error"] = (
+                    "向量服务未返回有效结果，待重建条目仍未完成；请检查模型连接后重试。"
+                    + (f"（{detail}）" if detail else "")
+                )
+            return
+    except Exception as exc:
+        app["_embedding_backfill_error"] = f"索引重建失败：{exc}"
 
 
 async def api_embedding_rebuild(request: web.Request) -> web.Response:
@@ -69,6 +123,7 @@ async def api_embedding_rebuild(request: web.Request) -> web.Response:
     previous = request.app.get("_embedding_backfill_task")
     if previous is not None and not previous.done():
         return web.json_response({"ok": True, "state": "rebuilding"})
+    request.app.pop("_embedding_backfill_error", None)
     request.app["_embedding_backfill_task"] = asyncio.create_task(
         _run_rebuild(request.app), name="embedding-profile-rebuild-manual",
     )
@@ -78,4 +133,6 @@ async def api_embedding_rebuild(request: web.Request) -> web.Response:
 def register_embedding_models(application: web.Application) -> None:
     application.router.add_get("/api/embedding/models", api_embedding_models)
     application.router.add_post("/api/embedding/models/{model_id}/install", api_embedding_model_install)
+    application.router.add_delete("/api/embedding/models/{model_id}", api_embedding_model_uninstall)
+    application.router.add_post("/api/embedding/catalog/refresh", api_embedding_catalog_refresh)
     application.router.add_post("/api/embedding/rebuild", api_embedding_rebuild)

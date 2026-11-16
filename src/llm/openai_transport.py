@@ -19,6 +19,7 @@ logger = logging.getLogger("trpg")
 class _ChatCapabilities:
     token_parameter: str = "max_tokens"
     default_temperature_only: bool = False
+    reasoning_effort_unsupported: bool = False
 
 
 class OpenAIChatTransport:
@@ -36,6 +37,8 @@ class OpenAIChatTransport:
                 body[capabilities.token_parameter] = body.pop("max_tokens")
             if capabilities.default_temperature_only and "temperature" not in self._generation_options:
                 body.pop("temperature", None)
+            if capabilities.reasoning_effort_unsupported:
+                body.pop("reasoning_effort", None)
             async with session.post(url, json=body, **kwargs) as response:
                 if response.status == 400 and attempt < 2:
                     if self._learn(capabilities, body, await response.text(), frozenset(self._generation_options)):
@@ -69,5 +72,12 @@ class OpenAIChatTransport:
         ):
             capabilities.default_temperature_only = True
             logger.info("Chat endpoint only accepts its default temperature")
+            return True
+        if parameter == "reasoning_effort" and "reasoning_effort" in body and (
+            code in {"unsupported_parameter", "unknown_parameter", "extra_forbidden"}
+            or "reasoning_effort" in message
+        ):
+            capabilities.reasoning_effort_unsupported = True
+            logger.info("Chat endpoint does not support reasoning_effort; retrying without it")
             return True
         return False

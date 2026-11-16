@@ -19,7 +19,7 @@ beforeEach(() => {
   i18n.global.locale.value = 'zh-CN'
 })
 
-function setup(config: Partial<AppConfig>, supported = true) {
+function setup(config: Partial<AppConfig>, supported = true, dirty = false) {
   const store = useSettingsStore()
   store.config = structuredClone(config)
   let persisted = structuredClone(config)
@@ -38,6 +38,7 @@ function setup(config: Partial<AppConfig>, supported = true) {
   const wrapper = mount(ModelRoutingPane, {
     props: {
       supported, saving: false, embeddingTesting: false, embeddingResult: null,
+      dirty,
       onSave: () => { void settings.saveModelRouting() },
     },
     global: {
@@ -128,6 +129,45 @@ it('keeps routing unavailable when the backend does not support provider configu
   const { wrapper } = setup({ ai_providers: [] }, false)
   expect(wrapper.findAll('select')).toHaveLength(0)
   expect(wrapper.get('.model-routing-save').attributes('disabled')).toBeDefined()
+  wrapper.unmount()
+})
+
+it('makes unsaved model changes visible next to the save action', () => {
+  const { wrapper } = setup({ ai_providers: [] }, true, true)
+  expect(wrapper.get('.model-routing-save-state').text()).toBe('有未保存更改')
+  expect(wrapper.get('.model-routing-unsaved-hint').text()).toContain('尚未生效')
+  wrapper.unmount()
+})
+
+it('shows visible feedback when a manual memory-index rebuild finishes', async () => {
+  const config = {
+    ai_providers: [],
+    embedding_enabled: true,
+    embedding_source: 'external',
+    embedding_status: { state: 'ready', pending: 2, total_active: 2, ready_current_profile: 0 },
+  } as Partial<AppConfig>
+  const { wrapper } = setup(config)
+  let rebuildRequested = false
+  mocks.api.mockImplementation(async (path: string, options?: RequestInit) => {
+    if (path === '/embedding/rebuild') {
+      rebuildRequested = true
+      return { ok: true, state: 'rebuilding' }
+    }
+    if (path === '/config' && (!options || !options.method || options.method === 'GET')) {
+      return {
+        ...config,
+        embedding_status: rebuildRequested
+          ? { state: 'ready', pending: 0, total_active: 2, ready_current_profile: 2 }
+          : config.embedding_status,
+      }
+    }
+    return {}
+  })
+
+  await wrapper.get('[data-testid="embedding-index-status"] button').trigger('click')
+  await flushPromises()
+
+  expect(wrapper.get('[data-testid="embedding-rebuild-feedback"]').text()).toContain('重建完成')
   wrapper.unmount()
 })
 

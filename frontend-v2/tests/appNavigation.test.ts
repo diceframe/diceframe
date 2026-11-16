@@ -18,13 +18,13 @@ describe('app navigation', () => {
     const visibleIds = [...primaryNavItemIds, ...groupedIds]
 
     expect(new Set(visibleIds).size).toBe(visibleIds.length)
-    const detailRouteIds = new Set(['creator', 'worlds', 'adventures'])
+    const detailRouteIds = new Set(['worlds', 'adventures'])
     expect(new Set(visibleIds)).toEqual(new Set(appNavItems.filter(item => !detailRouteIds.has(item.id)).map(item => item.id)))
   })
 
   it('keeps content and management route identity independent of labels', () => {
     expect(appNavGroups.find(group => group.id === 'content')?.itemIds)
-      .toEqual(['library', 'lorebook', 'modules', 'rules'])
+      .toEqual(['library', 'creator', 'modules', 'rules', 'lorebook'])
     expect(appNavGroups.find(group => group.id === 'content')?.defaultItemId).toBe('library')
     expect(appNavGroups.find(group => group.id === 'management')?.itemIds)
       .toEqual(['memory', 'logs', 'plugins', 'settings'])
@@ -44,7 +44,7 @@ describe('app navigation', () => {
     expect(isNavItemActive('lorebook', 'worlds')).toBe(true)
     expect(isNavItemActive('modules', 'module-detail')).toBe(true)
     expect(isNavItemActive('library', 'adventures')).toBe(true)
-    expect(isNavItemActive('library', 'creator')).toBe(true)
+    expect(isNavItemActive('creator', 'creator')).toBe(true)
     expect(isNavItemActive('worlds', 'adventures')).toBe(false)
   })
 

@@ -153,8 +153,8 @@ async def test_web_composition_passes_proxy_and_keyless_embedding_settings(monke
 
     # Reuse inert stores so actual client construction never opens databases or sends requests.
     reuse = SimpleNamespace(
-        registry=object(), lorebook_store=object(), lorebook_matcher=object(),
-        memory_store=SimpleNamespace(embedding_client=None),
+        registry=object(), ruleset_registry=object(), lorebook_store=object(),
+        lorebook_matcher=object(), memory_store=SimpleNamespace(embedding_client=None),
     )
     monkeypatch.setattr(factory, "GameHandler", Mock())
     monkeypatch.setattr(factory, "build_default_ruleset_registry", Mock())
