@@ -34,6 +34,24 @@ _SAFE_ENV_KEYS = frozenset({
 })
 _OVERRIDABLE_ENV_KEYS = frozenset({"TZ", "LANG", "LC_ALL", "PYTHONIOENCODING"})
 _SECRET_ENV = re.compile(r"password|api.?key|token|secret|credential", re.I)
+# 子进程标准输出的兜底解码：Windows 上 Python 默认按 ANSI 码页写管道，
+# runtime 自己覆盖了标准流编码时仍要能把响应读出来。
+_FALLBACK_ENCODINGS = ("mbcs",) if os.name == "nt" else ()
+
+
+def _decode_stream_bytes(raw: bytes) -> tuple[str, str | None]:
+    """UTF-8 优先，失败退回本机 ANSI 码页，最后才有损替换。"""
+
+    try:
+        return raw.decode("utf-8"), None
+    except UnicodeDecodeError:
+        pass
+    for encoding in _FALLBACK_ENCODINGS:
+        try:
+            return raw.decode(encoding), encoding
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", "replace"), "replace"
 
 
 class StdioRuntimeTransport:
@@ -73,7 +91,16 @@ class StdioRuntimeTransport:
         child_env = {key: value for key, value in os.environ.items() if key.upper() in _SAFE_ENV_KEYS}
         if env:
             child_env.update({key.upper(): value for key, value in env.items()})
+        # 协议流是 UTF-8，子进程必须按 UTF-8 解 stdin。Windows 中文环境下 Python
+        # 子进程从管道读 stdin 用的是 ANSI 码页（GBK），UTF-8 的中文会被解成乱码，
+        # 而且第三个字节常常被当成 GBK 前导字节、把后面的结构字符一起吞掉，
+        # 于是 json.loads 失败、runtime 报「无法解析的请求行」并丢弃——宿主这侧
+        # 只能看到 20 秒超时（小于 4 KB 的纯 ASCII 请求不受影响，所以只在真正
+        # 带规则数据建局时才炸）。强制 UTF-8 模式同样让子进程的 stderr 可读。
+        child_env["PYTHONUTF8"] = "1"
+        child_env["PYTHONIOENCODING"] = "utf-8"
         self._child_env = child_env
+        self._encoding_fallback_warned = False
         # 故障关闭（超时/协议错）与生命周期关闭要分开：前者允许下一次调用
         # 重新拉起子进程，后者（宿主停用插件）之后一律拒绝。
         self._restartable = True
@@ -126,9 +153,17 @@ class StdioRuntimeTransport:
             if len(raw) > MAX_PROBE_BYTES:
                 self._responses.put((None, RuntimeProbeError("runtime response is too large")))
                 return
+            text, fallback = _decode_stream_bytes(raw)
+            if fallback is not None and not self._encoding_fallback_warned:
+                self._encoding_fallback_warned = True
+                logger.warning(
+                    "外部规则 runtime 响应不是 UTF-8（按 %s 解码）。宿主已强制子进程使用 "
+                    "UTF-8 标准流，runtime 自己覆盖了编码设置时才会走到这里。",
+                    fallback,
+                )
             try:
-                value = json.loads(raw.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                value = json.loads(text)
+            except json.JSONDecodeError:
                 self._responses.put((None, RuntimeProbeError("runtime returned invalid JSON")))
                 return
             if not isinstance(value, dict):
@@ -162,7 +197,8 @@ class StdioRuntimeTransport:
             self._emit_stderr(pending)
 
     def _emit_stderr(self, raw: bytes) -> None:
-        text = raw.decode("utf-8", "replace").strip()
+        text, _ = _decode_stream_bytes(raw)
+        text = text.strip()
         if not text:
             return
         if self._stderr_seen >= MAX_STDERR_LINES:

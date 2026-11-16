@@ -135,6 +135,57 @@ def test_stdio_transport_forwards_child_stderr_to_the_host():
     assert any("boom from child" in line for line in seen)
 
 
+def test_stdio_transport_pins_the_child_to_utf8_stdio():
+    """子进程必须按 UTF-8 解 stdin，否则中文请求行会被 ANSI 码页解坏。
+
+    Windows 中文环境下 Python 从管道读 stdin 默认用 GBK。UTF-8 的中文第三个
+    字节会被当成 GBK 前导字节，把后面的 `}`、`]`、字母一起吞掉，JSON 结构就
+    坏了；runtime 只能丢弃请求，宿主看到的是 20 秒超时。
+    """
+
+    transport = StdioRuntimeTransport(_child("""
+        import json, sys
+        for line in sys.stdin:
+            request = json.loads(line)
+            print(json.dumps({"request_id": request["request_id"], "ok": True,
+                              "result": {"stdin_encoding": sys.stdin.encoding}}), flush=True)
+        """))
+    try:
+        answer = transport({"request_id": "r1", "operation": "encoding"})
+    finally:
+        transport.close(force=True)
+    assert str(answer["result"]["stdin_encoding"]).lower().replace("_", "-") == "utf-8"
+
+
+def test_stdio_transport_round_trips_a_large_non_ascii_request():
+    """建局时 game_binding 会带上整份规则模板（几十 KB 中文）。
+
+    小请求恰好躲过编码破坏，所以这条用真实体量的中文负载把回归钉住。
+    """
+
+    detail = "最终物语：飞空艇、梅基多巨坑、艾洛尼亚帝国、德斯迪蒙娜、罗盘、幼钟式；" * 300
+    transport = StdioRuntimeTransport(_child("""
+        import json, sys
+        for line in sys.stdin:
+            request = json.loads(line)
+            payload = request.get("payload") or {}
+            print(json.dumps({"request_id": request["request_id"], "ok": True,
+                              "result": {"detail_len": len(payload.get("detail") or ""),
+                                         "detail_tail": (payload.get("detail") or "")[-4:]}},
+                             ensure_ascii=False), flush=True)
+        """))
+    try:
+        answer = transport({
+            "request_id": "r1",
+            "operation": "game_binding",
+            "payload": {"detail": detail},
+        })
+    finally:
+        transport.close(force=True)
+    assert answer["result"]["detail_len"] == len(detail)
+    assert answer["result"]["detail_tail"] == detail[-4:]
+
+
 def test_stdio_runtime_restart_reuses_host_state_and_request_receipts(tmp_path: Path):
     from src.engine.game_instance import GameInstance
     from src.engine.modules import ruleset_runtime
