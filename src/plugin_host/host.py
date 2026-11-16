@@ -1179,11 +1179,14 @@ class PluginHost:
                 self._write_group_install_journal({**journal_record, "phase": "backup_moved"})
                 published: list[str] = []
                 for entry in entries:
-                    await _rename_dir_with_retry(Path(entry["staging"]), Path(entry["target"]))
+                    # Write-ahead publish intent: a crash after rename must not
+                    # leave a new target invisible to group rollback. All old
+                    # targets have already moved to backup at this point.
                     published.append(str(entry["plugin_id"]))
                     self._write_group_install_journal({
                         **journal_record, "phase": "publishing", "published": published,
                     })
+                    await _rename_dir_with_retry(Path(entry["staging"]), Path(entry["target"]))
                 self._write_group_install_journal({
                     **journal_record, "phase": "published", "published": published,
                 })
@@ -1258,6 +1261,7 @@ class PluginHost:
         if not records:
             return
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
+        failed_records: list[dict[str, Any]] = []
         for record in records:
             plugin_id = str(record.get("plugin_id") or "")
             try:
@@ -1267,16 +1271,23 @@ class PluginHost:
                 self._ensure_inside(self.plugins_dir, target)
                 self._ensure_inside(self.plugins_dir, staging)
                 self._ensure_inside(self.plugins_dir, backup)
-                # A valid published target is the committed side of the
-                # transaction. Any leftover staging/backup is garbage.
+                # A still-staged candidate has not been published. The valid
+                # target can be the old package (crash before moving backup).
+                if (
+                    target.is_dir() and not backup.exists()
+                    and (staging.exists() or record.get("phase") == "prepared")
+                ):
+                    if staging.exists():
+                        shutil.rmtree(staging)
+                    continue
+                # A valid target with consumed staging is the committed side.
+                # Persist its receipt before discarding recovery evidence.
                 if target.is_dir() and (target / "plugin.json").is_file():
+                    self._backfill_install_receipt(plugin_id, record, target)
                     if staging.exists():
                         shutil.rmtree(staging, ignore_errors=True)
                     if backup.exists():
                         shutil.rmtree(backup, ignore_errors=True)
-                    # Commit 后中断：补写缺失的安装 receipt（journal 记录
-                    # 自身携带 manifest/artifact_hash/source 重建数据）。
-                    self._backfill_install_receipt(plugin_id, record, target)
                     continue
                 # Otherwise restore the previous package if the process died
                 # after moving it aside. Never promote an uncommitted staging
@@ -1291,7 +1302,11 @@ class PluginHost:
                 if staging.exists():
                     shutil.rmtree(staging, ignore_errors=True)
             except Exception:
+                failed_records.append(record)
                 self.logger.error("插件安装 journal 恢复失败，已保留现场: %s", plugin_id, exc_info=True)
+        if failed_records:
+            self._atomic_json(self._install_journal_path, failed_records)
+            return
         try:
             self._install_journal_path.unlink()
         except OSError:
@@ -1336,28 +1351,41 @@ class PluginHost:
                 self._ensure_inside(self.plugins_dir, staging)
                 self._ensure_inside(self.plugins_dir, backup)
                 if phase == "published":
-                    if staging.exists():
-                        shutil.rmtree(staging, ignore_errors=True)
-                    if backup.exists():
-                        shutil.rmtree(backup, ignore_errors=True)
-                    # Commit 后中断：补写缺失的安装 receipt，保证重启后
-                    # marketplace 身份校验与覆盖安装仍有依据。
                     self._backfill_install_receipt(
                         str(entry.get("plugin_id") or ""),
                         receipts_by_id.get(str(entry.get("plugin_id") or "")),
                         target,
                     )
+                    if staging.exists():
+                        shutil.rmtree(staging, ignore_errors=True)
+                    if backup.exists():
+                        shutil.rmtree(backup, ignore_errors=True)
                     continue
-                # No commit marker means the group is not atomic. Restore every
-                # old target and discard all candidate staging directories.
-                if str(entry.get("plugin_id") or "") in published and target.exists():
-                    shutil.rmtree(target, ignore_errors=True)
-                if target.exists() and backup.exists():
-                    shutil.rmtree(target, ignore_errors=True)
-                if backup.exists() and not target.exists():
+                # Old journals recorded publish progress AFTER rename. A
+                # consumed staging directory also proves a publish attempt once
+                # all backups moved, even if the id is absent from `published`.
+                # Persist the rollback plan before mutation so another crash
+                # after restoring backup cannot mistake the old target for a
+                # candidate and delete it on the next recovery.
+                rollback = entry.get("rollback")
+                if not isinstance(rollback, dict):
+                    rollback = {
+                        "discard_target": (
+                            str(entry.get("plugin_id") or "") in published
+                            or (phase in {"backup_moved", "publishing"} and not staging.exists())
+                        ),
+                        "restore_backup": backup.exists(),
+                    }
+                    entry["rollback"] = rollback
+                    self._write_group_install_journal(record)
+                if backup.exists():
+                    if target.exists():
+                        shutil.rmtree(target)
                     backup.rename(target)
+                elif rollback["discard_target"] and not rollback["restore_backup"] and target.exists():
+                    shutil.rmtree(target)
                 if staging.exists():
-                    shutil.rmtree(staging, ignore_errors=True)
+                    shutil.rmtree(staging)
         except Exception:
             self.logger.error("插件组安装 journal 恢复失败，保留现场等待人工处理", exc_info=True)
             return
@@ -1994,18 +2022,32 @@ class PluginHost:
         receipt: dict[str, Any] | None,
         target: Path,
     ) -> None:
-        """事务 commit 后中断时，按 journal 数据补写缺失的安装 receipt。
+        """Reconcile even an old receipt, but only for the journal's exact target.
 
-        仅在 receipt 缺失且目标包确实存在时写入；写入失败会向上抛出，
-        由恢复逻辑保留 journal 以便下次重启重试（fail closed）。
+        Failure preserves the journal for retry; never bless a changed manifest
+        merely because a directory or an earlier version's receipt exists.
         """
         if not plugin_id or receipt is None:
             return
-        receipt_path = self.data_dir / plugin_id / "install.json"
-        if receipt_path.exists() or not target.is_dir():
-            return
         manifest = receipt.get("manifest")
         if not isinstance(manifest, dict):
+            raise ValueError("install journal manifest is invalid")
+        installed = json.loads((target / "plugin.json").read_text(encoding="utf-8"))
+        if (
+            manifest.get("id") != plugin_id
+            or not isinstance(installed, dict)
+            or self._manifest_digest(installed) != self._manifest_digest(manifest)
+        ):
+            raise ValueError("install journal target manifest mismatch")
+        expected = {
+            "plugin_id": plugin_id,
+            "version": str(manifest.get("version") or ""),
+            "manifest_digest": self._manifest_digest(manifest),
+            "artifact_hash": str(receipt.get("artifact_hash") or ""),
+            "source": str(receipt.get("source") or "group-zip"),
+        }
+        current = self._load_install_receipt(plugin_id)
+        if all(current.get(key) == value for key, value in expected.items()):
             return
         self._save_install_receipt(
             plugin_id, manifest,
