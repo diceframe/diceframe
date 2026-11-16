@@ -1,0 +1,16 @@
+# src/engine/persistence.py 返回给请求方的提示。
+"en":
+  archive_duplicate_files: "The save package contains duplicate files"
+  archive_encrypted: "Save packages do not support encrypted files"
+  archive_invalid_files: "The save package contains invalid files"
+  archive_missing_cover: "The save package is missing the adventure cover asset"
+  archive_missing_map_background: "The save package is missing the map background asset"
+  archive_missing_state: "The save package is missing state.json"
+  archive_not_zip: "The save package is not a valid zip"
+  archive_parse_failed: "Parsing the save package failed: %{exc}"
+  archive_too_large: "The save package is too large when extracted"
+  cover_import_unsupported: "Importing adventure cover assets is not supported in this environment"
+  map_background_import_unsupported: "Importing map background assets is not supported in this environment"
+  member_too_large: "%{filename} is too large when extracted"
+  state_missing_game_key: "state.json is missing game_key"
+  state_not_json: "state.json is not valid JSON"

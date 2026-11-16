@@ -9,6 +9,11 @@ from .triggered_spells import free_cast_resource
 from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.features import CombatCapabilityView
 from src.rulesets.dnd2024.features.combat import martial_arts_profile
+from src.rulesets.dnd2024.features.resources import (
+    OVERCHANNEL_FEATURE_ID,
+    OVERCHANNEL_OWNER,
+    OVERCHANNEL_SPELL_CLASS,
+)
 from src.rulesets.dnd2024.spells.feat_spells import feat_spell_grants
 
 from .check_windows import LUCKY_RESOURCE
@@ -97,7 +102,7 @@ class CombatViewMixin:
                 "weapon_category_refs": [], "proficiency_bonus": 0,
                 "creature_type": str(enemy.get("creature_type") or ""),
                 "counterspell_dc": int(enemy.get("counterspell_dc", 0) or 0),
-                "skill_values": {}, "concentration": None,
+                "skill_values": {}, "skill_refs": [], "concentration": None,
             }
         raise CombatIntentError("actor_id is invalid")
 
@@ -156,6 +161,9 @@ class CombatViewMixin:
             "abilities": deepcopy(character.get("abilities") or {}),
             "saving_throws": deepcopy(character.get("derived", {}).get("saving_throws") or {}),
             "skill_values": deepcopy(character.get("proficiencies", {}).get("skill_values") or {}),
+            # 技能熟练本身也要投影：Reliable Talent 只对"使用技能熟练"的检定
+            # 生效，而加值数字分不清 "+2 因为熟练" 与 "+2 因为属性"。
+            "skill_refs": list(character.get("proficiencies", {}).get("skill_refs") or []),
             "proficiency_bonus": int(
                 character.get("derived", {}).get("proficiency_bonus", 2) or 2
             ),
@@ -186,7 +194,13 @@ class CombatViewMixin:
             "conditions": deepcopy(conditions),
             "death_saves": deepcopy(conditions.get("death_saves") or {}),
             "build": deepcopy(character.get("build") or {}),
-            "features": {"subclass_ref": subclass_ref},
+            "features": {
+                "subclass_ref": subclass_ref,
+                # Copied verbatim, not sanitised: a corrupted ledger must reach
+                # the counter read and fail closed there, never look like zero.
+                "usage": deepcopy(feature_state["usage"])
+                if feature_state.get("usage") is not None else [],
+            },
             "class_resources": deepcopy(feature_projection["class_resources"]),
             "martial_arts_die": str(feature_projection["unarmed_damage_die"]),
             "unarmed_ability_choice": list(feature_projection["unarmed_ability_choice"]),
@@ -387,11 +401,15 @@ class CombatViewMixin:
                 "current": entry.get("current", 0),
                 "maximum": entry.get("maximum", 0),
             }
+        features: dict[str, Any] = {
+            "subclass_ref": str((actor.get("features") or {}).get("subclass_ref") or ""),
+        }
+        raw_usage = (actor.get("features") or {}).get("usage")
+        if raw_usage is not None:
+            features["usage"] = deepcopy(raw_usage)
         return {
             "build": actor.get("build") or {},
-            "features": {"subclass_ref": str(
-                (actor.get("features") or {}).get("subclass_ref") or ""
-            )},
+            "features": features,
             "abilities": actor.get("abilities") or {},
             "resources": {"class": class_state},
             "equipment": {"item_refs": list(actor.get("equipment_refs") or [])},
@@ -469,16 +487,22 @@ class CombatViewMixin:
                 character = self._feature_character(actor)
                 max_slot = (
                     int(self.features.feature_value(
-                        character, "overchannel", "max_slot_level", 5,
+                        character, OVERCHANNEL_FEATURE_ID, "maximum_slot_level", 0,
+                        owner=OVERCHANNEL_OWNER,
                     ) or 0)
-                    if self.features.has_feature(character, "overchannel") else 0
+                    if self.features.has_feature(
+                        character, OVERCHANNEL_FEATURE_ID, owner=OVERCHANNEL_OWNER,
+                    ) else 0
                 )
                 eligible_slots = [
                     level for level in available_slots if 1 <= level <= max_slot
                 ]
-                row["maximize_damage_available"] = bool(
+                # 列表归属与学派是两个独立字段：Overchannel 认的是
+                # `class_refs` 里的 Wizard，不是 `school == evocation`。
+                row["overchannel_available"] = bool(
                     max_slot and effect.get("damage")
                     and effect["mode"] in {"spell_attack", "saving_throw", "automatic_damage"}
+                    and OVERCHANNEL_SPELL_CLASS in spell["class_refs"]
                     and eligible_slots
                 )
                 result.append(row)
