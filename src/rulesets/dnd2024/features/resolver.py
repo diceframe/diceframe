@@ -483,17 +483,20 @@ class Dnd2024ClassFeatureResolver:
     def jump_ability(self, character: Mapping[str, Any] | None) -> str:
         """The ability that sets jump distance; default is Strength.
 
-        Second-Story Work lets the Thief *replace* Strength with Dexterity --
-        the substitution changes which score is read, it never adds a second
-        modifier.  Exactly one owned declaration may name it, so the first is
-        authoritative and the default stays Strength.
+        Second-Story Work permits Dexterity instead of Strength (SRD p64).
+        The derived profile reports the largest legal jump, not a forced
+        substitution that could reduce the character's normal jump distance.
         """
 
+        abilities = (character or {}).get("abilities") or {}
+        best = "str"
         for definition in self.features_for(character):
             ability = definition.parameters.get("jump_ability")
-            if isinstance(ability, str) and ability:
-                return ability
-        return "str"
+            if isinstance(ability, str) and ability and int(
+                abilities.get(ability, 10)
+            ) > int(abilities.get(best, 10)):
+                best = ability
+        return best
 
     def feature_max_hp_bonus(self, character: Mapping[str, Any] | None) -> int:
         """The Hit Point maximum increase granted by owned features.
