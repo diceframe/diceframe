@@ -36,6 +36,8 @@ def test_startup_installs_requirements_when_pydantic_ai_is_missing(monkeypatch, 
                 "-m",
                 "pip",
                 "install",
+                # 优先拿 wheel，避免在没装编译工具链的机器上卡在源码构建。
+                "--prefer-binary",
                 "-r",
                 str(requirements),
             ],

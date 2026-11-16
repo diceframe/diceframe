@@ -57,13 +57,21 @@ async def test_agent_rest_uses_shared_party_dispatch_and_waits_for_second_player
         "expected_revision": 0, "hit_dice": {"d10": 1},
         "confirm_elapsed_time": True,
     }, "ally")
-    assert second["resolved"] is True
-    assert second["rest_session"]["status"] == "completed"
+    # 全员申报只走到「等 DM 裁决」：结算与时间推进都还不发生。
+    assert second["resolved"] is False
+    assert second["rest_session"]["status"] == "awaiting_approval"
+    assert instance.get_character_sheet("gm").get("ruleset_revision", 0) == 0
+    assert clock_to_minutes(instance.world_state["clock"]) == before_clock
+
+    decided = await WebAPI.ruleset_rest_decide(api, key, "gm", True, {
+        "approve": True, "operation_id": "party-approve",
+    })
+    assert decided["ok"] is True
+    assert decided["rest_session"]["status"] == "completed"
     assert instance.get_character_sheet("gm")["ruleset_revision"] == 1
     assert instance.get_character_sheet("ally")["ruleset_revision"] == 1
-    # Ruleset rest itself does not advance the world clock; importantly the
-    # pending and duplicate calls do not advance it either.
-    assert clock_to_minutes(instance.world_state["clock"]) == before_clock
+    # 短休的 1 小时在批准那一刻推进，且只推进一次。
+    assert clock_to_minutes(instance.world_state["clock"]) == before_clock + 60
 
     # A completed session cannot settle a second time with the old revisions.
     duplicate = await rest_tool.handler({
@@ -156,7 +164,14 @@ async def test_agent_proposal_confirm_replay_then_second_party_submission(
         "rest": "short", "hit_dice": {"d10": 1}, "confirm_elapsed_time": True,
         "expected_revision": 0, "operation_id": "party-ally-after-agent",
     })
-    assert second["resolved"] is True
+    assert second["rest_session"]["status"] == "awaiting_approval"
+    assert instance.get_character_sheet("gm").get("ruleset_revision", 0) == 0
+    assert instance.get_character_sheet("gm")['hp'] == 1
+
+    decided = await WebAPI.ruleset_rest_decide(api, key, "gm", True, {
+        "approve": True, "operation_id": "party-approve-after-agent",
+    })
+    assert decided["ok"] is True
     assert instance.get_character_sheet("gm")["ruleset_revision"] == 1
     assert instance.get_character_sheet("ally")["ruleset_revision"] == 1
     assert instance.get_character_sheet('gm')['hp'] > 1

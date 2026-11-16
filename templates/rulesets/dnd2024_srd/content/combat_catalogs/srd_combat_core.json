@@ -119,12 +119,17 @@
       {"side": "actor", "mode": "advantage", "negated_by": ["see_invisibility", "truesight"]}
     ]},
     "rage": {"resist_damage_types": ["bludgeoning", "piercing", "slashing"]},
+    "charmed": {"cannot_attack_source": true},
+    "frightened": {"attack_modes": [{"side": "actor", "mode": "disadvantage"}], "cannot_approach_source": true},
     "stoneskinned": {"resist_damage_types": ["bludgeoning", "piercing", "slashing"]},
     "poison_resistant": {"resist_damage_types": ["poison"]},
     "slowed_10": {"speed_modifier": -10},
     "incapacitated": {"implies_incapacitated": true},
     "paralyzed": {"attack_modes": [{"side": "target", "mode": "advantage"}], "implies_incapacitated": true, "speed_zero": true, "auto_fail_saves": ["str", "dex"], "crit_on_hit_within_5": true},
     "stunned": {"attack_modes": [{"side": "target", "mode": "advantage"}], "implies_incapacitated": true, "auto_fail_saves": ["str", "dex"]},
-    "unconscious": {"attack_modes": [{"side": "target", "mode": "advantage"}], "implies_incapacitated": true, "speed_zero": true, "auto_fail_saves": ["str", "dex"], "crit_on_hit_within_5": true}
+    "unconscious": {"attack_modes": [{"side": "target", "mode": "advantage"}], "implies_incapacitated": true, "speed_zero": true, "auto_fail_saves": ["str", "dex"], "crit_on_hit_within_5": true},
+    "prone": {"attack_modes": [{"side": "actor", "mode": "disadvantage"}]},
+    "staggered": {"speed_halved": true},
+    "staggered_opening": {"attack_modes": [{"side": "target", "mode": "advantage", "consume_on": "attack_resolved"}]}
   }
 }

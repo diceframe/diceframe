@@ -1407,6 +1407,7 @@ function onPlayKeydown(event: KeyboardEvent) {
           :game-key="game.currentGame.value"
           :user-id="actorId"
           :rest-session="game.detail.value.rest_session"
+          :is-gm="game.isGm.value"
           :initial-focus="characterCenterFocus"
           @saved="onCharacterCenterSaved"
           @rest-pending="onCharacterCenterRestPending"
