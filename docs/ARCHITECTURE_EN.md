@@ -3043,6 +3043,8 @@ To avoid forcing every runtime to implement an ever-growing method set, addition
 - `RunLifecycleRuntime`
 - `PublicTimelineProjectionRuntime`
 
+Remote adapters must explicitly declare support for the optional `next_automatic_intent` RPC through the independent `RulesetCapabilities.automatic_intents=True` flag. It defaults to false and is not inferred from `authoritative_intents`, `deterministic_combat`, or the existence of the adapter method. Without this declaration the adapter returns `None` without sending that RPC, so ordinary intents remain usable. Once declared, only a successful `null` response ends the automatic ladder; remote rejection, transport errors and malformed responses propagate to the existing authority transaction for rejection and rollback, rather than being swallowed as “unsupported.” Built-in runtimes still use the optional Protocol; D&D also declares the capability to keep its metadata accurate.
+
 The correct extension pattern is usually:
 
 ```text

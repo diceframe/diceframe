@@ -113,6 +113,7 @@ class RemoteRulesetRuntimeAdapter:
 
     @staticmethod
     def _dto(value: Any, field: str) -> Any:
+        result: Any
         if isinstance(value, dict):
             result = deepcopy(value)
         elif isinstance(value, (list, tuple, str, int, float, bool)) or value is None:
@@ -140,6 +141,36 @@ class RemoteRulesetRuntimeAdapter:
         return RemoteRulesetRuntimeAdapter._dto(rule if template is None else template, "rule")
 
     def game_binding(self, rule: Any, locale: str) -> dict[str, Any]:
+        result = self._call("game_binding", {"rule": self._rule_dto(rule), "locale": locale})
+        if not isinstance(result, dict):
+            raise RuntimeProbeError("remote game_binding result must be an object")
+        return result
+
+    @staticmethod
+    def _rule_dto(rule: Any) -> Any:
+        """Send the rule's template, never the host's rule object.
+
+        ``RuleSystem`` is a host-side behaviour object with no wire form; its
+        ``template`` is the canonical JSON the child is allowed to read.  Call
+        sites pass the object, so the unwrapping belongs here rather than in
+        every service that calls a remote runtime.
+        """
+
+        template = getattr(rule, "template", None)
+        return RemoteRulesetRuntimeAdapter._dto(
+            rule if template is None else template, "rule",
+        )
+
+    def game_binding(self, rule: Any, locale: str) -> dict[str, Any]:
+        """Name the runtime that owns this rule's versioned save state.
+
+        ``VersionedStateRuntime`` requires the binding before any ruleset state
+        is written, so a remote runtime that declares ``versioned_state`` must
+        answer it exactly like a built-in one.  The host keeps transaction,
+        save and upgrade ownership; the runtime only states its own identity
+        and schema version (ADR-0014 §4).
+        """
+
         result = self._call("game_binding", {"rule": self._rule_dto(rule), "locale": locale})
         if not isinstance(result, dict):
             raise RuntimeProbeError("remote game_binding result must be an object")
@@ -175,6 +206,33 @@ class RemoteRulesetRuntimeAdapter:
         result = self._call("available_intents", {"instance": self._dto(instance, "instance"), "actor_id": actor_id})
         if not isinstance(result, list):
             raise RuntimeProbeError("remote available_intents result must be a list")
+        return result
+
+    def next_automatic_intent(self, instance: Any) -> dict[str, Any] | None:
+        """Return one server-owned automatic intent, or ``None`` when done.
+
+        ``AutomaticIntentRuntime`` drives enemies, companions and AI-hosted
+        seats without asking the model for a rules action.  A remote runtime
+        opts in with ``capabilities.automatic_intents`` before this optional
+        RPC is sent. Without that declaration there is no automatic ladder,
+        even though this adapter structurally satisfies the protocol. Once
+        declared, RPC errors must propagate so the host can reject/roll back
+        the submission; only a successful null response ends the ladder.
+        The host resolves returned intents through the normal
+        ``resolve_intent`` / ``apply_event_batch`` chain.
+        """
+
+        if not self.capabilities.automatic_intents:
+            return None
+        result = self._call(
+            "next_automatic_intent", {"instance": self._dto(instance, "instance")},
+        )
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise RuntimeProbeError(
+                "remote next_automatic_intent result must be an object or null"
+            )
         return result
 
     def prepare_intent_submission(
