@@ -56,7 +56,7 @@ function asNode(value: unknown): Record<string, unknown> {
     {{ node.label || node.action }}
   </button>
   <ul v-else-if="node.component === 'list'" class="gameplay-node-list">
-    <li v-for="(item, index) in items(node.projected_value)" :key="index">
+    <li v-for="(item, index) in items(node.projected_value ?? node.value)" :key="index">
       <GameplayDeclarativeNode v-if="item && typeof item === 'object' && !Array.isArray(item)" :node="asNode(item)" @action="emit('action', $event)" />
       <span v-else>{{ scalar(item) }}</span>
     </li>
