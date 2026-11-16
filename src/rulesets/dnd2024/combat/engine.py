@@ -16,6 +16,7 @@ from src.rulesets.dnd2024.character.attunement import (
     owned_ref_counts,
 )
 from src.rulesets.dnd2024.character.builder import ability_modifier
+from src.rulesets.dnd2024.character.primitives import ABILITY_IDS
 from src.rulesets.dnd2024.character.reconciliation import (
     Dnd2024CharacterStateReconciler,
     merge_live_character_projection,
@@ -831,7 +832,7 @@ class Dnd2024CombatEngine(
                 # 自由遭遇不属于任何冒险包；把这个事实写进权威状态，界面才能
                 # 持续显示“自由战斗”，而叙事文本无法改变它。
                 resolved_intent.update({"mode": "sandbox", "adventure_binding": None})
-            events.append(self._start_combat_event(instance, resolved_intent, rng))
+            events.extend(self._start_combat_event(instance, resolved_intent, rng))
         elif intent_type == "combat.end":
             events.append({"type": "dnd2024.combat.ended", "reason": "gm"})
         elif intent_type == "combat.message":
@@ -1132,6 +1133,7 @@ class Dnd2024CombatEngine(
                 "origin_step_id": str(combat.get("origin_step_id") or ""),
                 "mode": str(combat.get("mode") or ""),
                 "adventure_binding": deepcopy(combat.get("adventure_binding")),
+                "bardic_instances": self._active_bardic_view(instance, combat),
                 "actors": actors,
             },
             "encounter_presets": self.encounter_presets(),
@@ -1339,7 +1341,8 @@ class Dnd2024CombatEngine(
         return events
 
     def _concentration_events(
-        self, target: dict[str, Any], damage: int, rng: Any,
+        self, instance: Any, combat: dict[str, Any],
+        target: dict[str, Any], damage: int, rng: Any,
     ) -> list[dict[str, Any]]:
         if not target.get("concentration") or damage <= 0:
             return []
@@ -1351,13 +1354,18 @@ class Dnd2024CombatEngine(
             self.catalog.conditions, target.get("conditions") or {}, "saving_throw", rng,
         )
         check_bonus = sum(row["roll"] for row in check_bonus_rolls)
-        total = roll + modifier + check_bonus
+        # 光环在受伤结算的这一刻求值：Shield、Uncanny Dodge、Divine Smite
+        # 都先改完伤害再来这里，所以四个入口拿到的都是同一份位置与条件。
+        aura = self._saving_throw_aura_bonus(instance, combat, target)
+        total = roll + modifier + check_bonus + int(aura["bonus"])
         success = total >= dc
         events: list[dict[str, Any]] = [{
             "type": "check.resolved", "kind": "concentration", "actor_id": target["actor_id"],
             "rolls": [roll], "natural": roll, "modifier": modifier,
             "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
+            "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
             "total": total, "target": dc, "success": success,
+            "roll_id": f"concentration:{target['actor_id']}:1",
         }]
         if not success:
             events.append({
@@ -1378,74 +1386,178 @@ class Dnd2024CombatEngine(
     ) -> int:
         return abs(self._position(combat, mover) + distance - self._position(combat, target))
 
-    def _aura_immune_conditions(
-        self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
-    ) -> dict[str, str]:
-        """Conditions the target is immune to through a friendly aura right now.
+    def _projected_auras(
+        self, instance: Any, combat: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Every base aura a living, conscious party member projects right now.
 
-        The declaration is the registry: every class feature whose catalog
-        parameters include ``aura_immune_conditions`` is a candidate, and a
-        holder projects its aura only while all of these hold:
+        One row per (holder, base aura).  ``range_ft`` already folds in that
+        holder's own Aura Expansion, so a level-18 paladin widens only their own
+        aura and a level-6 ally beside them keeps 10 feet -- the expansion is a
+        property of who owns it, never a global maximum.
 
-        * the holder is on the target's side (players and companions only roam
-          the roster, so enemies never project an aura);
-        * the feature is owned at the holder's current level;
-        * ``aura_range`` is a positive integer and ``aura_immune_conditions`` a
-          list of non-empty strings (otherwise the declaration fails closed);
-        * the 1D theater distance between holder and target is within range.
-
-        The paladin's own aura covers them too because distance 0 is within
-        range.  The return maps condition id to the *first* declaring feature
-        id in catalog order, which is what an interception reports as its
-        source.
+        The emanation is off as a whole whenever the holder cannot sustain it:
+        any condition that implies Incapacitated disables it, and so does being
+        at 0 HP or carrying the ``dead`` condition.  That second half cannot be
+        left to the condition registry alone -- ``dead`` is not a catalog
+        condition yet, and the reducer removes ``unconscious`` the moment it
+        marks a creature dead, so a corpse would otherwise keep radiating a
+        bonus to its allies.  Enemies never project a class aura, which is why
+        the roster scan starts from ``side == "party"`` rather than from every
+        combatant.
         """
 
-        target_side = str(target.get("side") or "")
-        target_id = str(target.get("actor_id") or "")
-        if not target_side or not target_id:
-            return {}
-        # 按 owner 扫描声明：同名特性可以同时存在于 class 与 subclass 两个
-        # owner 下，用短 id 查询会命中错误的那一条，甚至查不到。
-        aura_features = [
-            definition
-            for definition in self.features.catalog.features_by_key.values()
-            if "aura_immune_conditions" in definition.parameters
-        ]
-        immune: dict[str, str] = {}
+        rows: list[dict[str, Any]] = []
         for ally in self._all_targets(instance, combat):
-            if str(ally.get("side") or "") != target_side:
+            if str(ally.get("side") or "") != "party":
                 continue
             holder_id = str(ally["actor_id"])
-            character = self._feature_character(
-                self._actor_view(instance, combat, holder_id),
-            )
-            for definition in aura_features:
-                if not self.features.has_feature(
-                    character, definition.id, owner=definition.owner,
-                ):
-                    continue
-                aura_range = self.features.feature_value(
-                    character, definition.id, "aura_range", owner=definition.owner,
-                )
-                conditions = self.features.feature_value(
-                    character, definition.id, "aura_immune_conditions",
-                    owner=definition.owner,
-                )
+            actor = self._actor_view(instance, combat, holder_id)
+            conditions = actor.get("conditions") or {}
+            flags = condition_flags(self.catalog.conditions, conditions)
+            if (
+                flags.get("incapacitated")
+                or "dead" in conditions
+                or int(actor.get("hp", 1)) <= 0
+            ):
+                continue
+            character = self._feature_character(actor)
+            owned = self.features.active_features_for(character)
+            for definition in owned:
+                declared = definition.parameters.get("aura_range_ft")
                 if (
-                    isinstance(aura_range, bool)
-                    or not isinstance(aura_range, int)
-                    or aura_range <= 0
+                    isinstance(declared, bool) or not isinstance(declared, int)
+                    or declared < 1
                 ):
                     continue
-                if not isinstance(conditions, list) or any(
-                    not isinstance(code, str) or not code for code in conditions
-                ):
+                range_ft = declared
+                for extension in owned:
+                    if extension.parameters.get("aura_expands_feature_id") != definition.id:
+                        continue
+                    override = extension.parameters.get("aura_range_override_ft")
+                    if (
+                        isinstance(override, int) and not isinstance(override, bool)
+                        and override >= 1
+                    ):
+                        range_ft = max(range_ft, override)
+                rows.append({
+                    "holder_id": holder_id,
+                    "definition": definition,
+                    "range_ft": range_ft,
+                    "character": character,
+                    "owned": owned,
+                })
+        return rows
+
+    @staticmethod
+    def _initiative_rank(combat: dict[str, Any], actor_id: str) -> tuple[int, str]:
+        """A stable tie-break key: initiative order first, then actor id."""
+
+        order = [str(item) for item in (combat.get("initiative") or [])]
+        try:
+            return (order.index(actor_id), actor_id)
+        except ValueError:
+            return (len(order), actor_id)
+
+    def _saving_throw_aura_bonus(
+        self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
+    ) -> dict[str, Any]:
+        """The single best saving-throw aura bonus covering the target.
+
+        RAW lets a creature inside two auras choose one.  Settling that on the
+        sheet would need a prompt the passive path cannot show, so the highest
+        bonus wins and equal bonuses break on initiative order and then actor
+        id.  Bonuses never stack: ``sources`` names the winner alone.
+
+        An uncovered target gets ``{"bonus": 0, "sources": []}`` so every caller
+        can emit ``aura_bonus``/``aura_sources`` unconditionally and keep the
+        existing event shape for characters who never met a paladin.
+        """
+
+        target_id = str(target.get("actor_id") or "")
+        if not target_id or str(target.get("side") or "") != "party":
+            return {"bonus": 0, "sources": []}
+        best: dict[str, Any] | None = None
+        best_rank: tuple[int, str] = (0, "")
+        for row in self._projected_auras(instance, combat):
+            definition = row["definition"]
+            ability = definition.parameters.get("aura_save_bonus_ability")
+            if not isinstance(ability, str) or ability not in ABILITY_IDS:
+                continue
+            if self._distance(combat, row["holder_id"], target_id) > row["range_ft"]:
+                continue
+            floor = definition.parameters.get("aura_save_bonus_minimum")
+            minimum = floor if isinstance(floor, int) and not isinstance(floor, bool) else 1
+            score = (row["character"].get("abilities") or {}).get(ability)
+            modifier = ability_modifier(int(score)) if isinstance(score, int) else 0
+            bonus = max(minimum, modifier)
+            rank = self._initiative_rank(combat, row["holder_id"])
+            if best is None or bonus > best["bonus"] or (
+                bonus == best["bonus"] and rank < best_rank
+            ):
+                best = {
+                    "bonus": bonus,
+                    "feature_id": definition.id,
+                    "owner": definition.owner,
+                    "source_actor_id": row["holder_id"],
+                    "range": row["range_ft"],
+                    "ability": ability,
+                    "ability_modifier": modifier,
+                }
+                best_rank = rank
+        if best is None:
+            return {"bonus": 0, "sources": []}
+        return {"bonus": best.pop("bonus"), "sources": [best]}
+
+    def _aura_condition_immunity_source(
+        self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
+        condition_id: str,
+    ) -> dict[str, str] | None:
+        """The aura that makes ``condition_id`` a no-op for the target now.
+
+        A condition immunity rides on a base aura named by
+        ``aura_source_feature_id``, so it uses that aura's range and dies with
+        it when the holder is Incapacitated.  It is not an independent
+        emanation, which is exactly why the old free-standing ``aura_range``
+        declaration is gone.
+
+        The catalog is consulted first: if no declaration lists ``condition_id``
+        anywhere, nothing can intercept it and projecting the auras would be
+        wasted work.  That early exit is what makes it affordable to ask this
+        question on every condition-applying path rather than only on saves.
+
+        The first qualifying source in catalog order is reported.  Two Devotion
+        paladins therefore produce one interception with one stable source
+        rather than two stacked settlements.
+        """
+
+        wanted = str(condition_id or "")
+        target_id = str(target.get("actor_id") or "")
+        if not wanted or not target_id or str(target.get("side") or "") != "party":
+            return None
+        declared = {
+            code
+            for definition in self.features.catalog.features_by_key.values()
+            for code in (definition.parameters.get("aura_condition_immunities") or [])
+            if isinstance(code, str)
+        }
+        if wanted not in declared:
+            return None
+        for row in self._projected_auras(instance, combat):
+            if self._distance(combat, row["holder_id"], target_id) > row["range_ft"]:
+                continue
+            for extension in row["owned"]:
+                if extension.parameters.get("aura_source_feature_id") != row["definition"].id:
                     continue
-                if self._distance(combat, holder_id, target_id) > aura_range:
+                immune = extension.parameters.get("aura_condition_immunities")
+                if not isinstance(immune, list) or wanted not in immune:
                     continue
-                for condition_id in conditions:
-                    immune.setdefault(condition_id, definition.id)
-        return immune
+                return {
+                    "feature_id": extension.id,
+                    "owner": extension.owner,
+                    "source_actor_id": row["holder_id"],
+                }
+        return None
 
     def _require_range(
         self, combat: dict[str, Any], actor_id: str, target_id: str, maximum: int,

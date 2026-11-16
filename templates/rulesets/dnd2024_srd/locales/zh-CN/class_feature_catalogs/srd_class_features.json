@@ -181,12 +181,12 @@
       "restoring_touch": "恢复之触",
       "ritual_adept": "仪式通才",
       "rogue_subclass": "盗贼子职",
-      "roving": "游荡",
+      "roving": "游走",
       "sacred_weapon": "神圣武器",
       "scholar": "学者",
       "sculpt_spells": "塑形法术",
       "sear_undead": "灼烧亡灵",
-      "second_story_work": "二楼作业",
+      "second_story_work": "飞檐走壁",
       "self_restoration": "自我恢复",
       "signature_spells": "招牌法术",
       "slippery_mind": "圆滑心智",
@@ -221,7 +221,8 @@
       "wild_resurgence": "野性复苏",
       "wild_shape": "野性形态",
       "wizard_subclass": "法师子职",
-      "words_of_creation": "创世之言"
+      "words_of_creation": "创世之言",
+      "ranger": "游侠"
     }
   }
 }

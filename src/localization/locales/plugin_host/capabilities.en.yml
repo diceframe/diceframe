@@ -1,0 +1,3 @@
+# src/plugin_host/capabilities.py 返回给请求方的提示。
+"en":
+  no_capability_initializer: "The plugin type has no runtime capability initializer: %{plugin_type}"

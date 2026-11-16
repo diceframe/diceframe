@@ -22,6 +22,7 @@ from src.engine.memory_outbox import (
     pending_memory_reversals,
 )
 from src.engine.modules import economy_state
+from src.localization.messages import t
 
 # transfer/fee/all_contributors 已随 schema 8 退役：PAY/TEAM_PAY 标签契约
 # 在 schema 6 停用后，它们没有任何存活创建路径（见 migrations.instance）。
@@ -986,11 +987,11 @@ def resolve_proposal(
         None,
     )
     if proposal is None:
-        return {"ok": False, "code": "PROPOSAL_NOT_FOUND", "error": "经济提案不存在"}
+        return {"ok": False, "code": "PROPOSAL_NOT_FOUND", "error": t("engine.economy.proposal_missing")}
     if proposal.get("run_id") != instance.run_id:
-        return {"ok": False, "code": "STALE_RUN", "error": "这是上一局的经济请求"}
+        return {"ok": False, "code": "STALE_RUN", "error": t("engine.economy.proposal_from_previous_run")}
     if proposal.get("status") != "pending":
-        return {"ok": False, "code": "ALREADY_RESOLVED", "error": "经济提案已处理"}
+        return {"ok": False, "code": "ALREADY_RESOLVED", "error": t("engine.economy.proposal_already_handled")}
 
     kind = str(proposal.get("kind") or "payment")
     payer_uid = str(proposal.get("payer_uid") or proposal.get("uid") or "")
@@ -1006,7 +1007,7 @@ def resolve_proposal(
     else:
         allowed = actor_uid == payer_uid or (not accepted and is_gm)
     if not allowed:
-        return {"ok": False, "code": "FORBIDDEN", "error": "无权处理这项经济提案"}
+        return {"ok": False, "code": "FORBIDDEN", "error": t("engine.economy.not_allowed")}
 
     now = datetime.now(timezone.utc).isoformat()
     terms = proposal.get("payment_terms") if isinstance(proposal.get("payment_terms"), dict) else None
@@ -1015,7 +1016,7 @@ def resolve_proposal(
         return {
             "ok": False,
             "code": "INSTALLMENT_ALREADY_STARTED",
-            "error": "定金已结算，当前不能直接拒绝；请处理尾款，或由 GM 回滚本轮交易",
+            "error": t("engine.economy.deposit_settled_cannot_reject"),
             "proposal": deepcopy(proposal),
         }
     if not accepted:
@@ -1052,40 +1053,40 @@ def resolve_proposal(
             terms_initial = int(terms.get("initial_due"))
             terms_remaining = int(terms.get("remaining_due"))
         except (TypeError, ValueError):
-            return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": "支付条款金额无效"}
+            return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": t("engine.economy.payment_terms_amount_invalid")}
         if (
             terms_total != amount
             or terms_initial <= 0
             or terms_remaining < 0
             or terms_initial + terms_remaining != amount
         ):
-            return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": "支付条款总额不一致"}
+            return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": t("engine.economy.payment_terms_total_mismatch")}
         if settlement_stage == "deposit_pending":
             if terms_remaining <= 0:
-                return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": "定金条款缺少尾款"}
+                return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": t("engine.economy.deposit_terms_missing_balance")}
             charge_amount = terms_initial
             partial_settlement = True
         elif settlement_stage == "deposit_paid":
             if terms_remaining <= 0:
-                return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": "尾款金额无效"}
+                return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": t("engine.economy.remainder_amount_invalid")}
             charge_amount = terms_remaining
         elif settlement_stage == "full":
             if terms_initial != amount or terms_remaining != 0:
-                return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": "全额支付条款不一致"}
+                return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": t("engine.economy.full_payment_terms_mismatch")}
         else:
-            return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": "支付条款阶段无效"}
+            return {"ok": False, "code": "INVALID_PAYMENT_TERMS", "error": t("engine.economy.payment_terms_stage_invalid")}
     # FIX-08：零金额只在 ``reward``（纯物品奖励）下合法；付款/购买永远需要正金额。
     minimum = 0 if kind == "reward" else 1
     if charge_amount < minimum or charge_amount > MAX_ECONOMY_AMOUNT or amount > MAX_ECONOMY_AMOUNT:
-        return {"ok": False, "code": "INVALID_AMOUNT", "error": "经济金额无效"}
+        return {"ok": False, "code": "INVALID_AMOUNT", "error": t("engine.economy.amount_invalid")}
     entries: list[dict[str, Any]] = []
     reward_snapshots: list[dict[str, Any]] = []
     if kind in {"payment", "purchase"}:
         if payer_uid not in instance.players:
-            return {"ok": False, "code": "PAYER_NOT_FOUND", "error": "付款角色不存在"}
+            return {"ok": False, "code": "PAYER_NOT_FOUND", "error": t("engine.economy.payer_missing")}
         rewards = list(proposal.get("rewards") or [])
         if rewards and recipient_uid not in instance.players:
-            return {"ok": False, "code": "RECIPIENT_NOT_FOUND", "error": "物品接收角色不存在"}
+            return {"ok": False, "code": "RECIPIENT_NOT_FOUND", "error": t("engine.economy.item_recipient_missing")}
         payer = instance.get_character_sheet(payer_uid)
         currency = payer.get("currency") if isinstance(payer.get("currency"), dict) else {}
         current = int(currency.get("amount", payer.get("gold", 0)) or 0)
@@ -1099,7 +1100,7 @@ def resolve_proposal(
                 return {
                     "ok": False,
                     "code": "INSUFFICIENT_FUNDS",
-                    "error": f"尾款余额不足：需要 {charge_amount}，当前 {current}",
+                    "error": t("engine.economy.insufficient_balance_for_remainder", charge_amount=charge_amount, current=current),
                     "proposal": deepcopy(proposal),
                 }
             set_proposal_status(proposal, "rejected")
@@ -1112,7 +1113,7 @@ def resolve_proposal(
             return {
                 "ok": False,
                 "code": "INSUFFICIENT_FUNDS",
-                "error": f"余额不足：需要 {charge_amount}，当前 {current}",
+                "error": t("engine.economy.insufficient_balance", charge_amount=charge_amount, current=current),
                 "proposal": deepcopy(proposal),
                 "outcome": deepcopy(outcome),
             }
@@ -1132,14 +1133,14 @@ def resolve_proposal(
             )
     elif kind == "reward":
         if recipient_uid not in instance.players:
-            return {"ok": False, "code": "RECIPIENT_NOT_FOUND", "error": "奖励角色不存在"}
+            return {"ok": False, "code": "RECIPIENT_NOT_FOUND", "error": t("engine.economy.reward_character_missing")}
         rewards = list(proposal.get("rewards") or [])
         if rewards and grant_reward is None:
             # 有物品奖励却没有发放通道时绝不能提交：那会留下"提案已结算、物品没到
             # 手"的半截状态。宁可 fail closed 让调用方补上通道。
             return {
                 "ok": False, "code": "REWARD_UNSUPPORTED",
-                "error": "物品奖励缺少发放通道",
+                "error": t("engine.economy.item_reward_no_channel"),
             }
         recipient = instance.get_character_sheet(recipient_uid)
         if amount:
@@ -1161,7 +1162,7 @@ def resolve_proposal(
                 instance, recipient_uid, rewards, grant_reward, reward_snapshots,
             )
     else:
-        return {"ok": False, "code": "UNSUPPORTED_KIND", "error": "不支持的经济提案类型"}
+        return {"ok": False, "code": "UNSUPPORTED_KIND", "error": t("engine.economy.proposal_type_unsupported")}
 
     if partial_settlement:
         terms["stage"] = "deposit_paid"

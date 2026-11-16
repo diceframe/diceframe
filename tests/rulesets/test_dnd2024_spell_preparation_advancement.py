@@ -265,19 +265,27 @@ def test_wizard_adds_exactly_two_spells_to_the_book(
     engine: Dnd2024AdvancementEngine, wizard: dict,
 ) -> None:
     block = _magic(wizard)
+    # 2 级的 Scholar 要选一个技能；这条测试只关心法术书那一侧。
+    feature_choices = _feature_choice_answers(engine.preview_next_level(wizard, {}))
 
-    preview = engine.preview_next_level(wizard, {"class_spell_choices": {
-        "cantrip_refs": list(block["cantrip_refs"]),
-        "prepared_spell_refs": [*block["prepared_spell_refs"], "spell:shield"],
-        "spellbook_refs": [*block["spellbook_refs"], "spell:shield", "spell:grease"],
-    }})
+    preview = engine.preview_next_level(wizard, {
+        "class_spell_choices": {
+            "cantrip_refs": list(block["cantrip_refs"]),
+            "prepared_spell_refs": [*block["prepared_spell_refs"], "spell:shield"],
+            "spellbook_refs": [*block["spellbook_refs"], "spell:shield", "spell:grease"],
+        },
+        "feature_choices": feature_choices,
+    })
 
     assert preview["ok"] is True, _errors(preview)
-    applied = engine.apply_next_level(wizard, {"class_spell_choices": {
-        "cantrip_refs": list(block["cantrip_refs"]),
-        "prepared_spell_refs": [*block["prepared_spell_refs"], "spell:shield"],
-        "spellbook_refs": [*block["spellbook_refs"], "spell:shield", "spell:grease"],
-    }})
+    applied = engine.apply_next_level(wizard, {
+        "class_spell_choices": {
+            "cantrip_refs": list(block["cantrip_refs"]),
+            "prepared_spell_refs": [*block["prepared_spell_refs"], "spell:shield"],
+            "spellbook_refs": [*block["spellbook_refs"], "spell:shield", "spell:grease"],
+        },
+        "feature_choices": feature_choices,
+    })
     assert len(_magic(applied)["spellbook_refs"]) == 8
 
 
@@ -401,6 +409,31 @@ def _fill_spells(block: dict, requirement: dict) -> dict:
     return lists
 
 
+def _feature_choice_answers(preview: dict) -> list[dict]:
+    """Answer every ``feature_choice`` requirement with its first usable option.
+
+    Scholar, Blessed Strikes and friends are declared with a choice, so a level
+    that grants one cannot be applied without an answer; these tests are about
+    the spell budget, not about which option to take.
+    """
+
+    answers: list[dict] = []
+    for requirement in preview.get("requirements") or []:
+        if requirement.get("kind") != "feature_choice":
+            continue
+        options = [
+            option["value"] for option in requirement.get("options") or []
+            if option.get("available", True)
+        ][: int(requirement.get("count") or 1)]
+        answers.append({
+            "owner": requirement["owner"],
+            "feature_id": requirement["feature_id"],
+            "choice_id": requirement["choice_id"],
+            "selected_refs": options,
+        })
+    return answers
+
+
 def _advance_to(engine: Dnd2024AdvancementEngine, character: dict, level: int) -> dict:
     """Walk a cleric up to ``level``, answering only what each level asks."""
 
@@ -409,6 +442,9 @@ def _advance_to(engine: Dnd2024AdvancementEngine, character: dict, level: int) -
         preview = engine.preview_next_level(current)
         assert preview["ok"] is False or not preview["requirements"], preview
         choices: dict = {}
+        feature_choices = _feature_choice_answers(preview)
+        if feature_choices:
+            choices["feature_choices"] = feature_choices
         for requirement in preview["requirements"]:
             kind = requirement["id"]
             if kind == "subclass_ref":

@@ -1,0 +1,11 @@
+# GM 发起的手动掷骰请求（src/webui/services/manual_rolls.py）返回给请求方的提示。
+"zh-CN":
+  run_changed: "对局已更新，请刷新后重试"
+  targets_required: "至少选择一名玩家"
+  target_required: "检定用途必须填写目标值"
+  target_out_of_range: "目标值必须在 1 到 10000 之间"
+  operation_id_invalid: "operation_id 无效"
+  request_missing: "请求不存在或已过期"
+  not_allowed_to_roll: "无权投掷"
+  request_cancelled: "请求已取消"
+  request_already_resolved: "请求已完成，无法取消"

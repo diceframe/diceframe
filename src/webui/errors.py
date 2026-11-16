@@ -4,6 +4,9 @@
 - 后端存量错误消息保持中文原文（契约兼容），不逐处迁移；
 - 本模块维护「高频错误文案 → error_code」映射表，由 error_code_middleware
   在响应出口统一补 error_code 字段，前端按 locale 映射展示；
+- 请求的 Accept-Language 首选语言不是中文时，已登记错误码的 error 文案
+  同时换成 src/localization/locales/webui/errors.<语言>.yml 里的译文，没有内置
+  错误码表的客户端（移动端、机器人、第三方）也能拿到对应语言；
 - 未收录的错误不补码，前端回退显示 error 原文，保证任何错误都能正常显示。
 """
 
@@ -13,6 +16,9 @@ import json
 import logging
 
 from aiohttp import web
+
+from src.engine.language import DEFAULT_LANGUAGE
+from src.localization import messages
 
 logger = logging.getLogger("trpg")
 
@@ -93,6 +99,15 @@ ERROR_CODE_MAP: dict[str, str] = {
 }
 
 
+def _localized_error(code: str) -> str | None:
+    """按请求语言给出错误码的文案；中文请求或未登记时返回 None（保留原文）。"""
+    language = messages.request_language()
+    if not language or language == DEFAULT_LANGUAGE:
+        return None
+    key = f"webui.errors.{code}"
+    return messages.t(key) if messages.has(key) else None
+
+
 @web.middleware
 async def error_code_middleware(request: web.Request, handler) -> web.StreamResponse:
     """响应出口：为 4xx/5xx JSON 错误响应补充 error_code 字段。
@@ -116,12 +131,21 @@ async def error_code_middleware(request: web.Request, handler) -> web.StreamResp
         return response
     if not isinstance(data, dict) or not data.get("error"):
         return response
-    if data.get("error_code"):
-        return response
-    code = ERROR_CODE_MAP.get(str(data["error"]))
+    declared = str(data.get("error_code") or "")
+    code = declared or ERROR_CODE_MAP.get(str(data["error"]))
     if not code:
         return response
+    localized = _localized_error(code)
+    if declared and localized is None:
+        return response
     data["error_code"] = code
+    if localized is not None:
+        data["error"] = localized
+        # 响应内容随协商语言变化：告诉缓存，也告诉客户端实际用的语言。
+        response.headers["Content-Language"] = messages.request_language()
+        vary = [part.strip() for part in response.headers.get("Vary", "").split(",") if part.strip()]
+        if not any(part.lower() == "accept-language" for part in vary):
+            response.headers["Vary"] = ", ".join([*vary, "Accept-Language"])
     try:
         response.body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         response.headers["Content-Length"] = str(len(response.body))

@@ -1,0 +1,11 @@
+# src/plugin_host/support.py 返回给请求方的提示。
+"en":
+  adventure_module_catalog_only: "adventure-module must use content_delivery_mode: catalog (installation only registers the content library; content is materialized on demand at runtime)"
+  catalog_no_entrypoint: "A catalog content-only pack must not declare entrypoint; use an executable plugin type for program capabilities"
+  compatible_rulesets_empty_string: "%{compatible_rulesets_field} must not contain empty strings"
+  compatible_rulesets_entry_not_string: "%{compatible_rulesets_field} entries must be strings"
+  compatible_rulesets_not_array: "%{compatible_rulesets_field} must be an array"
+  compatible_rulesets_too_many: "%{compatible_rulesets_field} can have at most %{max_compatible_rulesets} entries"
+  content_profile_unsupported: "Unsupported content_profile: %{raw_profile}"
+  delivery_mode_unsupported: "Unsupported content_delivery_mode: %{raw_mode}"
+  system_agnostic_conflict: "system_agnostic: true and compatible_rulesets are mutually exclusive: a system-agnostic pack should not be limited to specific rules"

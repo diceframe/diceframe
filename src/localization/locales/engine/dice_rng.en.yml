@@ -1,0 +1,7 @@
+# src/engine/dice_rng.py 返回给请求方的提示。
+"en":
+  count_out_of_range: "The number of dice is out of range (1-%{max_dice_count}): %{formula}"
+  die_sides_out_of_range: "The number of sides is out of range (2-%{max_dice_sides}): d%{sides}"
+  formula_invalid: "Invalid dice formula: %{formula}"
+  modifier_out_of_range: "The dice modifier is out of range (±%{max_dice_modifier}): %{formula}"
+  sides_out_of_range: "The number of sides is out of range (2-%{max_dice_sides}): %{formula}"

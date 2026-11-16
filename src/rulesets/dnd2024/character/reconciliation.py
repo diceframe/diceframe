@@ -22,7 +22,12 @@ from typing import Any
 
 from .attunement import attuned_refs, attunement_capacity, owned_ref_counts
 from .attunement import attunement_state_for_projection, pending_attunement_refs
-from .derivation import derive_armor_class, derive_armor_training_state, derive_speed
+from .derivation import (
+    derive_armor_class,
+    derive_armor_training_state,
+    derive_movement_profile,
+    derive_speed,
+)
 from .primitives import ref_id as _ref_id
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.items.charges import initialize_item_state
@@ -439,6 +444,16 @@ class Dnd2024CharacterStateReconciler:
             if base_speed > 0
             else None
         )
+        # 攀爬/游泳速度是 Speed 的副本，跳跃距离只读属性：两者都没有独立来源，
+        # 因此与 Speed 同一入口重算。species 未知时 Speed 为 None，速度类派生
+        # 一律不写，避免把 Climb Speed 改写成 0。
+        movement = (
+            derive_movement_profile(
+                speed, canonical.get("abilities") or {}, features, canonical,
+            )
+            if speed is not None
+            else None
+        )
         # 旧档没有同调段：按空集处理，并在一次投影内补写规范化结构。
         migrated = "attunement" not in canonical
         if migrated:
@@ -479,6 +494,9 @@ class Dnd2024CharacterStateReconciler:
             and mirror_ac == armor_class
             and previous_training == armor_training
             and (speed is None or previous_speed == speed)
+            and (movement is None or all(
+                derived.get(key) == value for key, value in movement.items()
+            ))
             and previous_attuned == attuned
             and previous_slots == slots
             and previous_pending == pending
@@ -501,6 +519,8 @@ class Dnd2024CharacterStateReconciler:
                 # base once so a later reconciliation does not compound the
                 # already-applied feature bonus or armor penalty.
                 derived["speed_base"] = base_speed
+        if movement is not None:
+            derived.update(movement)
         derived["attuned_refs"] = attuned
         derived["attunement_slots"] = slots
         derived["attunement_pending"] = pending
@@ -580,6 +600,13 @@ class Dnd2024CharacterStateReconciler:
             if base_speed > 0
             else None
         )
+        movement = (
+            derive_movement_profile(
+                speed, canonical.get("abilities") or {}, features, canonical,
+            )
+            if speed is not None
+            else None
+        )
         migrated = "attunement" not in canonical
         if migrated:
             warnings.append(
@@ -591,6 +618,9 @@ class Dnd2024CharacterStateReconciler:
             and derived.get("armor_class") == armor_class
             and derived.get("armor_training") == armor_training
             and (speed is None or derived.get("speed") == speed)
+            and (movement is None or all(
+                derived.get(key) == value for key, value in movement.items()
+            ))
             and derived.get("attuned_refs") == attuned
             and derived.get("attunement_slots") == slots
             and derived.get("attunement_pending") == pending
@@ -604,6 +634,8 @@ class Dnd2024CharacterStateReconciler:
             derived["speed"] = speed
             if _base_speed(canonical, self.bundle) <= 0:
                 derived["speed_base"] = base_speed
+        if movement is not None:
+            derived.update(movement)
         derived["attuned_refs"] = attuned
         derived["attunement_slots"] = slots
         derived["attunement_pending"] = pending

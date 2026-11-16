@@ -1,0 +1,6 @@
+# src/engine/game_configuration.py 返回给请求方的提示。
+"en":
+  dice_reveal_invalid: "The dice reveal mode must be auto or click"
+  luck_timeout_range: "The Luck timeout must be between 0 and 3600 seconds (0 = disabled)"
+  reward_policy_fields_invalid: "Invalid reward policy (mode or auto_reward_cap is not valid)"
+  reward_policy_invalid: "Invalid reward policy"

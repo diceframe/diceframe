@@ -7,6 +7,7 @@ from dataclasses import replace
 import pytest
 
 from src.engine.modules import ruleset_runtime
+from src.rulesets.dnd2024.features.models import ClassFeatureError
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 from src.rulesets.events import stable_batch_id
@@ -249,6 +250,26 @@ def conditions_of(engine, instance, actor_id: str) -> dict:
     return engine._actor_view(instance, combat_state(instance), actor_id)["conditions"]
 
 
+def interception_of(check: dict) -> dict:
+    """The interception audit: which declaration, whose owner, which holder.
+
+    S0-E2 replaced the SP6-era bare feature-id string with the three-field
+    object the contract asks for (``{feature_id, owner, source_actor_id}``), so
+    a consumer can tell two identically named auras apart and name the creature
+    that actually supplied the immunity.  The assertions below therefore
+    compare the whole object instead of a short id.
+    """
+
+    return check["blocked_by_aura"]
+
+
+AURA_OF_DEVOTION = {
+    "feature_id": "aura_of_devotion",
+    "owner": "subclass:oath_of_devotion",
+    "source_actor_id": "player:gm",
+}
+
+
 # --- A1/A2: aura blocks an in-range ally, outside range it does not ---------
 
 def test_ally_inside_aura_is_immune_and_the_check_names_the_aura() -> None:
@@ -262,7 +283,7 @@ def test_ally_inside_aura_is_immune_and_the_check_names_the_aura() -> None:
         if event["type"] == "check.resolved" and event.get("kind") == "saving_throw"
     )
     assert check["success"] is False
-    assert check["blocked_by_aura"] == "aura_of_devotion"
+    assert interception_of(check) == AURA_OF_DEVOTION
     assert applied_of(events) is None
 
     apply_events(engine, instance, events)
@@ -303,7 +324,7 @@ def test_the_paladin_is_immune_too() -> None:
         if event["type"] == "check.resolved" and event.get("kind") == "saving_throw"
     )
     assert check["success"] is False
-    assert check["blocked_by_aura"] == "aura_of_devotion"
+    assert interception_of(check) == AURA_OF_DEVOTION
     assert applied_of(events) is None
 
     apply_events(engine, instance, events)
@@ -357,7 +378,7 @@ def test_aura_boundary_is_exactly_ten_feet() -> None:
         event for event in inside
         if event["type"] == "check.resolved" and event.get("kind") == "saving_throw"
     )
-    assert inside_check["blocked_by_aura"] == "aura_of_devotion"
+    assert interception_of(inside_check) == AURA_OF_DEVOTION
     assert applied_of(inside) is None
 
     place(instance, **{"player:ally": 11})
@@ -446,7 +467,24 @@ def test_color_spray_blinded_is_not_blocked_by_the_aura() -> None:
 
 # --- A9: two holders contribute one union -------------------------------
 
+def aura_source_for(engine, instance, actor_id: str) -> dict | None:
+    return engine._aura_condition_immunity_source(
+        instance, combat_state(instance),
+        engine._actor_view(instance, combat_state(instance), actor_id),
+        "charmed",
+    )
+
+
 def test_two_paladins_union_in_range() -> None:
+    """Either holder covers the target, and the audit names the one that did.
+
+    SP6 asked ``_aura_immune_conditions`` for a ``{condition: feature_id}``
+    map, which S0-E2 replaced with ``_aura_condition_immunity_source``: the
+    immunity rides on a named base aura, so the answer is one source object or
+    nothing.  The union property itself is unchanged and is now asserted by
+    which holder supplied the source, not merely that some aura exists.
+    """
+
     _runtime, engine, instance = new_combat(
         allies={"paladin2": "paladin", "target": "wizard"},
     )
@@ -454,42 +492,48 @@ def test_two_paladins_union_in_range() -> None:
         "player:gm": 20, "player:paladin2": 0, "player:target": 5,
         "enemy:goblin-1": 15,
     })
-    target = engine._actor_view(instance, combat_state(instance), "player:target")
-    assert engine._aura_immune_conditions(instance, combat_state(instance), target) == {
-        "charmed": "aura_of_devotion",
+    assert aura_source_for(engine, instance, "player:target") == {
+        **AURA_OF_DEVOTION, "source_actor_id": "player:paladin2",
     }
 
     place(instance, **{"player:gm": 0, "player:paladin2": 20})
-    target = engine._actor_view(instance, combat_state(instance), "player:target")
-    assert engine._aura_immune_conditions(instance, combat_state(instance), target) == {
-        "charmed": "aura_of_devotion",
-    }
+    assert aura_source_for(engine, instance, "player:target") == AURA_OF_DEVOTION
+
+    # 两边都不在 10 尺内时没有任何来源：真正的并集，不是"有一个就算"。
+    place(instance, **{"player:gm": 20, "player:paladin2": 40})
+    assert aura_source_for(engine, instance, "player:target") is None
 
 
 # --- A10: malformed declarations fail closed -----------------------------
 
 @pytest.mark.parametrize(
-    "overrides",
+    "feature_id, overrides",
     [
-        {"aura_range": 0},
-        {"aura_range": True},
-        {"aura_immune_conditions": "charmed"},
-        {"aura_immune_conditions": ["charmed", 1]},
+        ("aura_of_protection", {"aura_range_ft": 0}),
+        ("aura_of_protection", {"aura_range_ft": True}),
+        ("aura_of_devotion", {"aura_condition_immunities": "charmed"}),
+        ("aura_of_devotion", {"aura_condition_immunities": ["charmed", 1]}),
     ],
 )
-def test_malformed_aura_declarations_yield_no_immunity(monkeypatch, overrides) -> None:
-    _runtime, engine, instance = new_combat(allies={"ally": "wizard"})
-    place(instance, **{"player:gm": 0, "player:ally": 10, "enemy:goblin-1": 5})
+def test_malformed_aura_declarations_fail_closed(feature_id, overrides) -> None:
+    """A malformed aura never loads, so it can never silently grant nothing.
 
-    catalog = engine.features.catalog
-    definition = catalog.features["aura_of_devotion"]
+    SP6 patched the catalog at runtime and asserted the malformed declaration
+    yielded no immunity.  S0-E2 moved the whole shape check to the load
+    boundary (``_validate_aura_parameters``), which is strictly stronger: the
+    bundle is rejected instead of quietly projecting an aura that does nothing.
+    The four shapes are the same four, retargeted at the surviving keys --
+    ``aura_range``/``aura_immune_conditions`` no longer exist, so patching them
+    would prove nothing.
+    """
+
+    _runtime, engine, instance = new_combat(allies={"ally": "wizard"})
+    definition = engine.features.catalog.features_by_key[
+        ("class:paladin", feature_id) if feature_id == "aura_of_protection"
+        else ("subclass:oath_of_devotion", feature_id)
+    ]
     malformed = replace(
         definition, parameters={**definition.parameters, **overrides},
     )
-    monkeypatch.setattr(
-        engine.features, "catalog",
-        replace(catalog, features={**catalog.features, "aura_of_devotion": malformed}),
-    )
-
-    target = engine._actor_view(instance, combat_state(instance), "player:ally")
-    assert engine._aura_immune_conditions(instance, combat_state(instance), target) == {}
+    with pytest.raises(ClassFeatureError):
+        engine.features._validate_aura_parameters(malformed)
