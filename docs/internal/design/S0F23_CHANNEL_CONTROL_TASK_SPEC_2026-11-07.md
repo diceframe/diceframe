@@ -189,3 +189,140 @@ git status --short
 - 聚焦 / 回归 / 全量 / ruff / diff 输出：
 - RNG、重放、存档与装备证据：
 - 与契约的偏差及原因：
+
+## 11. 执行报告
+
+- 实际基线：`1e57c795`（S0-F22 执行报告提交），分支 `feat/dnd2024-s0f20-combat-start`
+- Python：`E:/Github/diceframe/.venv/Scripts/python.exe`（3.13）；ruff/mypy：`C:/Python314/Scripts/`（读 pyproject，锁 3.11）
+- 提交：本文件同批 commit（feat / test / docs 三段）
+
+### 11.1 Sacred Weapon：绑定、加值、类型与 guided 光照
+
+绑定写在**持有者的一个条件**上（`sacred_weapon`，字段 `weapon_ref / bonus / ability / damage_type_choices / expires_at_minute / bright_light_radius / dim_light_beyond / light_automation`），不是武器上的标记。匹配按 canonical ref：盟友手里那同一把 `item:longsword` 拿不到加值（`test_the_bonus_follows_the_ref_not_the_weapon_name`）。
+
+一次攻击内激活的事件顺序：
+
+```
+dnd2024.attack.spent
+dnd2024.class_resource.spent(resource_id="channel_divinity", amount=1, feature_id="sacred_weapon")
+condition.applied(condition="sacred_weapon", weapon_ref=..., bonus=..., expires_at_minute=...)
+check.resolved(modifier=...+bonus, sacred_weapon_bonus=bonus)
+```
+
+- 加值是攻击检定上的独立加成，先加进 `modifier`，再单独记一条 `sacred_weapon_bonus` 供对账；属性、熟练、武器骰都不改。
+- 激活那一掷本身吃到加值（`_sacred_weapon_bonus_value` 直读表，不读尚未落地的条件），所以"激活与首击同批"不会漏加。
+- 伤害类型：`sacred_weapon_damage="radiant"` 只改这次该武器的类型；`normal` 与省略都保留武器原类型，武器骰与 rider 不复制。
+- 期限走世界时钟（`expires_at_minute = 当前分钟 + 10`，reason `ten minutes passed`），与 Divine Sense 共用 `WORLD_CLOCK_DURATIONS`。
+- 脱手结束在 `character/reconciliation.py`：`_end_dropped_weapon_bindings` 读本次投影出的 carried refs，不在清单里就删条件；`reconcile` 返回值新增 `ended_weapon_bindings` 并参与幂等短路。重新拾回不恢复。
+- 光照只写事实：`bright_light_radius=20 / dim_light_beyond=20 / light_automation="guided"`，不参与 AC、攻击、Hide 与感知（`test_the_light_fields_are_recorded_as_guided_only`）。
+
+### 11.2 Smite of Protection：掩蔽是位置事实
+
+条件是挂在**圣武士本人**身上的一份 `smite_of_protection`（duration `actor_turn_start`），掩蔽半径借 `_projected_auras` 的 `aura_of_protection`（含 Aura Expansion），`cover_source_feature_id` 由数据声明，查询端不再硬编码光环名。
+
+- `engine._cover_record` 返回 `{armor_class_bonus, dex_save_bonus, sources}`，只对 `side == "party"` 求值；持有者失能 / 光环 inactive 时 `_projected_auras` 本来就不投影，掩蔽随之消失。
+- 接入点三处：武器攻击的 `target_ac`、法术攻击的 `target_ac`、豁免的 `_cover_save_bonus`（**只有 Dex**；其它属性返回 0）。三处都在事件里留 `cover_bonus` / `cover_sources`。
+- 走出灵光失去、走回（效果未到期）恢复；`test_half_cover_follows_the_aura_not_a_snapshot` 用同一份条件前后两次查询验证，没有任何快照。
+- 触发点是**真实 cast**：`triggered_spells._smite_of_protection_events` 在 `dnd2024.spell.cast` 之后调用，槽施法与免费 Paladin's Smite 都触发，拒绝命中法术决策不触发，也不扣 Channel。
+- 多个实例不叠加：同 id 条件覆盖；`_cover_record` 取最高并按先攻序打破平局。
+
+### 11.3 Abjure Foes：目标、豁免与三选一
+
+`abjure_foes` 是 Paladin 9 级特性，capability `cost = {action: 1, resources: [channel_divinity ×1]}`，`target_kind` 声明为 `creature`（SRD 原文是 "creatures you choose"，不是"敌人"）。
+
+- 目标数 `max(1, Cha mod)`：少选、多选、重复、超距、不可见、自己、死亡目标全部整批拒绝，零事件（`_validate_abjure_foes`）。
+- 每目标独立 Wis save 对 Paladin spell save DC；失败者获得 `frightened`，`duration="abjure_foes"`、`turns_remaining=10`、`ends_on_damage=true`、`turn_choice_limit=["move","action","bonus_action"]`。
+- 三选一的执行点 `validation._validate_turn_choice`：把意图翻译成"这次会花掉三项里的哪一项"（`_intent_choice`），再看别的两项是否已花掉；**同一种选择的重复交给常规预算**（第二刀、第二个附赠动作本来就会被经济拒绝）。
+- 移动的"已选"标记由 reducer 在 `dnd2024.position.changed` 且 `economy.actor_id == actor_id` 时写 `economy["moved"]=True` —— 被推开的第三方不会替谁花掉选择权。
+- **Action Surge 不能绕过**：`_choice_spent` 只看预算会把 surge 误读成"还没选过动作"，所以额外一条规则拦在 `_validate_turn_choice` 里（`action` 预算为 0 而 `surge_action` > 0 时拒绝，文案 `Action Surge cannot buy another`）。
+- 不是失能：反应预算与 `_reaction_eligible` 不受影响。
+- 免疫：`_condition_immunity_blocker` 在条件落地**之前**问，被免疫者连"只三选一"的限制都不留；拦截原因写回该次豁免（`blocked_condition` + `blocked_by_aura`）。
+- 结束：任意正数伤害（`ends_on_damage`，抗性减到 0 不算）、十个自己的回合、存档与重放同状态。
+
+### 11.4 Sear Undead 与 Turn 特例
+
+`sear_undead`（Cleric 5，owner `class:cleric`）不是独立动作：它是 Turn Undead 意图上的 `sear_undead: true`。
+
+- 骰数 `max(1, Wis mod)`，**整次使用只掷一次**，只打本次 Turn 豁免失败的目标；没人失败时一颗骰都不掷（不浪费 RNG，也不在骰迹里留无效果记录）。
+- 事件顺序：各目标 Turn save → 失败者的 `condition.applied` → Sear 的 `resource.changed`（`turn_effect_preserved=true`、`channel_effect="turn_undead"`、`feature_id="sear_undead"`）→ Turn 状态最终保留。reducer 的伤害扫描（`_end_damage_conditions`）读 `turn_effect_preserved` 跳过这一条，其它来源的正数伤害照常结束 Turn。
+- 伤害正常过抗性、HP、专注、击败与战斗结束（`_resist_damage` / `_concentration_events` / `_enemy_zero_hp_feature_events` / `dnd2024.combat.ended`）。
+- 治疗侧不介入：Disciple of Life / Blessed Healer / Supreme Healing 只写在两条治疗路径上，Sear 事件不带 `maximized`、不产生治疗事件（`test_sear_is_damage_and_no_healing_booster_touches_it`，5 级生命牧师）。
+
+### 11.5 改动文件对照白名单
+
+白名单 14 项中改动 10 项：class feature content、`combat/resolution.py`、`combat/triggered_spells.py`、`combat/engine.py`、`combat/reducer.py`、`combat/validation.py`、`character/reconciliation.py`、`runtime.py`、新建测试、本任务书。
+
+**白名单外改动 2 处**（都是该逻辑唯一产地，无替代）：
+
+| 文件 | 改动 | 理由 |
+|---|---|---|
+| `combat/primitives.py` | `SACRED_WEAPON_*` / `SMITE_OF_PROTECTION_*` / `ABJURE_FOES_DURATION` / `TURNS_SCOPED_DURATIONS` / `WORLD_CLOCK_DURATIONS` | 条件域常量被 resolution、engine、reconciliation 三方消费，双写会漂移 |
+| `features/models.py` | `ACTION_KINDS` 增加 `abjure_foes` | 闭集 fail-closed：不加这个 kind，capability 声明直接报未知动作 |
+
+白名单里的 `features/resolver.py`、`combat/check_modes.py`、`combat/view.py`、en/zh locale 未改：前两者已有 `feature_value` / `class_state` / 攻击源查询够用；`target_kind` 已随 capability 投影；四个 id 的本地化标签基线已存在（en 225 / zh-CN 225 条，逐项核对过）。
+
+### 11.6 测试 1–26 逐项结果
+
+| 编号 | 用例 | 结果 |
+|---|---|---|
+| 1 | `test_the_four_features_appear_only_at_their_own_level` + `test_the_subclass_features_need_the_subclass` + `test_abjure_foes_is_the_only_new_capability` | 通过（Paladin 2/3/5/8/9/14/15、Cleric 4/5；无子职即无 Devotion 两项） |
+| 2 | `test_sacred_weapon_is_activated_by_the_attack_that_uses_it` + `test_sacred_weapon_cannot_be_added_after_the_first_attack` + `test_a_dodge_cannot_smuggle_a_sacred_weapon_activation` + `test_sacred_weapon_needs_an_unspent_channel_use` | 通过 |
+| 3 | `test_only_a_melee_weapon_can_be_imbued` + `test_a_ranged_weapon_cannot_be_imbued` + `test_a_weapon_the_actor_does_not_carry_is_refused` + `test_a_thrown_melee_weapon_is_still_a_melee_weapon` + `test_the_bonus_follows_the_ref_not_the_weapon_name` | 通过（徒手 / 长弓拒绝、标枪可绑定、伪造 ref 无 attack profile、盟友同 ref 无加值） |
+| 4 | `test_sacred_weapon_is_activated_by_the_attack_that_uses_it`（Cha 15 → +2，同一条 `check.resolved` 里 `sacred_weapon_bonus=2`）+ `test_a_negative_charisma_still_grants_plus_one`（同角色同掷对比基线，+1）+ `test_a_miss_keeps_the_bond` | 通过 |
+| 5 | `test_a_hit_may_deal_radiant_instead_of_the_weapon_type` + `test_the_default_keeps_the_weapon_damage_type` + `test_the_damage_choice_needs_a_bond` | 通过 |
+| 6 | `test_recasting_ends_the_old_bond_before_the_new_one` + `test_dropping_the_weapon_ends_the_bond_and_picking_it_up_does_not` + `test_the_bond_lasts_ten_minutes` | 通过；"主动无动作结束"未做，见 §11.8 第 3 条 |
+| 7 | `test_the_light_fields_are_recorded_as_guided_only` | 通过（20/20/guided；AC 与 Hide 不受影响） |
+| 8 | `test_a_divine_smite_cast_opens_half_cover_without_a_channel_use` + `test_a_free_divine_smite_also_opens_half_cover` + `test_declining_the_smite_does_not_open_half_cover` | 通过 |
+| 9 | `test_half_cover_raises_the_ac_of_everyone_in_the_aura` + `test_half_cover_follows_the_aura_not_a_snapshot` + `test_an_incapacitated_paladin_grants_no_cover` | 通过（敌人在灵光内也拿不到；敌人攻击友方时 `target` 是抬高后的 AC） |
+| 10 | `test_half_cover_ends_at_the_start_of_the_next_turn` + `test_a_second_cast_leaves_one_instance_not_two` | 通过；"同回合刷新"不可达，见 §11.8 第 4 条 |
+| 11 | `test_abjure_foes_spends_one_channel_for_exactly_charisma_targets` | 通过（Cha +2 → 恰好 2 个，只扣一次 Channel、只花一个动作） |
+| 12 | `test_a_short_or_long_target_list_is_refused_whole` + `test_duplicate_and_out_of_range_targets_are_refused` + `test_an_unseen_target_is_refused` | 通过（零事件） |
+| 13 | `test_each_target_saves_on_its_own_against_the_paladin_dc` | 通过（同一掷序一个失败一个成功，DC = spell save DC，ability = wis） |
+| 14 | `test_the_frightened_carries_the_three_way_choice` + `test_moving_first_costs_the_action_and_the_bonus_action` + `test_acting_first_costs_the_move` + `test_a_bonus_action_first_costs_the_move` | 通过（含"先附赠动作后不能再移动"，用圣疗走 bonus_action 分支） |
+| 15 | `test_an_abjured_creature_can_still_react` + `test_action_surge_cannot_buy_a_second_choice` | 通过 |
+| 16 | `test_positive_damage_ends_it_and_zero_does_not` + `test_the_one_minute_runs_out_after_ten_of_its_own_turns` | 通过（另一目标不受影响；0 伤与抗性至 0 都不结束） |
+| 17 | `test_a_frightened_immune_creature_keeps_no_hidden_limit` | 通过（勇气灵光内的队友被拦截，`blocked_by_aura.feature_id="aura_of_courage"`；同批敌人照样带限制） |
+| 18 | `test_sear_rolls_one_d8_per_wisdom_modifier_and_hits_the_failed_undead`（Wis 16 → 3d8）+ `test_a_negative_wisdom_still_rolls_one_d8`（Wis 9 → 1d8） | 通过 |
+| 19 | `test_a_creature_that_saved_takes_no_sear_damage` + `test_without_sear_no_extra_die_is_rolled` | 通过（未选 Sear 只消耗 Turn 豁免那一颗 d20） |
+| 20 | `test_sear_does_not_end_the_turn_effect_but_later_damage_does` | 通过（Sear 后仍 Frightened+Incapacitated，随后 1 点其它伤害才结束） |
+| 21 | `test_sear_goes_through_resistance_and_can_be_halved_to_nothing` + `test_sear_can_finish_the_last_enemy` + `test_sear_is_damage_and_no_healing_booster_touches_it` | 通过（抗性减半、减半到 0 无事件、击败发 `dnd2024.combat.ended`） |
+| 22 | `test_sacred_weapon_and_abjure_share_one_channel_pool` | 通过；短休 +1 / 长休全恢复由 F22 的池用例与邻接回归覆盖 |
+| 23 | `test_a_batch_replays_to_the_same_state` | 通过（同一批重放得到相同 HP、条件与事件序列） |
+| 24 | `test_the_bond_and_the_cover_survive_a_save_and_load` | 通过（重新投影不重复扣费，脱手检测幂等） |
+| 25 | 邻接五份 183 passed | 通过 |
+| 26 | 全量 + ruff + mypy + `git diff --check` | 通过；feed 只多出白名单里的 `weapon_ref / sacred_weapon_bonus / bright_light_radius / dim_light_beyond / light_automation / cover_bonus / cover_sources` |
+
+测试文件 55 条（含参数化），全绿。
+
+### 11.7 门禁输出（真实命令）
+
+```
+pytest tests/rulesets/test_dnd2024_channel_control.py -q                       55 passed  (74.70s)
+pytest channel_healing + smite + paladin_auras + combat + live_equipment_reconciliation -q
+                                                                              183 passed (316.55s)
+pytest tests/rulesets -q -n 6 --dist loadfile                                 2350 passed / 0 failed (476.32s)
+ruff check src/ tests/rulesets/test_dnd2024_channel_control.py                All checks passed
+mypy（全仓）                                                                   no issues in 102 files
+git diff --check                                                              无输出
+```
+
+全量无既有基线失败（Windows 上那 18 条 docker launcher / 升级用例属 `tests/` 其它目录，不在 `tests/rulesets` 范围）。
+
+### 11.8 与契约的偏差及原因
+
+1. **`abjure_foes` 的 `target_kind` 从 `hostile` 改为 `creature`。** SRD 原文是 "a number of creatures equal to your Charisma modifier that you can see"，不是"敌人"；`_validate_abjure_foes` 按"活着的、可见的、60 尺内的、非自己"校验，本来就允许选中友方。声明与校验必须说同一句话，否则前端目标选择器会比服务端更窄。
+2. **Action Surge 的拦截放在 `_validate_turn_choice`，不是 `_choice_spent`。** 预算里 `surge_action` 与 `action` 是两栏，"已选过动作"用 `action < 1` 判定；把 surge 折进 `_choice_spent` 会把"还没行动、只有 surge"也判成已选过。单独的规则只在 `action` 为 0 而 `surge_action > 0` 时拒绝，文案直说 Action Surge 买不到第二个。
+3. **"主动无动作结束"未实现。** 契约 §4.1.6/矩阵 6 要求"无动作提前结束"，但引擎的意图闭集（`primitives.INTENT_TYPES`）里没有任何"结束自己身上效果"的入口，新增一种意图要改 `primitives.py`（白名单外）并牵动 validation/reducer/view 三处。本切片只落地三条真实存在的中止路径：再次激活、脱手、10 分钟到期。见 §11.9 第 1 条。
+4. **"再次施法刷新"改为跨回合验证"不叠加"。** Divine Smite 是附赠动作，且一回合只能消耗一个法术槽（既有规则 `only one spell slot can be expended on a turn`），所以同一回合里不可能有第二次圣斩；而 `smite_of_protection` 在持有者下一回合开始时到期，两段不会重叠。实际可观察的只有"第二次施法后仍是一份实例、+2 而不是 +4"（`test_a_second_cast_leaves_one_instance_not_two`）。
+5. **恐惧免疫只能在己方侧表达。** `_aura_condition_immunity_source` 与 `_passive_condition_immunity` 都以 `side == "party"` 为前提，敌人 stat block 没有 `condition_immunities` 栏位。所以矩阵 17 用"灵光内的队友 + 勇气灵光"验证：拦截原因写回该次豁免、目标身上不留隐藏限制；敌人（不在灵光受益方里）照常恐惧。
+6. **白名单外改了两个文件**（§11.5 表）：`combat/primitives.py` 与 `features/models.py`，都是闭集/常量的唯一产地。
+7. **顺手修了一个真实缺陷。** `_intent_choice` 初版把 `CapabilityCost.action` 当布尔（`capability.cost.bonus_action`），而它是槽位名字字符串（`action` / `bonus_action` / `reaction`）。任何被斥退恐惧的生物使用职业能力都会抛 `AttributeError`——只有 `test_a_bonus_action_first_costs_the_move` 走圣疗才现形。
+8. **"取最高掩蔽"目前只有一个来源。** `_cover_record` 按"单一最佳来源"返回，但基线还没有 Three-Quarters/Total Cover 之类的第二来源，所以"与更高掩蔽不叠加"只能靠代码形状保证，没有跨来源用例。
+
+### 11.9 未决事项（不得把非目标列为已实现）
+
+1. **没有"提前结束自身效果"的意图入口。** Sacred Weapon 的 "You can end this effect early (no action required)" 只能靠重施、脱手或到期三条路径终止。补齐需要新增一种意图（例如 `end_effect`），涉及 `primitives.py`、validation、reducer、view 与前端按钮，属独立切片。
+2. **敌人不能自带恐惧免疫。** 免疫查询只认己方侧（灵光或自身特性），SRD 里的"Frightened 免疫怪物"在本实现里表达不出来；矩阵 17 只能验证己方侧那条路径。
+3. **光照仍是 guided。** 20 尺 Bright / 20 尺 Dim 只写成可审计事实，不参与 AC、攻击、Hide、视野或感知；需要照明系统的切片来做自动判定。
+4. **三选一的映射里 `activate_item` 与反应法术没有 pipeline 用例。** `_intent_choice` 已把物品激活算作"选动作"、把 `Reaction` 施法算作"不占三选一"，但本切片的 fixture（Cleric / Paladin）没有可激活物品，也没有反应法术，这两条只有代码形状保证。
+5. **`smite_of_protection` 的掩蔽不随光环消失立即失效的窗口。** 条件挂在圣武士身上，光环因失能消失时查询自然返回 0，但条件本身要等到下一回合开始才移除；事件流里没有"因光环消失而移除掩蔽"的记录，只有查询结果变 0。
