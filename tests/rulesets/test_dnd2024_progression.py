@@ -176,7 +176,14 @@ def test_spellcaster_advancement_requires_level_appropriate_full_selection() -> 
         "spellbook_refs": [*initial["spellbook_refs"], "spell:shield", "spell:grease"],
     }
     level_two = engine.apply_next_level(
-        wizard, {"class_spell_choices": level_two_choices}
+        wizard, {
+            "class_spell_choices": level_two_choices,
+            # Wizard 2 gains Scholar; the level-up transaction requires an answer.
+            "feature_choices": [{
+                "owner": "class:wizard", "feature_id": "scholar",
+                "choice_id": "scholar_skill", "selected_refs": ["skill:arcana"],
+            }],
+        },
     )
 
     class_magic = level_two["spellcasting"]["class"]
