@@ -253,7 +253,7 @@ def test_intent_errors_and_labels_follow_game_language() -> None:
         assert refusal["error"] == MESSAGES["gm_only"][language]
         outputs[language] = engine.available_intents(instance, "p1")
         # 前置条件不满足时原样返回拒绝；结算阶段的校验失败则抛错。两者都跟随对局语言。
-        assert engine.resolve_intent(instance, {"type": "conflict.end"}, random.Random(1)) == {
+        assert engine.resolve_intent(instance, {"type": "conflict.end", "requester_is_gm": True}, random.Random(1)) == {
             "ok": False, "code": "NO_CONFLICT", "error": MESSAGES["no_conflict"][language],
         }
         with pytest.raises(ValueError) as error:

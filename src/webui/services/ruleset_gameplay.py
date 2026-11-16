@@ -531,6 +531,7 @@ async def submit_intent(
             "last_activity": session_stats.last_activity(instance),
             "log": deepcopy(instance.log),
             "round_number": progression_state.round_value(instance),
+            "plot_tracker": deepcopy(instance.plot_tracker),
         }
         # Only a first mark is undone if the transaction rolls back.
         marks_seat = (
@@ -565,7 +566,8 @@ async def submit_intent(
             if marks_seat:
                 module_hooks.run(module_hooks.SEAT_FORGOTTEN, instance, effective_requester)
             return _error("INTENT_REJECTED", str(exc))
-        except Exception:
+        except BaseException:
+            # Cancellation is a failed transaction too (including clock edits).
             instance.restore_ruleset_transaction(before)
             if marks_seat:
                 module_hooks.run(module_hooks.SEAT_FORGOTTEN, instance, effective_requester)

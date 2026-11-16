@@ -168,6 +168,7 @@ def defense_dl(rule: Any, target: dict[str, Any]) -> int | None:
 
 class FabulaUltimaCheckMechanic(CheckMechanic):
     dice_system = DICE_SYSTEM
+    rollback_sheet_fields = ("pending_check_bonus", "pending_check_bonus_reason")
     target_is_dc = True
 
     def descriptor(self) -> dict[str, Any]:

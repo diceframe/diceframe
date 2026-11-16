@@ -67,6 +67,9 @@ class CheckMechanic:
     dice_system: str = ""
     #: 规划器的 ``target`` 是否按 DC 语义处理（与 d20 共用渠道归一化与硬上限）。
     target_is_dc: bool = True
+    #: Transient sheet fields consumed/created by checks. Owners opt in; these
+    #: fields participate in abort and swipe without rolling back progression.
+    rollback_sheet_fields: tuple[str, ...] = ()
 
     def descriptor(self) -> dict[str, Any]:
         """规则模板未声明 ``check_mechanic`` 时的默认元数据。"""
@@ -153,6 +156,12 @@ def check_mechanic_for(dice_system: object) -> CheckMechanic | None:
     return _MECHANICS.get(str(dice_system or "").strip().lower())
 
 
+def rollback_sheet_fields() -> frozenset[str]:
+    """Fields declared by installed check mechanics, with no concrete imports."""
+    return frozenset(field for mechanic in _MECHANICS.values()
+                     for field in mechanic.rollback_sheet_fields)
+
+
 def registered_dice_systems() -> frozenset[str]:
     return frozenset(_MECHANICS)
 
@@ -179,6 +188,7 @@ __all__ = [
     "check_mechanic_for",
     "register_check_mechanic",
     "registered_dice_systems",
+    "rollback_sheet_fields",
     "request_dice_system",
     "supported_dice_systems",
 ]

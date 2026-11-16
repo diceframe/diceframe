@@ -2160,6 +2160,17 @@ Planner 只有在：
 
 ---
 
+### 骰制瞬时状态与成长分配
+
+注册的 `CheckMechanic` 可通过 `rollback_sheet_fields` 声明检定消费或生成的瞬时角色卡字段。
+`round_snapshots` 按声明保存字段存在性和值；abort / 历史回退恢复它们，swipe 仍复用原检定结果，
+恢复叙事前快照而不重新返还已消费的加值。旧快照缺少标记时不猜测补偿，通用层不导入具体规则包。
+
+声明式成长分配由 `engine.character_progress` 拥有，规则 intent 与 WebUI 成长事务共同使用；
+XP 升级结算负责发放资格，分配职业等级不重复增加角色等级或技能点。
+WebUI 成长 service 在 authority gate / 状态锁下复核 run、权限与判定期，候选状态校验后发布并保存，
+保存失败或取消恢复 before-image；命刻 intent 的 `plot_tracker` 同样参与宿主意图事务回滚。
+
 # 14. Manual Roll 子系统
 
 手动骰不是简单前端随机数。

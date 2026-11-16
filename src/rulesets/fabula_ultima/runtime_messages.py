@@ -135,7 +135,9 @@ MESSAGES: dict[str, dict[str, str]] = {
     "intent_rest": {"zh-CN": "休息", "en": "Rest"},
     "intent_fabula_spend": {"zh-CN": "消耗物语点", "en": "Spend a Fabula Point"},
     "intent_class_levelup": {"zh-CN": "提升职业等级", "en": "Level up a class"},
-    "gm_only": {"zh-CN": "只有 GM 可以发起冲突", "en": "Only the GM can start a conflict"},
+    "gm_only": {"zh-CN": "此操作仅限 GM", "en": "Only the GM can perform this operation"},
+    "invalid_player_actor": {"zh-CN": "无效的玩家角色", "en": "Invalid player actor"},
+    "actor_not_controlled": {"zh-CN": "请求者不控制该角色", "en": "Actor is not controlled by requester"},
     "conflict_already_active": {"zh-CN": "冲突已在进行中", "en": "A conflict is already in progress"},
     "no_conflict": {"zh-CN": "当前没有冲突", "en": "There is no active conflict"},
     "no_villain": {"zh-CN": "没有这个反派", "en": "There is no such villain"},
@@ -538,14 +540,9 @@ MESSAGES: dict[str, dict[str, str]] = {
         "zh-CN": "{actor} 完全恢复 HP/MP 并解除异常状态",
         "en": "{actor} fully recovers HP/MP and is cleared of status effects",
     },
-    "levelup_unknown_class": {
-        "zh-CN": "只能提升已有职业",
-        "en": "You can only level up a class you already have",
-    },
-    "levelup_mastered": {"zh-CN": "该职业已精通", "en": "That class is already mastered"},
     "levelup_done": {
-        "zh-CN": "{actor} 提升 {klass} 到 {level} 级，获得 1 技能点",
-        "en": "{actor} raises {klass} to level {level} and gains 1 skill point",
+        "zh-CN": "{actor} 分配职业等级：{klass} 达到 {level} 级",
+        "en": "{actor} allocates a class level: {klass} reaches level {level}",
     },
 
     # ------------------------------------------------------------------ 数据表校验

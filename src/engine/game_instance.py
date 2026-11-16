@@ -586,6 +586,8 @@ class GameInstance:
             restored_round = int(snapshot["round_number"])
         ruleset_runtime.restore_from_transaction(self, snapshot)
         self.players = copy.deepcopy(snapshot["players"])
+        if "plot_tracker" in snapshot:
+            self.plot_tracker = copy.deepcopy(snapshot["plot_tracker"])
         # The combat turn view is derived from the restored ruleset_state; the
         # snapshot's combat_* / initiative_* keys are informational only.
         if "scene" in snapshot and snapshot["scene"] is not None:

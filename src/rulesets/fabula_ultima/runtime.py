@@ -23,6 +23,7 @@ from src.adventures.graph_v2 import ADVENTURE_GRAPH_FORMAT_V2
 from src.rulesets.fabula_ultima.dice import fu_high_roll
 from src.engine.modules import adventure_runtime_state, ruleset_runtime
 from src.engine.game_state import GameState
+from src.engine.character_progress import assign_class_level
 from src.engine.player_control import control_mode as seat_control_mode
 from src.engine.player_control import is_ai_controlled
 from src.rulesets.contracts import RulesetCapabilities
@@ -58,7 +59,7 @@ STARTING_CURRENCY = 500
 
 #: 冲突的发起与行动者编排只归 GM；身份由 ``prepare_intent_submission`` 盖章。
 GM_ONLY_INTENTS = frozenset({
-    "conflict.start", "conflict.select_actor", "conflict.enemy_action", "conflict.ai_action",
+    "conflict.start", "conflict.end", "conflict.select_actor", "conflict.enemy_action", "conflict.ai_action",
 }) | gm_tools.GM_ONLY_TOOL_INTENTS
 
 
@@ -851,6 +852,12 @@ class FabulaUltimaRuntime(LegacyRulesetAdapter):
         # 服务端认定的身份，覆盖客户端可能自带的同名字段；validate_intent 据此
         # 拒绝非 GM 发起的冲突编排。
         prepared["requester_is_gm"] = bool(requester_is_gm)
+        prepared["submitted_by"] = requester_id
+        # Legacy GM uid is accepted only here, then discarded. Resource
+        # reducers use one canonical actor_id, never a client-selected alias.
+        legacy_uid = str(prepared.pop("uid", "") or "")
+        if requester_is_gm and not prepared.get("actor_id") and legacy_uid:
+            prepared["actor_id"] = f"player:{legacy_uid}"
         if not requester_is_gm and str(prepared.get("type") or "") in {
             "conflict.action", "fabula.spend", "levelup.class", "rest.take",
         }:
@@ -2379,8 +2386,18 @@ class FabulaUltimaRuntime(LegacyRulesetAdapter):
             summary.append(_text(instance, "villain_escalate", villain=villain['name'], tier=villain['tier'], fate=villain['fate']))
         return self._batch(kind, [{"kind": "log", "text": summary[-1]}], summary)
 
+    @staticmethod
+    def _resource_actor_uid(instance: Any, intent: dict[str, Any]) -> str:
+        actor = str(intent.get("actor_id") or "")
+        uid = actor.removeprefix("player:")
+        if not actor.startswith("player:") or uid not in instance.players:
+            raise ValueError(_text(instance, "invalid_player_actor"))
+        if not intent.get("requester_is_gm") and uid != str(intent.get("submitted_by") or ""):
+            raise ValueError(_text(instance, "actor_not_controlled"))
+        return uid
+
     def _resolve_fabula(self, instance: Any, intent: dict[str, Any]) -> dict[str, Any]:
-        uid = str(intent.get("uid") or intent.get("actor_id") or "").split(":")[-1]
+        uid = self._resource_actor_uid(instance, intent)
         sheet = instance.get_character_sheet(uid)
         points = int(sheet.get("fabula") or 0)
         if points <= 0:
@@ -2430,20 +2447,12 @@ class FabulaUltimaRuntime(LegacyRulesetAdapter):
         return self._batch("rest.take", [{"kind": "log", "text": _text(instance, "sentence_separator").join(summary)}], summary)
 
     def _resolve_levelup(self, instance: Any, intent: dict[str, Any]) -> dict[str, Any]:
-        uid = str(intent.get("uid") or intent.get("actor_id") or "").split(":")[-1]
+        uid = self._resource_actor_uid(instance, intent)
         klass = str(intent.get("class") or "")
-        sheet = instance.get_character_sheet(uid)
-        levels = dict(sheet.get("class_levels") or {})
-        if klass not in levels:
-            raise ValueError(_text(instance, "levelup_unknown_class"))
-        if int(levels[klass]) >= 10:
-            raise ValueError(_text(instance, "levelup_mastered"))
-        levels[klass] = int(levels[klass]) + 1
-        sheet["class_levels"] = levels
-        sheet["class"] = _class_label(levels)
-        sheet["level"] = int(sheet.get("level") or 5) + 1
-        sheet["skill_points"] = int(sheet.get("skill_points") or 0) + 1
-        instance.set_character_sheet(uid, sheet)
+        # XP settlement already grants level/skill points. This operation only
+        # allocates one pending class level, exactly like the growth route.
+        result = assign_class_level(instance, uid, klass, self._rule(instance))
+        levels = result["class_levels"]
         summary = [_text(instance, "levelup_done", actor=uid, klass=klass, level=levels[klass])]
         return self._batch("levelup.class", [{"kind": "log", "text": summary[0]}], summary)
 
