@@ -741,12 +741,13 @@ async def test_authoritative_intent_and_restart_recovery(tmp_path):
     assert reapplied["applied"] is True
     assert ruleset_runtime.state(restarted_instance)["version"] == 2
 
-    # 停电重放保护：确定性 request_id（batch:<id>）命中持久化收据缓存，
-    # 逐字返回首次响应、不二次执行——若真重执行，服务端 ledger 判重会
-    # 返回 replayed=True/applied=False，与首次响应不同。
+    # 宿主应用回执确认重放，但不能再次应用旧 post-image。
+    saved_after_apply = json.loads(json.dumps(ruleset_runtime.state(restarted_instance)))
+    ledger_after_apply = json.loads(json.dumps(ruleset_runtime.event_ledger(restarted_instance)))
     replayed = runtime2.apply_event_batch(restarted_instance, continued["event_batch"])
-    assert replayed == reapplied
-    assert ruleset_runtime.state(restarted_instance)["version"] == 2
+    assert replayed == {"ok": True, "applied": False, "replayed": True}
+    assert ruleset_runtime.state(restarted_instance) == saved_after_apply
+    assert ruleset_runtime.event_ledger(restarted_instance) == ledger_after_apply
     restarted_source.close()
 
 
