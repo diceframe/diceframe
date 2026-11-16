@@ -17,6 +17,14 @@ from ..character.attunement import (
     item_requires_attunement,
     owned_ref_counts,
 )
+from ..features.models import ClassFeatureError
+from ..features.resources import (
+    OVERCHANNEL_FEATURE_ID,
+    OVERCHANNEL_OWNER,
+    OVERCHANNEL_SPELL_CLASS,
+    feature_usage_count,
+    resource_state,
+)
 from ..items.activation import (
     ItemActivationError,
     validate_activation_declaration,
@@ -412,6 +420,9 @@ class CombatValidationMixin:
         has_unarmed_strike = any(
             action.kind == "unarmed_strike" for action in capability.actions
         )
+        has_bardic_grant = any(
+            action.kind == "bardic_grant" for action in capability.actions
+        )
         if has_unarmed_strike:
             # 复用 canonical 徒手打击校验：目标必须存活且敌对、射程由同一份
             # 攻击档案决定，Combat 不自己算命中/伤害。
@@ -419,6 +430,46 @@ class CombatValidationMixin:
                 "target_id": str(intent.get("target_id") or ""),
                 "weapon_ref": UNARMED_STRIKE_REF,
             }, actor)
+        elif has_bardic_grant:
+            # 授予目标是另一位、能看见或听见你、且在 60 尺内的友方活体，并且
+            # 对方此刻没有一枚未过期的骰。这些事实在校验期就能用同一组权威
+            # 状态判定，所以非法提交在这里得到结构化拒绝，而不是等到结算时
+            # 抛异常；resolution 仍会重验一遍（纵深防御，且它要写缩略视图）。
+            target_id = str(intent.get("target_id") or "")
+            target = self._actor_view(instance, combat, target_id)
+            if target_id == actor["actor_id"]:
+                raise CombatIntentError("you cannot grant Bardic Inspiration to yourself")
+            if str(target.get("side") or "") != str(actor.get("side") or "") or target["hp"] <= 0:
+                raise CombatIntentError("Bardic Inspiration targets a living ally")
+            range_ft = self.features.feature_value(
+                self._feature_character(actor), "bardic_inspiration", "range_ft", 0,
+            )
+            if not isinstance(range_ft, int) or range_ft <= 0:
+                raise CombatIntentError("no Bardic Inspiration range is declared")
+            self._require_range(combat, actor["actor_id"], target_id, range_ft)
+            # "can see or hear you"：现有状态词表里能同时切断两条通道的只有
+            # 隐身施予者 + 目盲承受者；deafened 未建模，因此不参与判定。
+            if (
+                "invisible" in (actor.get("conditions") or {})
+                and "blinded" in (target.get("conditions") or {})
+            ):
+                raise CombatIntentError("the target can neither see nor hear you")
+            if self._active_bardic_instance(instance, combat, target_id) is not None:
+                raise CombatIntentError("the target already holds a Bardic Inspiration die")
+        elif any(action.kind == "inspiration_slot_exchange" for action in capability.actions):
+            # Font 的槽换次数：必须有已消耗次数、且该法术位仍然可用。
+            character = self._canonical_actor(instance, actor)
+            pool = dict(resource_state(character, "bardic_inspiration"))
+            if int(pool.get("current", 0) or 0) >= int(pool.get("maximum", 0) or 0):
+                raise CombatIntentError("no expended Bardic Inspiration use to regain")
+            slot_level = intent.get("slot_level")
+            if isinstance(slot_level, bool) or not isinstance(slot_level, int) or slot_level < 1:
+                raise CombatIntentError("a spell slot level is required")
+            slots = dict(
+                ((character.get("spellcasting") or {}).get("class") or {}).get("slots_current") or {}
+            )
+            if int(slots.get(str(slot_level), 0) or 0) < 1:
+                raise CombatIntentError("the spell slot is already spent")
         elif capability.requires_hostile_target:
             target = self._actor_view(
                 instance, combat, str(intent.get("target_id") or ""),
@@ -718,21 +769,36 @@ class CombatValidationMixin:
                 raise CombatIntentError("spell resist_type choice is required")
         elif intent.get("resist_type") is not None:
             raise CombatIntentError("this spell does not take a resist_type")
-        maximize = intent.get("maximize_damage")
-        if maximize is not None and not isinstance(maximize, bool):
-            raise CombatIntentError("maximize_damage must be a boolean")
-        if maximize:
+        maximise = intent.get("overchannel")
+        if maximise is not None and not isinstance(maximise, bool):
+            raise CombatIntentError("overchannel must be a boolean")
+        if maximise:
             character = self._feature_character(actor)
-            max_slot = int(self.features.feature_value(
-                character, "overchannel", "max_slot_level", 5,
-            ) or 0)
-            if not self.features.has_feature(character, "overchannel") or max_slot < 1:
+            if not self.features.has_feature(
+                character, OVERCHANNEL_FEATURE_ID, owner=OVERCHANNEL_OWNER,
+            ):
                 raise CombatIntentError("overchannel is required to maximize damage")
+            # 列表归属来自官方目录的 `class_refs`；学派不是门槛。
+            if OVERCHANNEL_SPELL_CLASS not in spell["class_refs"]:
+                raise CombatIntentError("overchannel only applies to Wizard spells")
             if effect["mode"] not in {"spell_attack", "saving_throw", "automatic_damage"} \
                     or not effect.get("damage"):
                 raise CombatIntentError("this spell does not deal damage")
+            max_slot = int(self.features.feature_value(
+                character, OVERCHANNEL_FEATURE_ID, "maximum_slot_level", 0,
+                owner=OVERCHANNEL_OWNER,
+            ) or 0)
             if not 1 <= int(slot_level) <= max_slot:
-                raise CombatIntentError("maximized casting requires a spell slot of level 1-5")
+                raise CombatIntentError(
+                    f"maximized casting requires a spell slot of level 1-{max_slot}"
+                )
+            # 坏计数必须在这里炸掉，不能落成"首次免费"。
+            try:
+                feature_usage_count(
+                    character, OVERCHANNEL_OWNER, OVERCHANNEL_FEATURE_ID,
+                )
+            except ClassFeatureError as exc:
+                raise CombatIntentError(str(exc)) from exc
         if effect["mode"] == "teleport":
             distance = intent.get("teleport_distance")
             if isinstance(distance, bool) or not isinstance(distance, int) or distance == 0:

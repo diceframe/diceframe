@@ -1,0 +1,3 @@
+# src/engine/narrative_perspective.py 返回给请求方的提示。
+"zh-CN":
+  perspective_invalid: "叙事视角必须是 auto、immersive 或 third_person"

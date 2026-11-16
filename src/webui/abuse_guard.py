@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import math
+import os
 import re
 import time
 from collections import deque
@@ -25,6 +26,30 @@ WRITE_PER_IP_LIMIT = 60
 WRITE_PER_IP_WINDOW_SECONDS = 60
 WRITE_GLOBAL_LIMIT = 600
 WRITE_GLOBAL_WINDOW_SECONDS = 60
+WRITE_PER_IP_LIMIT_ENV = "DICEFRAME_ABUSE_WRITE_PER_IP_LIMIT"
+
+
+def write_per_ip_limit_from_env(default: int = WRITE_PER_IP_LIMIT) -> int:
+    """Per-IP write budget, overridable by the process that starts the server.
+
+    The default is what a single client may write per minute and it stays 60 for
+    every real deployment.  The browser smoke suite is the one caller that needs
+    more: it drives the whole UI from 127.0.0.1, so a suite that legitimately
+    writes 62 times inside one window trips a limit written for one abusive
+    client, and the 429 lands on whichever spec happens to be running — the
+    invite panel in ``peer-connect`` is the usual victim.  Raising the budget in
+    the harness is the only fix that does not either weaken production or teach
+    individual specs to retry their way around a real rejection.
+    """
+
+    raw = os.getenv(WRITE_PER_IP_LIMIT_ENV)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
 # 房间密码猜测：每个「IP + 规范化后的游戏」一个令牌桶。容量 5（前 5 次错误
 # 不受影响），之后每 30 秒回补 1 次机会——是减速而不是封锁：
 # - 每次尝试在进入处理器之前就先扣一个令牌（并发请求也会被计入），只有处理器

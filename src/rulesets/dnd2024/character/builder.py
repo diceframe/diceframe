@@ -10,7 +10,7 @@ from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 
 
-from .derivation import CharacterDerivationMixin
+from .derivation import CharacterDerivationMixin, plan_skill_choices
 from .primitives import (
     ABILITY_IDS,
     POINT_BUY_COSTS,
@@ -117,6 +117,7 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
         feat_choices = self._present_feat_choices(
             draft, class_entity=class_entity, species=species, background=background,
         )
+        skill_choices = self._present_skill_choices(draft, background, class_ref)
         return {
             "ability_methods": [
                 {
@@ -182,6 +183,7 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             ],
             "species_feat_count": int(species_feat_choice.get("count", 0) or 0),
             "feat_choices": feat_choices,
+            "skill_choices": skill_choices,
             "class_tools": [present(item, "tool") for item in class_tools],
             "class_tool_count": int(class_tool_choice.get("count", 0) or 0),
             "quick_presets": quick_presets,
@@ -295,6 +297,134 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
                 "automation_level": str(feat.get("automation_level") or "guided"),
                 "source_ref": str(feat.get("source_ref") or ""),
                 "specs": presented_specs,
+            })
+        return result
+
+    @staticmethod
+    def _skill_proficiency_refs(
+        draft: dict[str, Any], background: dict[str, Any] | None,
+    ) -> set[str]:
+        """Every skill proficiency the draft already has, from all four sources."""
+
+        return {
+            *((background or {}).get("skill_refs") or []),
+            *(draft.get("class_skill_refs") or []),
+            *(draft.get("species_skill_refs") or []),
+            *(
+                (draft.get("feat_choice_answers") or {}).get("feat:skilled", {}).get(
+                    "proficiencies"
+                ) or []
+            ),
+        }
+
+    def _skill_choice_proxy(self, draft: dict[str, Any], class_ref: str) -> dict[str, Any]:
+        """The minimal canonical shape a level-1 skill slot is owned through."""
+
+        level = draft.get("level", 1)
+        if isinstance(level, bool) or not isinstance(level, int):
+            level = 1
+        proxy: dict[str, Any] = {
+            "build": {"class_levels": [{"class_ref": class_ref, "level": level}]},
+        }
+        feature_state = draft.get("features")
+        if isinstance(feature_state, dict) and feature_state.get("subclass_ref"):
+            proxy["features"] = {"subclass_ref": str(feature_state["subclass_ref"])}
+        return proxy
+
+    def validate(self, draft: dict[str, Any]) -> list[str]:
+        """Draft validation plus the skill-choice slots of this slice.
+
+        The slot rules exist exactly once (``plan_skill_choices``).  Leaving them
+        out of ``validate`` would make the API boundary lie: the caller's
+        validation step would pass and ``derive`` would then raise, so the same
+        illegal slot would be "fine" or "fatal" depending on which entry point
+        was used.  Everything reported here is raised again by ``derive``.
+        """
+
+        # 不用零参 super()：这个类带 ``@dataclass(slots=True)``，dataclass 会
+        # 重建类对象，方法里的 ``__class__`` 单元仍指向重建前的那个类。在
+        # Python 3.11 上零参 super() 因此抛
+        # ``TypeError: super(type, obj): obj must be an instance or subtype of type``。
+        # 明写 mixin 名字可以绕开这个单元，行为与 MRO 顺序一致（两个 mixin 里
+        # 只有它定义了 validate）。
+        errors = CharacterValidationMixin.validate(self, draft)
+        if errors:
+            return errors
+        class_ref = str(draft.get("class_ref") or "")
+        if not class_ref:
+            return errors
+        background = self.bundle.get(
+            "background", str(draft.get("background_ref") or "").split(":", 1)[-1],
+        )
+        _records, choice_errors = plan_skill_choices(
+            draft.get("feature_choices"),
+            Dnd2024ClassFeatureResolver(self.bundle),
+            self._skill_choice_proxy(draft, class_ref),
+            self._skill_proficiency_refs(draft, background),
+            level=int(draft.get("level", 1) or 1),
+        )
+        return [*errors, *choice_errors]
+
+    def _present_skill_choices(
+        self,
+        draft: dict[str, Any],
+        background: dict[str, Any] | None,
+        class_ref: str,
+    ) -> list[dict[str, Any]]:
+        """The skill selections a level-1 build still has to answer.
+
+        Only a declaration the character owns at this level is projected, so a
+        Bard 2 Expertise slot never appears on a level-1 draft.  Every option in
+        the pool is listed and marked unavailable with a reason code instead of
+        being hidden, because "you cannot pick that yet" and "that does not
+        exist" are different answers to the player.
+
+        Availability is computed from the draft's own proficiencies, which is
+        what the commit path enforces.  Nothing here is authoritative: the
+        derive stage re-validates the same rules and refuses an illegal slot.
+        """
+
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        if not class_ref:
+            return []
+        proxy = self._skill_choice_proxy(draft, class_ref)
+        proficient = self._skill_proficiency_refs(draft, background)
+        chosen = {
+            str(ref)
+            for record in draft.get("feature_choices") or []
+            if isinstance(record, dict)
+            for ref in record.get("selected_refs") or []
+        }
+        result: list[dict[str, Any]] = []
+        for definition in features.features_for(proxy):
+            choice = definition.choice
+            if choice is None or choice.kind != "skill_proficiency":
+                continue
+            allowed = set(choice.enabled_options)
+            options: list[dict[str, Any]] = []
+            for skill in self.bundle.list("skill"):
+                ref = f"skill:{skill['id']}"
+                if allowed and ref not in allowed:
+                    continue
+                reasons: list[str] = []
+                if choice.requires_proficiency and ref not in proficient:
+                    reasons.append("not_proficient")
+                if choice.exclude_expertise and ref in chosen:
+                    reasons.append("already_expertise")
+                options.append({
+                    "value": ref,
+                    "name": str(skill.get("name") or _humanize_id(str(skill["id"]))),
+                    "source_ref": str(skill.get("source_ref") or ""),
+                    "available": not reasons,
+                    "unavailable_reasons": reasons,
+                })
+            result.append({
+                "owner": definition.owner,
+                "feature_id": definition.id,
+                "choice_id": choice.id,
+                "count": choice.count,
+                "grants": choice.grants,
+                "options": options,
             })
         return result
 

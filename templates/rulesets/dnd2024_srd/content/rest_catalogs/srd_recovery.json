@@ -56,7 +56,9 @@
     "ranger": [
       {"id": "favored_enemy", "minimum_level": 1, "maximum_track": "favored_enemy", "short": "none", "long": "all", "source_ref": "srd-5.2.1:p58:favored-enemy"}
     ],
-    "rogue": [],
+    "rogue": [
+      {"id": "stroke_of_luck", "minimum_level": 20, "maximum_fixed": 1, "short": "all", "long": "all", "source_ref": "srd-5.2.1:p63:stroke-of-luck"}
+    ],
     "sorcerer": [
       {"id": "innate_sorcery", "minimum_level": 1, "maximum_fixed": 2, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p65:innate-sorcery"},
       {"id": "sorcery_points", "minimum_level": 2, "maximum_track": "sorcery_points", "short": "none", "long": "all", "source_ref": "srd-5.2.1:p66:font-of-magic"}

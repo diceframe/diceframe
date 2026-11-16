@@ -347,7 +347,9 @@ def _combat(
     runtime: Dnd2024Runtime, sheet: dict, *, enemy_first: bool = False,
 ) -> tuple[object, object]:
     engine, instance = monk_instance(runtime, sheet)
-    rolls = [1, 20] if enemy_first else [20, 1]
+    # A Champion of this level owns remarkable_athlete, so the player's
+    # Initiative is rolled with Advantage: two d20s, keep the higher.
+    rolls = [1, 2, 20] if enemy_first else [20, 1]
     resolved = engine.resolve_intent(instance, {
         "intent_id": "start-1", "type": "combat.start", "expected_version": 0,
         "submitted_by": "gm", "enemies": [{

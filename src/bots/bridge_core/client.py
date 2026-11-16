@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import secrets
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode, urlparse, urlunparse
@@ -10,6 +13,24 @@ from urllib.parse import quote, urlencode, urlparse, urlunparse
 import aiohttp
 
 from src.bots.bridge_core.errors import DiceFrameHTTPError
+
+_request_language: ContextVar[str] = ContextVar("diceframe_bridge_request_language", default="")
+
+
+@contextmanager
+def request_language(language: object) -> Iterator[None]:
+    """Ask DiceFrame to answer the requests made inside this block in ``language``.
+
+    The bridge knows which language a conversation uses; sending it as the standard
+    ``Accept-Language`` header lets the server return its own messages (errors that end up
+    in the bot's reply) in that language instead of the default Chinese.
+    """
+
+    token = _request_language.set(str(language or "").strip())
+    try:
+        yield
+    finally:
+        _request_language.reset(token)
 
 
 class DiceFrameClient:
@@ -233,6 +254,9 @@ class DiceFrameClient:
             headers["X-Bot-Token"] = self.bot_token
         if actor:
             headers["X-Bot-Actor"] = actor
+        language = _request_language.get()
+        if language and "Accept-Language" not in headers:
+            headers["Accept-Language"] = language
 
         async with self._session.request(method, self.base_url + path, headers=headers, **kwargs) as response:
             try:
