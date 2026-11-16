@@ -18,6 +18,14 @@ INITIATIVE_CHOICES = frozenset({"uncanny_metabolism", "persistent_rage"})
 # 15 级持久狂怒的狂暴用这个 duration 记账：它不靠每回合续期维持，
 # 只被 Unconscious 与真实穿上重甲提前结束。
 PERSISTENT_RAGE_DURATION = "persistent_rage"
+# 18 级卓越防御：一条自带"除 Force 外全部抗性"的条件。它既不是 ``combat``
+# （战斗结束不等于一分钟到）也不是回合域（它按分钟计时），因此有自己的
+# duration，并靠 duration_minutes + 到期轮数两个上限之一结束。
+SUPERIOR_DEFENSE_CONDITION = "superior_defense"
+SUPERIOR_DEFENSE_DURATION = "superior_defense"
+# 回合开始窗口的关闭事件。窗口本身存在 economy 上（它不消耗任何经济，只是
+# "此刻允许支付"的记号），所以关闭它同样是一条事件，而不是某处直接改状态。
+TURN_WINDOW_CLOSED_EVENT = "dnd2024.turn_window.closed"
 
 
 def combat_turn_slots(combat: dict[str, Any]) -> list[dict[str, Any]]:

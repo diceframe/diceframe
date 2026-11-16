@@ -63,9 +63,15 @@ class CombatContext:
     action: int = 0
     bonus_action: int = 0
     reaction: int = 0
+    # 当前回合开始时开启的窗口是否属于正在评估的角色。窗口不花经济，所以
+    # 它是一个独立布尔而不是第四种"剩余次数"：跳过之后它由 combat 层关闭，
+    # 而不是被某种动作消耗。
+    turn_start: bool = False
 
     @classmethod
-    def from_economy(cls, economy: Mapping[str, Any] | None) -> CombatContext:
+    def from_economy(
+        cls, economy: Mapping[str, Any] | None, actor_id: str = "",
+    ) -> CombatContext:
         source: Mapping[str, Any] = economy if isinstance(economy, Mapping) else {}
 
         def budget(key: str) -> int:
@@ -74,10 +80,13 @@ class CombatContext:
                 return 0
             return max(0, value)
 
+        window = source.get("turn_start_window")
+        window = window if isinstance(window, Mapping) else {}
         return cls(
             action=budget("action"),
             bonus_action=budget("bonus_action"),
             reaction=budget("reaction"),
+            turn_start=bool(actor_id) and str(window.get("actor_id") or "") == actor_id,
         )
 
     def remaining(self, action: str) -> int:
@@ -95,6 +104,15 @@ def _cost_views(
     definitions: Mapping[str, ResourceDefinition],
 ) -> tuple[CapabilityCostView, ...]:
     views: list[CapabilityCostView] = []
+    if capability.cost.turn_start:
+        # 窗口本身就是这份成本的"剩余":1 表示还没被跳过也没被别的动作关掉。
+        views.append(CapabilityCostView(
+            kind="turn_start",
+            name=catalog.label("turn_start", "turn start"),
+            amount=1,
+            current=1 if context.turn_start else 0,
+            maximum=1,
+        ))
     if capability.cost.action:
         views.append(CapabilityCostView(
             kind=capability.cost.action,
@@ -134,6 +152,10 @@ def _blocked_reason(
     action = capability.cost.action
     if action and context.remaining(action) < 1:
         return f"the {action.replace('_', ' ')} has already been spent"
+    if capability.cost.turn_start and not context.turn_start:
+        # 窗口一旦被动作或跳过关掉，就不能回头再激活：这就是"at the start of
+        # your turn"的可执行含义。
+        return "the start of your turn has already passed"
     return ""
 
 

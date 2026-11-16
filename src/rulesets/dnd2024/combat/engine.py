@@ -27,6 +27,7 @@ from src.rulesets.dnd2024.features import (
     CombatCapabilityView,
     Dnd2024ClassFeatureResolver,
 )
+from src.rulesets.dnd2024.features.resources import resource_state
 from src.rulesets.dnd2024.items.activation import (
     ItemActivationError,
     validate_activation_declaration,
@@ -61,6 +62,7 @@ from .primitives import (
     INTENT_TYPES,
     PERSISTENT_RAGE_DURATION,
     RAGE_MAX_ROUNDS,
+    TURN_WINDOW_CLOSED_EVENT,
     UNARMED_STRIKE_REF,
     CombatIntentError,
     actor_kind as _actor_kind,
@@ -1035,6 +1037,16 @@ class Dnd2024CombatEngine(
         if pending is None:
             pending = next(({key: value for key, value in event.items() if key != "type"} for event in events
                             if event.get("type") == "dnd2024.decision.pending"), None)
+        # 回合开始窗口在读事件之前关闭：一旦这个回合干了别的事，"at the start
+        # of your turn" 就已经过去了，不能回头补。窗口属于经济预算，所以它是
+        # 一条事件而不是某个分支里顺手改的状态。
+        events.extend(self._turn_window_closure_events(combat, intent))
+        events.extend(self._incapacitation_cleanup_events(instance, combat, events))
+        # 世界时钟驱动的到期：一场在一分钟内结束的战斗会把效果留在身上，
+        # 只要之后还有任何战斗意图或时钟越过那一分钟就会被清掉。end_turn
+        # 由回合推进处统一查两个上限，这里不能重复发同一条移除事件。
+        if intent_type != "end_turn" and combat.get("initiative"):
+            events.extend(self._superior_defense_expiry_events(instance, combat))
         batch = {
             "batch_id": stable_batch_id(intent, expected),
             "intent_id": intent_id,
@@ -1045,6 +1057,80 @@ class Dnd2024CombatEngine(
             "source_ref": "srd-5.2.1:p24-p27:playing-the-game",
         }
         return {"ok": True, "event_batch": batch, "pending_decision": pending}
+
+    def _turn_window_closure_events(
+        self, combat: dict[str, Any], intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Close the turn-start window after anything but a chat message.
+
+        The rule is not "one free action then close": it is that the window
+        belongs to one instant of the turn.  So every intent the engine can
+        settle closes it, including the activation itself and ``end_turn`` --
+        an exclusion list only for messages, readiness pings, the start of the
+        combat (which is the intent that *opens* it) and its end.
+        """
+
+        window = (combat.get("economy") or {}).get("turn_start_window")
+        if not isinstance(window, dict):
+            return []
+        intent_type = str(intent.get("type") or "")
+        if intent_type in {
+            "combat.start", "combat.end", "combat.message",
+            "encounter.ready", "encounter.unready",
+        }:
+            return []
+        return [{
+            "type": TURN_WINDOW_CLOSED_EVENT,
+            "actor_id": str(window.get("actor_id") or ""),
+            "reason": intent_type,
+        }]
+
+    def _incapacitation_cleanup_events(
+        self, instance: Any, combat: dict[str, Any], events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """End effects whose own text says the Incapacitated condition ends them.
+
+        Superior Defense lasts "1 minute or until you have the Incapacitated
+        condition", and the condition can arrive from a Stunning Strike, a spell
+        or the environment.  Resolving it where the condition is *gained* would
+        mean a branch per source; resolving it once per batch from the merged
+        condition set means a new source needs no change here at all.
+
+        The metadata flag is on the effect, not on the class, so nothing in this
+        method names a feature.
+        """
+
+        applied: dict[str, set[str]] = {}
+        for event in events:
+            if event.get("type") != "condition.applied":
+                continue
+            target_id = str(event.get("target_id") or "")
+            if target_id:
+                applied.setdefault(target_id, set()).add(
+                    str(event.get("condition") or "")
+                )
+        cleanup: list[dict[str, Any]] = []
+        for actor_id, gained in applied.items():
+            try:
+                view = self._actor_view(instance, combat, actor_id)
+            except CombatIntentError:  # pragma: no cover - target came from an event
+                continue
+            conditions = dict(view.get("conditions") or {})
+            # 本批的新条件还没落地，必须并进来才看得到"刚刚被失能"这件事。
+            for condition_id in gained:
+                conditions.setdefault(condition_id, {})
+            if not condition_flags(self.catalog.conditions, conditions)["incapacitated"]:
+                continue
+            for condition_id, meta in (view.get("conditions") or {}).items():
+                if condition_id in gained:
+                    continue
+                if not isinstance(meta, dict) or not meta.get("ends_on_incapacitated"):
+                    continue
+                cleanup.append({
+                    "type": "condition.removed", "target_id": actor_id,
+                    "condition": condition_id, "reason": "incapacitated",
+                })
+        return cleanup
 
     def add_player_to_active_combat(self, instance: Any, user_id: str) -> dict[str, Any]:
         """Enroll a newly joined player after the current combat actor.
@@ -1451,11 +1537,51 @@ class Dnd2024CombatEngine(
         base = max(0, int(actor.get("speed", 0) or 0))
         # 速度修正来自条件注册表：speed_zero 压倒修正，其余按 speed_modifier 求和。
         speed = effective_speed(self.catalog.conditions, actor.get("conditions") or {}, base)
-        return {
+        economy = {
             "actor_id": actor["actor_id"], "action": 1, "bonus_action": 1,
             "reaction": 1, "movement": speed, "speed": speed,
             "attacks_remaining": 0, "disengaged": False,
         }
+        # 回合开始窗口属于这个回合，因此随经济预算一起生成、一起消失。
+        window = self._turn_start_window(actor)
+        if window is not None:
+            economy["turn_start_window"] = window
+        return economy
+
+    def _turn_start_window(self, actor: dict[str, Any]) -> dict[str, Any] | None:
+        """The turn-start payment window this actor is offered right now.
+
+        A window is opened only for a capability that *costs* the window: the
+        mechanism exists so that "at the start of your turn" can be a price,
+        not so every feature grows a free prompt.  When the resource cannot be
+        paid the window is not opened at all -- an unpayable button is noise,
+        and the capability's own cost check would refuse it anyway.
+
+        A capability with no declared action cost is the whole reason this is a
+        separate object: the window is neither an action nor a resource, so it
+        cannot be read off the economy's remaining budgets.
+        """
+
+        if actor.get("kind") not in {"player", "companion"}:
+            return None
+        character = self._feature_character(actor)
+        for definition in self.features.active_features_for(character):
+            for capability in definition.capabilities:
+                if not capability.cost.turn_start:
+                    continue
+                affordable = all(
+                    int(resource_state(character, cost.resource_id).get("current", 0) or 0)
+                    >= cost.amount
+                    for cost in capability.cost.resources
+                )
+                if not affordable:
+                    continue
+                return {
+                    "actor_id": str(actor["actor_id"]),
+                    "feature_id": definition.id,
+                    "capability_id": capability.id,
+                }
+        return None
 
     def _attacks_per_action(self, actor: dict[str, Any]) -> int:
         # Extra Attack 由职业表决定：progression 表说哪个职业在几级授予哪个

@@ -460,6 +460,7 @@ class CombatViewMixin:
             self._feature_character(actor),
             economy,
             include_unavailable=include_unavailable,
+            actor_id=str(actor.get("actor_id") or ""),
         )
 
     def _available_spells(

@@ -51,6 +51,8 @@ from .primitives import (
     INITIATIVE_CHOICES,
     PERSISTENT_RAGE_DURATION,
     RELENTLESS_RAGE_DECISION,
+    SUPERIOR_DEFENSE_CONDITION,
+    SUPERIOR_DEFENSE_DURATION,
     CombatIntentError,
     RAGE_MAX_ROUNDS,
     UNARMED_STRIKE_REF,
@@ -795,6 +797,12 @@ class CombatResolutionMixin:
                     str(kind) for kind in meta.get("resist_damage_types") or []
                     if isinstance(kind, str) and kind
                 )
+                # 排除式声明（Superior Defense 的"除 Force 外全部"）。它和枚举
+                # 写法互斥地放在同一处求值，仍然只有一次 return，所以多个来源
+                # 不会把伤害连除两次。
+                excepted = meta.get("resist_all_except")
+                if isinstance(excepted, list) and damage_type not in excepted:
+                    return amount // 2, condition_id
             if damage_type in types:
                 return amount // 2, condition_id
         if self._fiendish_resilience_type(target) == damage_type:
@@ -3628,23 +3636,52 @@ class CombatResolutionMixin:
                 dice = str(self.features.feature_value(
                     character, capability.feature_id, "heal_dice", "",
                 ) or "")
+                if dice == "martial_arts":
+                    # Wholeness of Body 掷的是"当前等级轨道的一个 Martial Arts
+                    # die"，不是固定骰：6/11/17 级分别是 d8/d10/d12，写成常量就
+                    # 会在升级后停在旧骰面上。
+                    dice = self.features.unarmed_strike_die(character)
                 bonus = int(self.features.feature_value(
                     character, capability.feature_id, "heal_bonus", 0,
                 ) or 0)
+                ability = str(self.features.feature_value(
+                    character, capability.feature_id, "heal_ability", "",
+                ) or "")
+                if ability:
+                    bonus += ability_modifier(
+                        int((actor.get("abilities") or {}).get(ability, 10) or 10)
+                    )
+                minimum = int(self.features.feature_value(
+                    character, capability.feature_id, "heal_minimum", 1,
+                ) or 1)
                 healing_node = formula_node_from_dice_formula(dice)
                 if bonus:
                     healing_node = {"op": "add", "args": [
                         healing_node, {"op": "constant", "value": bonus},
                     ]}
                 healing, rolls = roll_damage_node(healing_node, rng)
-                healing = max(1, healing)
+                # 最低值作用在"最终治疗量"上：Wis 为负时 roll+mod 可以是负数，
+                # 但它仍是一次成功的治疗，不能变成扣血。
+                healing = max(minimum, healing)
                 blocked = "cannot_regain_hp" in actor["conditions"]
                 events.append({
                     "type": "resource.changed", "resource": "hp", "target_id": actor_id,
                     "delta": 0 if blocked else healing, "amount": 0 if blocked else healing,
                     "healing": True, "rolls": rolls,
+                    "feature_id": capability.feature_id,
+                    "heal_die": dice, "heal_bonus": bonus,
                     **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
                 })
+            elif action.kind == "temp_hp":
+                events.extend(self._temp_hp_grant_events(
+                    actor, capability.feature_id, rng,
+                ))
+            elif action.kind == "invisible":
+                events.extend(self._self_invisible_events(actor, capability.feature_id))
+            elif action.kind == "resistance_all":
+                events.extend(self._resistance_all_events(
+                    instance, combat, actor, capability.feature_id,
+                ))
             elif action.kind == "rage":
                 # 狂暴不能维持专注：进入狂暴即结束正在维持的专注法术。
                 if actor.get("concentration"):
@@ -3717,6 +3754,118 @@ class CombatResolutionMixin:
             sheet = deepcopy(instance.get_character_sheet(uid))
             sheet["ruleset_character"] = canonical
             instance.set_character_sheet(uid, sheet)
+
+    def _temp_hp_grant_events(
+        self, actor: dict[str, Any], feature_id: str, rng: Any,
+    ) -> list[dict[str, Any]]:
+        """A self-only Temporary Hit Point grant paid by an action.
+
+        Tireless rolls its own die and adds the ability modifier.  The reducer
+        already owns the one rule that matters here -- keep the higher of the
+        old and the new pool, never touch Hit Points, Unconscious or stable --
+        so this method produces only the roll and the amount.  A lower result
+        therefore still costs the action and the charge, which is what the rule
+        says: the die was rolled, not negotiated.
+        """
+
+        character = self._feature_character(actor)
+        dice = str(self.features.feature_value(
+            character, feature_id, "temp_hp_dice", "",
+        ) or "")
+        ability = str(self.features.feature_value(
+            character, feature_id, "temp_hp_dice_ability", "",
+        ) or "")
+        minimum = int(self.features.feature_value(
+            character, feature_id, "temp_hp_dice_minimum", 1,
+        ) or 1)
+        node = formula_node_from_dice_formula(dice)
+        modifier = (
+            ability_modifier(int((actor.get("abilities") or {}).get(ability, 10) or 10))
+            if ability else 0
+        )
+        rolled, rolls = roll_damage_node(node, rng)
+        amount = max(minimum, rolled + modifier)
+        actor_id = str(actor["actor_id"])
+        return [{
+            "type": "resource.changed", "resource": "temp_hp",
+            "target_id": actor_id, "source_actor_id": actor_id,
+            "delta": amount, "amount": amount, "rolls": rolls,
+            "feature_id": feature_id, "ability": ability,
+            "ability_modifier": modifier, "rolled": rolled,
+        }]
+
+    def _self_invisible_events(
+        self, actor: dict[str, Any], feature_id: str,
+    ) -> list[dict[str, Any]]:
+        """Nature's Veil: Invisible until the end of the actor's next turn.
+
+        ``caster_next_turn_end`` with two ticks is exactly that span: the
+        actor's own turn end takes it to one, the next one takes it to zero.
+        Nothing else ends it -- attacking or being attacked does not, because
+        the SRD text grants a fixed span and the generic visibility rules
+        already answer who can see whom.  Re-applying writes the same
+        condition again rather than stacking a second one.
+        """
+
+        character = self._feature_character(actor)
+        condition = str(self.features.feature_value(
+            character, feature_id, "condition", "invisible",
+        ) or "invisible")
+        duration = str(self.features.feature_value(
+            character, feature_id, "condition_duration", "caster_next_turn_end",
+        ) or "caster_next_turn_end")
+        turns = int(self.features.feature_value(
+            character, feature_id, "condition_turns", 2,
+        ) or 2)
+        actor_id = str(actor["actor_id"])
+        return [{
+            "type": "condition.applied", "target_id": actor_id,
+            "condition": condition, "duration": duration,
+            "turns_remaining": turns, "source_actor_id": actor_id,
+            "feature_id": feature_id,
+        }]
+
+    def _resistance_all_events(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        feature_id: str,
+    ) -> list[dict[str, Any]]:
+        """Superior Defense: Resistance to every damage type except a named few.
+
+        The condition carries the *exclusion* instead of an enumerated list of
+        every type: a damage type added to the catalog later must be resisted by
+        default, and a copied list would silently be one entry short.  Both time
+        limits are recorded -- one real minute on the world clock and ten combat
+        rounds -- because a fight does not advance the clock and a rest does not
+        advance the round counter; whichever runs out first ends the effect.
+        """
+
+        character = self._feature_character(actor)
+        minutes = int(self.features.feature_value(
+            character, feature_id, "duration_minutes", 1,
+        ) or 1)
+        rounds = int(self.features.feature_value(
+            character, feature_id, "duration_rounds", 10,
+        ) or 10)
+        excepted = self.features.feature_value(
+            character, feature_id, "resist_all_except", ["force"],
+        ) or []
+        now = self._logical_minutes(instance)
+        actor_id = str(actor["actor_id"])
+        return [{
+            "type": "condition.applied", "target_id": actor_id,
+            "condition": SUPERIOR_DEFENSE_CONDITION,
+            "duration": SUPERIOR_DEFENSE_DURATION,
+            "duration_minutes": minutes, "duration_rounds": rounds,
+            "expires_at_minute": now + minutes,
+            "expires_at_round": int(combat.get("round", 1) or 1) + rounds,
+            "resist_all_except": [
+                str(kind) for kind in excepted if isinstance(kind, str) and kind
+            ],
+            "ends_on_incapacitated": bool(self.features.feature_value(
+                character, feature_id, "ends_on_incapacitated", False,
+            )),
+            "source_actor_id": actor_id, "feature_id": feature_id,
+        }]
 
     def _font_of_magic_events(
         self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],
@@ -4135,13 +4284,69 @@ class CombatResolutionMixin:
         next_round = int(combat["round"]) + wraps
         next_actor = str(slots[next_index]["actor_id"])
         next_view = self._actor_view(instance, combat, next_actor)
-        return [*events, {
-            "type": "dnd2024.turn.advanced", "round": next_round,
-            "turn_index": next_index, "actor_id": next_actor,
-            "slot_id": str(slots[next_index]["slot_id"]),
-            "previous_actor_id": str(previous_slot["actor_id"]),
-            "economy": self._fresh_economy(next_view),
-        }, *self._turn_start_events(next_view)]
+        return [
+            *events,
+            # 卓越防御按"一分钟"计时，不是按持有者的回合数：每当局势推进就
+            # 用两个上限各查一次，谁先到就结束谁。
+            *self._superior_defense_expiry_events(instance, combat, next_round),
+            {
+                "type": "dnd2024.turn.advanced", "round": next_round,
+                "turn_index": next_index, "actor_id": next_actor,
+                "slot_id": str(slots[next_index]["slot_id"]),
+                "previous_actor_id": str(previous_slot["actor_id"]),
+                "economy": self._fresh_economy(next_view),
+            },
+            *self._turn_start_events(next_view),
+        ]
+
+    def _superior_defense_expiry_events(
+        self, instance: Any, combat: dict[str, Any], round_number: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """End Superior Defense when either of its two limits has passed.
+
+        A combat round is six seconds, so ten rounds are one minute on the
+        battlefield; the world clock is the only thing that measures time
+        outside it.  Both limits are read and whichever expired first ends the
+        effect, so it never outlives its minute by hiding behind ``combat.ended``.
+
+        ``round_number`` is supplied only when a turn just advanced.  Every
+        combat intent sweeps the clock limit too, which is what removes a
+        leftover buff carried out of an earlier fight without inventing a
+        second expiry mechanism.  An actor whose view cannot be built any more
+        is simply skipped: it left the fight, and its conditions went with it.
+        """
+
+        now = self._logical_minutes(instance)
+        events: list[dict[str, Any]] = []
+        for actor_id in combat.get("initiative") or []:
+            identifier = str(actor_id)
+            try:
+                view = self._actor_view(instance, combat, identifier)
+            except CombatIntentError:
+                continue
+            condition = (view.get("conditions") or {}).get(SUPERIOR_DEFENSE_CONDITION)
+            if not isinstance(condition, dict):
+                continue
+            expires_round = condition.get("expires_at_round")
+            expired = (
+                round_number is not None
+                and isinstance(expires_round, int) and not isinstance(expires_round, bool)
+                and round_number > expires_round
+            )
+            if not expired:
+                expires_at = condition.get("expires_at_minute")
+                expired = (
+                    isinstance(expires_at, int) and not isinstance(expires_at, bool)
+                    and now >= expires_at
+                )
+            if not expired:
+                continue
+            events.append({
+                "type": "condition.removed", "target_id": identifier,
+                "condition": SUPERIOR_DEFENSE_CONDITION,
+                "reason": "one minute passed",
+            })
+        return events
 
     @staticmethod
     def _combat_slots(combat: dict[str, Any]) -> list[dict[str, Any]]:

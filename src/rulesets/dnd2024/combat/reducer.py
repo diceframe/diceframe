@@ -320,6 +320,16 @@ class CombatReducerMixin:
                     raise EventBatchError(f"economy grant flag is unknown: {key}")
                 economy[str(key)] = value
             return
+        if event_type == "dnd2024.turn_window.closed":
+            # 窗口是"此刻允许支付"的记号，关掉它是幂等的：重复关闭、或在
+            # 已经换了行动者的经济上关闭，都不能顺手改别的字段。
+            economy = combat.get("economy") or {}
+            window = economy.get("turn_start_window")
+            if isinstance(window, dict) and str(window.get("actor_id") or "") == str(
+                event.get("actor_id") or ""
+            ):
+                economy.pop("turn_start_window", None)
+            return
         if event_type == "dnd2024.feature.used":
             # 「每回合一次」按真实攻击者 + 具体回合（round + turn_index）记账。
             # 借机攻击发生在别人的回合，因此不能读当前行动者的 economy。

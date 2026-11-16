@@ -31,8 +31,15 @@ ACTION_KINDS = frozenset({
     # Font of Magic 的两个方向是两条独立动作：槽换点不要动作、点换槽要附赠
     # 动作，合成一个 kind 就只能靠 intent 里的字段猜哪一半被声明了。
     "font_slot_to_points", "font_create_slot",
+    # 自身增益类：临时生命值、只作用于自己的隐形、以及"除某一伤害类型外
+    # 全部抗性"。三者都不产生攻击或移动，但都必须走同一套资源/经济结算，
+    # 所以作为封闭 kind 声明而不是让客户端拼事件。
+    "temp_hp", "invisible", "resistance_all",
 })
 ACTION_COST_KINDS = ("bonus_action", "action")
+# 回合开始窗口的支付键。与动作成本互斥：一个能力要么花动作，要么只在自己
+# 回合开始时花资源 —— 两者同时声明会让"这个能力到底占不占动作"没有唯一答案。
+TURN_START_COST_KEY = "turn_start"
 # 装备前提里可声明的武器类别；同样 fail closed。``simple_melee`` 是 SRD 的
 # Simple Melee 武器栏，``martial_melee_light`` 是带 Light 的 Martial Melee 武器。
 WEAPON_KINDS = frozenset({"simple_melee", "martial_melee_light"})
@@ -152,10 +159,20 @@ class ResourceCost:
 
 @dataclass(frozen=True, slots=True)
 class CapabilityCost:
-    """The action-economy and resource price of one capability."""
+    """The action-economy and resource price of one capability.
+
+    ``turn_start`` is a third kind of price next to the two action slots: the
+    capability can only be paid inside the window that opened when the actor's
+    own turn began, and it consumes no action, Bonus Action or Reaction.
+    Superior Defense is written that way -- "at the start of your turn" is a
+    timing restriction, not a cheaper action -- so it cannot be expressed as
+    ``action="action"`` without inventing a free action, nor left unpriced
+    without becoming usable at any moment of the turn.
+    """
 
     action: str = ""
     resources: tuple[ResourceCost, ...] = ()
+    turn_start: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -703,6 +720,22 @@ class Dnd2024ClassFeatureCatalog:
             if _require_positive_int(raw_cost[action_kind], f"{capability_id}.{action_kind}") != 1:
                 raise ClassFeatureError(f"{capability_id}.{action_kind} must be 1")
             action = action_kind
+        turn_start = TURN_START_COST_KEY in raw_cost
+        if turn_start:
+            if raw_cost[TURN_START_COST_KEY] is not True:
+                raise ClassFeatureError(
+                    f"{capability_id}.{TURN_START_COST_KEY} must be true"
+                )
+            if action:
+                raise ClassFeatureError(
+                    f"{capability_id} cannot cost an action and a turn-start window at once"
+                )
+            if not (raw_cost.get("resources") or []):
+                # 既不要动作也不要资源，等于一个任意时刻可用的免费能力：
+                # "只能在回合开始支付" 就失去意义，必须当成声明错误。
+                raise ClassFeatureError(
+                    f"{capability_id} turn-start capability must cost a resource"
+                )
         raw_resources = raw_cost.get("resources") or []
         if not isinstance(raw_resources, list):
             raise ClassFeatureError(f"{capability_id}.cost.resources must be an array")
@@ -752,7 +785,9 @@ class Dnd2024ClassFeatureCatalog:
         return FeatureCapability(
             id=capability_id,
             feature_id=feature_id,
-            cost=CapabilityCost(action=action, resources=tuple(resources)),
+            cost=CapabilityCost(
+                action=action, resources=tuple(resources), turn_start=turn_start,
+            ),
             requires_hostile_target=bool(raw.get("requires_hostile_target")),
             actions=tuple(actions),
             requires_condition=requires_condition or None,

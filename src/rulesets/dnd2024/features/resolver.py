@@ -1573,6 +1573,7 @@ class Dnd2024ClassFeatureResolver:
         combat_context: Mapping[str, Any] | None = None,
         *,
         include_unavailable: bool = False,
+        actor_id: str = "",
     ) -> tuple[CombatCapabilityView, ...]:
         """Capabilities the character may declare in the given combat context.
 
@@ -1580,6 +1581,12 @@ class Dnd2024ClassFeatureResolver:
         capabilities: Bonus Unarmed Strike is a Martial Arts benefit and must
         disappear with it, while the Focus actions (a different class feature)
         stay available.
+
+        ``actor_id`` scopes the turn-start window.  The window lives on the
+        combat economy, which is one object for the whole table, so a
+        capability that may only be paid "at the start of your turn" has to be
+        matched against the actor being evaluated -- otherwise every monk would
+        see the window the current actor's turn just opened.
         """
 
         active = self.active_features_for(character)
@@ -1589,7 +1596,7 @@ class Dnd2024ClassFeatureResolver:
         return _project_capabilities(
             self.catalog,
             active,
-            CombatContext.from_economy(combat_context),
+            CombatContext.from_economy(combat_context, actor_id),
             definitions,
             include_unavailable=include_unavailable,
         )
