@@ -320,6 +320,70 @@ async def api_live_character_rest_options(request: web.Request) -> web.Response:
     return web.json_response(result, status=status)
 
 
+async def api_live_character_ritual(request: web.Request) -> web.Response:
+    """Perform a timed ritual; the rite spends its own minutes on the clock."""
+
+    gk = request.match_info["game_key"]
+    uid = request.match_info["user_id"]
+    api = _get_api(request)
+    inst = api.get_game_instance(gk)
+    if not inst:
+        return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
+    if not can_modify_character(
+        request.get("user_id", ""),
+        uid,
+        inst.gm_uid,
+        owner=bool(request.get("owner_authenticated", False)),
+    ):
+        return web.json_response(
+            {"ok": False, "error": "无权修改他人角色卡"}, status=403
+        )
+    payload = await request.json()
+    result = await api.ruleset_ritual_resolve_live(gk, uid, payload)
+    await _broadcast_ruleset_change(request, gk, result)
+    code = str(result.get("code") or "")
+    status = (
+        200
+        if result.get("ok")
+        else 404
+        if code in {"GAME_NOT_FOUND", "CHARACTER_NOT_FOUND"}
+        else 409
+        if code in {"STALE_CHARACTER_REVISION", "REWRITE_IN_PROGRESS", "STALE_RUN"}
+        else 422
+    )
+    return web.json_response(result, status=status)
+
+
+async def api_live_character_ritual_options(request: web.Request) -> web.Response:
+    """Read the rituals this character could perform, without performing one."""
+
+    gk = request.match_info["game_key"]
+    uid = request.match_info["user_id"]
+    api = _get_api(request)
+    inst = api.get_game_instance(gk)
+    if not inst:
+        return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
+    if not can_modify_character(
+        request.get("user_id", ""),
+        uid,
+        inst.gm_uid,
+        owner=bool(request.get("owner_authenticated", False)),
+    ):
+        return web.json_response(
+            {"ok": False, "error": "无权查看他人角色卡的仪式选项"}, status=403
+        )
+    result = api.ruleset_ritual_options(gk, uid)
+    code = str(result.get("code") or "")
+    status = (
+        200
+        if result.get("ok")
+        else 404
+        if code in {"GAME_NOT_FOUND", "CHARACTER_NOT_FOUND", "RULE_NOT_FOUND"}
+        else 422
+    )
+    return web.json_response(result, status=status)
+
+
 async def api_game_rest_decide(request: web.Request) -> web.Response:
     """DM verdict on a party rest that is waiting for approval.
 

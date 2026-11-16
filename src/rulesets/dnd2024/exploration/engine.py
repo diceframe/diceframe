@@ -59,6 +59,7 @@ from src.rulesets.dnd2024.spells.casting import (
     spellcasting_projection,
 )
 from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
+from src.rulesets.dnd2024.spells.font_of_magic import font_slots
 from src.rulesets.dnd2024.spells.feat_spells import concentration_holder
 from src.rulesets.dnd2024.treasure import (
     Dnd2024TreasureCatalog,
@@ -235,10 +236,14 @@ class Dnd2024ExplorationEngine:
                 ]
                 if int(spell["level"]) > 0 else [0]
             )
-            if int(spell["level"]) > 0 and free_cast_resource(
-                casting, spell_ref, int(spell["level"]),
-            ) is not None:
-                available_slots.insert(0, 0)
+            if int(spell["level"]) > 0:
+                # Font of Magic 造的临时槽在普通槽表之外，但施法时是真槽。
+                for level, count in casting["font_slots"].items():
+                    if int(count) > 0 and int(level) >= int(spell["level"]):
+                        available_slots.append(int(level))
+                available_slots = sorted(set(available_slots))
+                if free_cast_resource(casting, spell_ref, int(spell["level"])) is not None:
+                    available_slots.insert(0, 0)
             if int(spell["level"]) > 0 and not available_slots:
                 continue
             spells.append({
@@ -374,7 +379,8 @@ class Dnd2024ExplorationEngine:
         else:
             if slot_level < spell["level"]:
                 raise ExplorationIntentError("slot_level is lower than the spell level")
-            if int(slots.get(str(slot_level), 0) or 0) < 1:
+            if int(slots.get(str(slot_level), 0) or 0) < 1 \
+                    and int(font_slots(canonical).get(str(slot_level), 0) or 0) < 1:
                 raise ExplorationIntentError("the selected spell slot is not available")
         effect = self.catalog.spell_effects.get(spell_ref.removeprefix("spell:"))
         target_values = intent.get("target_ids")
@@ -661,11 +667,6 @@ class Dnd2024ExplorationEngine:
                     "delta": healing, "amount": healing, "healing": True, "rolls": rolls,
                     "hp_after": min(maximum, before + healing),
                 })
-                conditions = target_canonical.setdefault("conditions", {})
-                if healing > 0:
-                    conditions.pop("unconscious", None)
-                    conditions.pop("stable", None)
-                    conditions["death_saves"] = {"successes": 0, "failures": 0}
             elif mode == "buff":
                 condition = str(effect.get("condition") or "")
                 if condition:
@@ -875,6 +876,24 @@ class Dnd2024ExplorationEngine:
                 raise EventBatchError("spell slot is already spent")
             slots[level] -= 1
             return
+        if event_type == "dnd2024.spell.font_slot_spent":
+            kind, raw_id = str(event["actor_id"]).split(":", 1)
+            if kind != "player":
+                raise EventBatchError("exploration casting is player-only")
+            stored = snapshot["characters"][raw_id]["spellcasting"]["class"].get(
+                "font_slots"
+            )
+            if not isinstance(stored, dict):
+                raise EventBatchError("font slots are not initialized")
+            level = str(event["slot_level"])
+            remaining = stored.get(level)
+            if not isinstance(remaining, int) or isinstance(remaining, bool) or remaining < 1:
+                raise EventBatchError("temporary spell slot is already spent")
+            if remaining == 1:
+                stored.pop(level)
+            else:
+                stored[level] = remaining - 1
+            return
         if event_type == "dnd2024.concentration.started":
             kind, raw_id = str(event["actor_id"]).split(":", 1)
             canonical = (
@@ -1025,7 +1044,7 @@ class Dnd2024ExplorationEngine:
         before = int(resources.get("hp", 0) or 0)
         maximum = int(resources.get("max_hp", 0) or 0)
         resources["hp"] = max(0, min(maximum, before + int(event["delta"])))
-        if kind == "player" and resources["hp"] > 0:
+        if resources["hp"] > 0:
             conditions = character.setdefault("conditions", {})
             conditions.pop("unconscious", None)
             conditions.pop("stable", None)

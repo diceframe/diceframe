@@ -3691,7 +3691,7 @@ available_intents
 
 返回该 intent 时才显示。
 
-探索与战斗通过 `spells/casting.py` 共用 effective known/prepared、始终准备授予、免费来源优先级、资源事件和 canonical 消费；战斗动作经济仍由 combat 拥有。无限槽优先于有限次数，`slot_level=0` 选择合法免费来源，显式正环阶仍消耗普通法术位；探索继续拒绝非探索安全的确定性效果。
+探索与战斗通过 `spells/casting.py` 共用 effective known/prepared、始终准备授予、免费来源优先级、资源事件和 canonical 消费；战斗动作经济仍由 combat 拥有。无限槽优先于有限次数，`slot_level=0` 选择合法免费来源，显式正环阶消耗付费法术位：同环阶优先使用 Font 临时槽，再使用普通槽，一次施法只扣一个来源且不消耗免费次数；Font 槽保持独立投影，不并入普通槽或免费来源。探索继续拒绝非探索安全的确定性效果。
 
 法术精通长休研究通过 runtime 声明的 `free_cast` 休息选项接入正式 service → runtime → resting 链路，队伍提交前进行非变更校验；短休不能替换法术。
 

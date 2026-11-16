@@ -9,14 +9,13 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from src.engine import module_hooks
+from src.engine.modules import game_config
 from src.engine.staged_transaction import StagedGameTransaction
-from src.engine.modules import game_config, progression_state
 from src.engine.modules import ruleset_runtime
-from src.engine.world.memory_projection import queue_world_memory
-from src.engine.world_events import MAX_ADVANCE_MINUTES, advance_world_time
 from src.engine.world_state import clock_to_minutes, world_clock
 from src.webui.ruleset_draft_validation import validate_draft_shape
 from src.webui.ruleset_rest_projection import public_rest_session, saved_rest_session
+from src.webui.services.world_time import advance_game_time
 
 if TYPE_CHECKING:
     from src.rulesets.registry import RulesetRuntimeRegistry
@@ -211,27 +210,17 @@ def _rest_duration(runtime: Any, rest: str) -> int:
 def _advance_rest_time(
     dependencies: "LiveRulesetRestDependencies", instance: Any, minutes: int,
 ) -> None:
-    """Move the world clock in bounded steps and let the rest of the world follow.
+    """Move the world clock and let Adventure gates and memory follow.
 
     The clock is a world op: it settles due events and processes in the same
     commit. Adventure gates and assistant memory are downstream consumers and
     would otherwise never see the time pass.
     """
 
-    remaining = max(0, int(minutes))
-    while remaining:
-        step = min(remaining, MAX_ADVANCE_MINUTES)
-        outcome = advance_world_time(
-            instance, step,
-            source_round=progression_state.round_value(instance),
-        )
-        if dependencies.advance_adventure_world is not None:
-            dependencies.advance_adventure_world(instance)
-        queue_world_memory(
-            instance, outcome.get("events") or [],
-            round_number=progression_state.round_value(instance),
-        )
-        remaining -= step
+    advance_game_time(
+        instance, minutes,
+        advance_adventure_world=dependencies.advance_adventure_world,
+    )
 
 
 def _validate_hit_dice_counts(character: dict[str, Any], requested: Any) -> dict[str, int]:

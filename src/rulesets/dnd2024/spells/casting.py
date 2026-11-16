@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 
 from .feat_spells import feat_spell_grants, spend_feat_free_cast
+from .font_of_magic import font_slots
 
 
 def spellcasting_projection(
@@ -37,6 +38,7 @@ def spellcasting_projection(
     grants = [*projected["spell_grants"], *feat_spell_grants(character)]
     slots = features.free_cast_slots(character)
     return {
+        "font_slots": font_slots(character),
         "class_spell_refs": class_refs,
         "spell_refs": list(
             dict.fromkeys(
@@ -146,6 +148,18 @@ def spell_cost_events(
         return []
     actor_id = actor["actor_id"]
     if slot_level > 0:
+        # Created slots are real paid slots, never a free-cast source. Prefer
+        # them at the requested level, emitting exactly one resource spend.
+        if int((actor.get("font_slots") or {}).get(str(slot_level), 0) or 0) > 0:
+            return [
+                {
+                    "type": "dnd2024.spell.font_slot_spent",
+                    "actor_id": actor_id,
+                    "slot_level": slot_level,
+                    "amount": 1,
+                    "source": "font_of_magic",
+                }
+            ]
         return [
             {
                 "type": "dnd2024.spell.slot_spent",

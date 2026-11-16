@@ -356,7 +356,9 @@ async def test_a_failed_time_advance_rolls_the_whole_party_back(
     def _boom(*_args, **_kwargs):
         raise ValueError("clock refused to move")
 
-    monkeypatch.setattr(ruleset_rest, "advance_world_time", _boom)
+    # 时钟推进已抽到共享实现（services/world_time.py），休息服务只保留一层
+    # 转发；打桩点跟着转发走，装配与仪式共用同一条写路径。
+    monkeypatch.setattr(ruleset_rest, "advance_game_time", _boom)
     result = await WebAPI.ruleset_rest_decide(
         api, KEY, "gm", True, {"approve": True, "operation_id": "decision-rollback"},
     )

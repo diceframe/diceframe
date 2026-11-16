@@ -1441,6 +1441,26 @@ class Dnd2024ClassFeatureResolver:
                     return capability
         return None
 
+    def feature_definition(self, feature_id: str) -> ClassFeatureDefinition | None:
+        """The declaration with this id, whichever owner-scoped key holds it.
+
+        ``features_by_key`` is keyed by ``(owner, id)`` because the same feature
+        id can exist for a class and a subclass.  Callers that only know the id
+        -- a capability's declaring feature, for instance -- need the owner to
+        find the class-level table the feature's numbers live in, so this
+        lookup prefers the bare class owner over a subclass one.
+        """
+
+        wanted = str(feature_id or "")
+        found: ClassFeatureDefinition | None = None
+        for (owner, identifier), definition in self.catalog.features_by_key.items():
+            if identifier != wanted:
+                continue
+            if owner.startswith("class:"):
+                return definition
+            found = found or definition
+        return found
+
     def unarmed_strike_die(self, character: Mapping[str, Any] | None) -> str:
         """The feature-derived base damage of this character's Unarmed Strike."""
 

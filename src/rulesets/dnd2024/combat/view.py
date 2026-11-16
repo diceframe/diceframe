@@ -18,6 +18,7 @@ from src.rulesets.dnd2024.spells.casting import spell_caster, spellcasting_proje
 
 from .check_windows import LUCKY_RESOURCE
 from .primitives import (
+    FEATURE_STATE_KEYS,
     CombatIntentError,
     UNARMED_STRIKE_REF,
     actor_kind as _actor_kind,
@@ -192,6 +193,9 @@ class CombatViewMixin:
             "spell_refs": casting["spell_refs"],
             "class_spell_refs": casting["class_spell_refs"],
             "slots": deepcopy(class_magic.get("slots_current") or {}),
+            # Font of Magic 造的临时槽：单独一栏，绝不并进普通槽表，否则
+            # "最多 5 环"和"长休消失"这两件事就没地方可查了。
+            "font_slots": casting["font_slots"],
             "spell_grants": deepcopy(spell_grants),
             "free_cast_slots": deepcopy(free_cast_slots),
             "spell_attack_bonus": int(
@@ -212,6 +216,14 @@ class CombatViewMixin:
                 # the counter read and fail closed there, never look like zero.
                 "usage": deepcopy(feature_state["usage"])
                 if feature_state.get("usage") is not None else [],
+                # Character-scoped feature state (a re-chosen resistance, the
+                # next survival DC) outlives the combat, so the view has to
+                # carry it or combat would silently read "never chosen".
+                **{
+                    feature_id: deepcopy(feature_state[feature_id])
+                    for feature_id in FEATURE_STATE_KEYS
+                    if isinstance(feature_state.get(feature_id), dict)
+                },
             },
             "class_resources": deepcopy(feature_projection["class_resources"]),
             "martial_arts_die": str(feature_projection["unarmed_damage_die"]),
@@ -403,6 +415,10 @@ class CombatViewMixin:
         raw_usage = (actor.get("features") or {}).get("usage")
         if raw_usage is not None:
             features["usage"] = deepcopy(raw_usage)
+        for feature_id in FEATURE_STATE_KEYS:
+            stored = (actor.get("features") or {}).get(feature_id)
+            if isinstance(stored, dict):
+                features[feature_id] = deepcopy(stored)
         return {
             "build": actor.get("build") or {},
             "features": features,
@@ -452,11 +468,17 @@ class CombatViewMixin:
                 int(level) for level, count in actor["slots"].items()
                 if int(count) > 0 and int(level) >= int(spell["level"]) and not economy.get("slot_spell_cast")
             ] if spell["level"] > 0 else [0]
+            if spell["level"] > 0 and not economy.get("slot_spell_cast"):
+                # 临时槽在普通槽表之外，但施法时它是真槽：不并进来，玩家就
+                # 看得到"我造了个槽"却选不了它。
+                for level, count in (actor.get("font_slots") or {}).items():
+                    if int(count) > 0 and int(level) >= int(spell["level"]):
+                        available_slots.append(int(level))
             if spell["level"] > 0 and free_cast_resource(
                 actor, ref, int(spell["level"]),
             ):
                 available_slots.insert(0, 0)
-            available_slots.sort()
+            available_slots = sorted(set(available_slots))
             if available_slots:
                 # 目标声明随法术一起投影：前端只消费服务端语义，不再按
                 # spell mode 硬编码"盟友/敌人"。

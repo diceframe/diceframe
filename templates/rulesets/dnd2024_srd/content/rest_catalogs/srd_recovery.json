@@ -66,7 +66,7 @@
       {"id": "sorcerous_restoration", "minimum_level": 5, "maximum_fixed": 1, "short": "none", "long": "all", "short_recovery": {"mode": "points", "budget": "half_level_round_down", "track": "sorcery_points"}, "source_ref": "srd-5.2.1:p66:sorcerous-restoration"}
     ],
     "warlock": [
-      {"id": "magical_cunning", "minimum_level": 2, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p72:magical-cunning"},
+      {"id": "magical_cunning", "minimum_level": 2, "maximum_fixed": 1, "short": "none", "long": "all", "ritual": {"minutes": 1, "mode": "pact_slots", "budget": "half_max_round_up", "full_feature": "eldritch_master"}, "source_ref": "srd-5.2.1:p72:magical-cunning"},
       {"id": "dark_ones_own_luck", "minimum_level": 6, "maximum_ability_modifier": "cha", "minimum": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p76:dark-ones-own-luck"}
     ],
     "wizard": [
