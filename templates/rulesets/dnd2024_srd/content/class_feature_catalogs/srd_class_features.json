@@ -375,6 +375,7 @@
             "save_ability": "con",
             "on_fail_condition": "stunned",
             "on_success_condition": "staggered",
+            "on_success_attack_condition": "staggered_opening",
             "condition_duration": "attacker_next_turn_start"
           }
         },

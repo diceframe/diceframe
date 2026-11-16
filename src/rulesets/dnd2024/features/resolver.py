@@ -50,6 +50,7 @@ _RIDER_PARAMETER_KEYS: dict[str, frozenset[str]] = {
     "stunning_strike": frozenset({
         "once_per_turn", "focus_cost", "save_ability",
         "on_fail_condition", "on_success_condition", "condition_duration",
+        "on_success_attack_condition",
     }),
     "empowered_strikes": frozenset({"unarmed_damage_type_choices"}),
     "open_hand_technique": frozenset({
@@ -2401,7 +2402,10 @@ class Dnd2024ClassFeatureResolver:
             raise ClassFeatureError(
                 f"{definition.id} does not support {', '.join(unknown)}"
             )
-        missing = sorted(expected - set(parameters))
+        # A separate next-attack effect is optional for declarations that only
+        # grant a persistent success condition.
+        optional = {"on_success_attack_condition"} if definition.id == "stunning_strike" else set()
+        missing = sorted(expected - set(parameters) - optional)
         if missing:
             raise ClassFeatureError(
                 f"{definition.id} is missing {', '.join(missing)}"
@@ -2457,6 +2461,8 @@ class Dnd2024ClassFeatureResolver:
             one_of("save_ability", SAVE_ABILITIES)
             bare_id("on_fail_condition")
             bare_id("on_success_condition")
+            if "on_success_attack_condition" in parameters:
+                bare_id("on_success_attack_condition")
             one_of("condition_duration", _RIDER_CONDITION_DURATIONS)
         elif feature_id == "empowered_strikes":
             id_list("unarmed_damage_type_choices", DAMAGE_TYPES)

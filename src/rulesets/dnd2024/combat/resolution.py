@@ -7,6 +7,8 @@ from typing import Any
 
 from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.engine.player_control import is_ai_controlled
+from src.engine.modules import ruleset_runtime
+from src.engine.staged_transaction import fork_domain_state
 from src.rulesets.dnd2024.features.resolver import ENEMY_REDUCED_TO_ZERO_HP
 from src.rulesets.dnd2024.features.resources import (
     OVERCHANNEL_FEATURE_ID,
@@ -1343,6 +1345,9 @@ class CombatResolutionMixin:
             "focus_cost": int(parameter("stunning_strike", "focus_cost") or 1),
             "on_fail_condition": on_fail,
             "on_success_condition": on_success,
+            "on_success_attack_condition": str(
+                parameter("stunning_strike", "on_success_attack_condition") or ""
+            ),
             "duration": duration,
         })
         return declarations
@@ -1370,7 +1375,7 @@ class CombatResolutionMixin:
                 continue
             if row.get("kind") == "open_hand":
                 events.extend(self._open_hand_events(
-                    combat, attacker_id, target, row, dc, rng,
+                    instance, combat, attacker_id, target, row, dc, rng,
                 ))
                 continue
             if row.get("kind") != "stunning_strike":
@@ -1384,20 +1389,13 @@ class CombatResolutionMixin:
                     "type": "dnd2024.class_resource.spent", "actor_id": attacker_id,
                     "resource_id": "focus_points", "amount": cost,
                 })
-            roll = int(rng.randint(1, 20))
-            modifier = int(
-                (target.get("saving_throws") or {}).get(ability, 0) or 0
+            check = self._saving_throw_check(
+                instance, combat, target, str(target["actor_id"]),
+                ability, dc, attacker_id, events, rng,
             )
-            total = roll + modifier
-            succeeded = total >= dc
-            events.append({
-                "type": "check.resolved", "kind": "saving_throw",
-                "actor_id": str(target["actor_id"]), "ability": ability,
-                "rolls": [roll], "natural": roll, "modifier": modifier,
-                "total": total, "target": dc, "success": succeeded,
-                "source_feature": "stunning_strike",
-                "roll_id": f"stunning-strike:{target['actor_id']}:1",
-            })
+            check["source_feature"] = "stunning_strike"
+            events.append(check)
+            succeeded = check["success"]
             condition = str(
                 row.get("on_success_condition") if succeeded
                 else row.get("on_fail_condition")
@@ -1410,6 +1408,13 @@ class CombatResolutionMixin:
                 "duration": str(row.get("duration") or ""),
                 "source_actor_id": attacker_id,
             })
+            if succeeded and row.get("on_success_attack_condition"):
+                events.append({
+                    "type": "condition.applied", "target_id": str(target["actor_id"]),
+                    "condition": str(row["on_success_attack_condition"]),
+                    "duration": str(row.get("duration") or ""),
+                    "source_actor_id": attacker_id,
+                })
             events.append({
                 "type": "dnd2024.feature.used", "actor_id": attacker_id,
                 "feature_id": "stunning_strike",
@@ -1419,7 +1424,7 @@ class CombatResolutionMixin:
         return events
 
     def _open_hand_events(
-        self, combat: dict[str, Any], attacker_id: str, target: dict[str, Any],
+        self, instance: Any, combat: dict[str, Any], attacker_id: str, target: dict[str, Any],
         row: dict[str, Any], dc: int, rng: Any,
     ) -> list[dict[str, Any]]:
         """Addle / Push / Topple: the three Open Hand Technique outcomes.
@@ -1453,19 +1458,12 @@ class CombatResolutionMixin:
             return []
         if not ability or (choice == "push" and distance <= 0):
             return []
-        roll = int(rng.randint(1, 20))
-        modifier = int((target.get("saving_throws") or {}).get(ability, 0) or 0)
-        total = roll + modifier
-        succeeded = total >= dc
-        events.append({
-            "type": "check.resolved", "kind": "saving_throw",
-            "actor_id": target_id, "source_actor_id": attacker_id,
-            "ability": ability, "rolls": [roll], "natural": roll,
-            "modifier": modifier, "total": total, "target": dc,
-            "success": succeeded, "source_feature": "open_hand_technique",
-            "roll_id": f"open-hand:{target_id}:{choice}",
-        })
-        if succeeded:
+        check = self._saving_throw_check(
+            instance, combat, target, target_id, ability, dc, attacker_id, events, rng,
+        )
+        check["source_feature"] = "open_hand_technique"
+        events.append(check)
+        if check["success"]:
             return events
         if choice == "push":
             direction = (
@@ -1735,62 +1733,13 @@ class CombatResolutionMixin:
                 events.extend(consumed_events)
             elif mode == "saving_throw":
                 save_ability = str(effect["save"])
-                modifier = int(target["saving_throws"].get(save_ability, 0) or 0)
-                auto_fail = save_ability in condition_flags(
-                    self.catalog.conditions, target["conditions"],
-                )["auto_fail_saves"]
-                if auto_fail:
-                    # 麻痹/昏迷等自动失败：不消耗任何骰，也不掷加值骰。
-                    save_check_index = len(events)
-                    events.append({
-                        "type": "check.resolved", "kind": "saving_throw",
-                        "actor_id": target_id, "source_actor_id": actor_id,
-                        "ability": save_ability, "rolls": [], "natural": 0,
-                        "modifier": modifier, "check_bonus": 0, "check_bonus_rolls": [],
-                        "aura_bonus": 0, "aura_sources": [],
-                        "total": 0,
-                        "target": actor["spell_save_dc"], "success": False,
-                        "auto_failed": True,
-                    })
-                    succeeded = False
-                else:
-                    # 狂暴（力量豁免优势）、未受训护甲（力/敏豁免劣势）与
-                    # Danger Sense（敏捷豁免优势）走同一归一函数：优劣势
-                    # 相消时按 RAW 回到单骰。
-                    save_sources = self._saving_throw_sources(target, save_ability)
-                    save_mode = mode_from_sources(save_sources)
-                    first = int(rng.randint(1, 20))
-                    second = int(rng.randint(1, 20)) if save_mode else None
-                    if save_mode == "advantage":
-                        roll = max(first, second)
-                    elif save_mode == "disadvantage":
-                        roll = min(first, second)
-                    else:
-                        roll = first
-                    check_bonus_rolls = condition_check_bonus_rolls(
-                        self.catalog.conditions, target["conditions"], "saving_throw", rng,
-                    )
-                    check_bonus = sum(row["roll"] for row in check_bonus_rolls)
-                    # 光环加值单独成项：modifier 仍是角色本来的豁免值，Bless
-                    # 仍只占 check_bonus，三者不互相吞并，事件可逐项对账。
-                    aura = self._saving_throw_aura_bonus(instance, combat, target)
-                    total = roll + modifier + check_bonus + int(aura["bonus"])
-                    succeeded = total >= int(actor["spell_save_dc"])
-                    check_event = {
-                        "type": "check.resolved", "kind": "saving_throw", "actor_id": target_id,
-                        "source_actor_id": actor_id, "ability": save_ability,
-                        "rolls": [value for value in (first, second) if value is not None],
-                        "natural": roll, "modifier": modifier,
-                        "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
-                        "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
-                        "total": total,
-                        "target": actor["spell_save_dc"], "success": succeeded,
-                    }
-                    if save_sources:
-                        check_event["advantage_mode"] = save_mode
-                        check_event["advantage_sources"] = save_sources
-                    save_check_index = len(events)
-                    events.append(check_event)
+                check_event = self._saving_throw_check(
+                    instance, combat, target, target_id, save_ability,
+                    int(actor["spell_save_dc"]), actor_id, events, rng,
+                )
+                succeeded = check_event["success"]
+                save_check_index = len(events)
+                events.append(check_event)
                 if effect.get("damage"):
                     damage_node = spell_formula_node(
                         str(effect["damage"]), effect.get("upcast_damage"),
@@ -2517,24 +2466,41 @@ class CombatResolutionMixin:
                 "resource_id": resource_cost.resource_id, "amount": resource_cost.amount,
             })
         target_id = str(intent.get("target_id") or "")
+        # Reuse the actual reducer on an isolated aggregate, not a second
+        # approximation of HP, positions, conditions or per-turn usage.
+        staged = fork_domain_state(instance)
+        simulated = 0
         for action in capability.actions:
             if action.kind == "unarmed_strike":
                 for _ in range(action.count):
+                    self._simulate_capability_events(staged, events[simulated:])
+                    simulated = len(events)
+                    current_combat = ruleset_runtime.state(staged)["combat"]
+                    current_actor = self._actor_view(staged, current_combat, actor_id)
+                    current_target = self._actor_view(staged, current_combat, target_id)
+                    strike_intent = {
+                        "actor_id": actor_id, "target_id": target_id,
+                        "weapon_ref": UNARMED_STRIKE_REF,
+                        **{key: intent[key] for key in (
+                            "unarmed_damage_type", "rider_damage_type", "stunning_strike",
+                        ) if key in intent},
+                    }
+                    # The choice applies to the first eligible hit, never twice
+                    # in the same turn (a miss leaves it available).
+                    if self._feature_used_this_turn(current_combat, actor_id, "stunning_strike"):
+                        strike_intent.pop("stunning_strike", None)
+                    weapon = self._declared_attack(current_actor, strike_intent)
+                    if (
+                        current_target["hp"] <= 0
+                        or self._distance(current_combat, actor_id, target_id)
+                        > int(weapon.get("long_range") or weapon.get("range", 5))
+                    ):
+                        break
+                    self._validate_attack(staged, current_combat, strike_intent, current_actor)
+                    if intent.get("open_hand_choice"):
+                        strike_intent["open_hand_choice"] = intent["open_hand_choice"]
                     strike_events = self._attack_events(
-                        instance,
-                        combat,
-                        {
-                            "actor_id": actor_id, "target_id": target_id,
-                            "weapon_ref": UNARMED_STRIKE_REF,
-                            # Open Hand Technique 只在"由 Flurry 授予的攻击"上
-                            # 生效，所以授予来源必须随攻击一起走完结算链，
-                            # 而不是在命中后按武器或顺序去猜。
-                            **(
-                                {"open_hand_choice": intent["open_hand_choice"]}
-                                if intent.get("open_hand_choice") else {}
-                            ),
-                        },
-                        rng,
+                        staged, current_combat, strike_intent, rng,
                         spend_attack_action=False,
                         granted_by=str(capability.feature_id),
                     )
@@ -2620,6 +2586,25 @@ class CombatResolutionMixin:
             else:  # pragma: no cover - catalog validation guards this
                 raise CombatIntentError("unsupported class capability action")
         return events
+
+    def _simulate_capability_events(
+        self, instance: Any, events: list[dict[str, Any]],
+    ) -> None:
+        """Advance a detached capability plan using the canonical reducer."""
+
+        snapshot = {
+            "ruleset_state": ruleset_runtime.state(instance),
+            "characters": {
+                uid: deepcopy(_canonical(instance.get_character_sheet(uid)))
+                for uid in instance.players
+            },
+        }
+        for event in events:
+            self._reduce_event(snapshot, event)
+        for uid, canonical in snapshot["characters"].items():
+            sheet = deepcopy(instance.get_character_sheet(uid))
+            sheet["ruleset_character"] = canonical
+            instance.set_character_sheet(uid, sheet)
 
     def _font_of_magic_events(
         self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],
@@ -2777,8 +2762,20 @@ class CombatResolutionMixin:
         """Roll one repeated save, without deciding what it does."""
 
         repeat = meta.get("save_repeat") or {}
-        ability = str(repeat.get("ability") or "")
-        dc = int(repeat.get("dc", 0) or 0)
+        check = self._saving_throw_check(
+            instance, combat, actor, actor_id, str(repeat.get("ability") or ""),
+            int(repeat.get("dc", 0) or 0), str(meta.get("source_actor_id") or ""), events, rng,
+        )
+        check["repeat_save"] = True
+        return check
+
+    def _saving_throw_check(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        actor_id: str, ability: str, dc: int, source_actor_id: str,
+        events: list[dict[str, Any]], rng: Any,
+    ) -> dict[str, Any]:
+        """Shared save authority for spells, repeated saves and hit riders."""
+
         modifier = int(actor["saving_throws"].get(ability, 0) or 0)
         auto_fail = ability in condition_flags(
             self.catalog.conditions, actor["conditions"],
@@ -2787,13 +2784,12 @@ class CombatResolutionMixin:
             return {
                 "type": "check.resolved", "kind": "saving_throw",
                 "actor_id": actor_id,
-                "source_actor_id": str(meta.get("source_actor_id") or ""),
+                "source_actor_id": source_actor_id,
                 "ability": ability, "rolls": [], "natural": 0,
                 "modifier": modifier, "check_bonus": 0, "check_bonus_rolls": [],
                 "aura_bonus": 0, "aura_sources": [],
                 "total": 0,
                 "target": dc, "success": False, "auto_failed": True,
-                "repeat_save": True,
                 "roll_id": self._roll_id(events, "saving_throw", actor_id),
             }
         save_sources = self._saving_throw_sources(actor, ability)
@@ -2817,14 +2813,13 @@ class CombatResolutionMixin:
         check_event = {
             "type": "check.resolved", "kind": "saving_throw",
             "actor_id": actor_id,
-            "source_actor_id": str(meta.get("source_actor_id") or ""),
+            "source_actor_id": source_actor_id,
             "ability": ability,
             "rolls": [value for value in (first, second) if value is not None],
             "natural": roll, "modifier": modifier,
             "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
             "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
             "total": total, "target": dc, "success": total >= dc,
-            "repeat_save": True,
             "roll_id": self._roll_id(events, "saving_throw", actor_id),
         }
         if save_sources:

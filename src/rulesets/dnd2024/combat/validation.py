@@ -488,10 +488,20 @@ class CombatValidationMixin:
         if has_unarmed_strike:
             # 复用 canonical 徒手打击校验：目标必须存活且敌对、射程由同一份
             # 攻击档案决定，Combat 不自己算命中/伤害。
+            rider_actor = deepcopy(actor)
+            # The capability's own spend precedes every granted hit. Validate
+            # rider affordability against that balance, not the original pool.
+            for cost in capability.cost.resources:
+                for pool in rider_actor.get("class_resources") or []:
+                    if pool.get("id") == cost.resource_id:
+                        pool["current"] = int(pool.get("current", 0)) - cost.amount
             self._validate_attack(instance, combat, {
                 "target_id": str(intent.get("target_id") or ""),
                 "weapon_ref": UNARMED_STRIKE_REF,
-            }, actor)
+                **{key: intent[key] for key in (
+                    "unarmed_damage_type", "rider_damage_type", "stunning_strike",
+                ) if key in intent},
+            }, rider_actor)
         elif has_bardic_grant:
             # 授予目标是另一位、能看见或听见你、且在 60 尺内的友方活体，并且
             # 对方此刻没有一枚未过期的骰。这些事实在校验期就能用同一组权威
