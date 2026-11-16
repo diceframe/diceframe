@@ -13,10 +13,16 @@ from aiohttp import web
 
 from src.plugin_host.package_limits import MAX_PLUGIN_PACKAGE_BYTES
 from src.web_transport import ServerTransport
-from src.webui.abuse_guard import ABUSE_GUARD_KEY, AbuseGuard, abuse_guard_middleware
+from src.webui.abuse_guard import (
+    ABUSE_GUARD_KEY,
+    AbuseGuard,
+    abuse_guard_middleware,
+    write_per_ip_limit_from_env,
+)
 from src.webui.connection_pool import ConnectionPool
 from src.webui.cors import cors_middleware, cors_response_prepare
 from src.webui.errors import error_code_middleware
+from src.webui.request_language import request_language_middleware
 from src.webui.device_tokens import DEVICE_TOKENS_KEY, DeviceTokenStore
 from src.webui.login_audit import LOGIN_AUDIT_KEY, LoginAuditStore
 from src.webui.pairing import PairingService
@@ -93,6 +99,8 @@ def create_app(dependencies: ApplicationDependencies) -> web.Application:
     application.on_startup.append(dependencies.on_startup)
     application.on_cleanup.append(dependencies.on_cleanup)
     application.middlewares.append(cors_middleware)
+    # 最外层之一：让内层所有处理（含错误出口）都能读到请求语言。
+    application.middlewares.append(request_language_middleware)
     application.middlewares.append(update_admission)
     application.on_response_prepare.append(cors_response_prepare)
     application.middlewares.append(session_middleware)
@@ -104,7 +112,7 @@ def create_app(dependencies: ApplicationDependencies) -> web.Application:
     application["_config_reload_lock"] = asyncio.Lock()
     host_data = dependencies.host_data_dir or dependencies.data_dir
     application["session_manager"] = SessionManager(host_data)
-    application[ABUSE_GUARD_KEY] = AbuseGuard()
+    application[ABUSE_GUARD_KEY] = AbuseGuard(write_per_ip_limit=write_per_ip_limit_from_env())
     application[LOGIN_AUDIT_KEY] = LoginAuditStore(host_data)
     application[DEVICE_TOKENS_KEY] = DeviceTokenStore(host_data)
     application[SERVER_IDENTITY_KEY] = ServerIdentityStore(host_data)

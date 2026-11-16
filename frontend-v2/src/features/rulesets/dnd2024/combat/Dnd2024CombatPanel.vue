@@ -868,7 +868,7 @@ function stageSpell(): void {
   if (spell.resist_choice?.length) payload.resist_type = selectedResistType.value
   if (spell.mode === 'teleport') payload.teleport_distance = Number(teleportDistance.value)
   if (declareSpellLuck.value) payload.spend_luck = true
-  if (declareMaximize.value) payload.maximize_damage = true
+  if (declareMaximize.value) payload.overchannel = true
   stage(payload)
 }
 
@@ -1414,7 +1414,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
                   <input v-model="declareSpellLuck" type="checkbox" />
                   <span>{{ copy.luckyAdvantage }}<small>{{ copy.luckyHint }}</small></span>
                 </label>
-                <label v-if="selectedSpell?.maximize_damage_available" class="declare-toggle">
+                <label v-if="selectedSpell?.overchannel_available" class="declare-toggle">
                   <input v-model="declareMaximize" type="checkbox" />
                   <span>{{ copy.maximizeDamage }}<small>{{ copy.maximizeHint }}</small></span>
                 </label>

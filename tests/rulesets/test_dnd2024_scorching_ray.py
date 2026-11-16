@@ -399,7 +399,10 @@ def test_bless_also_applies_to_the_concentration_save() -> None:
         instance, ruleset_runtime.state(instance)["combat"], "player:gm",
     )
     view["concentration"] = {"spell_ref": "spell:bless"}
-    check = engine._concentration_events(view, 10, SequenceRng([12, 4]))[0]
+    check = engine._concentration_events(
+        instance, ruleset_runtime.state(instance)["combat"], view, 10,
+        SequenceRng([12, 4]),
+    )[0]
     assert check["check_bonus"] == 4
     assert check["total"] == 12 + check["modifier"] + 4
 

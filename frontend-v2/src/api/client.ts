@@ -85,6 +85,9 @@ export function authHeaders(initHeaders?: HeadersInit, contentType = true): Head
   if (contentType) headers.set('Content-Type', 'application/json')
   const token = localStorage.getItem(accessTokenStorageKey())
   if (token) headers.set('Authorization', `Bearer ${token}`)
+  // 后端按 Accept-Language 返回对应语言的提示文案（见 src/webui/request_language.py）。
+  // 显式设为应用的界面语言，否则浏览器带的是系统语言列表，和用户在应用里选的不一定一致。
+  if (!headers.has('Accept-Language')) headers.set('Accept-Language', String(i18n.global.locale.value))
   return headers
 }
 
