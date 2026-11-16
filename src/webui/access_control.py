@@ -546,6 +546,19 @@ class WebAccessControl:
         if len(parts) < 4:
             return ""
         tail = parts[3]
+        if tail == "gameplay-view":
+            return "seat" if request.method == "GET" and len(parts) == 4 else ""
+        if tail == "gameplay-actions":
+            return "seat" if request.method == "POST" and len(parts) == 5 else ""
+        if tail == "gameplay-slots":
+            return "seat" if request.method == "GET" and len(parts) == 5 else ""
+        if tail == "plugins":
+            # Game-scoped player rulebooks only, never global plugin/admin API.
+            return "seat" if (
+                request.method == "GET"
+                and len(parts) in {6, 7}
+                and parts[5] == "rulebooks"
+            ) else ""
         if tail == "recovery":
             if request.method == "GET" and len(parts) == 4:
                 return "seat"
