@@ -409,7 +409,9 @@ def test_supreme_healing_maximizes_cure_wounds_without_rng(cleric17, runtime) ->
     result, rng = cast_result(engine, instance, "spell:cure_wounds", 1, ["player:gm"], rolls=[99])
     assert result["ok"], result
     assert engine.apply_batch(instance, result["event_batch"])["applied"]
-    assert int(canonical(instance)["resources"]["hp"]) == 50 + amount
+    # Cleric 17 是 Life Domain，所以同一批里还会有一条 Disciple of Life 的
+    # 固定加值（2 + 1 环 = 3）：最大化的只是法术自己的骰，rider 没有骰。
+    assert int(canonical(instance)["resources"]["hp"]) == 50 + amount + 3
     assert rng.values == [99], "maximized dice must not consume RNG"
     healed = healing_to(result, "player:gm")
     assert healed["amount"] == amount
@@ -567,7 +569,7 @@ def test_the_maximized_heal_replays_without_a_second_payout(cleric17, runtime) -
     assert engine.apply_batch(instance, result["event_batch"])["applied"]
     hp_after = int(canonical(instance)["resources"]["hp"])
     slots_after = canonical(instance)["spellcasting"]["class"]["slots_current"]
-    assert hp_after == 10 + 16 + heal_modifier(instance)
+    assert hp_after == 10 + 16 + heal_modifier(instance) + 3  # 含 Disciple of Life
 
     # The batch carries the extra ``maximized`` audit key; replaying it must
     # neither pay out twice nor reject the unknown-for-the-reducer field.
