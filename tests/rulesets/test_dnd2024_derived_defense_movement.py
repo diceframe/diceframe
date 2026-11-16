@@ -11,8 +11,8 @@ Two asymmetric rules are the point of the whole file:
 * Roving is one declaration with two halves.  ``speed_bonus_ft`` is gated on
   "not wearing Heavy armor", the Climb/Swim Speeds it grants are not.  So the
   Speed bonus reads *active* declarations and the modes read *owned* ones.
-* Second-Story Work *replaces* Strength with Dexterity for jump distance.  It is
-  a substitution, never an extra modifier, so nothing here may sum the two.
+* Second-Story Work permits Dexterity instead of Strength for jump distance.
+  The default profile chooses the larger legal distance; it never sums them.
 
 Everything below runs through the real bundle and the real authoritative chain
 (``reconcile_canonical`` / ``derive_*``); no test invents an item, a feature or
@@ -325,7 +325,13 @@ def test_a_thief_sheet_reads_dexterity_and_anyone_else_reads_strength(runtime) -
     thief = _proxy("class:rogue", 3, subclass="subclass:thief")
     plain = _proxy("class:rogue", 3, subclass="subclass:assassin")
 
+    thief["abilities"] = {"str": 8, "dex": 16}
     assert resolver.jump_ability(thief) == "dex"
+    thief["abilities"] = {"str": 15, "dex": 8}
+    profile = derive_movement_profile(30, thief["abilities"], resolver, thief)
+    assert profile["jump_ability"] == "str"
+    assert profile["long_jump_ft"] == 15
+    assert profile["high_jump_ft"] == 5
     assert resolver.jump_ability(plain) == "str"
     assert resolver.jump_ability(None) == "str"
     assert resolver.jump_ability({"build": {}}) == "str"
@@ -378,9 +384,9 @@ def test_a_thief_keeps_climb_at_the_unarmored_speed(runtime) -> None:
     assert derived["speed"] == SPECIES_SPEED
     assert derived["climb_speed"] == SPECIES_SPEED
     assert derived["swim_speed"] == 0
-    assert derived["jump_ability"] == "dex"
-    # Dexterity 10, not Strength 16: the substitution is visible in the number.
-    assert derived["long_jump_ft"] == 10
+    assert derived["jump_ability"] == "str"
+    # Optional Dexterity 10 cannot remove the normal Strength 16 distance.
+    assert derived["long_jump_ft"] == 16
     assert derive_jump_distances(canonical["abilities"])["long_jump_ft"] == 16
 
 
