@@ -85,6 +85,8 @@ pip install -r requirements.txt
 python web_server.py
 ```
 
+建议先建虚拟环境再装依赖：Windows 用 `py -3 -m venv .venv`，再 `.venv\Scripts\activate`；Linux、macOS 用 `python3 -m venv .venv`，再 `source .venv/bin/activate`。`web_ui.bat` 会优先使用仓库根目录下的 `.venv314` 或 `.venv`，其次才是 `py` 启动器挑的解释器；没有虚拟环境时依赖会装进全局 Python，若该版本没有现成 wheel，第一次启动要等好几分钟。
+
 直接运行时会自动读取项目根目录的 `.env`；已经在 PowerShell、服务管理器或 Docker 中设置的环境变量优先级更高。
 
 启动后打开终端里显示的地址，默认是：
