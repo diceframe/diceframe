@@ -1510,6 +1510,14 @@ function onPlayKeydown(event: KeyboardEvent) {
           @open-combat="openRulesetTool('combat')"
         />
 
+        <!-- 规则运行时自带的声明式面板：插件无法携带 Vue 组件，命刻/机会/冲突
+             步骤这类专属信息只能以节点形式下发，由统一渲染器呈现。 -->
+        <RulesetPanels
+          :game-key="game.currentGame.value"
+          :panels="rulesetGameplay?.panels"
+          @refresh="refreshRulesetPanels"
+        />
+
         <GameTimeline
           :log="game.log.value"
           :live="game.detail.value.multiplayer?.submitted_actions || []"

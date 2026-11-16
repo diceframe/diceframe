@@ -48,6 +48,14 @@ def _decode_stream_bytes(raw: bytes) -> tuple[str, str | None]:
         return raw.decode("utf-8"), None
     except UnicodeDecodeError:
         pass
+    # 按字节预算截断可能切在多字节 UTF-8 字符中间：残缺的续字节会让 strict
+    # 解码失败并误入 ANSI 码页兜底（Windows 上表现为整行乱码）。先剥掉不完整
+    # 的尾部再按 UTF-8 解一次；仍失败才认为子进程真的没在用 UTF-8。
+    for trim in (1, 2, 3):
+        try:
+            return raw[:-trim].decode("utf-8"), None
+        except UnicodeDecodeError:
+            continue
     for encoding in _FALLBACK_ENCODINGS:
         try:
             return raw.decode(encoding), encoding

@@ -202,6 +202,36 @@ class RemoteRulesetRuntimeAdapter:
             raise RuntimeProbeError("remote game_binding result must be an object")
         return result
 
+    @staticmethod
+    def _rule_dto(rule: Any) -> Any:
+        """Send the rule's template, never the host's rule object.
+
+        ``RuleSystem`` is a host-side behaviour object with no wire form; its
+        ``template`` is the canonical JSON the child is allowed to read.  Call
+        sites pass the object, so the unwrapping belongs here rather than in
+        every service that calls a remote runtime.
+        """
+
+        template = getattr(rule, "template", None)
+        return RemoteRulesetRuntimeAdapter._dto(
+            rule if template is None else template, "rule",
+        )
+
+    def game_binding(self, rule: Any, locale: str) -> dict[str, Any]:
+        """Name the runtime that owns this rule's versioned save state.
+
+        ``VersionedStateRuntime`` requires the binding before any ruleset state
+        is written, so a remote runtime that declares ``versioned_state`` must
+        answer it exactly like a built-in one.  The host keeps transaction,
+        save and upgrade ownership; the runtime only states its own identity
+        and schema version (ADR-0014 §4).
+        """
+
+        result = self._call("game_binding", {"rule": self._rule_dto(rule), "locale": locale})
+        if not isinstance(result, dict):
+            raise RuntimeProbeError("remote game_binding result must be an object")
+        return result
+
     def describe_experience(self, rule: Any, locale: str) -> dict[str, Any]:
         return self._call("describe_experience", {"rule": self._rule_dto(rule), "locale": locale})
 
