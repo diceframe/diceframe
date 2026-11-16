@@ -92,6 +92,10 @@ from .weapon_masteries import WEAPON_MASTERY_EFFECTS, WEAPON_MASTERY_FEATURE_ID
 # Potent Spellcasting is declared once per casting class with its own
 # ``cantrip_source_class``; both declarations have to be asked separately.
 POTENT_SPELLCASTING_OWNERS = ("class:cleric", "class:druid")
+# Indomitable Might is a passive declaration on the character, but the check
+# event has to name the feature that rewrote its total.  The id lives here so
+# the audit trail and the catalog cannot drift apart.
+INDOMITABLE_MIGHT = "indomitable_might"
 
 
 def _without_consumed_conditions(
@@ -681,6 +685,46 @@ class CombatResolutionMixin:
             if isinstance(declared, list) and ability in {str(item) for item in declared}:
                 sources.append({"code": "danger_sense", "mode": "advantage"})
         return sources
+
+    def _strength_total_replacement(
+        self, target: dict[str, Any], ability: str, total: int,
+    ) -> tuple[int, dict[str, Any]]:
+        """Indomitable Might: judge with the Strength score when it is higher.
+
+        The rule replaces the *total*, not the die, so the d20 face and
+        ``rolls`` stay exactly what was rolled and the event carries both
+        numbers: ``ordinary_total`` is what the roll and every modifier
+        produced, ``replacement_score`` is the score that may stand in for it.
+        Nothing is rolled and no die is added, so the RNG order of the batch is
+        unchanged.
+
+        Only Strength checks and Strength saving throws reach this: every call
+        site passes the ability it actually rolled, and anything else comes
+        back untouched, so attacks, initiative, damage, Dex/Con saves and death
+        saves keep their own rules.  An auto-failed save has no total to
+        replace and never reaches here either.
+        """
+
+        if ability != "str":
+            return total, {}
+        if not self.features.strength_total_replacement(
+            self._feature_character(target),
+        ):
+            return total, {}
+        score = int((target.get("abilities") or {}).get("str", 10) or 10)
+        if total >= score:
+            return total, {
+                "ordinary_total": total,
+                "replacement_score": score,
+                "total_replaced": False,
+                "feature_id": INDOMITABLE_MIGHT,
+            }
+        return score, {
+            "ordinary_total": total,
+            "replacement_score": score,
+            "total_replaced": True,
+            "feature_id": INDOMITABLE_MIGHT,
+        }
 
     def _consume_save_markers(
         self, target_id: str, target: dict[str, Any],
@@ -2254,6 +2298,13 @@ class CombatResolutionMixin:
                 ability, dc, attacker_id, events, rng,
             )
             check["source_feature"] = "stunning_strike"
+            total, replacement = self._strength_total_replacement(
+                target, ability, int(check["total"]),
+            )
+            if replacement:
+                check["total"] = total
+                check["success"] = total >= dc
+                check.update(replacement)
             events.append(check)
             succeeded = check["success"]
             # 这是一次真实豁免：Staggering 的"下一次豁免劣势"在这里就该用掉，
@@ -2327,6 +2378,13 @@ class CombatResolutionMixin:
             instance, combat, target, target_id, ability, dc, attacker_id, events, rng,
         )
         check["source_feature"] = "open_hand_technique"
+        total, replacement = self._strength_total_replacement(
+            target, ability, int(check["total"]),
+        )
+        if replacement:
+            check["total"] = total
+            check["success"] = total >= dc
+            check.update(replacement)
         events.append(check)
         # 同上：Open Hand 的豁免也是"真实豁免"，标记在这里消费。
         events.extend(self._consume_save_markers(target_id, target))
@@ -2867,17 +2925,22 @@ class CombatResolutionMixin:
                     int(actor["spell_save_dc"]), actor_id, events, rng,
                 )
                 if not check_event.get("auto_failed"):
-                    # 掩蔽只帮敏捷豁免，且只加在那个总数上：自动失败的豁免
-                    # 没有掷骰，掩蔽也不该凭空给它一个总数。
+                    # 掩蔽只帮敏捷豁免，Indomitable Might 用力量值替换总值；
+                    # 两者都只改总数，掷骰面与 check_bonus 保持原样。自动失败
+                    # 的豁免没有掷骰，两者都不该凭空给它一个总数。
                     cover = self._cover_save_bonus(
                         instance, combat, target, save_ability,
                     )
+                    total = int(check_event["total"]) + int(cover["bonus"])
+                    total, replacement = self._strength_total_replacement(
+                        target, save_ability, total,
+                    )
                     if int(cover["bonus"]):
-                        total = int(check_event["total"]) + int(cover["bonus"])
-                        check_event["total"] = total
-                        check_event["success"] = total >= int(actor["spell_save_dc"])
                         check_event["cover_bonus"] = int(cover["bonus"])
                         check_event["cover_sources"] = cover["sources"]
+                    check_event.update(replacement)
+                    check_event["total"] = total
+                    check_event["success"] = total >= int(actor["spell_save_dc"])
                 succeeded = check_event["success"]
                 save_check_index = len(events)
                 events.append(check_event)
@@ -4252,6 +4315,9 @@ class CombatResolutionMixin:
         roll = int(rng.randint(1, 20))
         modifier = int((target.get("saving_throws") or {}).get(save_ability, 0) or 0)
         total = roll + modifier
+        total, replacement = self._strength_total_replacement(
+            target, save_ability, total,
+        )
         saved = total >= dc
         events: list[dict[str, Any]] = [{
             "type": "check.resolved", "kind": "saving_throw",
@@ -4259,6 +4325,7 @@ class CombatResolutionMixin:
             "rolls": [roll], "natural": roll, "modifier": modifier,
             "total": total, "target": dc, "success": saved,
             "feature_id": feature_id, "channel_effect": "divine_spark",
+            **replacement,
         }]
         if saved:
             # "half as much damage" rounds down, and resistance applies after
@@ -4334,6 +4401,9 @@ class CombatResolutionMixin:
                 (target.get("saving_throws") or {}).get(save_ability, 0) or 0
             )
             total = roll + modifier
+            total, replacement = self._strength_total_replacement(
+                target, save_ability, total,
+            )
             saved = total >= dc
             events.append({
                 "type": "check.resolved", "kind": "saving_throw",
@@ -4341,6 +4411,7 @@ class CombatResolutionMixin:
                 "rolls": [roll], "natural": roll, "modifier": modifier,
                 "total": total, "target": dc, "success": saved,
                 "feature_id": feature_id, "channel_effect": "turn_undead",
+                **replacement,
             })
             if saved:
                 continue
@@ -4476,6 +4547,9 @@ class CombatResolutionMixin:
                 (target.get("saving_throws") or {}).get(save_ability, 0) or 0
             )
             total = roll + modifier
+            total, replacement = self._strength_total_replacement(
+                target, save_ability, total,
+            )
             saved = total >= dc
             check_index = len(events)
             events.append({
@@ -4484,6 +4558,7 @@ class CombatResolutionMixin:
                 "rolls": [roll], "natural": roll, "modifier": modifier,
                 "total": total, "target": dc, "success": saved,
                 "feature_id": feature_id, "channel_effect": "abjure_foes",
+                **replacement,
             })
             if saved:
                 continue
@@ -4855,6 +4930,7 @@ class CombatResolutionMixin:
             roll + modifier + check_bonus
             + int(aura["bonus"]) + int(cover["bonus"])
         )
+        total, replacement = self._strength_total_replacement(actor, ability, total)
         check_event = {
             "type": "check.resolved", "kind": "saving_throw",
             "actor_id": actor_id,
@@ -4866,6 +4942,7 @@ class CombatResolutionMixin:
             "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
             "total": total, "target": dc, "success": total >= dc,
             "roll_id": self._roll_id(events, "saving_throw", actor_id),
+            **replacement,
         }
         if int(cover["bonus"]):
             check_event["cover_bonus"] = int(cover["bonus"])

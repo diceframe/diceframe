@@ -563,6 +563,72 @@ class Dnd2024ClassFeatureResolver:
             for definition in self.features_for(character)
         )
 
+    def saving_throw_proficiency_sources(
+        self, character: Mapping[str, Any] | None,
+    ) -> dict[str, str]:
+        """``{ability: feature_id}`` for every feature-granted saving throw.
+
+        The source travels with the grant because the ref set cannot say who
+        put an ``ability:wis`` there: the class table and a feature look
+        identical once merged, and an audit that cannot tell them apart cannot
+        explain the bonus either.
+        """
+
+        sources: dict[str, str] = {}
+        for definition in self.features_for(character):
+            declared = definition.parameters.get("saving_throw_proficiencies")
+            if not isinstance(declared, list):
+                continue
+            for ability in declared:
+                if isinstance(ability, str) and ability and ability not in sources:
+                    sources[ability] = definition.id
+        return sources
+
+    def ability_bonuses(
+        self, character: Mapping[str, Any] | None,
+    ) -> dict[str, tuple[int, int]]:
+        """Ability score increases from owned features: ``{ability: (bonus, cap)}``.
+
+        Primal Champion and Body and Mind are the declarations today.  A bonus
+        is a benefit, so only declarations whose equipment gate is met count;
+        the cap travels with the bonus because "to a maximum of 25" is a
+        property of the grant, not of the character.
+        """
+
+        grants: dict[str, tuple[int, int]] = {}
+        for definition in self.active_features_for(character):
+            parameters = definition.parameters
+            cap = parameters.get("ability_score_cap")
+            if not isinstance(cap, int) or isinstance(cap, bool):
+                continue
+            for ability in ABILITY_IDS:
+                bonus = parameters.get(f"ability_bonus_{ability}")
+                if not isinstance(bonus, int) or isinstance(bonus, bool):
+                    continue
+                previous = grants.get(ability)
+                # 两道同属性加值取较高的上限：上限是"这几点最多到多少"，
+                # 更宽的那条决定了最终值，收紧它只会凭空削掉加值。
+                grants[ability] = (
+                    (previous[0] if previous else 0) + bonus,
+                    max(cap, previous[1]) if previous else cap,
+                )
+        return grants
+
+    def strength_total_replacement(
+        self, character: Mapping[str, Any] | None,
+    ) -> bool:
+        """Whether a Strength check total below the Strength score is replaced.
+
+        Indomitable Might is the only declaration today.  It is read as a
+        declaration rather than by feature id so a second feature that does the
+        same thing needs no branch here.
+        """
+
+        return any(
+            definition.parameters.get("strength_total_replacement") is True
+            for definition in self.active_features_for(character)
+        )
+
     # ------------------------------------------------------------------
     # always-prepared spell grants
     # ------------------------------------------------------------------
@@ -1913,6 +1979,8 @@ class Dnd2024ClassFeatureResolver:
                         f"{definition.id}.{key} names an unknown progression track: {value}"
                     )
             self._validate_passive_parameters(definition)
+            self._validate_ability_bonus_parameters(definition)
+            self._validate_saving_throw_proficiency_parameters(definition)
             self._validate_defeat_trigger_parameters(definition)
             self._validate_defense_parameters(definition)
             self._validate_speed_parameters(definition)
@@ -2041,7 +2109,10 @@ class Dnd2024ClassFeatureResolver:
                 f"{definition.id} must declare turn_start_regen_base and "
                 "turn_start_regen_ability as a pair"
             )
-        for flag in ("half_proficiency_bonus", "initiative_advantage"):
+        for flag in (
+            "half_proficiency_bonus", "initiative_advantage",
+            "strength_total_replacement",
+        ):
             if flag in parameters and parameters[flag] is not True:
                 raise ClassFeatureError(
                     f"{definition.id}.{flag} must be true when declared"
@@ -2073,6 +2144,80 @@ class Dnd2024ClassFeatureResolver:
             raise ClassFeatureError(
                 f"{definition.id}.critical_hit_move_speed_divisor must be an "
                 "integer of at least 2"
+            )
+
+    @staticmethod
+    def _validate_ability_bonus_parameters(definition: ClassFeatureDefinition) -> None:
+        """Fail closed on the ability-increase contract.
+
+        Primal Champion and Body and Mind are the declarations today.  Three
+        things must hold together, because a half-declared grant is a silent
+        one: the bonus keys name real abilities (``ability_bonus_str`` and
+        nothing else -- an unknown suffix would otherwise raise nothing), every
+        bonus is a positive integer, and the increase declares the cap it is
+        bounded by.  A cap other than 25 is refused rather than honoured: the
+        number is an absolute ceiling in the rules, and a per-feature variant
+        would quietly become a second cap system.
+        """
+
+        parameters = definition.parameters
+        bonuses = {
+            key: value for key, value in parameters.items()
+            if key.startswith("ability_bonus_")
+        }
+        cap = parameters.get("ability_score_cap")
+        if not bonuses:
+            if cap is not None:
+                raise ClassFeatureError(
+                    f"{definition.id}.ability_score_cap has no ability_bonus_* to bound"
+                )
+            return
+        for key, value in bonuses.items():
+            ability = key.removeprefix("ability_bonus_")
+            if ability not in ABILITY_IDS:
+                raise ClassFeatureError(
+                    f"{definition.id}.{key} does not name an ability"
+                )
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ClassFeatureError(
+                    f"{definition.id}.{key} must be a positive integer"
+                )
+        if cap != 25:
+            raise ClassFeatureError(
+                f"{definition.id}.ability_score_cap must be 25 when declared"
+            )
+
+    @staticmethod
+    def _validate_saving_throw_proficiency_parameters(
+        definition: ClassFeatureDefinition,
+    ) -> None:
+        """Fail closed on the per-ability saving throw proficiency list.
+
+        Slippery Mind is the only declaration today.  The value is a list of
+        canonical ability ids -- not a sentence, not the ``"all"`` string the
+        other declaration uses -- so merging it into the class's refs cannot
+        silently grant nothing, and a repeat cannot quietly cheapen the rule
+        that a proficiency is counted once.
+        """
+
+        parameters = definition.parameters
+        if "saving_throw_proficiencies" not in parameters:
+            return
+        declared = parameters["saving_throw_proficiencies"]
+        if not isinstance(declared, list) or not declared:
+            raise ClassFeatureError(
+                f"{definition.id}.saving_throw_proficiencies must be a non-empty list"
+            )
+        if any(
+            not isinstance(ability, str) or ability not in ABILITY_IDS
+            for ability in declared
+        ):
+            raise ClassFeatureError(
+                f"{definition.id}.saving_throw_proficiencies must hold ability ids"
+            )
+        if len(set(declared)) != len(declared):
+            raise ClassFeatureError(
+                f"{definition.id}.saving_throw_proficiencies repeats an ability"
             )
 
     def _validate_defeat_trigger_parameters(self, definition: ClassFeatureDefinition) -> None:

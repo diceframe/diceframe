@@ -1408,6 +1408,9 @@ class Dnd2024Runtime:
             "weapon_ref", "sacred_weapon_bonus", "bright_light_radius",
             "dim_light_beyond", "light_automation",
             "cover_bonus", "cover_sources",
+            # 不屈之力只改写总值：公开 feed 需要能说明"这个 18 来自属性而非骰面"，
+            # 所以三个审计数字与原天然骰并存，任何一方都不覆盖另一方。
+            "ordinary_total", "replacement_score", "total_replaced",
         }
         combat = (
             ruleset_runtime.state(instance).get("combat")

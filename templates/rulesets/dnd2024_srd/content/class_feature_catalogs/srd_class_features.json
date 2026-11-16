@@ -473,6 +473,17 @@
               "actions": [{"kind": "heal", "count": 1}]
             }
           ]
+        },
+        {
+          "id": "body_and_mind",
+          "minimum_level": 20,
+          "source_ref": "srd-5.2.1:p52:body-and-mind",
+          "summary": "Your Dexterity and Wisdom scores increase by 4, to a maximum of 25.",
+          "parameters": {
+            "ability_bonus_dex": 4,
+            "ability_bonus_wis": 4,
+            "ability_score_cap": 25
+          }
         }
       ]
     },
@@ -1013,6 +1024,26 @@
             "sundering_attack_bonus": 5,
             "sundering_duration": "attacker_next_turn_start"
           }
+        },
+        {
+          "id": "indomitable_might",
+          "minimum_level": 18,
+          "source_ref": "srd-5.2.1:p30:indomitable-might",
+          "summary": "If your total for a Strength check or Strength saving throw is less than your Strength score, you can use that score in place of the total.",
+          "parameters": {
+            "strength_total_replacement": true
+          }
+        },
+        {
+          "id": "primal_champion",
+          "minimum_level": 20,
+          "source_ref": "srd-5.2.1:p30:primal-champion",
+          "summary": "Your Strength and Constitution scores increase by 4, to a maximum of 25.",
+          "parameters": {
+            "ability_bonus_str": 4,
+            "ability_bonus_con": 4,
+            "ability_score_cap": 25
+          }
         }
       ]
     },
@@ -1119,6 +1150,15 @@
           "parameters": {
             "replace_natural_with": 20,
             "trigger": "own_check_failure"
+          }
+        },
+        {
+          "id": "slippery_mind",
+          "minimum_level": 15,
+          "source_ref": "srd-5.2.1:p63:slippery-mind",
+          "summary": "You gain proficiency in Wisdom and Charisma saving throws.",
+          "parameters": {
+            "saving_throw_proficiencies": ["wis", "cha"]
           }
         }
       ]
