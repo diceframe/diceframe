@@ -38,6 +38,8 @@ async def api_embedding_model_install(request: web.Request) -> web.Response:
     denied = _require_confirmed_request(request)
     if denied is not None:
         return denied
+    if not request.get("owner_authenticated", False):
+        return web.json_response({"ok": False, "error": "owner authentication required"}, status=403)
     try:
         result = await _manager(request).install(request.match_info["model_id"])
     except ModelCatalogError as exc:
