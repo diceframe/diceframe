@@ -14,7 +14,7 @@ from src.rulesets.dnd2024.features.resources import (
     OVERCHANNEL_OWNER,
     OVERCHANNEL_SPELL_CLASS,
 )
-from src.rulesets.dnd2024.spells.feat_spells import feat_spell_grants
+from src.rulesets.dnd2024.spells.casting import spell_caster, spellcasting_projection
 
 from .check_windows import LUCKY_RESOURCE
 from .primitives import (
@@ -141,9 +141,27 @@ class CombatViewMixin:
         feature_projection = self.features.actor_projection(character)
         # 起源专长（魔法学徒）授予的戏法/1 环法术与职业特性授予并列：
         # 各自带施法属性、攻击加值与 DC，结算时按法术来源取值。
+        #
+        # 常驻授予还要带 `automation_status`：它只由"这个法术真的有可结算
+        # 效果"派生，不手写。目录里存在一条法术不等于能施放，客户端也必须
+        # 能从同一个字段看出来。
+        casting = spellcasting_projection(character, self.features, feature_projection)
         spell_grants = [
-            *feature_projection["spell_grants"], *feat_spell_grants(character),
+            {
+                **row,
+                "automation_status": (
+                    "automated"
+                    if str(row.get("spell_ref", "")).removeprefix("spell:")
+                    in self.catalog.spell_effects
+                    else "not_automated"
+                ),
+            }
+            for row in casting["spell_grants"]
         ]
+        # 免费施法槽是独立资源，不是"这个法术免费"的布尔值：每槽自报
+        # 固定环阶、recharge、剩余次数与所选法术，结算时按 (slot, level)
+        # 匹配一个来源。
+        free_cast_slots = casting["free_cast_slots"]
         return {
             "actor_id": _player_actor(uid), "kind": "player", "id": uid, "side": "party",
             "hp": int(resources.get("hp", 0) or 0),
@@ -171,17 +189,11 @@ class CombatViewMixin:
                 character.get("proficiencies", {}).get("weapon_category_refs") or []
             ),
             "equipment_refs": list(character.get("equipment", {}).get("item_refs") or []),
-            "spell_refs": list(dict.fromkeys([
-                *list(class_magic.get("cantrip_refs") or []),
-                *list(class_magic.get("prepared_spell_refs") or []),
-                *[row["spell_ref"] for row in spell_grants],
-            ])),
-            "class_spell_refs": list(dict.fromkeys([
-                *list(class_magic.get("cantrip_refs") or []),
-                *list(class_magic.get("prepared_spell_refs") or []),
-            ])),
+            "spell_refs": casting["spell_refs"],
+            "class_spell_refs": casting["class_spell_refs"],
             "slots": deepcopy(class_magic.get("slots_current") or {}),
             "spell_grants": deepcopy(spell_grants),
+            "free_cast_slots": deepcopy(free_cast_slots),
             "spell_attack_bonus": int(
                 character.get("derived", {}).get("spell_attack_bonus", 0) or 0
             ),
@@ -218,23 +230,7 @@ class CombatViewMixin:
         through an origin feat uses that feat's chosen spellcasting ability.
         """
 
-        if spell_ref in actor.get("class_spell_refs", []):
-            return actor
-        grant = next(
-            (
-                row for row in actor.get("spell_grants", [])
-                if row.get("spell_ref") == spell_ref and row.get("source") == "feat"
-            ),
-            None,
-        )
-        if grant is None:
-            return actor
-        return {
-            **actor,
-            "spell_ability": grant["spell_ability"],
-            "spell_attack_bonus": int(grant["spell_attack_bonus"]),
-            "spell_save_dc": int(grant["spell_save_dc"]),
-        }
+        return spell_caster(actor, spell_ref)
 
     def _project_character(self, character: dict[str, Any]) -> dict[str, Any]:
         from src.rulesets.dnd2024.character.builder import Dnd2024CharacterBuilder
@@ -456,7 +452,9 @@ class CombatViewMixin:
                 int(level) for level, count in actor["slots"].items()
                 if int(count) > 0 and int(level) >= int(spell["level"]) and not economy.get("slot_spell_cast")
             ] if spell["level"] > 0 else [0]
-            if spell["level"] > 0 and free_cast_resource(actor, ref):
+            if spell["level"] > 0 and free_cast_resource(
+                actor, ref, int(spell["level"]),
+            ):
                 available_slots.insert(0, 0)
             available_slots.sort()
             if available_slots:

@@ -48,6 +48,92 @@ def _humanize(feature_id: str) -> str:
     return str(feature_id).replace("_", " ").strip().title()
 
 
+def _grant_row(value: Any) -> tuple[int, str] | None:
+    """Parse one ``"<level>:spell:<id>"`` always-prepared table row.
+
+    The table lives in the declaration rather than in code, and the encoding is
+    flat because a feature parameter may only hold scalars.  A row that does not
+    parse is a catalog defect, not a grant: it is dropped so the loader's
+    scalar check stays the only thing that can reject a declaration.
+    """
+
+    parts = str(value or "").split(":")
+    if len(parts) != 3 or parts[1] != "spell" or not parts[2]:
+        return None
+    try:
+        level = int(parts[0])
+    except ValueError:
+        return None
+    if level < 1:
+        return None
+    return level, f"spell:{parts[2]}"
+
+
+def _terrain_grant_row(value: Any) -> tuple[str, int, str] | None:
+    """Parse one ``"<terrain>:<level>:spell:<id>"`` land table row."""
+
+    parts = str(value or "").split(":")
+    if len(parts) != 4 or not parts[0] or parts[2] != "spell" or not parts[3]:
+        return None
+    try:
+        level = int(parts[1])
+    except ValueError:
+        return None
+    if level < 1:
+        return None
+    return parts[0], level, f"spell:{parts[3]}"
+
+
+# Free-cast slot encoding.  A feature parameter may only hold scalars, so the
+# six facts that define one slot travel as a single flat row rather than as a
+# nested object: ``"<slot_id>:<level>:<recharge>:<uses>:<spell_ref>"``.
+#
+# ``unlimited`` is a real recharge value, not "no recharge": Spell Mastery never
+# runs out, and a record that stored a finite count for it would be a lie.
+_FREE_CAST_RECHARGES = frozenset({"long_rest", "short_rest", "unlimited"})
+# A choice slot writes ``-`` where a fixed slot writes its spell, so the row
+# keeps five fields either way.
+_FREE_CAST_CHOICE = "-"
+# Where a choice slot may pick from.  ``class_list`` reads the declared lists,
+# ``spellbook`` reads the character's own spellbook, ``fixed`` needs no pick.
+FREE_CAST_SOURCES = frozenset({"fixed", "class_list", "spellbook"})
+
+
+def _free_cast_slot(value: Any) -> dict[str, Any] | None:
+    """Parse one free-cast slot row.
+
+    ``uses`` of ``0`` means the slot never runs out, and a ``spell_ref`` of
+    ``-`` means the player chooses the spell (the alternative is a feature that
+    names its own spell, like Contact Patron).  The last field is split off with
+    ``maxsplit`` because a spell ref itself contains a colon.
+    """
+
+    parts = str(value or "").split(":", 4)
+    if len(parts) != 5:
+        return None
+    slot_id, raw_level, recharge, raw_uses, raw_spell = parts
+    if not slot_id or recharge not in _FREE_CAST_RECHARGES:
+        return None
+    try:
+        spell_level = int(raw_level)
+        uses = int(raw_uses)
+    except ValueError:
+        return None
+    if spell_level < 1 or uses < 0:
+        return None
+    spell_ref = str(raw_spell or "")
+    if spell_ref != _FREE_CAST_CHOICE:
+        if not spell_ref.startswith("spell:") or len(spell_ref) <= len("spell:"):
+            return None
+    return {
+        "slot_id": slot_id,
+        "spell_level": spell_level,
+        "recharge": recharge,
+        "uses": uses,
+        "spell_ref": "" if spell_ref == _FREE_CAST_CHOICE else spell_ref,
+    }
+
+
 # The defeat-trigger payload is one closed four-key set.  ``trigger`` names the
 # only supported event; the other three describe the temp-HP formula.  Keeping
 # the names in one place means the loader and the combat helper can never
@@ -372,6 +458,279 @@ class Dnd2024ClassFeatureResolver:
             str(definition.parameters.get("saving_throw_proficiency") or "") == "all"
             for definition in self.features_for(character)
         )
+
+    # ------------------------------------------------------------------
+    # always-prepared spell grants
+    # ------------------------------------------------------------------
+
+    def spell_grant_choices(
+        self, character: Mapping[str, Any] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """The persisted per-feature spell-grant choices.
+
+        Two declarations need one: Circle of the Land picks a terrain each Long
+        Rest, and Magical Discoveries learns two spells at Bard 6.  Both are
+        player choices, so they live on the sheet; the *grants* are re-derived
+        from them on every read and never stored beside them, which is what
+        keeps a downgrade, a rebuild or a replay from carrying a stale terrain.
+        A malformed record is ignored here -- the entry point that writes one
+        validates it, and the read path must not invent a grant either.
+        """
+
+        spellcasting = (character or {}).get("spellcasting")
+        if not isinstance(spellcasting, Mapping):
+            return {}
+        class_magic = spellcasting.get("class")
+        if not isinstance(class_magic, Mapping):
+            return {}
+        raw = class_magic.get("spell_grant_choices")
+        if not isinstance(raw, Mapping):
+            return {}
+        return {
+            str(key): dict(value)
+            for key, value in raw.items()
+            if isinstance(value, Mapping)
+        }
+
+    def spell_grant_terrain_feature(
+        self, character: Mapping[str, Any] | None,
+    ) -> ClassFeatureDefinition | None:
+        """The owned declaration that makes the character choose a land terrain."""
+
+        for definition in self.features_for(character):
+            if definition.parameters.get("terrain_options"):
+                return definition
+        return None
+
+    # ------------------------------------------------------------------
+    # free-cast slots
+    # ------------------------------------------------------------------
+
+    def free_cast_choices(
+        self, character: Mapping[str, Any] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """The persisted free-cast slot records, keyed by slot id.
+
+        A record holds only what the player owns: the chosen spell and how many
+        uses are left.  Level, recharge and the use maximum stay in the
+        declaration, so a content fix is never shadowed by stale sheet data.
+        """
+
+        spellcasting = (character or {}).get("spellcasting")
+        if not isinstance(spellcasting, Mapping):
+            return {}
+        class_magic = spellcasting.get("class")
+        if not isinstance(class_magic, Mapping):
+            return {}
+        raw = class_magic.get("free_cast_slots")
+        if not isinstance(raw, Mapping):
+            return {}
+        return {
+            str(key): dict(value)
+            for key, value in raw.items()
+            if isinstance(value, Mapping)
+        }
+
+    def free_cast_slots(
+        self, character: Mapping[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Every free-cast slot the character owns, merged with its record.
+
+        The identity of a slot is ``(owner, feature_id, slot_id)`` and it is
+        never flattened into a single "can cast for free" flag: each row keeps
+        its own spell, level, recharge and remaining uses, because Contact
+        Patron, the four Mystic Arcana, Spell Mastery and Signature Spells are
+        six independent pools with six different recharge rules.
+
+        An absent record means "not spent yet" for a slot whose spell the
+        feature itself names, and "not chosen yet" for one the player picks.
+        """
+
+        stored = self.free_cast_choices(character)
+        return self._free_cast_rows(self.features_for(character), character, stored)
+
+    def _free_cast_rows(
+        self,
+        definitions: tuple[ClassFeatureDefinition, ...],
+        character: Mapping[str, Any] | None,
+        stored: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Free-cast rows for an already-resolved ownership list."""
+
+        records = self.free_cast_choices(character) if stored is None else stored
+        rows: list[dict[str, Any]] = []
+        for definition in definitions:
+            parameters = definition.parameters
+            raw_slots = parameters.get("free_cast_slots") or ()
+            if not raw_slots:
+                continue
+            source = str(parameters.get("free_cast_source") or "fixed")
+            for raw in raw_slots:
+                parsed = _free_cast_slot(raw)
+                if parsed is None:
+                    continue
+                rows.append(self._free_cast_row(
+                    definition, parsed, records.get(parsed["slot_id"]), source,
+                ))
+        return rows
+
+    def _free_cast_row(
+        self,
+        definition: ClassFeatureDefinition,
+        parsed: Mapping[str, Any],
+        record: Mapping[str, Any] | None,
+        source: str,
+    ) -> dict[str, Any]:
+        parameters = definition.parameters
+        uses = int(parsed["uses"])
+        fixed = str(parsed["spell_ref"] or "")
+        spell_ref = fixed
+        uses_remaining: int | None = None if uses == 0 else uses
+        valid = True
+        if record is not None:
+            # A record that disagrees with the declaration about the slot's
+            # level or recharge is not a slot any more; ignoring the mismatch
+            # would let a tampered sheet cast a level 2 spell out of a level 6
+            # arcanum by relabelling it.
+            stored_level = record.get("spell_level")
+            stored_recharge = record.get("recharge")
+            if (
+                (stored_level is not None and int(stored_level) != int(parsed["spell_level"]))
+                or (stored_recharge is not None and str(stored_recharge) != str(parsed["recharge"]))
+            ):
+                valid = False
+            chosen = record.get("spell_ref")
+            if not fixed and isinstance(chosen, str) and chosen:
+                spell_ref = chosen
+            if uses and isinstance(record.get("uses_remaining"), int):
+                uses_remaining = max(0, int(record["uses_remaining"]))
+        lists = [str(ref) for ref in parameters.get("free_cast_lists") or ()]
+        return {
+            "id": f"free_cast:{definition.owner}:{definition.id}:{parsed['slot_id']}",
+            "owner": definition.owner,
+            "feature_id": definition.id,
+            "slot_id": str(parsed["slot_id"]),
+            "spell_level": int(parsed["spell_level"]),
+            "recharge": str(parsed["recharge"]),
+            "uses_max": uses,
+            "spell_ref": spell_ref,
+            "selected": bool(spell_ref),
+            "uses_remaining": uses_remaining,
+            "valid": valid,
+            "source": "fixed" if fixed else source,
+            "spell_lists": lists,
+            "casting_time": str(parameters.get("free_cast_casting_time") or ""),
+            "save_auto_succeed": bool(parameters.get("free_cast_save_auto")),
+            "replacement": int(parameters.get("free_cast_replacement") or 0),
+            "replacement_group": str(
+                parameters.get("free_cast_replacement_group") or definition.id
+            ),
+            "rest_replace": int(parameters.get("free_cast_rest_replace") or 0),
+        }
+
+    def spell_grant_rows(
+        self, character: Mapping[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Always-prepared spells the character owns, one row per source.
+
+        Provenance is the point of this projection: a row names the ``owner``
+        and ``feature_id`` that grants the spell, the level at which the grant
+        started, and the terrain or choice slot it came from.  Two sources that
+        hand out the same spell stay two rows, so revoking one can never delete
+        a spell the other still provides.
+        """
+
+        return self._spell_grant_rows(self.features_for(character), character)
+
+    def _spell_grant_rows(
+        self,
+        definitions: tuple[ClassFeatureDefinition, ...],
+        character: Mapping[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Grant rows for an already-resolved ownership list.
+
+        ``actor_projection`` passes the list it just resolved so the combat
+        boundary resolves ownership once; every other caller uses
+        :meth:`spell_grant_rows`, which is why both read the same tables.
+        """
+
+        state = self.class_state(character)
+        if state is None:
+            return []
+        class_id, level = state
+        class_entity = self.bundle.get("class", class_id) or {}
+        ability = str(class_entity.get("spellcasting_ability") or "")
+        choices = self.spell_grant_choices(character)
+        rows: list[dict[str, Any]] = []
+        for definition in definitions:
+            parameters = definition.parameters
+            for raw in parameters.get("always_prepared") or ():
+                parsed = _grant_row(raw)
+                if parsed is None or parsed[0] > level:
+                    continue
+                rows.append(
+                    self._grant_row(definition, parsed[1], parsed[0], ability)
+                )
+            terrain = str((choices.get(definition.id) or {}).get("terrain") or "")
+            for raw in parameters.get("always_prepared_terrain") or ():
+                terrain_row = _terrain_grant_row(raw)
+                if (
+                    terrain_row is None
+                    or terrain_row[1] > level
+                    or terrain_row[0] != terrain
+                ):
+                    continue
+                rows.append(self._grant_row(
+                    definition, terrain_row[2], terrain_row[1], ability,
+                    terrain=terrain,
+                ))
+            slot = choices.get(definition.id) or {}
+            if int(parameters.get("spell_choice_count") or 0):
+                granted_level = int(slot.get("granted_level") or definition.minimum_level)
+                for ref in slot.get("spells") or ():
+                    if not isinstance(ref, str) or not ref:
+                        continue
+                    rows.append(self._grant_row(
+                        definition, ref, granted_level, ability,
+                        choice_id=definition.id,
+                    ))
+            if bool(parameters.get("free_cast_prepares")):
+                # Spell Mastery, Signature Spells and Contact Patron all say
+                # "you always have them prepared"; the free cast is a separate
+                # fact about the same spell, so it comes through as one more
+                # source on the prepared view rather than as its own entry.
+                for free in self._free_cast_rows(
+                    (definition,), character, self.free_cast_choices(character),
+                ):
+                    if not free["spell_ref"] or not free["valid"]:
+                        continue
+                    rows.append(self._grant_row(
+                        definition, free["spell_ref"],
+                        int(definition.minimum_level), ability,
+                        choice_id=free["slot_id"],
+                    ))
+        return rows
+
+    @staticmethod
+    def _grant_row(
+        definition: ClassFeatureDefinition,
+        spell_ref: str,
+        granted_level: int,
+        ability: str,
+        *,
+        terrain: str = "",
+        choice_id: str = "",
+    ) -> dict[str, Any]:
+        return {
+            "owner": definition.owner,
+            "feature_id": definition.id,
+            "spell_ref": str(spell_ref),
+            "granted_level": int(granted_level),
+            "terrain": str(terrain),
+            "choice_id": str(choice_id),
+            "source": "class_feature",
+            "spell_ability": ability,
+        }
 
     def min_feature_value(
         self,
@@ -877,8 +1236,18 @@ class Dnd2024ClassFeatureResolver:
         )
         return {
             "spell_grants": [
-                {"spell_ref": f"spell:{definition.parameters['granted_spell_id']}", "resource_id": definition.resource_id}
-                for definition in active if definition.parameters.get("granted_spell_id")
+                # 常驻授予（子职法术表、Land 地形、Magical Discoveries）与
+                # "免费施放" 授予是两种东西：前者只说明"已准备"，不带资源，
+                # 后者挂一个职业资源池。两者同列但都不许对方冒充自己。
+                *self._spell_grant_rows(owned, character),
+                *[
+                    {
+                        "spell_ref": f"spell:{definition.parameters['granted_spell_id']}",
+                        "resource_id": definition.resource_id,
+                    }
+                    for definition in active
+                    if definition.parameters.get("granted_spell_id")
+                ],
             ],
             "class_resources": [
                 definition.to_dict()

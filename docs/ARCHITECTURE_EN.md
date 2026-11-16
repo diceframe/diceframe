@@ -3746,6 +3746,10 @@ available_intents
 
 returns that intent.
 
+Exploration and combat share effective known/prepared spells, always-prepared grants, free-source priority, resource events and canonical consumption through `spells/casting.py`; combat retains ownership of action economy. Unlimited slots take priority over finite uses. `slot_level=0` selects a legal free source, while an explicit positive level still spends an ordinary slot. Exploration continues to reject deterministic effects that are not exploration-safe.
+
+Spell Mastery Long Rest study enters the formal service → runtime → resting chain through the runtime-declared `free_cast` rest option, with non-mutating validation before party submission; a Short Rest cannot replace spells.
+
 It shares with combat:
 
 - canonical known/prepared spells;

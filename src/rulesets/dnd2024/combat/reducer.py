@@ -20,7 +20,8 @@ from src.rulesets.dnd2024.features.resources import (
     feature_usage_count,
     set_feature_usage_count,
 )
-from src.rulesets.dnd2024.spells.feat_spells import concentration_holder, spend_feat_free_cast
+from src.rulesets.dnd2024.spells.feat_spells import concentration_holder
+from src.rulesets.dnd2024.spells.casting import apply_free_cast_cost
 from src.rulesets.events import EventBatchError
 from .primitives import actor_kind as _actor_kind
 
@@ -340,16 +341,10 @@ class CombatReducerMixin:
                 if kind == "player"
                 else self._companion_character(snapshot, raw_id)
             )
-            resource_id = str(event["resource_id"])
-            class_state = character.setdefault("resources", {}).setdefault("class", {})
-            state = class_state.get(resource_id)
-            if not isinstance(state, dict):
-                raise EventBatchError(f"class resource is not initialized: {resource_id}")
-            current = int(state.get("current", 0) or 0)
-            amount = int(event.get("amount", 1) or 1)
-            if current < amount:
-                raise EventBatchError(f"class resource is already spent: {resource_id}")
-            state["current"] = current - amount
+            try:
+                apply_free_cast_cost(character, event)
+            except ValueError as exc:
+                raise EventBatchError(str(exc)) from exc
             return
         if event_type == "dnd2024.bardic.granted":
             # 激励骰实例是唯一的状态记录：授予时间与到期分钟由 resolution
@@ -519,9 +514,16 @@ class CombatReducerMixin:
             if kind not in {"player", "companion"}:
                 raise EventBatchError("only player/companion feat spells are canonical")
             try:
-                spend_feat_free_cast(
-                    self._canonical_of(snapshot, kind, raw_id), str(event["feat_ref"]),
-                )
+                apply_free_cast_cost(self._canonical_of(snapshot, kind, raw_id), event)
+            except ValueError as exc:
+                raise EventBatchError(str(exc)) from exc
+            return
+        if event_type == "dnd2024.free_cast.spent":
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion free casts are canonical")
+            try:
+                apply_free_cast_cost(self._canonical_of(snapshot, kind, raw_id), event)
             except ValueError as exc:
                 raise EventBatchError(str(exc)) from exc
             return
