@@ -112,14 +112,16 @@ async def test_receipt_failure_keeps_journal_for_next_restart(tmp_path, monkeypa
             await host.install_group_from_zips([_package_bytes("pack-a", "1")])
         else:
             await host.install_from_zip(_package_bytes("pack-a", "1"))
-    restarted = PluginHost(tmp_path / "plugins", tmp_path / "data")
     with monkeypatch.context() as patch:
         def fail(*args, **kwargs):
             raise OSError("receipt disk unavailable")
-        patch.setattr(restarted, "_save_install_receipt", fail)
+        # 恢复现在发生在启动装配（__init__）里，注入失败必须覆盖到构造期。
+        patch.setattr(PluginHost, "_save_install_receipt", fail)
+        restarted = PluginHost(tmp_path / "plugins", tmp_path / "data")
         restarted.discover()
     journal = restarted._group_install_journal_path if group else restarted._install_journal_path
     assert journal.exists()
+    restarted = PluginHost(tmp_path / "plugins", tmp_path / "data")
     restarted.discover()
     assert restarted._load_install_receipt("pack-a")["version"] == "1"
     assert not journal.exists()
@@ -150,6 +152,7 @@ async def test_receipt_repair_refuses_target_manifest_not_in_journal(tmp_path, m
     changed = json.loads(expected)
     changed["description"] = "user modified after crash"
     target.write_text(json.dumps(changed))
+    # 恢复在启动装配（__init__）执行：manifest 冲突让本次恢复拒绝补写并保留 journal。
     restarted = PluginHost(tmp_path / "plugins", tmp_path / "data")
     restarted.discover()
     assert restarted._load_install_receipt("pack-a") == old_receipt
@@ -158,6 +161,7 @@ async def test_receipt_repair_refuses_target_manifest_not_in_journal(tmp_path, m
     assert journal.exists()
     # Removing the conflict lets the same retained journal finish on restart.
     target.write_text(expected)
+    restarted = PluginHost(tmp_path / "plugins", tmp_path / "data")
     restarted.discover()
     assert restarted.public_detail("pack-a")["status"] == "active"
     assert restarted._load_install_receipt("pack-a")["version"] == "2"
@@ -224,3 +228,47 @@ async def test_group_rollback_interrupted_after_backup_restore_is_repeatable(tmp
         assert restarted.public_detail(plugin_id)["version"] == "1"
         assert restarted.public_detail(plugin_id)["status"] == "active"
     assert not restarted._group_install_journal_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_rescan_waits_instead_of_rolling_back_inflight_group_install(
+    tmp_path, monkeypatch,
+):
+    """组安装中途让出事件循环时，并发 rescan 必须排队等发布锁，不能当场回滚在途 journal。"""
+    import asyncio
+
+    import src.plugin_host.host as host_module
+
+    host = PluginHost(tmp_path / "plugins", tmp_path / "data")
+    await host.install_group_from_zips([_package_bytes(p, "1") for p in ("pack-a", "pack-b")])
+    original = host_module._rename_dir_with_retry
+    hook = {"armed": False}
+    holder: dict[str, object] = {}
+
+    async def insert_rescan_during_install(src, dst, **kwargs):
+        await original(src, dst, **kwargs)
+        if hook["armed"] and src.name == "pack-a" and dst.name.endswith(".backup"):
+            hook["armed"] = False
+            # 在途事务正持锁：并发 rescan 只能在锁上排队（fail-open 场景旧实现会在此
+            # 无锁插入 discover → 把 live journal 当场回滚，破坏备份/目标目录）。
+            holder["rescan"] = asyncio.create_task(host.rescan())
+            for _ in range(3):
+                await asyncio.sleep(0)
+            assert not holder["rescan"].done()
+            assert host._group_install_journal_path.exists()
+        return None
+
+    monkeypatch.setattr(host_module, "_rename_dir_with_retry", insert_rescan_during_install)
+    hook["armed"] = True
+    await host.install_group_from_zips(
+        [_package_bytes(p, "2") for p in ("pack-a", "pack-b")], overwrite=True,
+    )
+    # 安装事务完整提交：两个插件都是新版本且 active，没有发生任何回滚。
+    discovered = await holder["rescan"]
+    by_id = {item["id"]: item for item in discovered}
+    for plugin_id in ("pack-a", "pack-b"):
+        assert by_id[plugin_id]["version"] == "2"
+        assert by_id[plugin_id]["status"] == "active"
+        assert host.public_detail(plugin_id)["version"] == "2"
+    assert not host._group_install_journal_path.exists()
+    assert not list((tmp_path / "plugins").glob(".pack-*.group-*"))

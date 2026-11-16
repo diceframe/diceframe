@@ -183,10 +183,20 @@ class PluginHost:
         # 插件进程启动时捕获并轮询；主进程被重启（含 os.execv 保 PID 重启）后重新生成，
         # 旧插件进程读到世代变化/缺失即退出，避免孤儿进程残留导致开关状态与真实进程不一致。
         self._host_generation = secrets.token_hex(8)
+        # 启动装配期无并发，收敛上次进程崩溃遗留的安装 journal；运行期恢复只在发布锁内。
+        self._recover_install_state()
 
-    def discover(self) -> list[PluginPublicDetail]:
+    def _recover_install_state(self) -> None:
+        """收敛遗留的单包与组安装 journal。
+
+        只允许在启动装配（__init__）与 `_package_publish_lock` 保护段内调用：
+        journal 是在途安装事务的回滚凭据，无锁恢复会把并发安装的 live journal
+        当场回滚，最坏情况删掉已还原的旧版本目录。
+        """
         self._recover_group_install_journal()
         self._recover_install_journal()
+
+    def discover(self) -> list[PluginPublicDetail]:
         self.plugins.clear()
         # 先内置再用户目录，用户目录同名覆盖内置；runtime.source 记录来源。
         for source, base_dir in (("builtin", self.builtin_dir), ("user", self.plugins_dir)):
@@ -1036,6 +1046,8 @@ class PluginHost:
         expected_plugin_type: str = "",
     ) -> PluginPublicDetail:
         async with self._package_publish_lock:
+            # 新安装前先收敛遗留 journal（与启动期相同的语义），锁内无在途事务。
+            self._recover_install_state()
             return await self._install_from_zip_locked(
                 payload, overwrite=overwrite, allow_any_root=allow_any_root,
                 expected_plugin_type=expected_plugin_type,
@@ -1156,6 +1168,8 @@ class PluginHost:
         """Publish a preflighted package group as one recoverable transaction."""
 
         async with self._package_publish_lock:
+            # 新安装前先收敛遗留 journal（与启动期相同的语义），锁内无在途事务。
+            self._recover_install_state()
             return await self._install_group_from_zips_locked(payloads, overwrite=overwrite)
 
     async def _install_group_from_zips_locked(
@@ -1262,9 +1276,10 @@ class PluginHost:
                     )
                 self._group_install_journal_path.unlink(missing_ok=True)
         except Exception:
-            # Leave the journal for the next discover to perform the same
-            # rollback after a process interruption.  Do an immediate best
-            # effort recovery as well so the current caller sees old packages.
+            # Leave the journal for the next publish-lock recovery pass
+            # (startup or the next locked install) after a process
+            # interruption.  Do an immediate best effort recovery as well so
+            # the current caller sees old packages.
             self._recover_group_install_journal()
             self.discover()
             raise
@@ -1573,6 +1588,12 @@ class PluginHost:
         return await self.mirrors.test(mirror_id)
 
     async def uninstall(self, plugin_id: str, *, delete_data: bool = False) -> dict[str, Any]:
+        # 卸载也是 package publisher：与安装/恢复共用发布锁，避免无锁恢复
+        # 把在途安装事务的 live journal 当场回滚。
+        async with self._package_publish_lock:
+            return await self._uninstall_locked(plugin_id, delete_data=delete_data)
+
+    async def _uninstall_locked(self, plugin_id: str, *, delete_data: bool = False) -> dict[str, Any]:
         runtime = self._require(plugin_id)
         if runtime.source == "builtin":
             raise ValueError(t("plugin_host.host.builtin_not_uninstallable"))
@@ -1974,10 +1995,13 @@ class PluginHost:
                 self._host_generation_path(plugin_id).unlink()
 
     async def rescan(self) -> list[PluginPublicDetail]:
-        await self.cleanup()
-        discovered = self.discover()
-        await self.start_enabled()
-        return discovered
+        # 重新扫描会重放 discover 全量替换插件表；与安装/恢复共用发布锁，
+        # 防止并发安装事务的中途（stop/sleep 让出事件循环）被扫描覆盖。
+        async with self._package_publish_lock:
+            await self.cleanup()
+            discovered = self.discover()
+            await self.start_enabled()
+            return discovered
 
 
     async def _monitor_process(self, plugin_id: str, process: asyncio.subprocess.Process) -> None:

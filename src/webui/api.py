@@ -26,7 +26,7 @@ from src.engine import persistence
 from src.webui.services.adventure_materialization import materialize_world_seed
 from src.engine.memory_outbox import pending_memory_deliveries, pending_memory_reversals
 from src.creator import CreatorProjectStore
-from src.creator.worker_jobs import WorkerJobStore
+from src.creator.worker_jobs import MAX_LEASE_SECONDS, MAX_RESULT_BYTES, WorkerJobError, WorkerJobStore
 from src.creator.worker import WorkerPolicy, run_worker
 
 from src.engine.participant_view import Viewer
@@ -184,6 +184,10 @@ class WebAPI:
             package_checker=self._creator_package_checker,
         )
         self._creator_worker_jobs = WorkerJobStore(self._reg.save_dir.parent / "creator-worker-jobs.json")
+        # 启动装配期收敛崩溃遗留的 running 回执（孤儿租约），避免回执永久卡在 running。
+        recovered = self._creator_worker_jobs.recover_expired()
+        if recovered:
+            logger.warning("已收敛 %d 个 Creator worker 孤儿回执为 interrupted", len(recovered))
         self._lore = lorebook
         self._mem = memory
         self._rules_dir = rules_dir
@@ -1550,9 +1554,15 @@ class WebAPI:
         cwd: str = ".",
         source_trust: str = "trusted",
         idempotency_key: str | None = None,
+        policy: WorkerPolicy | None = None,
     ) -> dict[str, Any]:
         """Run one revision-scoped Creator command and persist its receipt."""
 
+        # 回执上限与执行预算必须同源：输出预算超过 MAX_RESULT_BYTES 会让成功任务
+        # 在 complete() 落盘时才失败。stdout/stderr 各自截断到预算，所以预算取
+        # 回执上限的一半再减去信封余量，保证两路满载时回执 JSON 仍在限内。
+        # 租约必须覆盖执行超时，否则超时收尾必撞租约过期异常。
+        worker_policy = policy or WorkerPolicy(output_bytes=MAX_RESULT_BYTES // 2 - 512)
         project = self._creator_projects.read(owner_id, project_id)["project"]
         if project.get("revision") != expected_revision:
             raise ValueError("工程版本已变化，请重新读取后再执行 worker")
@@ -1564,7 +1574,10 @@ class WebAPI:
         row = created["job"]
         if created.get("reused") and row.get("status") == "completed":
             return {"ok": True, "reused": True, "job": row, "result": row.get("result")}
-        claim = self._creator_worker_jobs.claim(owner_id, row["id"])
+        claim = self._creator_worker_jobs.claim(
+            owner_id, row["id"],
+            lease_seconds=min(int(worker_policy.timeout_seconds) + 30, MAX_LEASE_SECONDS),
+        )
         with tempfile.TemporaryDirectory(
             prefix=f"creator-worker-{project_id}-",
             dir=str(self._reg.save_dir.parent),
@@ -1584,7 +1597,7 @@ class WebAPI:
                     command,
                     project_root=workspace,
                     cwd=cwd,
-                    policy=WorkerPolicy(),
+                    policy=worker_policy,
                     source_trust=source_trust,
                 )
             except Exception as exc:
@@ -1592,14 +1605,20 @@ class WebAPI:
                     owner_id, row["id"], claim["lease_id"], str(exc),
                 )
                 return {"ok": False, "job": receipt["job"], "error": str(exc)}
-        if result.get("status") == "timeout":
-            receipt = self._creator_worker_jobs.fail(
-                owner_id, row["id"], claim["lease_id"], "worker timed out", timeout=True,
-            )
-        else:
-            receipt = self._creator_worker_jobs.complete(
-                owner_id, row["id"], claim["lease_id"], result,
-            )
+        # 收尾调用自身也可能失败（租约过期 / 回执超限）；此时返回结构化错误，
+        # 不让 WorkerJobError 冒泡成路由 409，把回执永久卡在 running。
+        last_known = claim["job"]
+        try:
+            if result.get("status") == "timeout":
+                receipt = self._creator_worker_jobs.fail(
+                    owner_id, row["id"], claim["lease_id"], "worker timed out", timeout=True,
+                )
+            else:
+                receipt = self._creator_worker_jobs.complete(
+                    owner_id, row["id"], claim["lease_id"], result,
+                )
+        except WorkerJobError as exc:
+            return {"ok": False, "job": last_known, "error": str(exc)}
         return {"ok": bool(result.get("ok")), "job": receipt["job"], "result": result}
 
     def create_creator_project(
