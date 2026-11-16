@@ -1,0 +1,7 @@
+# src/engine/dice_rng.py 返回给请求方的提示。
+"zh-CN":
+  count_out_of_range: "骰子数量超出范围（1-%{max_dice_count}）: %{formula}"
+  die_sides_out_of_range: "骰子面数超出范围（2-%{max_dice_sides}）: d%{sides}"
+  formula_invalid: "无效的掷骰公式: %{formula}"
+  modifier_out_of_range: "骰子修正超出范围（±%{max_dice_modifier}）: %{formula}"
+  sides_out_of_range: "骰子面数超出范围（2-%{max_dice_sides}）: %{formula}"
