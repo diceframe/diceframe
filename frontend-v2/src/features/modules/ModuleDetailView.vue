@@ -13,7 +13,7 @@ import {
 import { useConfirm } from '@/composables/useConfirm'
 import { useLocale } from '@/composables/useLocale'
 import ModuleResourceBrowser from './resources/ModuleResourceBrowser.vue'
-import { contentKindLabel, formatModuleBlocker, moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
+import { contentKindLabel, formatModuleBlocker, missingRuntimeFromBlocker, moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
 import type { MessageKey } from '@/i18n'
 
 const route = useRoute()
@@ -39,6 +39,22 @@ const { confirm } = useConfirm()
 const moduleId = computed(() => String(route.params.moduleId || ''))
 const module = ref<ModuleDetail | null>(null)
 const compatibility = ref<ModuleCompatibilityResponse | null>(null)
+// 缺规则运行时是「能自己解决」的阻塞：给出直达扩展中心的入口，而不是让用户
+// 在一句错误文案里自己找。runtime id 允许带命名空间冒号，商店插件 id 用连字符，
+// 所以搜索词按连字符形式传（fu:core → fu-core）。
+const missingRuntime = computed(() => {
+  for (const blocker of compatibility.value?.blockers || []) {
+    const runtimeId = missingRuntimeFromBlocker(blocker)
+    if (runtimeId) return runtimeId
+  }
+  return ''
+})
+function openExtensionsCenter(runtimeId: string): void {
+  void router.push({
+    name: 'plugins',
+    query: { tab: 'marketplace', q: runtimeId.replace(/:/g, '-') },
+  })
+}
 const usage = ref<ModuleUsageResponse | null>(null)
 const error = ref('')
 const status = ref('')
@@ -357,6 +373,13 @@ async function run(action: ModuleAction) {
             <h3 class="mod-side-title">{{ t('modulesCompatibility') }}</h3>
             <p v-if="compatibility?.blockers?.length" class="error-text">{{ compatibility.blockers.map(blocker => formatModuleBlocker(blocker, locale)).join(locale === 'zh-CN' ? '；' : '; ') }}</p>
             <p v-else class="mod-compat-ok">{{ t('modulesCompatible') }}</p>
+            <button
+              v-if="missingRuntime"
+              type="button"
+              class="mod-runtime-cta"
+              data-testid="module-install-runtime"
+              @click="openExtensionsCenter(missingRuntime)"
+            >{{ t('modulesInstallRuntimeCta') }}</button>
             <p v-if="compatibility?.warnings?.length" class="muted">{{ compatibility.warnings.join(', ') }}</p>
           </div>
 
@@ -449,6 +472,8 @@ async function run(action: ModuleAction) {
 .mod-content-list li span { color: var(--df-text-muted); font-size: .82rem; }
 .mod-content-list li strong { color: var(--df-interactive-strong); font-size: .88rem; }
 .mod-compat-ok { margin: 0; color: var(--df-success); font-size: .84rem; font-weight: 600; }
+.mod-runtime-cta { justify-self: start; min-height: 32px; padding: 0 .7rem; border: 1px solid var(--df-border-strong, var(--df-border)); border-radius: var(--df-radius-sm, 4px); background: var(--df-surface-2, transparent); color: var(--df-interactive-strong); font-size: .8rem; font-weight: 600; cursor: pointer; }
+.mod-runtime-cta:hover { border-color: var(--df-accent-strong, var(--df-accent)); }
 .mod-technical { overflow: hidden; }
 .mod-technical summary { cursor: pointer; font-size: .84rem; font-weight: 700; color: var(--df-text-muted); list-style: none; }
 .mod-technical[open] summary { color: var(--df-text); margin-bottom: .5rem; }

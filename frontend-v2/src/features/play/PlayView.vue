@@ -311,6 +311,11 @@ type RulesetTool = 'campaign' | 'combat'
 const activeRulesetTool = ref<RulesetTool | ''>('')
 const directorProposal = ref<RulesetDirectorProposal | null>(null)
 const rulesetGameplay = ref<RulesetGameplayView | null>(null)
+// 侧栏折叠区只在真有可渲染节点时出现：运行时可能返回空数组，或整组都是非法节点
+// （宿主渲染器会丢弃），此时不该留下一个打不开的空壳。
+const hasRulesetPanels = computed(() => (rulesetGameplay.value?.panels || []).some(node => (
+  !!node && typeof node === 'object' && typeof (node as { component?: unknown }).component === 'string'
+)))
 const rulesetAvailableActions = ref<RulesetCombatAction[]>([])
 const rulesetCombatStatus = ref('none')
 const rulesetCampaignStatus = ref('')
@@ -1449,6 +1454,23 @@ function onPlayKeydown(event: KeyboardEvent) {
               :refresh-key="JSON.stringify([game.detail.value.run_id, game.detail.value.last_activity, game.detail.value.rest_activity])"
               @changed="game.refresh(true)"
             />
+            <!-- 规则运行时自带的声明式面板：插件无法携带 Vue 组件，命刻/机会/冲突
+                 步骤这类专属信息只能以节点形式下发，由统一渲染器呈现。这些是
+                 「查看类」信息，放在角色栏折叠区，不占消息流顶部。 -->
+            <details
+              v-if="hasRulesetPanels"
+              class="panel sidebar-disclosure"
+              data-testid="ruleset-panels-disclosure"
+            >
+              <summary><strong>{{ t('rulesetPanelsTitle') }}</strong></summary>
+              <div class="sidebar-disclosure-body">
+                <RulesetPanels
+                  :game-key="game.currentGame.value"
+                  :panels="rulesetGameplay?.panels"
+                  @refresh="refreshRulesetPanels"
+                />
+              </div>
+            </details>
           </template>
         </GameSidebar>
       </aside>
@@ -1554,14 +1576,6 @@ function onPlayKeydown(event: KeyboardEvent) {
           :is-gm="game.isGm.value"
           @open-campaign="openRulesetTool('campaign')"
           @open-combat="openRulesetTool('combat')"
-        />
-
-        <!-- 规则运行时自带的声明式面板：插件无法携带 Vue 组件，命刻/机会/冲突
-             步骤这类专属信息只能以节点形式下发，由统一渲染器呈现。 -->
-        <RulesetPanels
-          :game-key="game.currentGame.value"
-          :panels="rulesetGameplay?.panels"
-          @refresh="refreshRulesetPanels"
         />
 
         <GameTimeline
