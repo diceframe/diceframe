@@ -125,6 +125,15 @@ const editCard = ref<CardEditForm | null>(null)
 const editNpcPortrait = ref<NpcPortraitEdit | null>(null)
 const advancementCard = ref<CharacterCard | null>(null)
 const advancementPlayer = ref<Player | null>(null)
+// A card saved with a starting level above 1 keeps advancing on the saved card:
+// each level is its own persisted transaction, so a cancelled chain keeps the
+// levels it already gained instead of rolling them back.
+const wizardChain = ref<{
+  cardId: string
+  character: CharacterSheet
+  revision: number
+  targetLevel: number
+} | null>(null)
 const professionalEdit = ref<ProfessionalEditTarget | null>(null)
 const showWizard = ref(false)
 const characterSearch = ref('')
@@ -786,11 +795,12 @@ async function saveNpcPortrait() {
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
 }
 
-async function onWizardSubmit(c: CharacterSheet) {
+async function onWizardSubmit(c: CharacterSheet, options?: { targetLevel?: number }) {
   if (!canCreateCard.value) return
+  const targetLevel = Math.floor(Number(options?.targetLevel || 0))
   busy.value = true
   try {
-    await api('/character-cards', {
+    const created = await api<{ ok: boolean; card?: CharacterCard }>('/character-cards', {
       method: 'POST',
       body: JSON.stringify({
         ...c,
@@ -800,8 +810,38 @@ async function onWizardSubmit(c: CharacterSheet) {
     })
     showWizard.value = false
     await load()
+    const saved = created?.card
+    if (targetLevel > 1 && saved?.id) {
+      wizardChain.value = {
+        cardId: String(saved.id),
+        character: saved as CharacterSheet,
+        revision: Number(saved.ruleset_revision || 0),
+        targetLevel,
+      }
+      return
+    }
     toast.success(t('characterCardCreated'))
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
+}
+
+async function onWizardChainCompleted(_character: CharacterSheet) {
+  wizardChain.value = null
+  await load()
+  toast.success(t('characterCardCreated'))
+}
+
+async function onWizardChainCancel() {
+  const chain = wizardChain.value
+  wizardChain.value = null
+  await load()
+  const saved = chain
+    ? (data.value?.cards || []).find(candidate => cardId(candidate) === chain.cardId)
+    : undefined
+  const reached = saved ? professionalLevel(saved) : 0
+  if (reached <= 1) return
+  toast.info(String(locale.value).toLowerCase().startsWith('zh')
+    ? `已升至 ${reached} 级，剩余等级可在卡库继续升级。`
+    : `Advanced to level ${reached}; finish the remaining levels from the card library.`)
 }
 </script>
 
@@ -1085,8 +1125,22 @@ async function onWizardSubmit(c: CharacterSheet) {
       v-if="showWizard && isSelectedProfessionalRule()"
       :rule-id="ruleId"
       :language="String(locale)"
+      :chain="false"
       @submit="onWizardSubmit"
       @cancel="showWizard = false"
+    />
+    <RulesetAdvancementHost
+      v-if="wizardChain"
+      :runtime-id="String(data?.ruleset_runtime?.id || '')"
+      :rule-id="ruleId"
+      :character="wizardChain.character"
+      :card-id="wizardChain.cardId"
+      :revision="wizardChain.revision"
+      :target-level="wizardChain.targetLevel"
+      :language="String(locale)"
+      @chain-completed="onWizardChainCompleted"
+      @applied="onWizardChainCompleted"
+      @cancel="onWizardChainCancel"
     />
     <CharacterWizard
       v-else-if="showWizard"

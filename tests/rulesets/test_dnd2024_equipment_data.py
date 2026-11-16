@@ -500,7 +500,7 @@ def test_loot_to_equipment_to_combat_numbers_end_to_end(runtime) -> None:
     # 装备后才改变 AC，且 AC 完全来自规则集物品定义。
     assert equip_owned_item(sheet, "Plate Armor", item_ref="item:plate") is True
     summary = reconciler.reconcile(sheet, frozenset({"equipment", "inventory"}))
-    assert summary["armor_class"] == 18
+    assert summary["armor_class"] == 19  # 板甲 18 + 该预设 1 级选了的 Defense 1
     assert sheet["ruleset_character"]["equipment"]["item_refs"] == ["item:plate"]
     # 该角色力量 17 满足板甲的力量要求：不减速，但隐匿劣势照常投影。
     assert sheet["ruleset_character"]["derived"]["armor_training"] == {

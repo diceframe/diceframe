@@ -7,10 +7,12 @@ import type {
   RulesetBuilderChoicesResponse,
   RulesetBuilderValidationResponse,
   RulesetExperienceResponse,
+  RulesetPendingChoicesResponse,
   RulesetProgressionResponse,
   RulesetRestResponse,
   RulesetGameplayResponse,
   RulesetTemporaryEncounterResponse,
+  SpellPreparationOptionsResponse,
 } from '@/api/types'
 
 function rulePath(ruleId: string, suffix: string, language = ''): string {
@@ -136,6 +138,35 @@ export function applyCharacterCardAdvancement(
   )
 }
 
+/** What a card still owes. Read-only; opening the panel must not write. */
+export function fetchCharacterCardPendingChoices(
+  cardId: string,
+): Promise<RulesetPendingChoicesResponse> {
+  return api<RulesetPendingChoicesResponse>(
+    `/character-cards/${encodeURIComponent(cardId)}/choices/pending`,
+  )
+}
+
+/** Fill outstanding choices without advancing a level. */
+export function completeCharacterCardChoices(
+  cardId: string,
+  repairs: JsonObject,
+  expectedRevision: number,
+  operationId: string,
+): Promise<RulesetAdvancementApplyResponse> {
+  return api<RulesetAdvancementApplyResponse>(
+    `/character-cards/${encodeURIComponent(cardId)}/choices/complete`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        repairs,
+        expected_revision: expectedRevision,
+        operation_id: operationId,
+      }),
+    },
+  )
+}
+
 export function previewLiveCharacterAdvancement(
   gameKey: string,
   userId: string,
@@ -167,6 +198,25 @@ export function applyLiveCharacterAdvancement(
   )
 }
 
+export function fetchLiveCharacterSpellOptions(
+  gameKey: string,
+  userId: string,
+): Promise<SpellPreparationOptionsResponse> {
+  return api<SpellPreparationOptionsResponse>(
+    `/games/${encodeURIComponent(gameKey)}/character/${encodeURIComponent(userId)}/spells`,
+  )
+}
+
+export interface RestPreparationChange {
+  prepared_spell_refs: string[]
+  cantrip_refs?: string[]
+}
+
+export interface RestSubmissionOptions {
+  /** Long-rest preparation change; omitted entirely when nothing changed. */
+  preparedSpells?: RestPreparationChange
+}
+
 export function resolveLiveCharacterRest(
   gameKey: string,
   userId: string,
@@ -174,19 +224,20 @@ export function resolveLiveCharacterRest(
   hitDice: Record<string, number>,
   expectedRevision: number,
   operationId: string,
+  options: RestSubmissionOptions | null = null,
 ): Promise<RulesetRestResponse> {
+  const body: JsonObject = {
+    rest,
+    hit_dice: rest === 'short' ? hitDice : {},
+    confirm_elapsed_time: true,
+    expected_revision: expectedRevision,
+    operation_id: operationId,
+  }
+  // 空改动会被服务端拒（"would not change anything"），所以只在确有改动时附带。
+  if (options?.preparedSpells) body.prepared_spells = options.preparedSpells
   return api<RulesetRestResponse>(
     `/games/${encodeURIComponent(gameKey)}/character/${encodeURIComponent(userId)}/rest`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        rest,
-        hit_dice: rest === 'short' ? hitDice : {},
-        confirm_elapsed_time: true,
-        expected_revision: expectedRevision,
-        operation_id: operationId,
-      }),
-    },
+    { method: 'POST', body: JSON.stringify(body) },
   )
 }
 

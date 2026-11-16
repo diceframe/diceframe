@@ -8,6 +8,14 @@
   "hit_die": 6,
   "fixed_hp_per_level": 4,
   "spellcasting_ability": "cha",
+  "preparation_policy": {
+    "source": "class_list",
+    "level_up_replace": 1,
+    "long_rest_replace": 0,
+    "cantrip_swap_on": "level_up",
+    "spellbook": {"initial": 0, "per_level": 0},
+    "spellbook_gain_per_level": 0
+  },
   "recommended_spell_choices": {
     "cantrip_ids": ["light", "prestidigitation", "shocking_grasp", "sorcerous_burst"],
     "prepared_spell_ids": ["burning_hands", "detect_magic"]

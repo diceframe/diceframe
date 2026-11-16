@@ -14,6 +14,7 @@ from .contracts import (
     PluginTypeDescriptor,
     PluginTypeListView,
 )
+from src.localization.messages import t as translate
 
 logger = logging.getLogger(__name__)
 
@@ -265,21 +266,21 @@ def parse_compatible_rulesets(manifest: dict) -> list[str]:
     if raw is None:
         return []
     if not isinstance(raw, list):
-        raise ValueError(f"{COMPATIBLE_RULESETS_FIELD} 必须是数组")
+        raise ValueError(translate("plugin_host.support.compatible_rulesets_not_array", compatible_rulesets_field=COMPATIBLE_RULESETS_FIELD))
     if len(raw) > MAX_COMPATIBLE_RULESETS:
-        raise ValueError(f"{COMPATIBLE_RULESETS_FIELD} 最多 {MAX_COMPATIBLE_RULESETS} 条")
+        raise ValueError(translate("plugin_host.support.compatible_rulesets_too_many", compatible_rulesets_field=COMPATIBLE_RULESETS_FIELD, max_compatible_rulesets=MAX_COMPATIBLE_RULESETS))
     labels: list[str] = []
     for entry in raw:
         if not isinstance(entry, str):
-            raise ValueError(f"{COMPATIBLE_RULESETS_FIELD} 条目必须是字符串")
+            raise ValueError(translate("plugin_host.support.compatible_rulesets_entry_not_string", compatible_rulesets_field=COMPATIBLE_RULESETS_FIELD))
         label = normalize_ruleset_label(entry)
         if not label:
-            raise ValueError(f"{COMPATIBLE_RULESETS_FIELD} 不允许空字符串")
+            raise ValueError(translate("plugin_host.support.compatible_rulesets_empty_string", compatible_rulesets_field=COMPATIBLE_RULESETS_FIELD))
         if label not in labels:
             labels.append(label)
     if labels and manifest.get("system_agnostic") is True:
         raise ValueError(
-            "system_agnostic: true 与 compatible_rulesets 互斥：通用包不应限定具体规则"
+            translate("plugin_host.support.system_agnostic_conflict")
         )
     return labels
 
@@ -322,17 +323,16 @@ def validate_content_module_profile(manifest: dict) -> None:
     manifest = manifest or {}
     raw_profile = manifest.get("content_profile")
     if raw_profile is not None and str(raw_profile).strip() not in CONTENT_PROFILES:
-        raise ValueError(f"不支持的 content_profile：{raw_profile!r}")
+        raise ValueError(translate("plugin_host.support.content_profile_unsupported", raw_profile=repr(raw_profile)))
     raw_mode = manifest.get("content_delivery_mode")
     if raw_mode is not None and str(raw_mode).strip() not in CONTENT_DELIVERY_MODES:
-        raise ValueError(f"不支持的 content_delivery_mode：{raw_mode!r}")
+        raise ValueError(translate("plugin_host.support.delivery_mode_unsupported", raw_mode=repr(raw_mode)))
     if content_profile(manifest) == "adventure-module" and content_delivery_mode(manifest) != "catalog":
         raise ValueError(
-            "adventure-module 必须使用 content_delivery_mode: catalog"
-            "（安装只注册内容库，运行时按需物化）"
+            translate("plugin_host.support.adventure_module_catalog_only")
         )
     if content_delivery_mode(manifest) == "catalog" and manifest.get("entrypoint") is not None:
-        raise ValueError("catalog 纯内容包不得声明 entrypoint；程序能力应使用执行插件类型")
+        raise ValueError(translate("plugin_host.support.catalog_no_entrypoint"))
     parse_compatible_rulesets(manifest)
 
 

@@ -29,7 +29,17 @@ const props = withDefaults(defineProps<{
   embedded?: boolean
   experience: RulesetExperience
 }>(), { language: 'zh-CN', embedded: false })
-const emit = defineEmits<{ submit: [character: CharacterSheet]; cancel: [] }>()
+const emit = defineEmits<{
+  submit: [character: CharacterSheet, options?: { targetLevel?: number }]
+  cancel: []
+}>()
+
+// Starting level is a flow, not a card property: `draft.level` stays 1 (that is
+// what the builder validates and finalizes), and the host opens the advancement
+// panel once per level after the card exists.  Editing an existing card has no
+// starting level to choose, so the control is hidden there.
+const targetLevel = ref(1)
+const startLevelOptions = Array.from({ length: 20 }, (_, index) => index + 1)
 
 type BuilderMode = 'quick' | 'guided' | 'expert'
 type RefListKey = 'class_skill_refs' | 'species_skill_refs' | 'species_feat_refs' | 'class_tool_refs' | 'language_refs'
@@ -630,7 +640,7 @@ async function finish(): Promise<void> {
     }
     const result = await finalizeRulesetBuilderCharacter(props.ruleId, draft.value, props.language)
     store.clear()
-    emit('submit', result.character as CharacterSheet)
+    emit('submit', result.character as CharacterSheet, { targetLevel: targetLevel.value })
   } catch (cause: unknown) {
     error.value = String((cause as Error)?.message || cause)
   } finally { busy.value = false }
@@ -679,6 +689,7 @@ onMounted(async () => {
         </button>
       </div>
       <label class="name-field"><span>{{ text('角色名', 'Character name') }}</span><input v-model.trim="draft.name" maxlength="100" :placeholder="text('例如：阿岚', 'For example: Arden')"></label>
+      <label v-if="!initial" class="name-field start-level-field"><span>{{ text('起始等级', 'Starting level') }}</span><select v-model.number="targetLevel"><option v-for="level in startLevelOptions" :key="level" :value="level">{{ level }}</option></select><small v-if="targetLevel > 1" class="field-help">{{ text(`保存后会连续完成第 2 级到第 ${targetLevel} 级的升级选择。`, `After saving, you will choose levels 2 through ${targetLevel} in a row.`) }}</small></label>
       <p v-if="error" class="builder-error" role="alert">{{ error }}</p>
       <div class="quick-actions"><button @click="mode = 'guided'">{{ text('进入引导模式微调', 'Fine-tune in Guided mode') }}</button><button class="primary" :disabled="busy || !selectedPreset || !draft.name.trim()" @click="finish">{{ busy ? text('检查中…', 'Checking…') : text('完成并使用这个角色', 'Use this character') }}</button></div>
     </main>
@@ -689,6 +700,7 @@ onMounted(async () => {
       <section v-if="step === 1" class="builder-step">
         <div class="step-intro"><h3>{{ text('先确定你是谁、想怎样冒险', 'Choose who you are and how you adventure') }}</h3><p>{{ text('职业决定主要玩法；物种提供天生特质；背景记录成为冒险者之前的经历。', 'Class sets your core play, species grants innate traits, and background describes your formative life.') }}</p></div>
         <label class="name-field"><span>{{ text('角色名', 'Character name') }}</span><input v-model.trim="draft.name" maxlength="100"></label>
+        <label v-if="!initial" class="name-field start-level-field"><span>{{ text('起始等级', 'Starting level') }}</span><select v-model.number="targetLevel"><option v-for="level in startLevelOptions" :key="level" :value="level">{{ level }}</option></select><small v-if="targetLevel > 1" class="field-help">{{ text(`保存后会连续完成第 2 级到第 ${targetLevel} 级的升级选择。`, `After saving, you will choose levels 2 through ${targetLevel} in a row.`) }}</small></label>
         <fieldset><legend>{{ text('职业', 'Class') }}</legend><ChoiceGrid :model-value="draft.class_ref" :choices="choices.classes" :source-visible="sourceVisible" @update:model-value="selectClass" /></fieldset>
         <fieldset><legend>{{ text('物种', 'Species') }}</legend><ChoiceGrid :model-value="draft.species_ref" :choices="choices.species" :source-visible="sourceVisible" @update:model-value="selectSpecies" /></fieldset>
         <fieldset><legend>{{ text('背景', 'Background') }}</legend><ChoiceGrid :model-value="draft.background_ref" :choices="choices.backgrounds" :source-visible="sourceVisible" @update:model-value="selectBackground" /></fieldset>
@@ -776,7 +788,7 @@ onMounted(async () => {
 .preset-top { display: flex; justify-content: space-between; gap: 12px; color: var(--df-accent-strong); }
 .preset-card em { color: var(--df-text-muted); font-size: 12px; line-height: 1.5; }
 .tag-row { display: flex; flex-wrap: wrap; gap: 5px; }.tag-row i { padding: 2px 7px; border-radius: 99px; background: var(--df-surface-raised); color: var(--df-text-muted); font-size: 10px; font-style: normal; }
-.name-field { display: grid; gap: 7px; max-width: 440px; }.name-field input { font-size: 17px; }
+.name-field { display: grid; gap: 7px; max-width: 440px; }.name-field input { font-size: 17px; }.start-level-field select { max-width: 120px; }
 .quick-actions, .builder-actions { display: flex; justify-content: flex-end; gap: 9px; }
 .builder-step { display: grid; gap: 20px; }.step-intro h3 { margin: 0 0 5px; font-family: var(--df-font-title); font-size: 23px; }.step-intro p { margin: 0; color: var(--df-text-muted); }
 fieldset { display: grid; gap: 10px; margin: 0; padding: 14px; border: 1px solid var(--df-border-soft); border-radius: 14px; } legend { padding: 0 7px; color: var(--df-accent-strong); font-weight: 700; }

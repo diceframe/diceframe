@@ -18,6 +18,8 @@ from src.webui.sse_ticket import SSE_GRANT_KEY, BotGrant, OwnerGrant, token_dige
 from src.webui.services._common import canonical_game_key
 from src.webui.routes.auth import ACCESS_PASSWORD_CONFIGURED_KEY
 from src.localization.messages import t
+from src.webui.routes.launcher import IDENTITY_PATH as LAUNCHER_IDENTITY_PATH
+from src.webui.routes.launcher import STOP_PATH as LAUNCHER_STOP_PATH
 
 
 SEAT_TOKEN_HEADER = "X-Seat-Token"
@@ -41,6 +43,13 @@ PAIRED_DEVICE_ID_KEY = web.RequestKey("paired_device_id", str)
 # other share endpoint acts as a seat and requires that seat's token.
 _LOBBY_GET_TAILS = frozenset({"characters", "character-cards"})
 _LOBBY_POST_TAILS = frozenset({"players"})
+
+_LAUNCHER_LINK_ENDPOINTS = frozenset(
+    {
+        ("GET", LAUNCHER_IDENTITY_PATH),
+        ("POST", LAUNCHER_STOP_PATH),
+    }
+)
 
 _BOT_PUBLIC_ENDPOINTS = frozenset(
     {
@@ -179,6 +188,9 @@ class WebAccessControl:
         if self.is_public_ruleset_builder_request(request):
             return await handler(request)
         if request.method == "GET" and request.path == "/api/system/update/health":
+            return await handler(request)
+        # 便携版启动器握手：启动器没有房主会话，鉴权落在数据目录里的实例密钥上。
+        if (request.method, request.path) in _LAUNCHER_LINK_ENDPOINTS:
             return await handler(request)
         if request.method == "POST" and request.path == "/api/login":
             return await handler(request)

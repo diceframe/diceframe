@@ -36,7 +36,10 @@ def runtime() -> Dnd2024Runtime:
     return Dnd2024Runtime()
 
 
-def _draft(runtime: Dnd2024Runtime, class_ref: str = "class:fighter") -> dict:
+def _draft(
+    runtime: Dnd2024Runtime, class_ref: str = "class:fighter",
+    *, fighting_style: str = "feat:archery",
+) -> dict:
     """A legal level-1 draft built from the real SRD bundle."""
 
     locale = "en"
@@ -66,7 +69,9 @@ def _draft(runtime: Dnd2024Runtime, class_ref: str = "class:fighter") -> dict:
         "language_refs": ["language:common", "language:dwarvish", "language:elvish"],
     }
     if "fighting_style" in (class_entity.get("level_1_feature_ids") or []):
-        draft["class_feature_feat_choices"] = {"fighting_style": "feat:defense"}
+        # Archery 只影响远程攻击、没有 AC 效果，因此这个文件的既有数值断言
+        # 仍是"无被动加值"的基线；Defense 的场景由独立回归显式指定。
+        draft["class_feature_feat_choices"] = {"fighting_style": fighting_style}
     if class_entity.get("recommended_spell_choices"):
         draft["class_spell_choices"] = class_entity["recommended_spell_choices"]
     choices = runtime.builder_choices(None, draft)
@@ -100,9 +105,14 @@ class _Registry:
 class _Game:
     """A live game whose D&D2024 character starts unarmored."""
 
-    def __init__(self, runtime: Dnd2024Runtime, class_ref: str = "class:fighter") -> None:
+    def __init__(
+        self, runtime: Dnd2024Runtime, class_ref: str = "class:fighter",
+        *, fighting_style: str = "feat:archery",
+    ) -> None:
         self.runtime = runtime
-        sheet = runtime.finalize_character(None, _draft(runtime, class_ref))
+        sheet = runtime.finalize_character(
+            None, _draft(runtime, class_ref, fighting_style=fighting_style),
+        )
         self.instance = GameInstance(("web", "reconcile", "bot"))
         self.instance.state = GameState.ACTIVE_ACTION
         self.instance.round_number = 1

@@ -12,7 +12,7 @@ logger = logging.getLogger("trpg")
 _STOP_CHARS = set("，。！？；：""''（）【】《》…—·、, \t\n\r")
 
 
-def _extract_ngrams(text: str, n: int = 2) -> set[str]:
+def extract_ngrams(text: str, n: int = 2) -> set[str]:
     result: set[str] = set()
     clean = text.strip()
     for i in range(len(clean) - n + 1):
@@ -151,7 +151,7 @@ def recall_by_text_improved(store: MemoryStore, game_key: str, text: str,
         return []
 
     entities = _extract_entities(text)
-    ngrams = _extract_ngrams(text, n=2)
+    ngrams = extract_ngrams(text, n=2)
 
     # P2-H：先用 LIKE 按文本实体词粗筛，避免固定 LIMIT 500 漏掉靠后但相关的旧记忆；
     # 无实体词时回退最近 500 条。词数限制防 OR 子句过长。
@@ -194,7 +194,7 @@ def recall_by_text_improved(store: MemoryStore, game_key: str, text: str,
                 score += 5
 
         if entity and ngrams:
-            entity_ngrams = _extract_ngrams(entity, n=2)
+            entity_ngrams = extract_ngrams(entity, n=2)
             overlap = len(ngrams & entity_ngrams)
             score += overlap * 2
 
