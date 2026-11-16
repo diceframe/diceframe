@@ -661,7 +661,8 @@
             "trigger": "enemy_reduced_to_zero_hp",
             "temp_hp_ability": "cha",
             "temp_hp_class_ref": "class:warlock",
-            "temp_hp_minimum": 1
+            "temp_hp_minimum": 1,
+            "other_defeat_range_ft": 10
           }
         },
         {
