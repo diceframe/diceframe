@@ -28,7 +28,8 @@
   },
   "class_resources": {
     "barbarian": [
-      {"id": "rages", "minimum_level": 1, "maximum_track": "rages", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p28:rage"}
+      {"id": "rages", "minimum_level": 1, "maximum_track": "rages", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p28:rage"},
+      {"id": "persistent_rage", "minimum_level": 15, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p30:persistent-rage"}
     ],
     "bard": [
       {"id": "bardic_inspiration", "minimum_level": 1, "maximum_ability_modifier": "cha", "minimum": 1, "short_all_from_level": 5, "long": "all", "source_ref": "srd-5.2.1:p31:bardic-inspiration"}

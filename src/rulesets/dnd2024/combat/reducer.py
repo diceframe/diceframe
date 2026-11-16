@@ -25,7 +25,7 @@ from src.rulesets.dnd2024.spells.font_of_magic import MAX_CREATED_SLOT_LEVEL
 from src.rulesets.dnd2024.spells.casting import apply_free_cast_cost
 from src.rulesets.events import EventBatchError
 from .primitives import actor_kind as _actor_kind
-from .primitives import FEATURE_STATE_KEYS, RELENTLESS_RAGE_DECISION
+from .primitives import FEATURE_STATE_KEYS, PERSISTENT_RAGE_DURATION, RELENTLESS_RAGE_DECISION
 
 
 _ITEM_EVENT_FIELDS = {
@@ -103,6 +103,17 @@ class CombatReducerMixin:
             })
             combat.setdefault("positions", {})[actor_id] = int(event.get("position", 0) or 0)
             combat.setdefault("reactions", {})[actor_id] = 1
+            # slot 才是回合表：只往 initiative 里插人会让新加入者永远轮不到。
+            # 插入点在"当前回合之后"，当前 slot 的下标因此保持不变，已结算的
+            # 先攻顺序也不会被重排。
+            slots = combat.get("turn_slots")
+            if isinstance(slots, list):
+                index = max(0, min(len(slots), int(combat.get("turn_index", 0) or 0) + 1))
+                slots.insert(index, {
+                    "slot_id": f"{actor_id}#1", "actor_id": actor_id,
+                    "initiative_total": int(event.get("total", 0) or 0),
+                    "kind": "normal",
+                })
             return
         if event_type == "dnd2024.character.revived":
             kind, raw_id = _actor_kind(str(event["actor_id"]))
@@ -123,6 +134,10 @@ class CombatReducerMixin:
             state["combat"] = {
                 "status": "active", "round": event["round"], "turn_index": 0,
                 "initiative": deepcopy(event["initiative"]),
+                # 首轮 turn 顺序的权威形态：一个角色可以有两个 slot（Thief's
+                # Reflexes），``initiative`` 仍保持去重，因为其他读者只问
+                # "谁在场"。旧事件没有这个字段时退回单 slot 语义。
+                "turn_slots": deepcopy(event.get("turn_slots") or []),
                 "initiative_rolls": deepcopy(event["initiative_rolls"]),
                 "enemies": deepcopy(event["enemies"]),
                 "positions": deepcopy(event["positions"]),
@@ -148,6 +163,18 @@ class CombatReducerMixin:
                 raise EventBatchError("reaction is already spent")
             reactions[actor_id] = 0
             return
+        if event_type == "dnd2024.heroic_inspiration.changed":
+            # Heroic Inspiration 是角色级布尔状态：持有则"再获得即丢失"，
+            # 因此重复授予写成幂等，不叠层也不报错。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind != "player" or raw_id not in snapshot["characters"]:
+                raise EventBatchError("only an existing player can hold Heroic Inspiration")
+            if event.get("granted") is not True:
+                raise EventBatchError("heroic inspiration events only grant")
+            snapshot["characters"][raw_id]["heroic_inspiration"] = {
+                "granted": True, "source": str(event.get("feature_id") or ""),
+            }
+            return
         if event_type == "dnd2024.combat.ended":
             combat["status"] = "ended"
             combat["outcome"] = str(event.get("reason") or "ended")
@@ -165,10 +192,18 @@ class CombatReducerMixin:
                 conditions = character.get("conditions") or {}
                 for condition_id in [
                     key for key, value in conditions.items()
-                    if key == "rage" or (
-                        isinstance(value, dict) and (
-                            value.get("duration") in _TURN_SCOPED_DURATIONS
-                            or value.get("duration") == "combat"
+                    # 持久狂怒是"10 分钟"而不是"到战斗结束"：结束一场战斗
+                    # 不在官方提前结束条件里，仍在期限内的它必须留下来。
+                    if not (
+                        isinstance(value, dict)
+                        and value.get("duration") == PERSISTENT_RAGE_DURATION
+                    )
+                    and (
+                        key == "rage" or (
+                            isinstance(value, dict) and (
+                                value.get("duration") in _TURN_SCOPED_DURATIONS
+                                or value.get("duration") == "combat"
+                            )
                         )
                     )
                 ]:

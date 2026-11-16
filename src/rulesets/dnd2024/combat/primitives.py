@@ -12,6 +12,49 @@ DICE_RE = re.compile(r"^(\d+)d(\d+)([+-]\d+)?$")
 UNARMED_STRIKE_REF = "unarmed_strike"
 # 狂暴至多持续 10 分钟；一轮 6 秒，即 100 轮。
 RAGE_MAX_ROUNDS = 100
+# 掷先攻时可以选择使用的开场能力。声明只能出现在 combat.start 的
+# ``initiative_choices`` 里，且只能表达"用不用"，不能带任何数量或骰值。
+INITIATIVE_CHOICES = frozenset({"uncanny_metabolism", "persistent_rage"})
+# 15 级持久狂怒的狂暴用这个 duration 记账：它不靠每回合续期维持，
+# 只被 Unconscious 与真实穿上重甲提前结束。
+PERSISTENT_RAGE_DURATION = "persistent_rage"
+
+
+def combat_turn_slots(combat: dict[str, Any]) -> list[dict[str, Any]]:
+    """The authoritative turn schedule: one slot per turn, not per actor.
+
+    A Thief's Reflexes grants a second turn in round one, so "who acts now"
+    cannot be answered from the deduplicated ``initiative`` list.  ``initiative``
+    keeps its meaning ("who is in this combat"); ``turn_slots`` answers the
+    schedule.  Combats started before this slice carry no slots and fall back to
+    one slot per Initiative entry, so their order is unchanged by a read.
+    """
+
+    slots = combat.get("turn_slots")
+    if isinstance(slots, list):
+        rows = [
+            slot for slot in slots
+            if isinstance(slot, dict) and str(slot.get("actor_id") or "")
+        ]
+        if rows:
+            return rows
+    return [
+        {
+            "slot_id": f"{actor_id}#1", "actor_id": str(actor_id),
+            "initiative_total": 0, "kind": "normal",
+        }
+        for actor_id in combat.get("initiative") or []
+    ]
+
+
+def current_turn_slot(combat: dict[str, Any]) -> dict[str, Any] | None:
+    """The slot whose turn it is, or ``None`` when the schedule is inconsistent."""
+
+    slots = combat_turn_slots(combat)
+    index = int(combat.get("turn_index", 0) or 0)
+    if not slots or not 0 <= index < len(slots):
+        return None
+    return slots[index]
 
 
 def rider_attack_kind(weapon: dict[str, Any]) -> str:

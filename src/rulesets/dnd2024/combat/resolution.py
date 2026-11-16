@@ -48,13 +48,17 @@ from .action_adapter import (
     spell_formula_node,
 )
 from .primitives import (
+    INITIATIVE_CHOICES,
+    PERSISTENT_RAGE_DURATION,
     RELENTLESS_RAGE_DECISION,
     CombatIntentError,
     RAGE_MAX_ROUNDS,
     UNARMED_STRIKE_REF,
     actor_kind as _actor_kind,
     canonical as _canonical,
+    combat_turn_slots,
     companion_actor as _companion_actor,
+    current_turn_slot as _current_turn_slot,
     enemy_actor as _enemy_actor,
     player_actor as _player_actor,
     rider_attack_kind,
@@ -287,7 +291,8 @@ class CombatResolutionMixin:
             positions[actor_id] = int(raw.get("position", 30) or 30)
         initiatives.sort(key=lambda row: (-int(row["total"]), row["kind"] != "player", row["actor_id"]))
         order = [row["actor_id"] for row in initiatives]
-        first = self._actor_view_from_data(instance, enemies, order[0], companions)
+        slots = self._turn_slots(instance, initiatives, enemies, companions)
+        first = self._actor_view_from_data(instance, enemies, slots[0]["actor_id"], companions)
         # Superior Inspiration hooks the real Initiative roll, not a static
         # character value: every bard that rolled here tops up to two uses.
         refills: list[dict[str, Any]] = []
@@ -308,8 +313,13 @@ class CombatResolutionMixin:
             })
         # 战斗开始的第一回合也是"自己的回合开始"：首行动者与后续回合共用
         # 同一个 turn-start 辅助，不能因为批次里没有 turn.advanced 就跳过。
+        opening = self._initiative_opening_events(
+            instance, enemies, companions, order,
+            self._initiative_choices(intent), rng,
+        )
         return [{
             "type": "dnd2024.combat.started", "round": 1, "initiative": order,
+            "turn_slots": slots,
             "initiative_rolls": initiatives, "enemies": enemies, "positions": positions,
             "economy": self._fresh_economy(first), "position_mode": "theater",
             "reactions": {actor_id: 1 for actor_id in order},
@@ -318,7 +328,206 @@ class CombatResolutionMixin:
             "origin_step_id": str(intent.get("origin_step_id") or ""),
             "mode": str(intent.get("mode") or "sandbox"),
             "adventure_binding": deepcopy(intent.get("adventure_binding")),
-        }, *refills, *self._turn_start_regen_events(first)]
+        }, *refills, *opening, *self._turn_start_events(first)]
+
+    @staticmethod
+    def _initiative_choices(intent: dict[str, Any]) -> dict[str, dict[str, bool]]:
+        """The per-actor declarations made when Initiative was rolled.
+
+        A declaration only says *whether* to use an optional feature.  Every
+        amount, target and die comes from the server, so a client cannot
+        declare "regain 40 Focus" or a made-up slot; anything that is not a
+        known choice name is dropped here and rejected by validation first.
+        """
+
+        raw = intent.get("initiative_choices")
+        if not isinstance(raw, dict):
+            return {}
+        choices: dict[str, dict[str, bool]] = {}
+        for actor_id, entry in raw.items():
+            if not isinstance(entry, dict):
+                continue
+            chosen = {
+                key: value for key, value in entry.items()
+                if key in INITIATIVE_CHOICES and value is True
+            }
+            if chosen:
+                choices[str(actor_id)] = chosen
+        return choices
+
+    def _initiative_opening_events(
+        self, instance: Any, enemies: dict[str, dict[str, Any]],
+        companions: dict[str, dict[str, Any]], order: list[str],
+        choices: dict[str, dict[str, bool]], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Resolve every Initiative-time choice in one stable actor order.
+
+        Uncanny Metabolism and Perfect Focus are resolved per actor, then
+        Persistent Rage, so a monk can never both refill everything and take
+        the Perfect Focus floor in the same Initiative roll.  Actors are read
+        through their own view, which is what keeps a malformed declaration
+        from touching another player's sheet.
+        """
+
+        events: list[dict[str, Any]] = []
+        for actor_id in order:
+            if _actor_kind(actor_id)[0] != "player":
+                continue
+            chosen = choices.get(actor_id) or {}
+            view = self._actor_view_from_data(instance, enemies, actor_id, companions)
+            character = self._feature_character(view)
+            uncanny: list[dict[str, Any]] = []
+            if chosen.get("uncanny_metabolism"):
+                uncanny = self._uncanny_metabolism_events(view, character, rng)
+            events.extend(uncanny)
+            if not uncanny:
+                events.extend(self._perfect_focus_events(view, character))
+            if chosen.get("persistent_rage"):
+                events.extend(self._persistent_rage_opening_events(view, character))
+        return events
+
+    def _uncanny_metabolism_events(
+        self, view: dict[str, Any], character: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Uncanny Metabolism: refill Focus, heal ``level + Martial Arts die``.
+
+        The Long Rest charge is the gate, not the current Focus: a monk at full
+        Focus who declares the feature still spends the charge and rolls the
+        die, because the rule lets them (and a free "no-op" would be a way to
+        keep the charge forever).  ``cannot_regain_hp`` blocks only the Hit
+        Points; the refill and the charge still happen.
+        """
+
+        if not self.features.has_feature(character, "uncanny_metabolism"):
+            return []
+        charge = resource_state(character, "uncanny_metabolism")
+        if int(charge.get("current", 0) or 0) < 1:
+            return []
+        # "your Monk level" 读的是 monk 那一行职业等级，不是角色总等级：
+        # 多职业角色的 class_state 会是 None，用它会把治疗量算成 0。
+        level = declaring_class_level(character, "monk")
+        die = str(self.features.unarmed_strike_die(character) or "")
+        size = int(die.rsplit("d", 1)[1]) if "d" in die else 0
+        roll = int(rng.randint(1, size)) if size > 1 else 0
+        actor_id = str(view["actor_id"])
+        focus = resource_state(character, "focus_points")
+        events: list[dict[str, Any]] = []
+        maximum = int(focus.get("maximum", 0) or 0)
+        if maximum > 0:
+            events.append({
+                "type": "dnd2024.class_resource.refilled", "actor_id": actor_id,
+                "resource_id": "focus_points", "target": maximum,
+            })
+        healing = level + roll
+        blocked = "cannot_regain_hp" in (view.get("conditions") or {})
+        events.append({
+            "type": "resource.changed", "resource": "hp", "target_id": actor_id,
+            "delta": 0 if blocked else healing, "amount": 0 if blocked else healing,
+            "healing": True, "rolls": [roll] if size > 1 else [],
+            "feature_id": "uncanny_metabolism", "martial_arts_die": die,
+            "roll": roll, "monk_level": level,
+            **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
+        })
+        events.append({
+            "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+            "resource_id": "uncanny_metabolism", "amount": 1,
+        })
+        return events
+
+    def _perfect_focus_events(
+        self, view: dict[str, Any], character: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Perfect Focus: a floor of 4, never a gift and never a cost.
+
+        Only reached when Uncanny Metabolism was not used, which is why this
+        runs from the caller rather than deciding for itself.
+        """
+
+        if not self.features.has_feature(character, "perfect_focus"):
+            return []
+        floor = self.features.feature_value(character, "perfect_focus", "initiative_focus_floor", 0)
+        if isinstance(floor, bool) or not isinstance(floor, int) or floor <= 0:
+            return []
+        focus = resource_state(character, "focus_points")
+        current = int(focus.get("current", 0) or 0)
+        maximum = int(focus.get("maximum", 0) or 0)
+        if maximum <= 0 or current >= floor or current > 3:
+            return []
+        return [{
+            "type": "dnd2024.class_resource.refilled", "actor_id": str(view["actor_id"]),
+            "resource_id": "focus_points", "target": min(floor, maximum),
+        }]
+
+    def _persistent_rage_opening_events(
+        self, view: dict[str, Any], character: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Persistent Rage: refill every expended Rage use, once per Long Rest."""
+
+        if not self.features.has_feature(character, "persistent_rage"):
+            return []
+        charge = resource_state(character, "persistent_rage")
+        if int(charge.get("current", 0) or 0) < 1:
+            return []
+        rages = resource_state(character, "rages")
+        maximum = int(rages.get("maximum", 0) or 0)
+        actor_id = str(view["actor_id"])
+        events: list[dict[str, Any]] = []
+        if maximum > 0:
+            events.append({
+                "type": "dnd2024.class_resource.refilled", "actor_id": actor_id,
+                "resource_id": "rages", "target": maximum,
+            })
+        events.append({
+            "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+            "resource_id": "persistent_rage", "amount": 1,
+        })
+        return events
+
+    def _turn_slots(
+        self, instance: Any, initiatives: list[dict[str, Any]],
+        enemies: dict[str, dict[str, Any]],
+        companions: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """The authoritative first-round schedule, one entry per turn.
+
+        ``initiative`` stays a deduplicated actor list because every reader of
+        it asks "who is in this combat".  A Thief's two turns are two slots of
+        the same actor instead: same identity, same sheet, separate economy and
+        separate turn-start.  Slot order uses the same tie-break as Initiative
+        so a replay never reorders them.
+        """
+
+        kind_by_actor = {str(row["actor_id"]): str(row["kind"]) for row in initiatives}
+        slots: list[dict[str, Any]] = [
+            {
+                "slot_id": f"{row['actor_id']}#1", "actor_id": str(row["actor_id"]),
+                "initiative_total": int(row["total"]), "kind": "normal",
+            }
+            for row in initiatives
+        ]
+        for row in initiatives:
+            actor_id = str(row["actor_id"])
+            if kind_by_actor[actor_id] != "player":
+                continue
+            view = self._actor_view_from_data(instance, enemies, actor_id, companions)
+            character = self._feature_character(view)
+            offset = self.features.feature_value(
+                character, "thiefs_reflexes", "first_round_extra_turn_offset", 0,
+            )
+            if isinstance(offset, bool) or not isinstance(offset, int) or offset <= 0:
+                continue
+            slots.append({
+                "slot_id": f"{actor_id}#2", "actor_id": actor_id,
+                "initiative_total": int(row["total"]) - offset,
+                "kind": "thief_reflexes", "rounds": [1],
+            })
+        slots.sort(key=lambda slot: (
+            -int(slot["initiative_total"]),
+            kind_by_actor[str(slot["actor_id"])] != "player",
+            str(slot["actor_id"]),
+            0 if slot["kind"] == "normal" else 1,
+        ))
+        return slots
 
     def _initiative_roll(
         self, character: dict[str, Any], modifier: int, rng: Any,
@@ -2284,9 +2493,10 @@ class CombatResolutionMixin:
 
         if divisor <= 0:
             return []
-        order = [str(item) for item in combat.get("initiative") or []]
-        index = combat.get("turn_index", -1)
-        if not (0 <= index < len(order) and order[index] == attacker_id):
+        # 谁的回合由 slot 回答：首轮第二个 slot 属于同一角色，用 initiative 的
+        # 下标去比会在 Thief 回合里把这个额度错判成"不是你的回合"。
+        slot = _current_turn_slot(combat)
+        if slot is None or str(slot["actor_id"]) != attacker_id:
             return []
         actor = self._actor_view(instance, combat, attacker_id)
         speed = effective_speed(
@@ -2320,9 +2530,8 @@ class CombatResolutionMixin:
         deviation rather than paid out to the wrong actor.
         """
 
-        order = [str(item) for item in combat.get("initiative") or []]
-        index = combat.get("turn_index", -1)
-        if not (0 <= index < len(order) and order[index] == actor_id):
+        slot = _current_turn_slot(combat)
+        if slot is None or str(slot["actor_id"]) != actor_id:
             return []
         actor = self._actor_view(instance, combat, actor_id)
         grant = self.features.critical_hit_move(self._feature_character(actor))
@@ -3445,7 +3654,15 @@ class CombatResolutionMixin:
                     })
                 events.append({
                     "type": "condition.applied", "target_id": actor_id,
-                    "condition": "rage", "duration": "rage", "turns_remaining": RAGE_MAX_ROUNDS,
+                    "condition": "rage",
+                    "duration": (
+                        PERSISTENT_RAGE_DURATION
+                        if self.features.has_feature(
+                            self._feature_character(actor), "persistent_rage",
+                        )
+                        else "rage"
+                    ),
+                    "turns_remaining": RAGE_MAX_ROUNDS,
                     "sustained_this_turn": False, "established": False,
                     "source_actor_id": actor_id,
                 })
@@ -3882,21 +4099,33 @@ class CombatResolutionMixin:
             )
             return [{"type": "dnd2024.combat.ended", "reason": reason}]
         previous_index = int(combat["turn_index"])
+        # 回合按 slot 推进：同一角色在首轮可以有两个 slot（Thief's Reflexes），
+        # 它们共享 actor identity，但各自刷新经济、反应与 turn-start。
+        slots = self._combat_slots(combat)
+        previous_slot = slots[previous_index]
         # 重复豁免 tick 发生在"目标自己回合结束"，排在推进回合之前。
-        events = self._save_repeat_events(instance, combat, order[previous_index], rng)
+        events = self._save_repeat_events(
+            instance, combat, str(previous_slot["actor_id"]), rng,
+        )
         # Self-Restoration 与重复豁免读的是同一个时刻：若那条条件已在本次
         # tick 里被豁免掉，选定移除就不再产生第二条事件。
-        ender = self._actor_view(instance, combat, order[previous_index])
+        ender = self._actor_view(instance, combat, str(previous_slot["actor_id"]))
         events.extend(
             self._self_restoration_removal_events(ender, intent, events)
         )
         next_index = previous_index
         wraps = 0
-        for _ in range(len(order)):
-            next_index = (next_index + 1) % len(order)
+        for _ in range(len(slots)):
+            next_index = (next_index + 1) % len(slots)
             if next_index == 0:
                 wraps += 1
-            candidate = self._actor_view(instance, combat, order[next_index])
+            slot = slots[next_index]
+            # 只在前一轮有效的 slot（Thief 的第二回合）在第二轮直接跳过，
+            # 不能让它把轮次预算或先攻顺序改掉。
+            rounds = slot.get("rounds")
+            if isinstance(rounds, list) and int(combat["round"]) + wraps not in rounds:
+                continue
+            candidate = self._actor_view(instance, combat, str(slot["actor_id"]))
             # 失能单位跳过回合：敌人/队友 HP 归零即跳过；玩家 0 HP 走死亡豁免。
             if candidate["kind"] in {"enemy", "companion"} and candidate["hp"] <= 0:
                 continue
@@ -3904,14 +4133,64 @@ class CombatResolutionMixin:
                 continue
             break
         next_round = int(combat["round"]) + wraps
-        next_actor = order[next_index]
+        next_actor = str(slots[next_index]["actor_id"])
         next_view = self._actor_view(instance, combat, next_actor)
         return [*events, {
             "type": "dnd2024.turn.advanced", "round": next_round,
             "turn_index": next_index, "actor_id": next_actor,
-            "previous_actor_id": order[previous_index],
+            "slot_id": str(slots[next_index]["slot_id"]),
+            "previous_actor_id": str(previous_slot["actor_id"]),
             "economy": self._fresh_economy(next_view),
-        }, *self._turn_start_regen_events(next_view)]
+        }, *self._turn_start_events(next_view)]
+
+    @staticmethod
+    def _combat_slots(combat: dict[str, Any]) -> list[dict[str, Any]]:
+        """Turn slots for this combat, defaulting to one slot per actor.
+
+        Old saves (and any combat started before this slice) carry no
+        ``turn_slots``; the shared primitive falls back to the deduplicated
+        Initiative list so their schedule stays byte-identical instead of
+        migrating state on read.
+        """
+
+        return combat_turn_slots(combat)
+
+    def _turn_start_events(self, actor: dict[str, Any]) -> list[dict[str, Any]]:
+        """Everything a turn beginning does, in registration order.
+
+        Survivor's regeneration was registered first and keeps its position;
+        Heroic Warrior appends after it.  Every entry point -- the first actor
+        of a combat, a normal turn, and a Thief's second turn -- comes through
+        here, so no path can grant twice or skip one.
+        """
+
+        return [
+            *self._turn_start_regen_events(actor),
+            *self._turn_start_heroic_events(actor),
+        ]
+
+    def _turn_start_heroic_events(self, actor: dict[str, Any]) -> list[dict[str, Any]]:
+        """Heroic Warrior: a self-grant at turn start, only when lacking it.
+
+        Heroic Inspiration is a state, not an Advantage: this emits the grant
+        and nothing else.  Spending it rerolls *any* die, which this slice does
+        not model -- the sheet flag is therefore real but currently
+        unconsumable, and the execution report says so.
+        """
+
+        if actor.get("kind") != "player":
+            return []
+        character = self._feature_character(actor)
+        if not self.features.has_feature(character, "heroic_warrior"):
+            return []
+        current = character.get("heroic_inspiration")
+        if isinstance(current, dict) and current.get("granted") is True:
+            return []
+        return [{
+            "type": "dnd2024.heroic_inspiration.changed",
+            "actor_id": str(actor["actor_id"]), "granted": True,
+            "feature_id": "heroic_warrior",
+        }]
 
     def _turn_start_regen_events(
         self, actor: dict[str, Any],

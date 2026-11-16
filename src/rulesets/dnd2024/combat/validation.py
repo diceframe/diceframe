@@ -45,6 +45,7 @@ from ..spells.font_of_magic import (
 )
 from .primitives import (
     DICE_RE,
+    INITIATIVE_CHOICES,
     INTENT_TYPES,
     RELENTLESS_RAGE_DECISION,
     UNARMED_STRIKE_REF,
@@ -247,6 +248,7 @@ class CombatValidationMixin:
             # with the catalog entry. Enemy data is intentionally optional so
             # clients cannot smuggle a forged stat block into combat.
             self._validate_player_positions(instance, intent.get("player_positions"))
+            self._validate_initiative_choices(instance, intent)
             return
         if combat.get("status") != "active":
             raise CombatIntentError("combat is not active")
@@ -1364,6 +1366,42 @@ class CombatValidationMixin:
                     character, "improved_blessed_strikes", "temp_hp_range_ft", 0,
                 ) or 0),
             )
+
+    def _validate_initiative_choices(self, instance: Any, intent: dict[str, Any]) -> None:
+        """Validate the Initiative-time declarations before any dice are rolled.
+
+        A declaration is a yes/no for an optional feature.  It cannot name
+        another player, cannot spell out an amount, and cannot be made when the
+        feature is missing or its Long Rest charge is already spent -- all three
+        would otherwise turn into a free resource on the next replay.
+        """
+
+        raw = intent.get("initiative_choices")
+        if raw is None:
+            return
+        if not isinstance(raw, dict):
+            raise CombatIntentError("initiative choices must be an object")
+        for actor_id, entry in raw.items():
+            actor = str(actor_id)
+            kind, raw_id = _actor_kind(actor)
+            if kind != "player" or raw_id not in instance.players:
+                raise CombatIntentError("initiative choices can only name a player")
+            if not isinstance(entry, dict):
+                raise CombatIntentError("an initiative choice entry must be an object")
+            unknown = sorted(set(entry) - INITIATIVE_CHOICES)
+            if unknown:
+                raise CombatIntentError(f"unknown initiative choice: {unknown[0]}")
+            for value in entry.values():
+                if value is not True and value is not False:
+                    raise CombatIntentError("initiative choices only accept true or false")
+            character = _canonical(instance.get_character_sheet(raw_id))
+            for choice in sorted(INITIATIVE_CHOICES):
+                if entry.get(choice) is not True:
+                    continue
+                if not self.features.has_feature(character, choice):
+                    raise CombatIntentError(f"this character cannot use {choice}")
+                if int(resource_state(character, choice).get("current", 0) or 0) < 1:
+                    raise CombatIntentError(f"{choice} is already spent")
 
     @staticmethod
     def _validate_player_positions(instance: Any, positions: Any) -> None:

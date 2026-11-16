@@ -288,6 +288,17 @@
           "resource_id": "focus_points"
         },
         {
+          "id": "uncanny_metabolism",
+          "minimum_level": 2,
+          "resource_id": "uncanny_metabolism",
+          "source_ref": "srd-5.2.1:p51:uncanny-metabolism",
+          "summary": "When you roll Initiative, you can regain all expended Focus Points and roll your Martial Arts die, regaining Hit Points equal to your Monk level plus the roll. Once you use this feature, you can't use it again until you finish a Long Rest.",
+          "parameters": {
+            "initiative_focus_refill": "all",
+            "initiative_heal_die": "martial_arts"
+          }
+        },
+        {
           "id": "flurry_of_blows",
           "minimum_level": 2,
           "option_of": "monks_focus",
@@ -339,6 +350,13 @@
               "actions": [{"kind": "dash"}, {"kind": "disengage"}]
             }
           ]
+        },
+        {
+          "id": "perfect_focus",
+          "minimum_level": 15,
+          "source_ref": "srd-5.2.1:p51:perfect-focus",
+          "summary": "When you roll Initiative and don't use Uncanny Metabolism, you regain expended Focus Points until you have 4 if you have 3 or fewer.",
+          "parameters": {"initiative_focus_floor": 4}
         },
         {
           "id": "disciplined_survivor",
@@ -604,6 +622,14 @@
           }
         },
         {
+          "id": "heroic_warrior",
+          "owner": "subclass:champion",
+          "minimum_level": 10,
+          "source_ref": "srd-5.2.1:p49:heroic-warrior",
+          "summary": "During combat, you can give yourself Heroic Inspiration whenever you start your turn without it.",
+          "parameters": {"turn_start_heroic_inspiration": true}
+        },
+        {
           "id": "two_extra_attacks",
           "minimum_level": 11,
           "summary": "When you take the Attack action, you can attack three times instead of once.",
@@ -688,6 +714,13 @@
           "parameters": {"save_advantage_abilities": ["dex"]}
         },
         {
+          "id": "feral_instinct",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p29:feral-instinct",
+          "summary": "You have Advantage on Initiative rolls.",
+          "parameters": {"initiative_advantage": true}
+        },
+        {
           "id": "rage",
           "minimum_level": 1,
           "source_ref": "srd-5.2.1:p28:rage",
@@ -744,6 +777,18 @@
             "base_dc": 10,
             "dc_step": 5,
             "hp_multiplier": 2
+          }
+        },
+        {
+          "id": "persistent_rage",
+          "minimum_level": 15,
+          "resource_id": "persistent_rage",
+          "source_ref": "srd-5.2.1:p30:persistent-rage",
+          "summary": "When you roll Initiative, you can regain all expended uses of Rage; once you do so, you can't do it again until you finish a Long Rest. Your Rage also lasts 10 minutes without needing to extend it from round to round, and it ends early only if you have the Unconscious condition or don Heavy armor.",
+          "parameters": {
+            "initiative_rage_refill": true,
+            "rage_duration": "persistent_rage",
+            "rage_max_rounds": 100
           }
         },
         {
@@ -897,6 +942,14 @@
           "parameters": {
             "ability_check_floor": 10
           }
+        },
+        {
+          "id": "thiefs_reflexes",
+          "owner": "subclass:thief",
+          "minimum_level": 17,
+          "source_ref": "srd-5.2.1:p64:thiefs-reflexes",
+          "summary": "You can take two turns during the first round of any combat: your first turn at your normal Initiative and your second turn at your Initiative minus 10.",
+          "parameters": {"first_round_extra_turn_offset": 10}
         },
         {
           "id": "stroke_of_luck",

@@ -233,6 +233,9 @@ class CombatViewMixin:
             },
             "class_resources": deepcopy(feature_projection["class_resources"]),
             "martial_arts_die": str(feature_projection["unarmed_damage_die"]),
+            # Heroic Inspiration is a character-scoped flag: a turn-start grant
+            # that combat could not read back would be re-granted every round.
+            "heroic_inspiration": deepcopy(character.get("heroic_inspiration")),
             "unarmed_ability_choice": list(feature_projection["unarmed_ability_choice"]),
             "martial_arts_weapon_refs": list(
                 feature_projection["martial_arts_weapon_refs"]
@@ -442,6 +445,7 @@ class CombatViewMixin:
             "abilities": actor.get("abilities") or {},
             "resources": {"class": class_state},
             "equipment": {"item_refs": list(actor.get("equipment_refs") or [])},
+            "heroic_inspiration": deepcopy(actor.get("heroic_inspiration")),
         }
 
     def _available_class_capabilities(

@@ -1393,7 +1393,7 @@ class Dnd2024Runtime:
             "blocked_by_feature",
             "distance", "round", "turn_index", "previous_actor_id", "condition", "reason",
             "spell_ref", "resource", "roll", "successes", "failures", "stable", "dead", "hp",
-            "item_ref",
+            "item_ref", "granted", "feature_id",
             # 目标列表与标记对象：``spell.cast`` 只带 ``target_ids``（复数），
             # 转移只带 ``target_id``；两者都是"打的是谁"这一事实的写法。
             "target_ids", "mark_target_id", "mark_expires_hours",

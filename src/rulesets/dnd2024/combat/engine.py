@@ -59,12 +59,14 @@ from .check_windows import (
 )
 from .primitives import (
     INTENT_TYPES,
+    PERSISTENT_RAGE_DURATION,
     RAGE_MAX_ROUNDS,
     UNARMED_STRIKE_REF,
     CombatIntentError,
     actor_kind as _actor_kind,
     companion_actor as _companion_actor,
     canonical as _canonical,
+    current_turn_slot as _current_turn_slot,
     enemy_actor as _enemy_actor,
     player_actor as _player_actor,
 )
@@ -1265,11 +1267,11 @@ class Dnd2024CombatEngine(
                 })
         initiative = list(combat.get("initiative") or [])
         turn_index = int(combat.get("turn_index", 0) or 0)
-        current_actor_id = (
-            str(initiative[turn_index])
-            if initiative and 0 <= turn_index < len(initiative)
-            else ""
-        )
+        # ``turn_index`` 是 slot 下标；``initiative`` 是按人去重的列表，二者只在
+        # 没有 Thief's Reflexes 时一一对应。当前行动者必须由 slot 回答，否则
+        # 首轮第二个 slot 会把光标停在前一个行动者身上。
+        current_slot = _current_turn_slot(combat)
+        current_actor_id = str(current_slot["actor_id"]) if current_slot else ""
         return {
             "state_schema_version": int(state.get("state_schema_version", 1) or 1),
             "state_version": int(state.get("version", 0) or 0),
@@ -1278,6 +1280,7 @@ class Dnd2024CombatEngine(
                 "outcome": str(combat.get("outcome") or ""),
                 "round": int(combat.get("round", 0) or 0),
                 "turn_index": turn_index,
+                "turn_slot_id": str(current_slot["slot_id"]) if current_slot else "",
                 "current_actor_id": current_actor_id,
                 "initiative": initiative,
                 "position_mode": str(combat.get("position_mode") or "theater"),
@@ -1437,11 +1440,12 @@ class Dnd2024CombatEngine(
 
     @staticmethod
     def _current_actor(combat: dict[str, Any]) -> str:
-        order = combat.get("initiative")
-        index = int(combat.get("turn_index", 0) or 0)
-        if not isinstance(order, list) or not order or not 0 <= index < len(order):
+        # 当前行动者读的是 slot，不是 initiative 的下标：首轮里同一个角色可能
+        # 占两个 slot（Thief's Reflexes），而 initiative 仍然按人去重。
+        slot = _current_turn_slot(combat)
+        if slot is None:
             raise CombatIntentError("combat initiative state is invalid")
-        return str(order[index])
+        return str(slot["actor_id"])
 
     def _fresh_economy(self, actor: dict[str, Any]) -> dict[str, Any]:
         base = max(0, int(actor.get("speed", 0) or 0))
@@ -1911,6 +1915,27 @@ class Dnd2024CombatEngine(
             return combat["enemies"][raw_id].setdefault("conditions", {})
         raise EventBatchError("condition target actor is invalid")
 
+    def _wears_heavy_armor(self, snapshot: dict[str, Any], actor_id: str) -> bool:
+        """Whether this actor's canonical equipment includes Heavy armor.
+
+        Read through the equipment catalogue instead of a client flag, so a
+        stale sheet cannot keep Persistent Rage alive by claiming light armor.
+        """
+
+        kind, raw_id = _actor_kind(actor_id)
+        if kind == "player":
+            character = snapshot["characters"].get(raw_id) or {}
+        elif kind == "companion":
+            companions = snapshot["ruleset_state"].get("party", {}).get("companions", {})
+            character = (companions.get(raw_id) or {}).get("ruleset_character") or {}
+        else:
+            return False
+        equipment = self.features.equipment
+        return any(
+            equipment.armor_category(str(ref)) == "heavy"
+            for ref in equipment.equipped_refs(character)
+        )
+
     def _remove_concentration_conditions(
         self, snapshot: dict[str, Any], combat: dict[str, Any], owner: str,
     ) -> None:
@@ -2018,7 +2043,26 @@ class Dnd2024CombatEngine(
             # 续期则消耗剩余轮数，归零即结束。昏迷则无条件结束。
             previous_conditions = self._conditions(snapshot, combat, previous_actor_id)
             rage = previous_conditions.get("rage")
-            if isinstance(rage, dict):
+            if isinstance(rage, dict) and rage.get("duration") == PERSISTENT_RAGE_DURATION:
+                # 持久狂怒：不靠攻击或附赠动作续期，单纯 Incapacitated /
+                # Stunned / Paralyzed 也不结束；只有 Unconscious 或真的穿上
+                # 重甲结束。剩余轮数每轮照常递减，没有旧 Rage 那条"进入的那个
+                # 回合免费"的豁免——10 分钟是从进入那一刻起算的 100 轮。
+                if (
+                    "unconscious" in previous_conditions
+                    or self._wears_heavy_armor(snapshot, previous_actor_id)
+                ):
+                    previous_conditions.pop("rage", None)
+                else:
+                    remaining = int(
+                        rage.get("turns_remaining", RAGE_MAX_ROUNDS) or RAGE_MAX_ROUNDS
+                    ) - 1
+                    if remaining <= 0:
+                        previous_conditions.pop("rage", None)
+                    else:
+                        rage["turns_remaining"] = remaining
+                        rage["sustained_this_turn"] = False
+            elif isinstance(rage, dict):
                 # 失能即结束狂暴：unconscious / incapacitated 以及所有
                 # 蕴含失能的条件（paralyzed / stunned / petrified）。
                 if any(
