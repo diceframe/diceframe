@@ -154,6 +154,18 @@ class CombatReducerMixin:
                 "origin_step_id": str(event.get("origin_step_id") or ""),
                 "mode": str(event.get("mode") or "sandbox"),
                 "adventure_binding": deepcopy(event.get("adventure_binding")),
+                # 遭遇级的持握与骑乘：两者都随这场战斗生灭，不落盘到角色卡。
+                "hands": {},
+                "mounted": deepcopy(event.get("mounted") or {}),
+            }
+            return
+        if event_type == "dnd2024.weapon.swapped":
+            # 拔/收一次武器：事件携带换手后的完整握持，归约只负责落地。
+            # 它随这场战斗生灭，绝不写回角色卡的 equipment。
+            actor_id = str(event["actor_id"])
+            hands = combat.setdefault("hands", {})
+            hands[actor_id] = {
+                "left": event.get("left"), "right": event.get("right"),
             }
             return
         if event_type == "dnd2024.reaction.spent":
@@ -499,16 +511,44 @@ class CombatReducerMixin:
             return
         if event_type == "dnd2024.attack.spent":
             economy = combat["economy"]
-            if int(economy.get("attacks_remaining", 0) or 0) > 0:
-                economy["attacks_remaining"] -= 1
-            else:
-                # 支付选择由 resolution 的单一入口决定：普通 action 先用完，
-                # 只有它耗尽时 Action Surge 的 surge_action 才支付攻击。
-                resource = str(event.get("resource") or "action")
+            resource = str(event.get("resource") or "action")
+            # Bonus Action 的攻击（Light 追加攻击、附赠攻击能力）不走
+            # ``attacks_remaining``：那份额度只属于 Attack action，借给它等于
+            # 白送一次行动。
+            if resource == "bonus_action" or int(economy.get("attacks_remaining", 0) or 0) <= 0:
                 if int(economy.get(resource, 0) or 0) < 1:
-                    raise EventBatchError("Attack action is already spent")
+                    raise EventBatchError(
+                        "Bonus Action is already spent"
+                        if resource == "bonus_action"
+                        else "Attack action is already spent"
+                    )
                 economy[resource] -= 1
-                economy["attacks_remaining"] = max(0, int(event["attacks_per_action"]) - 1)
+                if resource != "bonus_action":
+                    # 支付选择由 resolution 的单一入口决定：普通 action 先用完，
+                    # 只有它耗尽时 Action Surge 的 surge_action 才支付攻击。
+                    economy["attacks_remaining"] = max(0, int(event["attacks_per_action"]) - 1)
+            else:
+                economy["attacks_remaining"] -= 1
+            if event.get("light_weapon"):
+                # "本回合用 Light 武器攻击过"是 Light 追加攻击的唯一前提，
+                # 记在回合标识上，标识一变即失效。
+                combat.setdefault("light_attacks", {})[
+                    str(event["actor_id"])
+                ] = {
+                    "round": int(combat.get("round", 0) or 0),
+                    "turn_index": int(combat.get("turn_index", 0) or 0),
+                }
+            if event.get("loading_weapon"):
+                # "每次 action/Bonus/Reaction 只能射一发"：窗口用支付它的经济
+                # 池标识，所以同一窗口里的第二发会被校验拒绝，换一个窗口
+                # （Bonus Action / Action Surge）仍然合法。
+                combat.setdefault("loading_shots", {})[
+                    str(event["actor_id"])
+                ] = {
+                    "round": int(combat.get("round", 0) or 0),
+                    "turn_index": int(combat.get("turn_index", 0) or 0),
+                    "window": resource,
+                }
             return
         if event_type == "dnd2024.attack_roll.recorded":
             # Reckless Attack 的窗口是"本回合第一次攻击检定"，所以要按

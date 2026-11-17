@@ -28,6 +28,52 @@ def _dice_average(formula: str) -> float:
     return int(count) * (int(sides) + 1) / 2 + int(bonus or 0)
 
 
+# SRD 5.2.1 p91：Two-Handed 的"骑乘例外"只出现在骑枪上。合法值做成闭集，
+# 否则 ``two_handed_exception`` 会退化成"随便写的豁免开关"。
+TWO_HANDED_HAND_EXCEPTIONS = frozenset({"mounted"})
+
+
+def _validate_weapon_hand_properties(weapon_id: str, weapon: dict[str, Any]) -> None:
+    """Validate the weapon's base hand properties.
+
+    ``two_handed`` / ``loading`` are closed-list SRD properties: a weapon either
+    has the property or it does not, so there is no third "unknown" state. The
+    bundle must therefore declare both keys explicitly — a forgotten
+    declaration is a load error rather than a silently weaker weapon. External
+    content is a different problem (it is not loaded through this catalog).
+    """
+
+    for prop in ("two_handed", "loading"):
+        if prop not in weapon:
+            raise CombatCatalogError(
+                f"combat weapon {weapon_id} must declare {prop!r} explicitly"
+            )
+        if not isinstance(weapon[prop], bool):
+            raise CombatCatalogError(
+                f"combat weapon {prop} must be a boolean: {weapon_id}"
+            )
+    if weapon["two_handed"] and "damage_two_handed" in weapon:
+        # 两用是"可单手可双手"，与"必须双手"互斥。
+        raise CombatCatalogError(
+            f"a two-handed weapon cannot also declare versatile damage: {weapon_id}"
+        )
+    if weapon["two_handed"] and bool(weapon.get("light")):
+        raise CombatCatalogError(f"a two-handed weapon cannot be light: {weapon_id}")
+    if weapon["loading"] and not bool(weapon.get("ranged")):
+        # Loading 描述的是"装填-射击"的节流，近战武器没有这个语义。
+        raise CombatCatalogError(f"only a ranged weapon can be loading: {weapon_id}")
+    exception = weapon.get("two_handed_exception")
+    if exception is not None:
+        if not weapon["two_handed"]:
+            raise CombatCatalogError(
+                f"two_handed_exception requires a two-handed weapon: {weapon_id}"
+            )
+        if exception not in TWO_HANDED_HAND_EXCEPTIONS:
+            raise CombatCatalogError(
+                f"combat weapon hand exception is invalid: {weapon_id}"
+            )
+
+
 SPELL_MODES = frozenset({
     "spell_attack", "saving_throw", "healing", "automatic_damage", "buff", "debuff", "triggered_damage",
     "stabilize", "reaction_defense", "temp_hp", "teleport", "dispel", "revive",
@@ -88,6 +134,7 @@ class Dnd2024CombatCatalog:
                 raise CombatCatalogError(f"combat weapon damage is invalid: {weapon_id}")
             if not 5 <= int(weapon.get("range", 0) or 0) <= 600:
                 raise CombatCatalogError(f"combat weapon range is invalid: {weapon_id}")
+            _validate_weapon_hand_properties(weapon_id, weapon)
             if "damage_two_handed" in weapon:
                 two_handed = weapon["damage_two_handed"]
                 if not isinstance(two_handed, str) or not DICE_RE.fullmatch(two_handed):

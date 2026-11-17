@@ -556,9 +556,28 @@ def test_only_a_melee_weapon_can_be_imbued(sheets, weapon_ref) -> None:
     assert "Melee weapon" in resolved["error"]
 
 
+def _without_shield(sheet: dict) -> dict:
+    """The same character with the shield taken off.
+
+    长弓是 Two-Handed：盾牌绑在手臂上时它根本握不住，握持校验会先拒绝，
+    那样就测不到"远程武器不能被祝圣"这条。所以这个用例先把盾牌脱下。
+    """
+
+    live = deepcopy(sheet)
+    canonical = live["ruleset_character"]
+    canonical["equipment"]["item_refs"] = [
+        ref for ref in canonical["equipment"]["item_refs"] if ref != "item:shield"
+    ]
+    live["equipment"] = [
+        row for row in live.get("equipment") or []
+        if "item_ref" not in row or row.get("item_ref") != "item:shield"
+    ]
+    return live
+
+
 def test_a_ranged_weapon_cannot_be_imbued(sheets, bundle) -> None:
     # 标枪是带 Thrown 的近战武器，可以绑定；真正的远程武器不行。
-    sheet = _with_ammo(_with_item(sheets["paladin3"], bundle, "Longbow"))
+    sheet = _without_shield(_with_ammo(_with_item(sheets["paladin3"], bundle, "Longbow")))
     refs = sheet["ruleset_character"]["equipment"]["item_refs"]
     assert "item:longbow" in refs
     engine, instance = _setup(sheet)

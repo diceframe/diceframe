@@ -26,7 +26,15 @@ from src.rulesets.dnd2024.spells.preparation import PreparationPolicy
 from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 
 # 专长机械参数的封闭键集：新参数随其归属切片一起扩这里，未知键 fail closed。
-ADVANCEMENT_FEAT_PARAMETER_KEYS = frozenset({"ranged_attack_bonus"})
+ADVANCEMENT_FEAT_PARAMETER_KEYS = frozenset({
+    "ranged_attack_bonus",
+    "light_extra_attack_ability_damage",
+})
+# 数值型参数与开关型参数必须分开校验：把布尔当成 1 来接受，会让
+# "5" 和 "true" 在同一个字段里都能通过，语义就没法审了。
+ADVANCEMENT_FEAT_BOOLEAN_PARAMETERS = frozenset({
+    "light_extra_attack_ability_damage",
+})
 # 被动效果的封闭 kind 集：本切片只消费 armor_class_bonus，其余必须加载期拒绝。
 ADVANCEMENT_FEAT_PASSIVE_EFFECT_KINDS = frozenset({"armor_class_bonus"})
 # 一个特性选项槽的规范化输入只接受这四个字段，多余字段一律拒绝。
@@ -150,6 +158,12 @@ class Dnd2024AdvancementEngine:
                 f"advancement feat {feat_id} has an unknown parameter: {unknown[0]}"
             )
         for key, value in parameters.items():
+            if key in ADVANCEMENT_FEAT_BOOLEAN_PARAMETERS:
+                if not isinstance(value, bool):
+                    raise ProgressionCatalogError(
+                        f"advancement feat {feat_id} parameter {key} must be a boolean"
+                    )
+                continue
             if (
                 isinstance(value, bool)
                 or not isinstance(value, int)

@@ -1490,6 +1490,9 @@ class Dnd2024ClassFeatureResolver:
                 self._benefitting_weapon_refs(character, active)
             ),
             "ranged_attack_bonus": self._ranged_attack_bonus(character),
+            "light_extra_attack_ability_damage": (
+                self._light_extra_attack_ability_damage(character)
+            ),
         }
 
     def projection_fields(self, character: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -1745,6 +1748,38 @@ class Dnd2024ClassFeatureResolver:
             if isinstance(bonus, int) and not isinstance(bonus, bool):
                 total += bonus
         return total
+
+    def _light_extra_attack_ability_damage(
+        self, character: Mapping[str, Any] | None,
+    ) -> bool:
+        """Whether the Light extra attack adds the ability modifier to damage.
+
+        Two-Weapon Fighting是唯一来源；判定留在 combat（它才知道这次攻击是不是
+        Light 追加之击），这里只回答"这名角色有没有这条风格"。参数走 feat 的
+        ``parameters`` 通道，与 ``ranged_attack_bonus`` 同一形状。
+        """
+
+        if not isinstance(character, Mapping):
+            return False
+        features = character.get("features")
+        feat_refs = features.get("feat_refs") if isinstance(features, Mapping) else None
+        if not isinstance(feat_refs, list):
+            return False
+        catalog = self.bundle.get("advancement_feat_catalog", "srd_advancement_feats")
+        feats = catalog.get("feats") if isinstance(catalog, Mapping) else None
+        if not isinstance(feats, Mapping):
+            return False
+        for ref in feat_refs:
+            if not isinstance(ref, str):
+                continue
+            feat = feats.get(ref.removeprefix("feat:"))
+            parameters = feat.get("parameters") if isinstance(feat, Mapping) else None
+            if (
+                isinstance(parameters, Mapping)
+                and parameters.get("light_extra_attack_ability_damage") is True
+            ):
+                return True
+        return False
 
     def unarmed_ability_choice(
         self, character: Mapping[str, Any] | None,

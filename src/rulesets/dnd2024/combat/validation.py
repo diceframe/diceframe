@@ -57,6 +57,7 @@ from .primitives import (
     rider_attack_kind,
 )
 from .check_modes import condition_flags, owned_mark, vision_codes
+from .hands import apply_swap
 from .check_windows import (
     CHECK_WINDOW_DECISION,
     DAMAGE_WINDOW_DECISION,
@@ -250,6 +251,7 @@ class CombatValidationMixin:
             # with the catalog entry. Enemy data is intentionally optional so
             # clients cannot smuggle a forged stat block into combat.
             self._validate_player_positions(instance, intent.get("player_positions"))
+            self._validate_mounted_players(instance, intent.get("mounted_player_ids"))
             self._validate_initiative_choices(instance, intent)
             return
         if combat.get("status") != "active":
@@ -1043,13 +1045,13 @@ class CombatValidationMixin:
 
     def _validate_two_handed(
         self, actor: dict[str, Any], intent: dict[str, Any], weapon: dict[str, Any],
+        hands: dict[str, Any] | None = None,
     ) -> None:
         """两用武器双手持用的声明校验。
 
-        ``equipment_refs`` 是携带清单而不是持握槽位：角色可以随身带备用
-        武器而不握在另一只手上，因此只有盾牌（明确占据一只手）能确定阻挡
-        双手持用。真正的副手槽位判定仍属于后续 slot map 改造；当前模型不会
-        假装能区分"携带"与"正在持握"。
+        ``equipment_refs`` 是携带清单，``hands`` 才是这一场的持握状态：角色
+        可以随身带备用武器而不握着它，所以"另一只手是否被占"由 hands 回答，
+        而不是由"背包里有没有盾"回答。
         """
 
         declared = intent.get("two_handed")
@@ -1062,11 +1064,10 @@ class CombatValidationMixin:
             raise CombatIntentError("two_handed is not available to this actor")
         if not weapon.get("damage_two_handed"):
             raise CombatIntentError("this weapon has no two-handed damage")
-        for ref in actor.get("equipment_refs") or []:
-            ref_id = str(ref).removeprefix("item:")
-            item = self.bundle.get("item", ref_id) or {}
-            if item.get("item_type") == "shield":
-                raise CombatIntentError("a shield in the other hand blocks two-handed use")
+        if self._held_shield_blocks(
+            actor, str(weapon.get("weapon_ref") or ""), hands=hands,
+        ):
+            raise CombatIntentError("a shield in the other hand blocks two-handed use")
 
     def _validate_lucky_spend(
         self, instance: Any, intent: dict[str, Any], actor: dict[str, Any],
@@ -1146,6 +1147,193 @@ class CombatValidationMixin:
                 sources.append(source)
         return sources
 
+    def _is_weapon_ref(self, ref: str) -> bool:
+        return str(ref).removeprefix("item:") in self.catalog.weapons
+
+    def _two_handed_refs(self, actor: dict[str, Any]) -> set[str]:
+        """Carried refs whose weapon needs both hands (mounted exception aside)."""
+
+        refs: set[str] = set()
+        for raw in actor.get("equipment_refs") or []:
+            ref = str(raw)
+            weapon = self.catalog.weapons.get(ref.removeprefix("item:"))
+            if not isinstance(weapon, dict) or not weapon.get("two_handed"):
+                continue
+            exception = str(weapon.get("two_handed_exception") or "")
+            if exception == "mounted" and bool(actor.get("mounted")):
+                continue
+            refs.add(ref)
+        return refs
+
+    def _weapon_swap_hands(
+        self, actor: dict[str, Any], intent: dict[str, Any],
+    ) -> dict[str, str | None] | None:
+        """Validate the declared swap and return the grip it produces.
+
+        One equip/unequip per attack is the SRD budget, so a declaration that
+        tries to do two things at once is malformed rather than rich.  Stowing
+        is limited to weapons: a shield comes off with an action, not for free.
+        """
+
+        swap = intent.get("weapon_swap")
+        if swap is None:
+            return None
+        if actor["kind"] not in {"player", "companion"}:
+            raise CombatIntentError("weapon_swap is not available to this actor")
+        carried = {str(ref) for ref in actor.get("equipment_refs") or []}
+        if isinstance(swap, dict):
+            draw = str(swap.get("draw") or "")
+            stow = str(swap.get("stow") or "")
+            if draw and draw not in carried:
+                raise CombatIntentError("weapon to draw is not carried")
+            if stow and not self._is_weapon_ref(stow):
+                raise CombatIntentError(
+                    "only a weapon can be stowed as part of an attack"
+                )
+        hands, error = apply_swap(
+            actor.get("hands"), swap, two_handed_refs=self._two_handed_refs(actor),
+        )
+        if error:
+            raise CombatIntentError(error)
+        return hands
+
+    def _held_shield_blocks(
+        self, actor: dict[str, Any], weapon_ref: str,
+        hands: dict[str, Any] | None = None,
+    ) -> bool:
+        """Whether a shield occupies the hand this weapon does not.
+
+        ``equipment`` 是携带清单，``hands`` 才是持握。带在身上的备用武器随时
+        可以按"每次攻击一次"的规则收起来，因此不构成阻挡；盾牌是绑在手臂上
+        的，不能免费脱手，所以它才是真正的阻挡源。缺少 ``hands`` 的调用方
+        （只读视图、旧测试夹具）退回旧口径：按携带清单里的盾牌判断。
+        """
+
+        hands = actor.get("hands") if hands is None else hands
+        if isinstance(hands, dict):
+            for side in ("left", "right"):
+                ref = str(hands.get(side) or "")
+                if not ref or ref == weapon_ref:
+                    continue
+                item = self.bundle.get("item", ref.removeprefix("item:")) or {}
+                if item.get("item_type") == "shield":
+                    return True
+            return False
+        for ref in actor.get("equipment_refs") or []:
+            item = self.bundle.get("item", str(ref).removeprefix("item:")) or {}
+            if item.get("item_type") == "shield":
+                return True
+        return False
+
+    def _validate_loading(
+        self, combat: dict[str, Any], actor: dict[str, Any], intent: dict[str, Any],
+        weapon: dict[str, Any],
+    ) -> None:
+        """A Loading weapon fires once per action / Bonus Action / Reaction.
+
+        窗口由"支付这次攻击的经济池"标识：同一个 Attack action 里的两次攻击
+        共用 ``action``（或 ``surge_action``），所以第二发会被拒绝，尽管
+        ``attacks_remaining`` 还允许它。换一个窗口（Bonus Action、Action
+        Surge）是另一发，仍然合法。
+        """
+
+        if not weapon.get("loading"):
+            return
+        if actor["kind"] not in {"player", "companion"}:
+            return
+        resource = (
+            "bonus_action" if intent.get("light_extra_attack")
+            else self._spend_action_resource(combat)
+        )
+        record = (combat.get("loading_shots") or {}).get(str(actor["actor_id"]))
+        if not isinstance(record, dict):
+            return
+        if (
+            int(record.get("round", -1)) == int(combat.get("round", 0) or 0)
+            and int(record.get("turn_index", -1)) == int(combat.get("turn_index", 0) or 0)
+            and str(record.get("window") or "") == resource
+        ):
+            raise CombatIntentError("a Loading weapon can fire only once per action")
+
+    def _validate_light_extra_attack(
+        self, combat: dict[str, Any], actor: dict[str, Any], intent: dict[str, Any],
+        weapon: dict[str, Any], hands: dict[str, Any] | None = None,
+    ) -> None:
+        """The Light extra attack: a Bonus Action, a different Light weapon.
+
+        There is no "off-hand" in these rules.  What the extra attack needs is
+        (a) an Attack action with a Light weapon this turn, (b) a *different*
+        Light weapon in the other hand, and (c) an unspent Bonus Action.  Its
+        damage omits the ability modifier unless Two-Weapon Fighting says
+        otherwise -- that decision lives in resolution, next to the damage roll.
+        """
+
+        declared = intent.get("light_extra_attack")
+        if declared is None:
+            return
+        if declared is not True:
+            raise CombatIntentError("light_extra_attack must be a boolean")
+        if actor["kind"] not in {"player", "companion"}:
+            raise CombatIntentError("light_extra_attack is not available to this actor")
+        if not weapon.get("light"):
+            raise CombatIntentError("the extra attack must use a Light weapon")
+        grip = hands if isinstance(hands, dict) else (actor.get("hands") or {})
+        ref = str(weapon.get("weapon_ref") or "")
+        other = next(
+            (
+                str(grip.get(side) or "")
+                for side in ("left", "right")
+                if str(grip.get(side) or "") not in {"", ref}
+            ),
+            "",
+        )
+        other_weapon = self.catalog.weapons.get(other.removeprefix("item:")) if other else None
+        if not isinstance(other_weapon, dict) or not other_weapon.get("light"):
+            raise CombatIntentError(
+                "the other hand must hold a different Light weapon"
+            )
+        record = (combat.get("light_attacks") or {}).get(str(actor["actor_id"]))
+        this_round = int(combat.get("round", 0) or 0)
+        this_turn = int(combat.get("turn_index", 0) or 0)
+        if not isinstance(record, dict) or (
+            int(record.get("round", -1)) != this_round
+            or int(record.get("turn_index", -1)) != this_turn
+        ):
+            raise CombatIntentError(
+                "the extra attack requires an Attack action with a Light weapon this turn"
+            )
+        economy = combat.get("economy") or {}
+        if str(economy.get("actor_id") or "") != str(actor["actor_id"]):
+            raise CombatIntentError("the extra attack can only be made on your own turn")
+        if int(economy.get("bonus_action", 0) or 0) < 1:
+            raise CombatIntentError(
+                "the extra attack costs a Bonus Action that is already spent"
+            )
+
+    def _validate_grip(
+        self, actor: dict[str, Any], weapon: dict[str, Any],
+        hands: dict[str, Any] | None = None,
+    ) -> None:
+        """A Two-Handed weapon must actually get both hands.
+
+        The versatile declaration already asked this question; Two-Handed
+        weapons ask it implicitly, every time they are used.  Without this
+        check "shield in one hand, greatsword in the other" is a legal attack,
+        which is exactly what the data now says it is not.
+        """
+
+        if not weapon.get("two_handed"):
+            return
+        if actor["kind"] not in {"player", "companion"}:
+            return
+        exception = str(weapon.get("two_handed_exception") or "")
+        if exception == "mounted" and bool(actor.get("mounted")):
+            return
+        if self._held_shield_blocks(
+            actor, str(weapon.get("weapon_ref") or ""), hands=hands,
+        ):
+            raise CombatIntentError("a shield in the other hand blocks two-handed use")
+
     def _validate_attack(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], actor: dict[str, Any],
     ) -> None:
@@ -1166,8 +1354,14 @@ class CombatValidationMixin:
             # 一个 lookup 同时覆盖装备武器、徒手打击与敌人 attack profile：
             # 客户端无法声明角色并不真正拥有的攻击档案。
             raise CombatIntentError("attack profile is not available to the actor")
+        # 先算出手部变化，再按变化后的握持判定：规则允许"先拔出再攻击"，
+        # 所以这一击可以合法地使用刚拔出的那把武器。
+        swap_hands = self._weapon_swap_hands(actor, intent)
+        self._validate_grip(actor, weapon, hands=swap_hands)
         self._validate_ammunition(instance, actor, weapon)
-        self._validate_two_handed(actor, intent, weapon)
+        self._validate_two_handed(actor, intent, weapon, hands=swap_hands)
+        self._validate_light_extra_attack(combat, actor, intent, weapon, hands=swap_hands)
+        self._validate_loading(combat, actor, intent, weapon)
         self._validate_lucky_spend(instance, intent, actor)
         self._validate_sacred_weapon(intent, actor, weapon, combat)
         distance = self._distance(combat, actor["actor_id"], target_id)
@@ -1877,3 +2071,24 @@ class CombatValidationMixin:
                 raise CombatIntentError("player_positions contains an unknown player")
             if isinstance(value, bool) or not isinstance(value, int) or not -10000 <= value <= 10000:
                 raise CombatIntentError("player position is invalid")
+
+    @staticmethod
+    def _validate_mounted_players(instance: Any, mounted_player_ids: Any) -> None:
+        """骑乘声明只接受在场玩家 id。
+
+        骑乘目前只回答一个问题："骑枪是否还需要两只手"。因此它按遭遇声明、
+        随遭遇结束，不做持久化；未知或重复的 id 一律拒绝，避免客户端用列表
+        长度或花式 id 绕过边界。
+        """
+
+        if mounted_player_ids is None:
+            return
+        if not isinstance(mounted_player_ids, list):
+            raise CombatIntentError("mounted_player_ids must be an array")
+        seen: set[str] = set()
+        for uid in mounted_player_ids:
+            if not isinstance(uid, str) or not uid or uid not in instance.players:
+                raise CombatIntentError("mounted_player_ids contains an unknown player")
+            if uid in seen:
+                raise CombatIntentError("mounted_player_ids contains a duplicate")
+            seen.add(uid)
