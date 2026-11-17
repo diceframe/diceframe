@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
@@ -20,6 +21,10 @@ class _ChatCapabilities:
     token_parameter: str = "max_tokens"
     default_temperature_only: bool = False
     reasoning_effort_unsupported: bool = False
+    # Provider-reported inclusive ceiling for the token parameter (0 = unknown).
+    # Learned from a 400 whose error message echoes the valid range; every
+    # later request for this (url, model) is clamped to it.
+    max_tokens_ceiling: int = 0
 
 
 class OpenAIChatTransport:
@@ -35,6 +40,17 @@ class OpenAIChatTransport:
             body.update(self._generation_options)
             if capabilities.token_parameter != "max_tokens" and "max_tokens" in body:
                 body[capabilities.token_parameter] = body.pop("max_tokens")
+            if capabilities.max_tokens_ceiling:
+                token_key = capabilities.token_parameter
+                if token_key in body and isinstance(body[token_key], int) \
+                        and body[token_key] > capabilities.max_tokens_ceiling:
+                    logger.warning(
+                        "模型 %s 的 %s 上限为 %d，请求值 %d 已被自动钳制；"
+                        "请到 设置 → DF Agent 调低「单次回复上限 / 任务预算」以匹配该模型。",
+                        json.get("model") or "?", token_key,
+                        capabilities.max_tokens_ceiling, body[token_key],
+                    )
+                    body[token_key] = capabilities.max_tokens_ceiling
             if capabilities.default_temperature_only and "temperature" not in self._generation_options:
                 body.pop("temperature", None)
             if capabilities.reasoning_effort_unsupported:
@@ -66,6 +82,24 @@ class OpenAIChatTransport:
             capabilities.token_parameter = "max_completion_tokens"
             logger.info("Chat endpoint requires max_completion_tokens; preserving the requested output budget")
             return True
+        if parameter in {"max_tokens", "max_completion_tokens"} and (
+            "max_tokens" in body or "max_completion_tokens" in body
+        ):
+            match = re.search(
+                r"valid range of (?:max_tokens|max_completion_tokens) is \[1,\s*(\d+)\]",
+                message,
+            )
+            if match:
+                ceiling = int(match.group(1))
+                if ceiling >= 1 and ceiling != capabilities.max_tokens_ceiling:
+                    capabilities.max_tokens_ceiling = ceiling
+                    logger.warning(
+                        "聊天端点拒绝超出范围的输出预算：该模型上限为 %d（原请求 %s）。"
+                        "后续请求已自动钳制到该上限；建议同步调低 设置 → DF Agent 的预算配置。",
+                        ceiling,
+                        max(int(body.get("max_tokens") or 0), int(body.get("max_completion_tokens") or 0)),
+                    )
+                    return True
         if parameter == "temperature" and parameter not in protected and "temperature" in body and (
             code == "unsupported_parameter"
             or (code == "unsupported_value" and "default" in message)

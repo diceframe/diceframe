@@ -7,10 +7,10 @@ it does not discover credentials or grant application permissions.
 from __future__ import annotations
 
 import json
-from typing import Annotated, Callable
+from typing import Annotated, Any, Callable
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
-from pydantic_ai import Agent, DeferredToolRequests, ModelRetry
+from pydantic_ai import Agent, DeferredToolRequests, ModelRetry, capture_run_messages
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models import Model
@@ -61,6 +61,168 @@ class FinalAnswer(BaseModel):
     answer: Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1, max_length=24000)]
 
 
+# 每轮请求会把对话历史整包重发；不做有界化时输入随轮数线性膨胀（旧消息里
+# 一条 18K 字符的工具观察 × N 轮就能烧掉几十万 token）。最近几条保留较大
+# 窗口保证连贯，更早的只留要点；总量再封一道顶。
+HISTORY_RECENT_MESSAGES = 6
+HISTORY_RECENT_CHARS = 4000
+HISTORY_OLDER_CHARS = 1200
+HISTORY_FIRST_CHARS = 12000
+# 总量上限按可严格执行的口径设定：首条（结构化压缩后 ≤12K）+ 最近窗口
+# （每条压缩后 ≤4K × 6）+ 中间回收余量；所有消息经压缩后均有单条上限，
+# 因此该总量可被真正执行（review 第二轮 P1-2）。
+HISTORY_TOTAL_CHARS = 60000
+# 观察结果进入历史的单条上限：模型不需要完整原文也能继续工作。
+OBSERVATION_CHARS = 6000
+
+
+# 可解析 JSON 的字符串不做「合法即整保」：那会让 40K 总量彻底失效
+# （review P1-2 复现：6 条 12K 观察输出 71K）。改为解析后结构化压缩——
+# 保留身份 / 状态 / 引用键与条目名，重序列化，保证合法且有界。
+_JSON_KEEP_KEYS = ("ok", "error", "code", "id", "name", "label", "draft_id",
+                   "approval_id", "source_id", "revision", "next_action",
+                   "total", "offset", "has_more", "returned_count",
+                   "omitted_count", "blocked", "status", "kind", "version")
+
+
+def _compact_json_text(value: str, limit: int) -> str:
+    try:
+        data = json.loads(value)
+    except (TypeError, ValueError):
+        return value[:limit] + "\u2026[截断]"
+    if not isinstance(data, (dict, list)):
+        return value[:limit] + "\u2026[截断]"
+
+    def compact(node: Any, key: str = "", strict: bool = False) -> Any:
+        """两段式：宽松（保留短的非白名单值）→ 严格（只留白名单键）。
+
+        兜底永远是合法 JSON（truncated 包装），绝不产生半截字符串——
+        否则下游解析器与模型视图都会损坏（review 第二轮复现）。
+        """
+        if isinstance(node, dict):
+            kept = {}
+            for key_, item in node.items():
+                if key_ in _JSON_KEEP_KEYS:
+                    kept[key_] = compact(item, key_, strict)
+                elif isinstance(item, (dict, list)):
+                    kept[key_] = compact(item, key_, strict)
+                elif isinstance(item, str):
+                    cap = 160 if not strict else 0
+                    kept[key_] = item if len(item) <= cap else item[:cap] + "\u2026"
+                elif not strict:
+                    kept[key_] = item
+                # strict：非白名单标量直接丢弃
+            return kept
+        if isinstance(node, list):
+            kept = [compact(item, key, strict) for item in node]
+            if len(kept) > 20:
+                omitted = len(kept) - 20
+                kept = kept[:20]
+                if kept and isinstance(kept[0], dict):
+                    kept[0] = {**kept[0], "omitted_count": omitted}
+            return kept
+        return node
+
+    shrunk = compact(data)
+    text = json.dumps(shrunk, ensure_ascii=False)
+    if len(text) <= limit:
+        return text
+    shrunk = compact(data, strict=True)
+    text = json.dumps(shrunk, ensure_ascii=False)
+    if len(text) <= limit:
+        return text
+    return json.dumps({"truncated": True,
+                       "preview": text[:max(200, limit - 200)]},
+                      ensure_ascii=False)[:limit]
+
+
+def _bound_text(value, limit):
+    if isinstance(value, str) and len(value) > limit:
+        if value[:1] in {"{", "["}:
+            return _compact_json_text(value, limit)
+        return value[:limit] + "\u2026[截断]"
+    return value
+
+
+# 结构性字段绝不截断：ids、版本、错误码、路径是恢复与审计的锚点（补充
+# 设计 §4）；长度只约束「内容」类键。
+_STRUCTURE_KEYS = frozenset({
+    "tool_call_id", "id", "draft_id", "approval_id", "plan_digest", "source_id",
+    "revision", "code", "path", "run_id", "session_id", "uuid", "digest",
+})
+_CONTENT_KEYS = frozenset({"content", "text", "answer", "delta", "instructions",
+                           "description", "error"})
+
+
+def _walk_bound(node, limit, *, key: str = ""):
+    if isinstance(node, dict):
+        return {key_: _walk_bound(item, limit, key=key_) for key_, item in node.items()}
+    if isinstance(node, list):
+        return [_walk_bound(item, limit, key=key) for item in node]
+    if isinstance(node, str):
+        if key in _STRUCTURE_KEYS:
+            return node
+        if key not in _CONTENT_KEYS:
+            # 未登记的键保守起见也不截断；体积由观察上限与总量兜底。
+            return node
+    return _bound_text(node, limit)
+
+
+def _bound_history(history: list) -> list:
+    """三段固定 + 预算回收：第 0 条任务消息、最近窗口、按预算回收的中间历史。
+
+    第 0 条（任务目标 / 初始 payload）与最近窗口无条件保留——先单独提取
+    固定，再从尾部向前在剩余预算内回收更早的历史，最后按原始顺序拼接。
+    反向循环遇顶 break 绝不会影响这两段（review 第二轮 P1-1：旧实现的正向
+    break 根本走不到 index 0，保护形同虚设）。超大的第 0 条走结构化压缩
+    而非任意截断；被舍弃的中间消息直接移除，不插合成条目（会破坏
+    pydantic-ai 的消息形状契约）。
+    """
+
+    if not history:
+        return []
+    total = len(history)
+    recent_start = max(1, total - HISTORY_RECENT_MESSAGES)
+
+    def bound_at(index: int, limit: int):
+        return _walk_bound(history[index], limit)
+
+    # 1) 第 0 条任务消息：结构化压缩到固定预算（身份 / 目录索引保留）。
+    first = _walk_bound(history[0], HISTORY_FIRST_CHARS)
+    first_cost = len(json.dumps(first, ensure_ascii=False))
+    if first_cost > HISTORY_FIRST_CHARS:
+        first = _compact_json_text(
+            json.dumps(first, ensure_ascii=False), HISTORY_FIRST_CHARS)
+        try:
+            first = json.loads(first)
+        except (TypeError, ValueError):
+            first = {"parts": [{"content": first[:HISTORY_FIRST_CHARS],
+                                "part_kind": "user-prompt"}],
+                     "kind": "request"}
+
+    # 2) 最近窗口无条件保留。
+    recent: list = []
+    for index in range(recent_start, total):
+        recent.append(bound_at(index, HISTORY_RECENT_CHARS))
+    recent_cost = sum(len(json.dumps(message, ensure_ascii=False)) for message in recent)
+
+    # 3) 中间历史从新到旧回收，直到把剩余预算用完。
+    middle: list = []
+    budget = max(0, HISTORY_TOTAL_CHARS - first_cost - recent_cost)
+    for index in range(recent_start - 1, 0, -1):
+        message = bound_at(index, HISTORY_OLDER_CHARS)
+        cost = len(json.dumps(message, ensure_ascii=False))
+        if running_cost(cost, middle) > budget:
+            break
+        middle.append(message)
+    middle.reverse()
+    return [first, *middle, *recent]
+
+
+def running_cost(cost: int, middle: list) -> int:
+    return sum(len(json.dumps(message, ensure_ascii=False)) for message in middle) + cost
+
+
 class DiceFrameModel(Model):
     def __init__(self, client, emit: Callable, language: str, max_tokens: int, max_steps: int):
         super().__init__()
@@ -70,6 +232,12 @@ class DiceFrameModel(Model):
         self.max_tokens = max_tokens
         self.max_steps = max_steps
         self.response_correction = ""
+        # 最近一次请求后的完整消息序列（含已计费的响应）：预算自动续段时用
+        # 它作为 message_history 接续同一对话，不重放已计费请求。
+        self.last_messages: list | None = None
+        self.request_count = 0
+        # 跨段累计的真实用量（与 usage 事件同源）：硬上限与 UI 都以此为准。
+        self.task_used = 0
 
     @property
     def model_name(self) -> str:
@@ -87,9 +255,11 @@ class DiceFrameModel(Model):
             "name": tool.name, "description": tool.description or "",
             "parameters": tool.parameters_json_schema,
         }} for tool in definitions]
-        # Keep the complete framework transcript, including correlated tool
-        # observations and retry prompts. Provider failover stays in LLMClient.
-        history = ModelMessagesTypeAdapter.dump_python(messages, mode="json", exclude_none=True)
+        self.request_count += 1
+        # Keep the correlated tool observations and retry prompts, bounded:
+        # provider failover stays in LLMClient, context size stays in here.
+        history = _bound_history(
+            ModelMessagesTypeAdapter.dump_python(messages, mode="json", exclude_none=True))
         instructions = "\n\n".join(part.content for message in messages
             for part in message.parts if part.part_kind == "system-prompt")
         if parameters.instruction_parts:
@@ -106,7 +276,10 @@ class DiceFrameModel(Model):
             raise provider_unavailable(exc, self.language) from exc
         calls = getattr(response, "tool_calls", None)
         reported_tokens = max(0, int(getattr(response, 'total_tokens', 0) or 0))
-        await self.emit('usage', {'total_tokens': reported_tokens})
+        attempted = max(1, int(getattr(response, 'attempted_requests', 0) or 0))
+        self.task_used += reported_tokens
+        await self.emit('usage', {'total_tokens': reported_tokens,
+                                  'attempted_requests': attempted})
         text = getattr(response, "content", "")
         parts = []
         self.response_correction = "Return one registered function call with JSON object arguments, or a nonempty final answer."
@@ -142,14 +315,27 @@ class DiceFrameModel(Model):
                 "error": self.response_correction}))
         else:
             self.response_correction = ""
-        return ModelResponse(parts, model_name=self.model_name,
-            usage=RequestUsage(output_tokens=reported_tokens))
+        # 续段用的断点必须包含最后一次已计费的响应：只存请求前输入会让续段
+        # 重放同一请求，重复计费（review P1-3）。pydantic-ai 在收到本响应后
+        # 会把它追加进历史，这里预先拼出等价序列。
+        self.last_messages = [*messages, ModelResponse(parts, model_name=self.model_name,
+            usage=RequestUsage(output_tokens=reported_tokens))]
+        return self.last_messages[-1]
+
+
+# 软阈值（触发整理并续段的内部阈值）：总预算的一半。它不是新的用户额度，
+# 只是连续性触发点；真正的成本边界永远是「任务总预算」本身，跨段累计、
+# 不可重置（补充设计 §1/§3）。
+SEGMENT_SOFT_DIVISOR = 2
+AUTO_SEGMENT_FLOOR = 4000
+MAX_AUTO_CONTINUES = 8
 
 
 async def execute_agent(client, tools, instructions: str, payload: dict, emit: Callable,
                         language: str, max_tokens: int, max_steps: int,
                         *, task_max_tokens: int = DEFAULT_TASK_MAX_TOKENS):
-    agent = Agent(DiceFrameModel(client, emit, language, max_tokens, max_steps),
+    model = DiceFrameModel(client, emit, language, max_tokens, max_steps)
+    agent = Agent(model,
         output_type=[FinalAnswer, str, DeferredToolRequests], tools=tools,
         instructions=instructions, retries=3, name="DF Agent")
 
@@ -159,13 +345,49 @@ async def execute_agent(client, tools, instructions: str, payload: dict, emit: C
             raise ModelRetry("Return a nonempty final answer of at most 24000 characters.")
         return output
 
-    try:
-        result = await agent.run(json.dumps(payload, ensure_ascii=False),
-            usage_limits=UsageLimits(request_limit=max_steps, tool_calls_limit=max_steps,
-                                     total_tokens_limit=task_max_tokens), infer_name=False)
-    except UnexpectedModelBehavior as exc:
-        raise AgentModelResponseInvalid(language) from exc
-    return result.output
+    # 连续执行：软阈值触顶时用 capture_run_messages 捕获完整中断历史（含
+    # 已计费响应与工具结果），以 message_history 接续、不重发原 prompt；
+    # 每段扣除已用模型轮次（review P1-4 / 补充设计 §3）。总预算跨段累计
+    # 且绝不放大：剩余额度不足以发起有效请求时明确暂停，交还服务层。
+    prompt = json.dumps(payload, ensure_ascii=False)
+    history = None
+    segment = 0
+    while True:
+        remaining = task_max_tokens - model.task_used
+        if segment > 0 and remaining < AUTO_SEGMENT_FLOOR:
+            raise UsageLimitExceeded(
+                f'Exceeded the total_tokens_limit of {task_max_tokens} '
+                f'(total_tokens={model.task_used})')
+        soft_limit = max(AUTO_SEGMENT_FLOOR, task_max_tokens // SEGMENT_SOFT_DIVISOR)
+        segment_limit = min(soft_limit, remaining)
+        request_budget = max(1, max_steps - model.request_count)
+        with capture_run_messages() as run_messages:
+            try:
+                result = await agent.run(prompt, message_history=history,
+                    usage_limits=UsageLimits(request_limit=request_budget,
+                                             tool_calls_limit=max_steps,
+                                             total_tokens_limit=segment_limit),
+                    infer_name=False)
+                return result.output
+            except UsageLimitExceeded as exc:
+                if 'total_tokens_limit' not in str(exc):
+                    raise  # 步数 / 工具次数触顶：不自动续段
+                if segment >= MAX_AUTO_CONTINUES:
+                    raise
+                captured = list(run_messages)
+                if not captured:
+                    raise
+                segment += 1
+                history = captured
+                prompt = None
+                note = ("\n— 正在整理上下文并继续（累计 "
+                        f"{model.task_used}/{task_max_tokens} tokens）…\n"
+                        if language.startswith("zh") else
+                        "\n— Compacting context and continuing (total "
+                        f"{model.task_used}/{task_max_tokens} tokens)…\n")
+                await emit("delta", {"delta": note})
+            except UnexpectedModelBehavior as exc:
+                raise AgentModelResponseInvalid(language) from exc
 
 
 __all__ = ["DeferredToolRequests", "FinalAnswer", "ModelRetry", "UsageLimitExceeded", "execute_agent"]

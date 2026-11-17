@@ -1,4 +1,4 @@
-﻿"""LLM 客户端 —— 通过 aiohttp 直连 OpenAI 兼容 API。"""
+"""LLM 客户端 —— 通过 aiohttp 直连 OpenAI 兼容 API。"""
 
 from __future__ import annotations
 
@@ -140,13 +140,19 @@ class LLMResponse:
 
 @dataclass
 class LLMToolResponse:
-    """一次工具规划调用的结构化结果。"""
+    """一次工具规划调用的结构化结果。
+
+    ``total_tokens`` 是本次调用全部计费尝试的聚合用量（含原生 → 回退 →
+    截断重试），``attempted_requests`` 是发出的真实请求次数——两者由
+    ``LLMClient.call_tools`` 聚合，供任务账本做准确成本核算。
+    """
 
     tool_calls: list[dict[str, Any]]
     total_tokens: int
     provider_used: str
     native_tools: bool = True
     content: str = ""
+    attempted_requests: int = 0
 
 
 class LLMToolCallError(RuntimeError):
@@ -229,9 +235,16 @@ class LLMClient:
         ]
         errors: list[str] = []
         status_codes: set[int] = set()
+        # 账本聚合：一次 call_tools 可能触发多次真实计费请求（原生 → auto 重试
+        # → JSON 回退 → 截断放大重试）。每个携带 usage 的响应都累加进池，
+        # 最终 LLMToolResponse.total_tokens 是整次调用的真实总消耗，而不是
+        # 最后一次成功响应的片段（review 第二轮 P1-4）。
+        usage_pool = 0
+        attempts = 0
         for provider in ordered:
             forced = force_tool_choice and provider.provider_name not in self._native_tool_unsupported
             if not force_tool_choice or forced or provider.provider_name in self._native_tool_auto:
+                attempts += 1
                 try:
                     native_result = await self._call_tools_one(
                         provider,
@@ -242,15 +255,26 @@ class LLMClient:
                         max_tokens,
                         force_tool_choice=forced,
                     )
+                    usage_pool += native_result.total_tokens
                     if force_tool_choice and not native_result.tool_calls:
                         raise ValueError("供应商未返回必需的工具调用")
+                    native_result.total_tokens = usage_pool
+                    native_result.attempted_requests = attempts
                     return native_result
                 except Exception as exc:
                     if isinstance(exc, aiohttp.ClientResponseError):
                         status_codes.add(exc.status)
                     errors.append(f"{provider.provider_name}: {exc}")
+                    try:
+                        usage_pool += native_result.total_tokens
+                    except UnboundLocalError:
+                        pass
+                    if isinstance(exc, aiohttp.ClientResponseError):
+                        status_codes.add(exc.status)
+                    errors.append(f"{provider.provider_name}: {exc}")
                     if forced and "does not support this tool_choice" in str(exc):
                         self._native_tool_unsupported.add(provider.provider_name)
+                        attempts += 1
                         try:
                             result = await self._call_tools_one(
                                 provider,
@@ -261,9 +285,12 @@ class LLMClient:
                                 max_tokens,
                                 force_tool_choice=False,
                             )
+                            usage_pool += result.total_tokens
                             if not result.tool_calls:
                                 raise ValueError("供应商未返回必需的工具调用")
                             self._native_tool_auto.add(provider.provider_name)
+                            result.total_tokens = usage_pool
+                            result.attempted_requests = attempts
                             return result
                         except Exception as auto_exc:
                             if isinstance(auto_exc, aiohttp.ClientResponseError):
@@ -296,6 +323,7 @@ class LLMClient:
                 budgets = length_retry_budgets(max_tokens)
                 response = None
                 for attempt, budget in enumerate(budgets, 1):
+                    attempts += 1
                     try:
                         response = await self._call_one(
                             provider,
@@ -305,6 +333,7 @@ class LLMClient:
                             budget,
                             True,
                         )
+                        usage_pool += response.total_tokens
                         break
                     except OutputTruncatedError:
                         if attempt >= len(budgets):
@@ -321,9 +350,10 @@ class LLMClient:
                     raise ValueError("模型未返回必需的工具调用")
                 return LLMToolResponse(
                     tool_calls=calls,
-                    total_tokens=response.total_tokens,
+                    total_tokens=usage_pool,
                     provider_used=provider.provider_name,
                     native_tools=False,
+                    attempted_requests=attempts,
                 )
             except Exception as exc:
                 if isinstance(exc, aiohttp.ClientResponseError):

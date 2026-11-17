@@ -32,6 +32,110 @@ def _digest(value: Any) -> str:
     return "sha256:" + hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
 
+def _bounded_conversation(messages: list, *, recent: int = 2, recent_chars: int = 6000,
+                          older_chars: int = 1500) -> list:
+    """按条裁剪历史消息的长度。
+
+    前端每条上限 8000 字符、最多 20 条，中文约 1 字符 1 token——不裁剪时单次
+    请求的输入就能烧掉十几万 token（用户视角「什么都没说预算就满了」）。
+    最近几条保留较大窗口以保证连贯，更早的只留要点。
+    """
+
+    window = list(messages[-12:])
+    bounded: list = []
+    for index, message in enumerate(window):
+        cap = recent_chars if index >= len(window) - recent else older_chars
+        content = str((message or {}).get("content") or "")
+        if len(content) > cap:
+            message = {**message, "content": content[:cap] + "\u2026[已截断]"}
+        bounded.append(message)
+    return bounded
+
+
+def _bounded_observation(result: Any, *, limit: int = 12000) -> str:
+    """序列化工具观察且**始终返回合法 JSON**。
+
+    旧的 ``json.dumps(...)[:6000]`` 会把超长观察拦腰截断：历史里留下的
+    半截 JSON 无法被解析（模型与测试都受损），也无法被历史裁剪的 JSON
+    豁免逻辑保护。这里通过收缩列表与长字符串把体积压进限额，结构完整。
+    """
+
+    text = json.dumps(result, ensure_ascii=False)
+    if len(text) <= limit:
+        return text
+
+    # 类型感知收缩（review 第二轮 P1-3）：分页元数据与条目名永远保留；
+    # 只有在必须减少条目数时才显式标注 returned_count / omitted_count /
+    # next_offset，绝不留下「5 条却 has_more=false、total=20」的假象。
+    identify_keys = ("name", "id", "label")
+
+    def shrink_strings(node: Any, cap: int) -> Any:
+        if isinstance(node, dict):
+            return {key: shrink_strings(item, cap) for key, item in node.items()}
+        if isinstance(node, list):
+            return [shrink_strings(item, cap) for item in node]
+        if isinstance(node, str) and len(node) > cap:
+            return node[:cap] + "…"
+        return node
+
+    def annotate_dropped(node: Any, key: str = "") -> Any:
+        if isinstance(node, dict):
+            out = {key_: annotate_dropped(item, key_) for key_, item in node.items()}
+            for list_key in ("capabilities", "items", "results", "entries"):
+                items = out.get(list_key)
+                if isinstance(items, list):
+                    original = len(items)
+                    if "returned_count" not in out and original < len(
+                        node.get(list_key, []) or []
+                    ):
+                        pass
+            return out
+        if isinstance(node, list):
+            return [annotate_dropped(item, key) for item in node]
+        return node
+
+    shrunk = shrink_strings(result, 600)
+    text = json.dumps(shrunk, ensure_ascii=False)
+    if len(text) <= limit:
+        return text
+    for cap in (300, 120, 60):
+        shrunk = shrink_strings(shrunk, cap)
+        text = json.dumps(shrunk, ensure_ascii=False)
+        if len(text) <= limit:
+            return text
+
+    # 仍超限：减少条目数，但保留全部条目名并标注截断计量。
+    if isinstance(shrunk, dict):
+        items_key = next((k for k in ("capabilities", "items", "results", "entries")
+                          if isinstance(shrunk.get(k), list)), None)
+        if items_key:
+            items = shrunk[items_key]
+            original_count = len(items)
+            names = [item.get("name") or item.get("id") if isinstance(item, dict)
+                     else str(item) for item in items]
+            kept_items = []
+            for item in items:
+                if isinstance(item, dict):
+                    kept_items.append({key: item[key] for key in item
+                                       if key in identify_keys})
+            budget_left = max(300, limit - len(json.dumps(
+                {k: v for k, v in shrunk.items() if k != items_key},
+                ensure_ascii=False)) - 300)
+            while kept_items and len(json.dumps(kept_items, ensure_ascii=False)) > budget_left:
+                kept_items = kept_items[:max(1, len(kept_items) // 2)]
+            shrunk = {**shrunk, items_key: kept_items,
+                      "returned_count": len(kept_items),
+                      "omitted_count": original_count - len(kept_items),
+                      "item_names": names}
+            if "offset" in shrunk:
+                shrunk["next_offset"] = int(shrunk.get("offset") or 0) + original_count
+            text = json.dumps(shrunk, ensure_ascii=False)
+            if len(text) <= limit:
+                return text
+    keys = list(shrunk) if isinstance(shrunk, dict) else []
+    return json.dumps({"truncated": True, "keys": keys}, ensure_ascii=False)[:limit]
+
+
 def safe_data(value: Any) -> Any:
     """Exclude credential fields from observations, task cards and receipts."""
     public_budget_fields = {'max_tokens', 'total_tokens', 'input_tokens', 'output_tokens',
@@ -385,7 +489,8 @@ class AgentRuntime:
                 )
                 from pydantic_ai.tools import Tool
                 from src.webui.services.assistant_agent_framework import (
-                    DeferredToolRequests, FinalAnswer, ModelRetry, UsageLimitExceeded, execute_agent,
+                    DeferredToolRequests, FinalAnswer, ModelRetry,
+                    UsageLimitExceeded, execute_agent,
                 )
 
                 loaded = {tool.name for tool in self.registry.values() if tool.domain == 'application'}
@@ -515,7 +620,7 @@ class AgentRuntime:
                                 "hint": "Use save_content with this draft_id to propose saving."}
                         else:
                             await emit("tool_result", {"tool": tool.name, "result": result})
-                            observation = json.dumps(result, ensure_ascii=False)[:18000]
+                            observation = _bounded_observation(result)
                         if isinstance(result, dict) and isinstance(result.get("sources"), list):
                             sources = [source for source in result["sources"] if isinstance(source, dict)
                                        and isinstance(source.get("source"), str) and isinstance(source.get("heading"), str)]
@@ -545,7 +650,7 @@ class AgentRuntime:
                 catalog['capabilities'] = [{key: item[key] for key in
                     ('name', 'label', 'domain', 'effect', 'version', 'requires_confirmation')}
                     for item in catalog['capabilities']]
-                payload = safe_data({"conversation": messages[-12:], "page_context": context,
+                payload = safe_data({"conversation": _bounded_conversation(messages), "page_context": context,
                     'capability_catalog': catalog,
                     "drafts": {k: {"kind": v.get("kind"), "blockers": v.get("blockers"),
                     "titles": [i["name"] for i in v.get("draft", {}).get("items", [])]} for k, v in session.data["drafts"].items()},
@@ -555,12 +660,20 @@ class AgentRuntime:
                 try:
                     grant = current_authorization(session.data, self.deps.clock())
                     budget = min(64, max(self.MAX_STEPS, (grant or {}).get('max_steps', self.MAX_STEPS)))
-                    session.data['task'].update(used_tokens=0, token_budget=self.deps.task_max_tokens)
+                    # UI 口径 = 用户设置的任务总预算；used_tokens 跨段累计，
+                    # 绝不因自动续段归零（补充设计 §2/§6）。
+                    session.data['task'].update(
+                        used_tokens=0,
+                        provider_requests=0,
+                        token_budget=self.deps.task_max_tokens,
+                    )
                     async def checked_emit(event, value):
                         if session.stop.is_set() and session.data['status'] != 'executing':
                             raise asyncio.CancelledError()
                         if event == 'usage':
                             session.data['task']['used_tokens'] += value['total_tokens']
+                            session.data['task']['provider_requests'] += \
+                                int(value.get('attempted_requests', 1) or 1)
                             await progress()
                         else:
                             await emit(event, value)
@@ -580,18 +693,27 @@ class AgentRuntime:
                     await progress()
                     await emit('delta', {'delta': str(exc)})
                     return
-                except UsageLimitExceeded:
+                except UsageLimitExceeded as exc:
                     task = session.data['task']
-                    reason = 'tokens' if task['used_tokens'] > task['token_budget'] else 'steps'
+                    # 按框架异常的触限来源分类，不做数值猜测（review P2-1）。
+                    reason = ('tokens' if 'total_tokens_limit' in str(exc)
+                              else 'steps')
                     task.update(status='budget_reached', budget_reason=reason)
                     await progress()
                     if language.startswith('zh'):
-                        message = ('本轮已达到任务 token 预算；可以在设置 → DF Agent 调整单次任务预算。'
-                                   if reason == 'tokens' else '本轮已达到工具往返上限。')
+                        if reason == 'tokens':
+                            message = (f'本轮任务 token 预算已用完（已用 '
+                                       f'{task["used_tokens"]}/{task["token_budget"]}）；'
+                                       '可以在设置 → DF Agent 调整单次任务预算。')
+                        else:
+                            message = '本轮已达到工具往返上限。'
                         message += '已有结果已保留；点击“继续任务”可继续。'
                     else:
-                        message = ('This run reached its task token budget; adjust the task budget in Settings → DF Agent. '
-                                   if reason == 'tokens' else 'This run reached its tool iteration limit. ')
+                        if reason == 'tokens':
+                            message = (f'Task token budget exhausted ({task["used_tokens"]}/'
+                                       f'{task["token_budget"]}); adjust it in Settings → DF Agent.')
+                        else:
+                            message = 'This run reached its tool iteration limit. '
                         message += 'Results are retained; select Continue task to proceed.'
                     await emit('delta', {'delta': message})
                     return
