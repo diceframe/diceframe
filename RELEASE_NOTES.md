@@ -1,6 +1,6 @@
-# DiceFrame v3.3.0-beta.2
+# DiceFrame v3.3.0
 
-> 这是 3.3.0 的**预览版（beta）**。beta.1 的 Docker 更新包存在依赖缺失（更新必失败并回滚），请改用本版本。默认的稳定频道不会收到它；请在「设置 → 预览版更新」里开启后才会检测到本版本。重要存档建议先备份。扩展中心、创作工坊与外部规则运行时均为本批实验性能力，欢迎在预览频道反馈。
+3.2.1 之后的扩展平台版本：统一扩展中心与模块商店、创作工坊、外部规则运行时平台、本地向量模型管理、后端提示多语言第一批，以及一批可靠性与更新链路修复。
 
 扩展平台批次：统一扩展中心与重做的模块商店、创作工坊、实验性的外部规则运行时平台、本地向量模型管理，以及后端提示多语言的第一批。同时包含插件安装原子性与一批可靠性修复。
 
@@ -28,7 +28,7 @@
 
 - **后端提示接入文案表（第一批）**：`src/webui` 返回给移动端、机器人与第三方调用方的提示按请求 `Accept-Language` 返回对应语言；不带该头时仍为简体中文，机器人脚本行为不变。
 
-### 自 beta.1 修复（重要）
+### 更新链路与可靠性修复（重要）
 
 - **Docker 更新包依赖缺失**：beta.1 的更新包缺 `python-i18n`，候选进程启动即崩、更新必回滚并报「候选进程已退出」。已补齐锁文件并新增「锁必须覆盖全部依赖，否则拒绝出包」的构建校验；重复应用当前版本不再杀掉健康进程重启。
 - **内置 Fabula Ultima 规则已撤回**：按外部化路线（`.dfplugin` 插件包）执行，主仓不再内置第三方规则数值表。
@@ -50,11 +50,9 @@
 
 ## English
 
-> This is the **beta preview** of 3.3.0. The stable channel does not receive it; enable *Preview updates* in Settings to see it. Back up important saves first. The extension center, Creator studio and external ruleset runtimes are experimental — feedback on the preview channel is welcome.
 
-> This is the **beta preview** of 3.3.0. The beta.1 Docker update package shipped without a required dependency (every in-app Docker update to beta.1 failed and rolled back); use beta.2 instead.
 
-The extension-platform batch: a unified extension center with a rebuilt module store, the Creator studio, an experimental external ruleset runtime platform, local embedding model management, and the first batch of localized backend messages — plus atomic plugin installs and a round of reliability fixes.
+The extension-platform release after 3.2.1: a unified extension center with a rebuilt module store, the Creator studio, an experimental external ruleset runtime platform, local embedding model management, and the first batch of localized backend messages — plus atomic plugin installs and a round of reliability fixes.
 
 ### Extension platform (new)
 
@@ -78,7 +76,7 @@ The extension-platform batch: a unified extension center with a rebuilt module s
 
 - **Backend messages, first batch**: messages returned to mobile clients, bots and third-party callers from `src/webui` now follow the request's `Accept-Language`; without the header they stay in Simplified Chinese, so bot scripts see no change.
 
-### Fixed since beta.1 (important)
+### Update-path and reliability fixes (important)
 
 - **Docker update package dependency**: the beta.1 package shipped without `python-i18n`; every candidate crashed on import, so in-app Docker updates always rolled back with "candidate process exited". The lock is fixed and the build now refuses to ship unless it covers every requirement; re-applying the running version no longer restarts a healthy process.
 - **Built-in Fabula Ultima ruleset reverted**: FU stays external (`.dfplugin` package) per the externalization decision; third-party rule data no longer ships in the main repo.
@@ -100,6 +98,6 @@ The extension-platform batch: a unified extension center with a rebuilt module s
 
 ## Downloads
 
-- Windows 安装包 / Windows installer：`DiceFrame-v3.3.0-beta.2-windows-setup.exe`
-- 便携版 / Portable：`DiceFrame-v3.3.0-beta.2-windows-portable.zip`
-- Docker：`diceframe`（`3.3.0-beta.2` 标签；beta 不打 `latest`）
+- Windows 安装包 / Windows installer：`DiceFrame-v3.3.0-windows-setup.exe`
+- 便携版 / Portable：`DiceFrame-v3.3.0-windows-portable.zip`
+- Docker：`diceframe`（`3.3.0` 与 `latest` 标签）
