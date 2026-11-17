@@ -5,7 +5,8 @@ import { useConfirm } from '@/composables/useConfirm'
 import { useLocale } from '@/composables/useLocale'
 import { useToast } from '@/composables/useToast'
 import { promptEnableAfterInstall } from './installEnable'
-import type { PluginField, PluginInfo } from '@/api/types'
+import type { MessageKey } from '@/i18n'
+import type { PluginDependency, PluginField, PluginInfo } from '@/api/types'
 
 export function useInstalledPlugins(
   busy: Ref<string>,
@@ -162,7 +163,41 @@ export function useInstalledPlugins(
     }
   }
 
+  // 硬依赖（requires.plugins）的就绪判定：装了但没启用也算没就绪——插件之间
+  // 的契约要靠运行时活着，光有目录没进程一样用不了。本地安装包不走商店的
+  // 「下载前提示」，所以启用这一步必须自己说清楚。
+  function dependencyIssue(dep: PluginDependency): MessageKey | '' {
+    if (!dep.available) return 'pluginDependencyMissing'
+    if (!dep.satisfied) return 'pluginDependencyOutdated'
+    const installed = plugins.value.find(item => item.id === dep.id)
+    const live = Boolean(installed && (installed.enabled || installed.running))
+    return live ? '' : 'pluginDependencyDisabled'
+  }
+
+  function unmetDependencies(plugin: PluginInfo): string[] {
+    const issues: string[] = []
+    for (const dep of plugin.dependencies || []) {
+      const key = dependencyIssue(dep)
+      if (!key) continue
+      issues.push(t(key, { id: dep.id, version: dep.minimum_version }))
+    }
+    return issues
+  }
+
+  async function confirmDependencies(plugin: PluginInfo): Promise<boolean> {
+    const issues = unmetDependencies(plugin)
+    if (!issues.length) return true
+    return confirm({
+      title: t('pluginDependencyWarningTitle'),
+      content: t('pluginDependencyWarningBody', { name: plugin.name, dependencies: issues.join(t('listSeparator')) }),
+      positiveText: t('pluginEnableAnyway'),
+      negativeText: t('cancel'),
+      type: 'warning',
+    })
+  }
+
   async function toggleRunning(plugin: PluginInfo, running: boolean) {
+    if (running && !(await confirmDependencies(plugin))) return
     busy.value = plugin.id
     try {
       await pluginApi.setRunning(plugin.id, running)
@@ -177,6 +212,7 @@ export function useInstalledPlugins(
 
   // 静态插件（内容包/主题）没有进程开关，用 config 的 enabled 作为列表开关，勾选即保存生效。
   async function toggleEnabled(plugin: PluginInfo, enabled: boolean) {
+    if (enabled && !(await confirmDependencies(plugin))) return
     if (!plugin.config) plugin.config = {}
     plugin.config.enabled = enabled
     await save(plugin)

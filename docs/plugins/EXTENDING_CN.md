@@ -56,7 +56,8 @@ python scripts/validate_content_module.py dist/plugins/plugin-id-1.0.0.dfplugin 
 3. `entrypoint` 是 stdio 进程命令；宿主常规启停不拉起该进程——进程由组合根注册表（`PluginRulesetRuntimeSource`）持有：启用即注册并探活，探活失败不注册；停用/卸载即撤销注册并终止子进程。
 4. 包内规则模板用 `contributes.rules` 提供，模板 `runtime` 块绑定 `ruleset_runtime.runtime_id`；版本不足时 resolve 抛 `IncompatibleRulesetRuntimeError`。
 5. runtime 进程必须无状态：所有结算以宿主提供的 instance 状态为准，`apply_event_batch` 只追加 ledger、按 batch_id 判重。重启恢复依赖「宿主持久化状态 + 收据幂等」。
-6. 测试参考 `tests/test_plugin_ruleset_runtimes.py`（真实 zip 安装 + 真实 stdio 子进程 + 重启恢复闭环）。
+6. `gameplay_view` 可以返回 `panels`：一组声明式节点，宿主在游戏主界面直接渲染。插件**不能携带前端组件**（`ruleset-runtime` 的 `contributes` 只有 `rules`），命刻、机会、冲突步骤这类专属信息只能通过它表达。节点只有 6 种控件：`group`（可带 `label` 与 `children`）、`text`、`value`、`progress`（`value`/`min`/`max`）、`list`（`value` 为数组）、`button`（`label` + `action` + `arguments`）。按钮的 `action` 会被提交为一次普通 intent（`type: action`，`arguments` 并入请求体），因此只需要 intent 词汇里已有的动作。宿主不解释节点语义，非法节点会被丢弃而不是报错。
+7. 测试参考 `tests/test_plugin_ruleset_runtimes.py`（真实 zip 安装 + 真实 stdio 子进程 + 重启恢复闭环）。
 
 ## F. 真正新增 Plugin Type
 

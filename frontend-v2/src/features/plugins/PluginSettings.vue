@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import type { Component } from 'vue'
 import { NButton, NTabPane, NTabs } from 'naive-ui'
 import DOMPurify from 'dompurify'
@@ -37,6 +38,11 @@ const {
 } = useTheme()
 const busy = ref('')
 const surfaceError = ref('')
+// 内容包页/模组详情可以用 `?tab=marketplace&q=<runtime>` 把人送到这里：
+// 「缺规则运行时」的提示不该只丢一句错误，得能一步跳到装插件的地方。
+const route = useRoute()
+const activeTab = ref('installed')
+const tabNames = new Set(['installed', 'marketplace', 'content', 'themes', 'tools', 'ui', 'mirrors'])
 // 插件类型筛选（已装 + 商店共用同一筛选值）：筛选条由后端类型表驱动
 const typeFilter = ref('')
 const { pluginTypeFilters, marketTypeFilters, pluginTypeLabel, loadTypes } = usePluginTypes()
@@ -172,6 +178,10 @@ async function loadPluginDocs(pluginId: string) {
 }
 
 onMounted(async () => {
+  const requestedTab = String(route.query.tab || '')
+  if (tabNames.has(requestedTab)) activeTab.value = requestedTab
+  const requestedKeyword = String(route.query.q || '').trim()
+  if (requestedKeyword) marketKeyword.value = requestedKeyword
   await load()
   await Promise.all([
     loadMarketplace(), loadMirrors(), loadContentResources(), loadLorebooks(), loadTypes(), loadPluginUi(), settingsStore.load(),
@@ -192,7 +202,7 @@ onMounted(async () => {
       <span>{{ surfaceError }}</span>
       <button type="button" class="ghost" @click="refreshPluginSurfaces">{{ t('retry') }}</button>
     </div>
-  <NTabs type="line" animated class="plugin-surface-tabs">
+  <NTabs v-model:value="activeTab" type="line" animated class="plugin-surface-tabs">
     <NTabPane name="installed" :tab="t('pluginsInstalledTab')">
       <InstalledTab
         :loading="loading"
