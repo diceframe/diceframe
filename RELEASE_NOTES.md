@@ -33,6 +33,7 @@
 - **Docker 更新包依赖缺失**：beta.1 的更新包缺 `python-i18n`，候选进程启动即崩、更新必回滚并报「候选进程已退出」。已补齐锁文件并新增「锁必须覆盖全部依赖，否则拒绝出包」的构建校验；重复应用当前版本不再杀掉健康进程重启。
 - **内置 Fabula Ultima 规则已撤回**：按外部化路线（`.dfplugin` 插件包）执行，主仓不再内置第三方规则数值表。
 - 首次启动时「同意用户协议」不再被版本校验闸门短暂拦截。
+- **购买体验闭环**：玩家想买但没人报价时，不再「不扣钱也不给东西」地静默落空——游玩页出现「待报价」卡片，GM 一键预填开单、玩家可自助出价（`我要出价`）；确认前永远不扣款不发货的既有安全语义不变。模型侧同时加固：任何人在叙事里报过价即视为已定价，不再轻易降级。
 
 ### 可靠性（修复）
 
@@ -82,6 +83,7 @@ The extension-platform batch: a unified extension center with a rebuilt module s
 - **Docker update package dependency**: the beta.1 package shipped without `python-i18n`; every candidate crashed on import, so in-app Docker updates always rolled back with "candidate process exited". The lock is fixed and the build now refuses to ship unless it covers every requirement; re-applying the running version no longer restarts a healthy process.
 - **Built-in Fabula Ultima ruleset reverted**: FU stays external (`.dfplugin` package) per the externalization decision; third-party rule data no longer ships in the main repo.
 - Accepting the user agreement on first boot is no longer briefly blocked by the update-validation gate.
+- **Purchase loop closed**: when a player wants to buy something but nobody has quoted a price, the purchase no longer silently does nothing (no charge, no item) — the play screen shows an "awaiting quote" card where the GM can pre-fill an order in one click and the player can name their own price. The existing safety contract (nothing charged or granted before confirmation) is unchanged. The model prompt is also hardened: any price a human stated in narration now counts as established.
 
 ### Reliability (fixes)
 
