@@ -17,6 +17,11 @@ from src.engine.currency import (
     validate_currency_system,
     validate_declared_currency_system,
 )
+from src.engine.check_mechanics import (
+    BUILTIN_DICE_SYSTEMS,
+    check_mechanic_for,
+    supported_dice_systems,
+)
 from src.engine.language import (
     DEFAULT_LANGUAGE,
     content_locale_candidates,
@@ -31,7 +36,10 @@ from src.rules.adventure_progression_config import AdventureProgressionConfig
 from src.rules.affection_config import AffectionConfig, parse_affection_config
 
 logger = logging.getLogger("trpg")
-SUPPORTED_DICE_SYSTEMS = frozenset({"d20", "d100", "none"})
+#: 属性骰组可声明的骰面（标准多面骰）。
+_ATTRIBUTE_DIE_SIZES = frozenset({4, 6, 8, 10, 12, 20})
+#: 通用管线内建的骰制；规则包注册的骰制见 ``supported_dice_systems()``。
+SUPPORTED_DICE_SYSTEMS = BUILTIN_DICE_SYSTEMS
 
 # 安全的数学表达式求值 —— 仅允许数字和基本算术运算
 _SAFE_OPS: dict[type, Callable] = {
@@ -147,8 +155,8 @@ class RuleSystem:
         self.rule_id: str = template["rule_id"]
         self.rule_name: str = template.get("rule_name", self.rule_id)
         self._dice_system = str(template.get("dice_system") or "d20").lower()
-        if self._dice_system not in SUPPORTED_DICE_SYSTEMS:
-            supported = ", ".join(sorted(SUPPORTED_DICE_SYSTEMS))
+        if self._dice_system not in supported_dice_systems():
+            supported = ", ".join(sorted(supported_dice_systems()))
             raise ValueError(f"不支持的检定骰制: {self._dice_system}（当前支持 {supported}）")
         # 显式声明版本的货币 schema（含非法/未支持版本）在构造时 fail-fast；
         # 无版本键的旧规则与显式 legacy（schema_version: 1）继续按 legacy 处理。
@@ -160,7 +168,7 @@ class RuleSystem:
         import copy
         import json
         value = copy.deepcopy(self.template)
-        for field in ("rule_name", "name", "description", "attr_hint", "skill_hint", "gm_prompt_appendix", "check_planner_appendix", "difficulty_instructions", "currency", "active_locale", "default_locale", "locale_schema_version"):
+        for field in ("rule_name", "name", "description", "attr_hint", "skill_hint", "gm_prompt_appendix", "check_planner_appendix", "narration_policy", "difficulty_instructions", "currency", "active_locale", "default_locale", "locale_schema_version"):
             value.pop(field, None)
         for item in value.get("attributes", []):
             if isinstance(item, dict):
@@ -378,6 +386,59 @@ class RuleSystem:
     def dice_system(self) -> str:
         return self._dice_system
 
+    def special_stat_max(self, stat: dict, attributes: dict) -> int:
+        """资源上限：优先用 ``max_formula``（随属性变化），否则退回固定 ``max``。
+
+        只声明固定 ``max`` 的规则行为不变。
+        """
+        formula = stat.get("max_formula") if isinstance(stat, dict) else None
+        if isinstance(formula, str) and formula.strip():
+            try:
+                value = int(_safe_eval(formula, dict(attributes or {})))
+                return max(1, value)
+            except Exception:
+                logger.warning("special_stat max_formula 求值失败，回退固定 max: %s", formula)
+        try:
+            return max(0, int((stat or {}).get("max", 99) or 99))
+        except (TypeError, ValueError):
+            return 99
+
+    @property
+    def start_level(self) -> int:
+        """建卡起始等级（规则可声明 ``start_level``，默认 1）。"""
+        try:
+            return max(1, min(60, int(self.template.get("start_level") or 1)))
+        except (TypeError, ValueError):
+            return 1
+
+    @property
+    def starting_currency(self) -> int:
+        """建卡初始资金（规则可声明 ``starting_currency``，默认 0 表示沿用旧行为）。"""
+        try:
+            return max(0, int(self.template.get("starting_currency") or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @property
+    def attribute_dice_array(self) -> list[int]:
+        """建卡固定属性骰组（如 [10, 8, 8, 6]）；空列表表示按点数自由分配。
+
+        属性值是骰面而不是分数的规则用它声明「分配这组骰子」；具体允许
+        哪些骰面由该规则的检定机制在保存模板时校验。
+        """
+        raw = self.template.get("attribute_dice_array")
+        if not isinstance(raw, list) or not raw:
+            return []
+        values: list[int] = []
+        for item in raw:
+            try:
+                value = int(item)
+            except (TypeError, ValueError):
+                continue
+            if value in _ATTRIBUTE_DIE_SIZES:
+                values.append(value)
+        return sorted(values, reverse=True)
+
     @property
     def check_mechanic(self) -> dict:
         """规则无关的检定元数据，供系统执行器与阶段 1 裁判共用。"""
@@ -392,6 +453,9 @@ class RuleSystem:
             }
         if self.dice_system == "none":
             return {"dice": "none", "comparison": "none", "critical": {}}
+        mechanic = check_mechanic_for(self.dice_system)
+        if mechanic is not None:
+            return mechanic.descriptor()
         return {
             "dice": "d20",
             "comparison": "roll_plus_modifier_gte_target",
@@ -493,17 +557,22 @@ class RuleSystem:
         - ``degree_affects_damage``：攻击总值超出目标是否追加伤害（D&D 式为 False）。
         - ``critical_damage``：``double_total``（旧版总值×2）或
           ``double_damage_dice``（只翻倍伤害骰，固定修正不翻倍）。
+        - ``high_roll``：伤害读命中检定结果里的 ``high_roll``，而非属性加值。
         """
         declared = self.template.get("damage_mechanic")
         if not isinstance(declared, dict):
             declared = {}
         critical = str(declared.get("critical_damage") or "double_total").strip()
-        return {
+        mechanic: dict[str, Any] = {
             "armor_reduces_damage": bool(declared.get("armor_reduces_damage", True)),
             "degree_affects_damage": bool(declared.get("degree_affects_damage", True)),
             "critical_damage": critical if critical in {"double_total", "double_damage_dice", "none"} else "double_total",
             "minimum_damage": max(0, int(declared.get("minimum_damage", 1) or 0)),
         }
+        # 只有声明了该模式的规则才带这个键；其它规则的结构保持不变。
+        if declared.get("high_roll"):
+            mechanic["high_roll"] = True
+        return mechanic
 
     @property
     def armor_model(self) -> str:
@@ -797,6 +866,11 @@ class RuleSystem:
         """规则专属的检定裁定要点，只追加给检定规划器（不进 GM 叙事 prompt）。"""
         return str(localized_field(self.template, "check_planner_appendix", language) or "")
 
+    def get_narration_policy(self, language: str = DEFAULT_LANGUAGE) -> str:
+        """规则声明的每轮叙事纪律（可选的展示/提示文本，随内容语言本地化）。"""
+        value = localized_field(self.template, "narration_policy", language)
+        return value.strip() if isinstance(value, str) else ""
+
     # 有专属标签/结算通道的资源不进 STAT 通道
     _STAT_EXCLUSIVE_KEYS = {"sanity", "luck", "mana"}
 
@@ -871,6 +945,19 @@ class RuleSystem:
             val = attrs.get(a["key"], 0)
             if val < a.get("min", 3) or val > a.get("max", 18):
                 errors.append(f"{a['name']} {val} 不在 [{a['min']},{a['max']}] 范围内")
+
+        # 规则声明了属性骰组时，建卡必须正好是那组骰子（如 d10/d8/d8/d6），
+        # 不能像点数制那样自由凑总和。
+        dice_array = self.attribute_dice_array
+        if dice_array:
+            values = [int(attrs.get(a["key"], 0) or 0) for a in self.attributes]
+            if sorted(values, reverse=True) != sorted(dice_array, reverse=True):
+                errors.append(
+                    "属性骰组必须正好是 "
+                    + "/".join(f"d{v}" for v in dice_array)
+                    + "，当前为 "
+                    + "/".join(f"d{v}" for v in values)
+                )
 
         # 技能数量
         skills = character_sheet.get("skills", [])

@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "kind": "bestiary",
+  "id": "fabula_ultima_core",
+  "monsters": [
+    {
+      "id": "slime",
+      "profile_id": "slime",
+      "name": "史莱姆",
+      "rank": "minion"
+    },
+    {
+      "id": "goblin",
+      "profile_id": "goblin",
+      "name": "哥布林",
+      "rank": "minion"
+    },
+    {
+      "id": "orc",
+      "profile_id": "orc",
+      "name": "兽人",
+      "rank": "minion"
+    },
+    {
+      "id": "skeleton",
+      "profile_id": "skeleton",
+      "name": "骷髅兵",
+      "rank": "minion"
+    },
+    {
+      "id": "golem",
+      "profile_id": "golem",
+      "name": "青铜魔像",
+      "rank": "elite"
+    },
+    {
+      "id": "whelp",
+      "profile_id": "whelp",
+      "name": "幼龙",
+      "rank": "elite"
+    },
+    {
+      "id": "assassin",
+      "profile_id": "assassin",
+      "name": "刺客",
+      "rank": "minion"
+    },
+    {
+      "id": "mage",
+      "profile_id": "mage",
+      "name": "敌法师",
+      "rank": "minion"
+    },
+    {
+      "id": "captain",
+      "profile_id": "captain",
+      "name": "守卫队长",
+      "rank": "elite"
+    },
+    {
+      "id": "witch",
+      "profile_id": "witch",
+      "name": "锈钟女巫",
+      "rank": "boss"
+    }
+  ]
+}

@@ -96,9 +96,15 @@ def calc_hp_based_damage(
     armor_reduces = bool(mech.get("armor_reduces_damage", True))
     degree = bool(mech.get("degree_affects_damage", True))
     crit_mode = str(mech.get("critical_damage") or "double_total")
+    high_roll = bool(mech.get("high_roll"))
     if check_result and bool(check_result.get("is_fumble")):
         return 0
-    if dice_total is not None:
+    if high_roll and check_result is not None:
+        # 规则声明 damage_mechanic.high_roll：伤害 = 命中检定结果里的高值 + 武器/法术加值。
+        # 是否再按护甲减伤由规则的 armor_reduces_damage 单独声明。
+        hr = int(check_result.get("high_roll") or 0)
+        base = int(weapon_damage) + hr
+    elif dice_total is not None:
         base = int(dice_total) + int(attr_modifier)
     else:
         base = int(weapon_damage) + int(attr_modifier)

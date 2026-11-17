@@ -38,8 +38,69 @@ const step = ref<1 | 2 | 3 | 4>(1)
 const characterName = ref('')
 const portrait = ref<CharacterPortrait | null>()
 const identityValues = ref<Record<string, string>>({})
+const ruleClasses = computed<Array<{ id?: string; name?: string }>>(() => {
+  const raw = (props.ruleMeta as Record<string, unknown> | null | undefined)?.classes
+  return Array.isArray(raw) ? raw as Array<{ id?: string; name?: string }> : []
+})
+const classOptions = computed(() => ruleClasses.value.map(c => String(c.name || '')).filter(Boolean))
+const hasClassPicker = computed(() => classOptions.value.length > 0)
+const classLevelTotal = computed(() => {
+  const raw = Number((props.ruleMeta as Record<string, unknown> | null | undefined)?.class_levels_total ?? 0)
+  return Number.isFinite(raw) && raw > 0 ? raw : 5
+})
+const primaryClass = ref('')
+const secondaryClass = ref('')
+const primaryLevel = ref(1)
+const secondaryLevel = ref(1)
+const classLevelSum = computed(() => Number(primaryLevel.value || 0) + Number(secondaryLevel.value || 0))
+const classSelectionOk = computed(() => {
+  if (!hasClassPicker.value) return true
+  if (!primaryClass.value || !secondaryClass.value) return false
+  if (primaryClass.value === secondaryClass.value) return false
+  const a = Number(primaryLevel.value) || 0
+  const b = Number(secondaryLevel.value) || 0
+  return a >= 1 && b >= 1 && a + b === classLevelTotal.value
+})
+const classSkillPool = computed<string[]>(() => {
+  if (!hasClassPicker.value) return []
+  const pools = (props.ruleMeta as Record<string, unknown> | null | undefined)?.skill_pools
+  const skills = (props.ruleMeta as Record<string, unknown> | null | undefined)?.skills
+  if (!pools || typeof pools !== 'object' || !skills || typeof skills !== 'object') return []
+  const names: string[] = []
+  for (const className of [primaryClass.value, secondaryClass.value]) {
+    const cls = ruleClasses.value.find(c => String(c.name || '') === className)
+    if (!cls?.id) continue
+    for (const skillId of (pools as Record<string, string[]>)[String(cls.id)] || []) {
+      const name = String(((skills as Record<string, { name?: string }>)[skillId] || {}).name || '')
+      if (name && !names.includes(name)) names.push(name)
+    }
+  }
+  return names
+})
 const identityFields = computed<IdentityField[]>(() =>
-  identitySchema(props.ruleMeta).filter(f => f.key !== 'background')
+  identitySchema(props.ruleMeta).filter(
+    f => f.key !== 'background' && !(hasClassPicker.value && f.key === 'archetype'),
+  )
+)
+
+watch(
+  [classOptions, classLevelTotal],
+  () => {
+    if (!hasClassPicker.value) return
+    if (!classOptions.value.includes(primaryClass.value)) primaryClass.value = classOptions.value[0] || ''
+    if (!classOptions.value.includes(secondaryClass.value) || secondaryClass.value === primaryClass.value) {
+      secondaryClass.value = classOptions.value.find(name => name !== primaryClass.value) || ''
+    }
+    const total = classLevelTotal.value
+    if (Number(primaryLevel.value) < 1) primaryLevel.value = Math.max(1, total - 1)
+    if (Number(secondaryLevel.value) < 1) secondaryLevel.value = Math.max(1, total - 1)
+    const sum = Number(primaryLevel.value) + Number(secondaryLevel.value)
+    if (sum !== total) {
+      primaryLevel.value = Math.max(1, total - 1)
+      secondaryLevel.value = Math.max(1, total - Number(primaryLevel.value))
+    }
+  },
+  { immediate: true },
 )
 
 const aiPrompt = ref('')
@@ -64,6 +125,21 @@ const background = ref('')
 // canonical 金额内部保存；输入框按展示单位编辑（0.25），提交前经 parser 换算。
 const gold = ref(0)
 const goldInput = ref('0')
+const startingCurrency = computed(() => {
+  const raw = Number((props.ruleMeta as Record<string, unknown> | null | undefined)?.starting_currency ?? 0)
+  return Number.isFinite(raw) && raw > 0 ? raw : 0
+})
+// 规则声明了初始资金时自动填入；用户改过就不再覆盖。
+watch(
+  startingCurrency,
+  (amount) => {
+    if (!amount) return
+    if (gold.value !== 0 || goldInput.value !== '0') return
+    gold.value = amount
+    goldInput.value = currencyAmountToInputText(amount, currencySystem.value)
+  },
+  { immediate: true },
+)
 const currencySystem = computed<CurrencySystem | null>(() => props.ruleMeta?.currency_system || null)
 const goldInvalid = computed(() => parseCurrencyInput(goldInput.value, currencySystem.value, { allowZero: true }) === null)
 const equipment = ref<CharacterItem[]>([])
@@ -106,8 +182,8 @@ function resetFields() {
   identityValues.value = {}
   skills.value = []
   background.value = ''
-  gold.value = 0
-  goldInput.value = '0'
+  gold.value = startingCurrency.value
+  goldInput.value = currencyAmountToInputText(startingCurrency.value, currencySystem.value)
   equipment.value = []
   inventory.value = []
   step.value = 1
@@ -173,6 +249,18 @@ function applyCharacter(c: CharacterSheet) {
   if (Array.isArray(c.equipment)) equipment.value = c.equipment.map(it => ({ ...it }))
   if (Array.isArray(c.inventory)) inventory.value = c.inventory.map(it => ({ ...it }))
   if (c.background) background.value = c.background
+  const storedLevels = (c as Record<string, unknown>).class_levels
+  if (storedLevels && typeof storedLevels === 'object') {
+    const entries = Object.entries(storedLevels as Record<string, unknown>)
+      .map(([name, level]) => [name, Number(level) || 0] as const)
+      .filter(([, level]) => level > 0)
+    if (entries.length >= 2) {
+      primaryClass.value = entries[0][0]
+      primaryLevel.value = entries[0][1]
+      secondaryClass.value = entries[1][0]
+      secondaryLevel.value = entries[1][1]
+    }
+  }
   if (c.currency?.amount !== undefined) gold.value = Number(c.currency.amount) || 0
   else if (c.gold !== undefined) gold.value = Number(c.gold) || 0
   goldInput.value = currencyAmountToInputText(gold.value, currencySystem.value)
@@ -184,13 +272,14 @@ watch(goldInput, (text) => {
 })
 
 function canNext() {
-  if (step.value === 1) return characterName.value.trim().length > 0
+  if (step.value === 1) return characterName.value.trim().length > 0 && classSelectionOk.value
   return true
 }
 function next() { if (canNext() && step.value < 4) step.value = (step.value + 1) as 1 | 2 | 3 | 4 }
 function prev() { if (step.value > 1) step.value = (step.value - 1) as 1 | 2 | 3 | 4 }
 
 function finish() {
+  if (!classSelectionOk.value) { toast.error(t('classLevelsInvalid')); return }
   const parsedGold = parseCurrencyInput(goldInput.value, currencySystem.value, { allowZero: true })
   if (parsedGold === null) { toast.error(t('invalidAmount')); return }
   gold.value = parsedGold
@@ -200,6 +289,12 @@ function finish() {
   for (const f of fields) setIdentityUpdate(updates, f, identityValues.value[f.key] || '')
   const identity = updates.identity || {}
   identity.background = background.value
+  if (hasClassPicker.value) {
+    // FU：职业是"两个职业 + 5 级分配"，存成可读字符串，同时保留结构化 class_levels。
+    const archetype = `${primaryClass.value} ${Number(primaryLevel.value)} / ${secondaryClass.value} ${Number(secondaryLevel.value)}`
+    identity.archetype = archetype
+    updates.class = archetype
+  }
 
   const character: CharacterSubmit = {
     character_name: characterName.value.trim(),
@@ -218,6 +313,12 @@ function finish() {
     currency: { amount: gold.value },
   }
   Object.assign(character, updates)
+  if (hasClassPicker.value) {
+    ;(character as Record<string, unknown>).class_levels = {
+      [primaryClass.value]: Number(primaryLevel.value),
+      [secondaryClass.value]: Number(secondaryLevel.value),
+    }
+  }
   emit('submit', character)
 }
 </script>
@@ -234,6 +335,23 @@ function finish() {
     <div v-if="step === 1" class="wizard-pane">
       <label>{{ t('characterName') }}<input v-model="characterName" :placeholder="t('nameCharacterPlaceholder')"></label>
       <PortraitPicker v-model="portrait" :rule-id="ruleId" :seed="characterName" :name="characterName" />
+      <div v-if="hasClassPicker" class="class-picker">
+        <label>{{ t('classRole') }} 1
+          <select v-model="primaryClass">
+            <option v-for="name in classOptions" :key="'pc-' + name" :value="name">{{ name }}</option>
+          </select>
+        </label>
+        <label>{{ t('classLevel') }}<input type="number" min="1" :max="classLevelTotal - 1" v-model.number="primaryLevel"></label>
+        <label>{{ t('classRole') }} 2
+          <select v-model="secondaryClass">
+            <option v-for="name in classOptions" :key="'sc-' + name" :value="name" :disabled="name === primaryClass">{{ name }}</option>
+          </select>
+        </label>
+        <label>{{ t('classLevel') }}<input type="number" min="1" :max="classLevelTotal - 1" v-model.number="secondaryLevel"></label>
+        <p class="form-hint" :class="{ warn: !classSelectionOk }">
+          {{ t('classLevelsHint', { sum: classLevelSum, total: classLevelTotal }) }}
+        </p>
+      </div>
       <label v-for="f in identityFields" :key="f.key">{{ identityLabel(f) }}<input v-model="identityValues[f.key]"></label>
 
       <details class="ai-block">
@@ -272,7 +390,7 @@ function finish() {
         <span v-if="skillPointTotal"> · {{ t('skillPointsSpent', { spent: skillSpent, total: skillPointTotal }) }}</span>
         <span v-if="maxSkillValue"> · {{ t('maxSingleSkill', { max: maxSkillValue }) }}</span>
       </p>
-      <SkillEditor v-model="skills" :pool="pool" />
+      <SkillEditor v-model="skills" :pool="hasClassPicker && classSkillPool.length ? classSkillPool : pool" :meta="ruleMeta" />
       <label>{{ t('backgroundStory') }}<textarea v-model="background" rows="4" :placeholder="t('backgroundPlaceholder')"></textarea></label>
       <label>{{ currencyEditableUnitLabel(currencySystem, currencyLabel(ruleMeta)) }}<input type="text" inputmode="decimal" v-model="goldInput" :step="currencyInputStep(currencySystem)" :class="{ invalid: goldInvalid }"></label>
     </div>

@@ -118,6 +118,14 @@ class PlayerStateApplier:
                 cs["status"] = pud["status"]
             # 物品事件：固定顺序 获得 -> 装备/卸下 -> 使用，再结算其它资源状态。
             domains = self._apply_item_events(instance, uid, cs, pud, rule)
+            # BONUS 标签记下的「下一次检定加值」；由规则的检定机制在结算时消费。
+            pending_bonus = pud.get("pending_check_bonus")
+            if isinstance(pending_bonus, (int, float)) and int(pending_bonus) > 0:
+                cs["pending_check_bonus"] = min(20, int(pending_bonus))
+                reason = str(pud.get("pending_check_bonus_reason") or "").strip()
+                if reason:
+                    cs["pending_check_bonus_reason"] = reason[:120]
+                domains.add("stats")
             # 法力变化
             mana_change = pud.get("mana_change")
             if isinstance(mana_change, (int, float)):

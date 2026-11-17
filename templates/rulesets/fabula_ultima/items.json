@@ -1,0 +1,414 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "enabled": true,
+      "id": "钢匕首",
+      "name": "钢匕首",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 4,
+      "price": 100,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 4"
+    },
+    {
+      "enabled": true,
+      "id": "巨剑",
+      "name": "巨剑",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 10,
+      "price": 300,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 10"
+    },
+    {
+      "enabled": true,
+      "id": "重矛",
+      "name": "重矛",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 12,
+      "price": 250,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 12"
+    },
+    {
+      "enabled": true,
+      "id": "手枪",
+      "name": "手枪",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 8,
+      "price": 250,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 8"
+    },
+    {
+      "enabled": true,
+      "id": "短弓",
+      "name": "短弓",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 5,
+      "price": 200,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 5"
+    },
+    {
+      "enabled": true,
+      "id": "铁指虎",
+      "name": "铁指虎",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 3,
+      "price": 80,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 3"
+    },
+    {
+      "enabled": true,
+      "id": "战斧",
+      "name": "战斧",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 9,
+      "price": 280,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 9"
+    },
+    {
+      "enabled": true,
+      "id": "武士刀",
+      "name": "武士刀",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 8,
+      "price": 300,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 8"
+    },
+    {
+      "enabled": true,
+      "id": "长剑",
+      "name": "长剑",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 7,
+      "price": 200,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 7"
+    },
+    {
+      "enabled": true,
+      "id": "细剑",
+      "name": "细剑",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 6,
+      "price": 220,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 6"
+    },
+    {
+      "enabled": true,
+      "id": "法杖",
+      "name": "法杖",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 6,
+      "price": 200,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 6"
+    },
+    {
+      "enabled": true,
+      "id": "魔典",
+      "name": "魔典",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 6,
+      "price": 250,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 6"
+    },
+    {
+      "enabled": true,
+      "id": "轻矛",
+      "name": "轻矛",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 7,
+      "price": 150,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 7"
+    },
+    {
+      "enabled": true,
+      "id": "阔剑",
+      "name": "阔剑",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 8,
+      "price": 260,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 8"
+    },
+    {
+      "enabled": true,
+      "id": "十字弩",
+      "name": "十字弩",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 7,
+      "price": 220,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 7"
+    },
+    {
+      "enabled": true,
+      "id": "手里剑",
+      "name": "手里剑",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 5,
+      "price": 60,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 5"
+    },
+    {
+      "enabled": true,
+      "id": "铁锤",
+      "name": "铁锤",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 9,
+      "price": 180,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 9"
+    },
+    {
+      "enabled": true,
+      "id": "镰刀",
+      "name": "镰刀",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 7,
+      "price": 200,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 7"
+    },
+    {
+      "enabled": true,
+      "id": "三叉戟",
+      "name": "三叉戟",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 9,
+      "price": 240,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 9"
+    },
+    {
+      "enabled": true,
+      "id": "喷火器",
+      "name": "喷火器",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 8,
+      "price": 400,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 8"
+    },
+    {
+      "enabled": true,
+      "id": "机枪",
+      "name": "机枪",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 7,
+      "price": 450,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 7"
+    },
+    {
+      "enabled": true,
+      "id": "步枪",
+      "name": "步枪",
+      "category": "equipment",
+      "type": "weapon",
+      "damage": 9,
+      "price": 400,
+      "slot": "main_hand",
+      "effect": "武器 · 伤害 9"
+    },
+    {
+      "enabled": true,
+      "id": "无甲",
+      "name": "无甲",
+      "category": "equipment",
+      "type": "armor",
+      "armor": 0,
+      "price": 0,
+      "slot": "armor",
+      "effect": "护甲 · 物防 0"
+    },
+    {
+      "enabled": true,
+      "id": "丝质衬衫",
+      "name": "丝质衬衫",
+      "category": "equipment",
+      "type": "armor",
+      "armor": 1,
+      "price": 30,
+      "slot": "armor",
+      "effect": "护甲 · 物防 1"
+    },
+    {
+      "enabled": true,
+      "id": "旅行装束",
+      "name": "旅行装束",
+      "category": "equipment",
+      "type": "armor",
+      "armor": 1,
+      "price": 50,
+      "slot": "armor",
+      "effect": "护甲 · 物防 1"
+    },
+    {
+      "enabled": true,
+      "id": "武道服",
+      "name": "武道服",
+      "category": "equipment",
+      "type": "armor",
+      "armor": 1,
+      "price": 60,
+      "slot": "armor",
+      "effect": "护甲 · 物防 1"
+    },
+    {
+      "enabled": true,
+      "id": "贤者之袍",
+      "name": "贤者之袍",
+      "category": "equipment",
+      "type": "armor",
+      "armor": 1,
+      "price": 120,
+      "slot": "armor",
+      "effect": "护甲 · 物防 1"
+    },
+    {
+      "enabled": true,
+      "id": "板甲衣",
+      "name": "板甲衣",
+      "category": "equipment",
+      "type": "armor",
+      "armor": 3,
+      "price": 200,
+      "slot": "armor",
+      "effect": "护甲 · 物防 3"
+    },
+    {
+      "enabled": true,
+      "id": "青铜板甲",
+      "name": "青铜板甲",
+      "category": "equipment",
+      "type": "armor",
+      "armor": 4,
+      "price": 300,
+      "slot": "armor",
+      "effect": "护甲 · 物防 4"
+    },
+    {
+      "enabled": true,
+      "id": "符文板甲",
+      "name": "符文板甲",
+      "category": "equipment",
+      "type": "armor",
+      "armor": 5,
+      "price": 500,
+      "slot": "armor",
+      "effect": "护甲 · 物防 5"
+    },
+    {
+      "enabled": true,
+      "id": "钢制板甲",
+      "name": "钢制板甲",
+      "category": "equipment",
+      "type": "armor",
+      "armor": 6,
+      "price": 700,
+      "slot": "armor",
+      "effect": "护甲 · 物防 6"
+    },
+    {
+      "enabled": true,
+      "id": "青铜盾牌",
+      "name": "青铜盾牌",
+      "category": "equipment",
+      "type": "shield",
+      "armor": 2,
+      "price": 100
+    },
+    {
+      "enabled": true,
+      "id": "符文盾牌",
+      "name": "符文盾牌",
+      "category": "equipment",
+      "type": "shield",
+      "armor": 2,
+      "price": 150
+    },
+    {
+      "enabled": true,
+      "id": "双盾",
+      "name": "双盾",
+      "category": "equipment",
+      "type": "shield",
+      "armor": 3,
+      "price": 220
+    },
+    {
+      "enabled": true,
+      "id": "potion",
+      "name": "治疗药水",
+      "category": "consumable",
+      "description": "恢复 20 HP。",
+      "ip_cost": 2,
+      "effect": {
+        "type": "heal",
+        "amount": 20,
+        "target": "ally"
+      },
+      "action": "action"
+    },
+    {
+      "enabled": true,
+      "id": "antidote",
+      "name": "万能药",
+      "category": "consumable",
+      "description": "解除异常状态。",
+      "ip_cost": 2,
+      "effect": {
+        "type": "cleanse",
+        "target": "ally"
+      },
+      "action": "action"
+    },
+    {
+      "enabled": true,
+      "id": "bomb",
+      "name": "炸弹",
+      "category": "consumable",
+      "description": "造成 10 点物理伤害。",
+      "ip_cost": 1,
+      "effect": {
+        "type": "damage",
+        "amount": 10,
+        "damage_type": "physical"
+      },
+      "action": "action"
+    }
+  ]
+}

@@ -147,6 +147,8 @@ def _format_history(log: list[dict], max_chars: int, language: str = "zh-CN") ->
             if a.get("user_id") != "system"
         )
         gm_text = sanitize_narration(entry.get("gm_response", ""))
+        manual_text = " ".join(str(item) for item in entry.get("manual_narrations", []) if str(item).strip())
+        manual_line = f"\nGM manual: {manual_text}" if manual_text else ""
         player_label = localized_text(language, {"en": "Players", "zh-CN": "玩家", "ja": "プレイヤー", "de": "Spieler"})
         state_changes = "; ".join(
             str(item) for item in entry.get("state_changes", []) if str(item).strip()
@@ -155,7 +157,7 @@ def _format_history(log: list[dict], max_chars: int, language: str = "zh-CN") ->
             "en": "State changes", "zh-CN": "状态变动", "ja": "状態変化", "de": "Statusänderungen",
         })
         state_line = f"\n{state_label}: {state_changes}" if state_changes else ""
-        return f"[Round {entry.get('round','?')}]\n{player_label}: {actions_text}\nGM: {gm_text}{state_line}"
+        return f"[Round {entry.get('round','?')}]\n{player_label}: {actions_text}\nGM: {gm_text}{manual_line}{state_line}"
 
     def _entry_slim(entry: dict) -> str:
         actions_text = "; ".join(
@@ -163,6 +165,8 @@ def _format_history(log: list[dict], max_chars: int, language: str = "zh-CN") ->
             if a.get("user_id") != "system"
         )
         gm_text = sanitize_narration(entry.get("gm_response", ""))
+        manual_text = " ".join(str(item) for item in entry.get("manual_narrations", []) if str(item).strip())
+        manual_suffix = f" | GM manual: {manual_text[:120]}" if manual_text else ""
         player_label = localized_text(language, {"en": "Players", "zh-CN": "玩家", "ja": "プレイヤー", "de": "Spieler"})
         state_changes = "; ".join(
             str(item) for item in entry.get("state_changes", []) if str(item).strip()
@@ -171,7 +175,7 @@ def _format_history(log: list[dict], max_chars: int, language: str = "zh-CN") ->
             "en": "State changes", "zh-CN": "状态变动", "ja": "状態変化", "de": "Statusänderungen",
         })
         state_suffix = f" | {state_label}: {state_changes[:120]}" if state_changes else ""
-        return f"[Round {entry.get('round','?')}] {player_label}: {actions_text} | GM: {gm_text[:80]}{state_suffix}"
+        return f"[Round {entry.get('round','?')}] {player_label}: {actions_text} | GM: {gm_text[:80]}{manual_suffix}{state_suffix}"
 
     for entry in keep_full:
         line = _entry_full(entry)
