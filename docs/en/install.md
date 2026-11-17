@@ -6,7 +6,7 @@ Choose an installation below, then follow [First game](content-and-play.md#first
 
 ## Windows Portable
 
-Download the latest `DiceFrame-vX.Y.Z-windows-portable.zip` from [Releases](https://github.com/diceframe/diceframe/releases/latest), extract it, and run `DiceFrame.exe`. Open **Manage → Settings → Model API**, then add an AI provider with its name, API format, Base URL, API key, and model catalog. Use **Manage → Settings → Model Routing** to assign the main model, fallbacks, embedding, TTS, ASR, and image-generation roles.
+Download the latest `DiceFrame-vX.Y.Z-windows-portable.zip` from [Releases](https://github.com/diceframe/diceframe/releases/latest), extract it, and run `DiceFrame.exe`. Open **Manage → Settings → Model API**, then add an AI provider with its name, API format, Base URL, API key, and model catalog. Use **Manage → Settings → Model Routing** to assign the main model, fallbacks, embedding, TTS, ASR, and image-generation roles. Vector memory needs no external service: since 3.3.0 a built-in local embedding model can be downloaded right inside **Manage → Settings → Models**; external local services such as Ollama remain an advanced option.
 
 Windows portable builds can check for and apply updates from the Version Update section under **Manage → Settings → About**.
 
