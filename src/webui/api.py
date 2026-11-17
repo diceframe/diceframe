@@ -3360,6 +3360,7 @@ class WebAPI:
         reason: str = "",
         recipient_uid: str = "",
         items: list[str] | None = None,
+        source: str = "gm_manual",
     ) -> dict[str, Any]:
         return await characters.create_payment_proposal(
             self._character_dependencies,
@@ -3369,6 +3370,7 @@ class WebAPI:
             reason=reason,
             recipient_uid=recipient_uid,
             items=items,
+            source=source,
         )
 
     async def _drain_economy_outbox(self, instance: Any) -> bool:

@@ -453,6 +453,7 @@ export interface GameDetail {
   quick_actions?: string[]
   quick_actions_enabled?: boolean
   economy_proposals?: PendingPayment[]
+  pending_purchase_quotes?: { payer_uid: string; target: string; quantity: number }[]
   run_id?: string
   pending_luck_decisions?: CheckResult[]
   pending_push_decisions?: CheckResult[]

@@ -674,7 +674,7 @@ def queue_proposal(
     return proposal
 
 
-PURCHASE_OFFER_SOURCES = frozenset({"gm_manual", "table_offer"})
+PURCHASE_OFFER_SOURCES = frozenset({"gm_manual", "table_offer", "player_self"})
 
 
 def has_pending_identical_purchase(instance: Any, payer_uid: str, target: str) -> bool:
@@ -728,6 +728,8 @@ def queue_purchase_offer(
     """
     if str(source) not in PURCHASE_OFFER_SOURCES:
         raise ValueError("unsupported purchase offer source")
+    # player_self（玩家自助出价）在本入口天然只给自己下单：recipient 恒等于
+    # payer；给别人开单必须走 GM（gm_manual）或桌上报价（table_offer）。
     from src.commands.state_items import normalized_reward_entries
 
     rewards = normalized_reward_entries(items, {})

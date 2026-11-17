@@ -221,6 +221,17 @@ def game_detail(
         "quick_actions": module_hooks.read(instance, module_hooks.QUICK_ACTIONS),
         "quick_actions_enabled": module_hooks.ask(module_hooks.STATE_READ, instance, module_hooks.QUICK_ACTIONS_ENABLED, default=True),
         "economy_proposals": economy_proposals,
+        # 未定价购买意图（只读投影，回合内存，不入库）：前端渲染成“待报价”
+        # 卡片，GM 一键开单 / 玩家自助出价，把静默断链变成可完成的操作。
+        "pending_purchase_quotes": [
+            {
+                "payer_uid": str(intent.get("payer_uid") or ""),
+                "target": str(intent.get("target") or ""),
+                "quantity": max(1, int(intent.get("quantity") or 1)),
+            }
+            for intent in (getattr(instance, "round_unpriced_purchase_intents", None) or [])
+            if isinstance(intent, dict) and intent.get("payer_uid") and intent.get("target")
+        ],
         "pending_luck_decisions": instance.pending_luck_checks(),
         "pending_push_decisions": check_decisions.pending(instance),
         "round_check_results": (
