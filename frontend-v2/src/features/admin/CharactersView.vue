@@ -156,7 +156,7 @@ const ruleMeta = ref<RuleMeta>({})
 const ruleAttrs = ref<RuleAttr[]>([])
 const ruleAttrsTotal = ref(60)
 const ruleId = ref('')
-const ruleDetail = ref<{ skill_pool?: Array<string | SkillSpec>; skills?: Array<string | SkillSpec>; rule_classes?: string[] } | null>(null)
+const ruleDetail = ref<{ skill_pool?: Array<string | SkillSpec>; skills?: Array<string | SkillSpec> } | null>(null)
 const ruleSchemaLoading = ref(false)
 // The current game binding and the library authoring binding are deliberately
 // separate. A character-card draft may target another installed ruleset while
@@ -179,11 +179,6 @@ const skillPool = computed<Array<string | SkillSpec>>(() => {
   const detail = libraryRuleDetail.value || {}
   return detail.skill_pool || detail.skills || []
 })
-const ruleClasses = computed<string[]>(() => ruleDetail.value?.rule_classes || [])
-/** 身份字段里的“职业/原型”用下拉，其余保持文本输入。 */
-function isClassField(field: Record<string, unknown>): boolean {
-  return field.key === 'archetype' || field.legacy_field === 'class'
-}
 const editRuleAttrs = computed<RuleAttr[]>(() => {
   if (!edit.value) return ruleAttrs.value
   if (ruleAttrs.value.length) return ruleAttrs.value
@@ -306,7 +301,7 @@ watch([ruleId, locale], async ([id]) => {
     ruleMeta.value = schema.rule_meta || ruleMeta.value
     ruleAttrs.value = schema.rule_attrs || ruleAttrs.value
     ruleAttrsTotal.value = Number(schema.rule_attrs_total || ruleAttrsTotal.value)
-    ruleDetail.value = { skill_pool: schema.skill_pool || [], rule_classes: schema.rule_classes || [] }
+    ruleDetail.value = { skill_pool: schema.skill_pool || [] }
     if (game.value && libraryRuleId.value === id) {
       libraryRuleSchemaSequence++
       libraryRuleMeta.value = ruleMeta.value
@@ -1092,14 +1087,7 @@ async function onWizardChainCancel() {
       <p v-if="characterSaveError" class="error-banner" role="alert">{{ characterSaveError }}</p>
       <label>{{ t('characterName') }}<input v-model="edit.character_name"></label>
       <PortraitPicker v-model="edit.portrait" :rule-id="ruleId" :seed="edit.user_id" :name="edit.character_name" />
-      <label v-for="f in edit.fields" :key="f.key">
-        {{ identityLabel(f) }}
-        <select v-if="isClassField(f) && ruleClasses.length" v-model="edit.identityValues[f.key]">
-          <option v-if="edit.identityValues[f.key] && !ruleClasses.includes(String(edit.identityValues[f.key]))" :value="edit.identityValues[f.key]">{{ edit.identityValues[f.key] }}</option>
-          <option v-for="name in ruleClasses" :key="name" :value="name">{{ name }}</option>
-        </select>
-        <input v-else v-model="edit.identityValues[f.key]">
-      </label>
+      <label v-for="f in edit.fields" :key="f.key">{{ identityLabel(f) }}<input v-model="edit.identityValues[f.key]"></label>
       <label>{{ t('level') }}<input type="number" v-model.number="edit.level"></label>
       <label>HP / {{ t('maxHp') }}
         <div class="row">

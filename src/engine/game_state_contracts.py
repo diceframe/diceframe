@@ -40,7 +40,6 @@ class PlayerRollbackState(TypedDict, total=False):
     inventory: Any
     equipment: Any
     key_items: Any
-    _check_mechanic_state: dict[str, dict[str, Any]]
 
 
 PlayerRollbackSnapshot = dict[str, PlayerRollbackState]
