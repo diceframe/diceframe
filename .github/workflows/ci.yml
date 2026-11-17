@@ -16,9 +16,16 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend tests
+    # PR 上分 3 片并行跑（每片内部仍是 -n auto 的 4 worker）；覆盖率的插桩
+    # 开销只留在 main 推送的整片运行里。下面的 backend-gate 保持「Backend
+    # tests」这个必需检查名不变，仓库合并门禁无需改动。
+    name: Backend tests (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
 
     steps:
       - name: Checkout
@@ -64,11 +71,66 @@ jobs:
             --require-hashes \
             -r requirements-portable.lock
 
-      - name: Run backend tests
+      - name: Run backend tests (shard ${{ matrix.shard }}/3)
         # 按测试文件分发给 runner 的所有核心：整套约 550 个文件、上万条用例，
         # 串行会吃掉 45 分钟预算的大部分。--dist loadfile 让同一文件的用例
-        # 始终落在同一个 worker，模块内 fixture 与共享状态语义与串行一致。
-        run: python -m pytest -q -n auto --dist loadfile --cov=src --cov-report=term-missing --cov-report=xml
+        # 始终落在同一个 worker，模块内 fixture 与共享状态语义与串行一致；
+        # pytest-split 再把用例集合按片切给不同 runner，墙钟约 40→15 分钟。
+        # 覆盖率不在分片里跑（插桩约占 15-25% 且产物只打印到日志），由 main
+        # 上独立的 backend-coverage job 全量执行。
+        run: >-
+          python -m pytest -q -n auto --dist loadfile
+          --splits 3 --group ${{ matrix.shard }}
+          --durations=15
+
+  backend-coverage:
+    # 只随 main 推送跑全量 + 覆盖率：PR 走 3 分片快速反馈，覆盖率日志不在
+    # 合并关键路径上。
+    name: Backend coverage (main)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Install CJK font for bot card rendering
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+
+      - name: Run backend tests with coverage
+        run: >-
+          python -m pytest -q -n auto --dist loadfile
+          --cov=src --cov-report=term-missing --cov-report=xml
+          --durations=15
+
+  backend-gate:
+    # 名称必须保持为「Backend tests」：仓库的分支规则以它作为必需检查，
+    # 分片 job 的名字带后缀，由这里汇总最终结论。
+    name: Backend tests
+    needs: backend
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify every backend shard passed
+        run: |
+          echo "backend result: ${{ needs.backend.result }}"
+          if [ "${{ needs.backend.result }}" != "success" ]; then
+            exit 1
+          fi
 
   launcher-windows:
     name: Launcher tests (Windows)
