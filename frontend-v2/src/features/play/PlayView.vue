@@ -1903,7 +1903,7 @@ function onPlayKeydown(event: KeyboardEvent) {
             {{ t('purchaseQuoteBody', { player: quotePlayerName(quote.payer_uid), item: quote.target, count: quote.quantity }) }}
           </span>
           <button
-            v-if="game.isGm.value || quote.payer_uid === actorId.value"
+            v-if="game.isGm.value || quote.payer_uid === actorId"
             type="button"
             class="purchase-quote-action"
             @click="openQuoteComposer(quote)"
