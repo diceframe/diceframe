@@ -111,6 +111,8 @@ async def test_reported_token_budget_stops_before_dispatch_and_retains_usage(tmp
     agent, events = await execute(tmp_path, ExpensiveProvider(), [tool(handler, mutation=True)])
     sid = next(data["session_id"] for event, data in events if event == "session")
     snapshot = agent.snapshot("owner", sid)
+    # 总预算被单响应击穿时在派发前硬停：mutation 不执行、pending 不产生；
+    # 已计费用量跨段累计完整保留（安全防线，补充设计 §7.8）。
     assert writes == [] and snapshot["pending"] is None
     assert snapshot["task"]["status"] == "budget_reached"
     assert snapshot["task"]["used_tokens"] == 300000

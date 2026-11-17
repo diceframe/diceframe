@@ -585,6 +585,12 @@ def test_only_session_stats_owners_assign_fields() -> None:
         # Model-response usage accumulated across a format-repair call; it
         # reaches persisted session totals only through record_llm_usage.
         (SRC / "commands" / "story_output.py", "response", "total_tokens"),
+        # LLMClient.call_tools aggregates usage across every billed attempt
+        # (native -> auto retry -> JSON fallback -> truncation retries) into
+        # the returned response; persisted session totals still only change
+        # through record_llm_usage.
+        (SRC / "llm" / "client.py", "native_result", "total_tokens"),
+        (SRC / "llm" / "client.py", "result", "total_tokens"),
         (SRC / "plugin_host" / "host.py", "runtime", "started_at"),
     }
     violations: list[str] = []

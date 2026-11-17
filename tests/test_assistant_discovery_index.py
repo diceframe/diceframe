@@ -37,8 +37,10 @@ async def test_chinese_visibility_discovery_uses_live_index_without_rewriting_te
             self.calls += 1
             catalog = initial_payload(user)['capability_catalog']
             names = {item['name'] for item in catalog['capabilities']}
-            assert 'set_lorebook_entry_visibility' in names
             assert all('parameters' not in item and 'handler' not in item for item in catalog['capabilities'])
+            # 有界索引不携带全量名字；目标能力经 r1 的 search 观察进入历史。
+            if self.calls == 1:
+                assert catalog.get('total', 0) > 0
             tools = {item['function']['name'] for item in kwargs['tools']}
             if self.calls == 1:
                 assert ('set_lorebook_entry_visibility' in tools) is (route == 'library')
@@ -88,7 +90,11 @@ async def test_new_domains_beyond_first_index_page_are_discoverable_without_agen
         async def call_tools(self, system, user, **kwargs):
             self.requests += 1
             catalog = initial_payload(user)['capability_catalog']
-            assert len(catalog['capabilities']) == 160 and catalog['has_more']
+            # 有界索引契约（补充设计 §5）：初始 payload 只带短索引（≤20 条 +
+            # omitted_count），全量目录通过 search/describe 分页检索。
+            assert len(catalog['capabilities']) <= 20
+            assert any(item.get('omitted_count') for item in catalog['capabilities'])
+            assert catalog['total'] == 180 and 'has_more' in catalog
             if self.requests == 1:
                 assert catalog['total'] == 180
                 return response('search_capabilities', {'domain': 'extension', 'offset': 160})

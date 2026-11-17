@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 
 import pytest
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.memory.model_catalog import LocalModelManager
 
 from src.memory.model_catalog import ModelCatalogError, load_catalog
 
