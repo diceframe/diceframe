@@ -524,6 +524,21 @@ class PluginHost:
         runtime = self.plugins.get(plugin_id)
         return self._plugin_type(runtime.manifest) if runtime else ""
 
+    def _is_live(self, runtime: Any) -> bool:
+        """插件此刻是否活着——前端启停开关绑的就是这个字段。
+
+        普通插件看宿主持有的子进程；``ruleset-runtime`` 的 stdio 进程由组合根
+        的运行时注册表持有，宿主的 ``runtime.process`` 永远为空，它的"活着"就是
+        注册表里已注册（``status == "active"``）。不认这一点，规则运行时的开关
+        会被接口 200 接受、然后刷新又显示关闭。
+        """
+
+        if runtime.process and runtime.process.returncode is None:
+            return True
+        if self._plugin_type(runtime.manifest) != "ruleset-runtime":
+            return False
+        return runtime.status in {"active", "running"}
+
     def public_detail(self, plugin_id: str) -> PluginPublicDetail:
         runtime = self._require(plugin_id)
         if runtime.process and runtime.process.returncode is not None and runtime.status == "running":
@@ -548,7 +563,7 @@ class PluginHost:
             "support": plugin_type_support(self._plugin_type(runtime.manifest)),
             "has_entrypoint": self._has_entrypoint(runtime.manifest),
             "enabled": bool(runtime.config.get("enabled")),
-            "running": bool(runtime.process and runtime.process.returncode is None),
+            "running": self._is_live(runtime),
             "status": runtime.status,
             "error": runtime.error,
             "schema": runtime.schema,

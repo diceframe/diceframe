@@ -3008,6 +3008,22 @@ frontend generic component
 
 ---
 
+### 外部 Runtime 应用与传输边界
+
+远端 event bridge 的宿主应用回执保存在现有 `ruleset_runtime.event_ledger`
+的 `_host_remote_apply_v1` 命名空间，绑定 batch payload、runtime/version 与 game/run。
+角色卡单独写回也必须建立回执；相同 batch 重放只返回结果，不再次写入旧 post-image；
+同 ID 不同 payload 或缺失可验证回执的历史 batch 明确拒绝。child 只收到去除宿主
+回执的账本投影；state/ledger 写回必须保留历史并新增恰好一个对应 batch。
+回执、规则状态及角色卡沿既有事务和 round before-image 一起保存、回滚，
+不另建持久模块槽。兼容与缓存 pre-image 校验见
+[RULESET_REMOTE_EVENT_BRIDGE.md](RULESET_REMOTE_EVENT_BRIDGE.md)。
+
+stdio stderr 在读取阶段限制未完成行的字节前缀（1600 bytes），超长部分丢弃直到换行；
+日志最多 64 行、每行 400 字符，达到预算后仍继续 drain，不累积完整行。
+stdout reader 固定绑定子进程代次的 stream/response queue，旧进程迟到的 EOF
+不能污染重启后的 RPC。
+
 ### Runtime 叙事检定准备
 
 `dice_system=none` 且声明 `narrative_checks` 的规则通过可选

@@ -56,7 +56,8 @@ This path does not require a `PluginHost` edit.
 3. `entrypoint` is the stdio process command. The host's regular start/stop path does not spawn this process — the composition-root registry (`PluginRulesetRuntimeSource`) owns it: enabling registers the runtime and probes it, a failed probe leaves it unregistered, and disable/uninstall revokes the registration and terminates the child.
 4. Ship rule templates through `contributes.rules`; each template's `runtime` block binds to `ruleset_runtime.runtime_id`. An insufficient version raises `IncompatibleRulesetRuntimeError` on resolve.
 5. The runtime process must stay stateless: every settlement works on the instance state provided by the host, and `apply_event_batch` only appends to the ledger with per-batch dedup. Restart recovery relies on "host-persisted state + receipt idempotency".
-6. See `tests/test_plugin_ruleset_runtimes.py` (real zip install + real stdio child process + restart recovery loop).
+6. `gameplay_view` may return `panels`: a list of declarative nodes the host renders directly on the play screen. A plugin **cannot ship frontend components** (`ruleset-runtime` only contributes `rules`), so rules-specific information such as clocks, opportunities and conflict steps has to be expressed here. There are six controls: `group` (optional `label` and `children`), `text`, `value`, `progress` (`value`/`min`/`max`), `list` (`value` is an array), and `button` (`label` + `action` + `arguments`). A button's `action` is submitted as an ordinary intent (`type: action`, with `arguments` merged into the body), so it can only use actions that already exist in the intent vocabulary. The host does not interpret node semantics; malformed nodes are dropped rather than raising.
+7. See `tests/test_plugin_ruleset_runtimes.py` (real zip install + real stdio child process + restart recovery loop).
 
 ## F. A Genuinely New Plugin Type
 
