@@ -14,6 +14,7 @@ from typing import Any
 
 from src.engine.constants import COMBAT_ATTACK_KEYWORDS
 from src.engine.character_utils import armor_ac_components, armor_value, get_resource
+from src.engine.check_mechanics import CheckResolution, check_mechanic_for, request_dice_system
 from src.engine.dice import (
     check_d100_bonus,
     coc_success_level,
@@ -380,7 +381,7 @@ def build_check_request(
         # 确定性回退只针对行动玩家本人；companion 委派只来自 LLM planner。
         "actor_ref": f"player:{uid}",
         "actor_name": actor_name,
-        "dice_system": "d100" if dice_system == "d100" else "d20",
+        "dice_system": request_dice_system(dice_system),
         "label": label,
         "intent": intent or "generic",
         "skill": skill,
@@ -390,6 +391,16 @@ def build_check_request(
         "kind": kind,
         "opponent": opponent,
     }
+    mechanic = check_mechanic_for(dice_system)
+    if mechanic is not None:
+        sheet_attributes = character_sheet.get("attributes")
+        request.update(mechanic.request_fields(
+            rule=rule,
+            sheet_attributes=sheet_attributes if isinstance(sheet_attributes, dict) else {},
+            attribute=attribute,
+            action=action,
+            is_attack=kind == "attack",
+        ))
     if rule and rule.advantage_mechanic.get("type") in {"coc_bonus_penalty", "d20_keep_high_low"}:
         apply_grant(instance, request, f"round:{progression_state.round_value(instance)}")
     return request
@@ -434,6 +445,14 @@ def _d20_thresholds_for_request(
 def roll_check_request(request: dict[str, Any], rule: RuleSystem | None = None) -> dict[str, Any]:
     """按 CheckRequest 只生成原始骰值；规则修正与成败由判定解析器计算。"""
     dice_system = str(request.get("dice_system") or "").lower()
+    mechanic = check_mechanic_for(dice_system)
+    if mechanic is not None:
+        return {
+            "ok": True,
+            "check_id": str(request.get("check_id") or ""),
+            "dice_system": dice_system,
+            **mechanic.roll(request, rule),
+        }
     mode = _effective_advantage_mode(request, rule)
     if dice_system == "d100":
         if mode == "advantage":
@@ -677,6 +696,34 @@ def _duplicate_channel_note(language: object) -> str:
     })
 
 
+def _validated_builtin_roll(
+    request: dict[str, Any],
+    rule: RuleSystem | None,
+    dice_system: str,
+    rolls: list[int],
+    roll_value: int,
+) -> str:
+    """校验内建 d20 / d100 的骰值，返回生效的优势模式。"""
+    maximum = 100 if dice_system == "d100" else 20
+    if dice_system not in {"d20", "d100"} or not 1 <= roll_value <= maximum:
+        raise ValueError(f"非法的 {dice_system} 检定值: {roll_value}")
+    if any(value < 1 or value > maximum for value in rolls):
+        raise ValueError(f"非法的 {dice_system} 候选骰值: {rolls}")
+    advantage_mode = _effective_advantage_mode(request, rule)
+    if advantage_mode:
+        if len(rolls) < 2:
+            raise ValueError(f"{advantage_mode} 检定缺少候选骰值")
+        if dice_system == "d100":
+            expected = min(rolls) if advantage_mode == "advantage" else max(rolls)
+        else:
+            expected = max(rolls) if advantage_mode == "advantage" else min(rolls)
+        if roll_value != expected:
+            raise ValueError(f"{advantage_mode} 检定取值错误: {roll_value} != {expected}")
+    elif roll_value not in rolls:
+        raise ValueError(f"检定值 {roll_value} 不在候选骰值 {rolls} 中")
+    return advantage_mode
+
+
 def resolve_check_request(
     instance: GameInstance,
     action: dict[str, Any],
@@ -699,25 +746,15 @@ def resolve_check_request(
         return None
 
     dice_system = str(request.get("dice_system") or (rule.dice_system if rule else "d20")).lower()
-    maximum = 100 if dice_system == "d100" else 20
-    if dice_system not in {"d20", "d100"} or not 1 <= roll_value <= maximum:
-        raise ValueError(f"非法的 {dice_system} 检定值: {roll_value}")
+    mechanic = check_mechanic_for(dice_system)
     raw_rolls = action.get("dice_rolls")
     rolls = [int(value) for value in raw_rolls] if isinstance(raw_rolls, list) and raw_rolls else [roll_value]
-    if any(value < 1 or value > maximum for value in rolls):
-        raise ValueError(f"非法的 {dice_system} 候选骰值: {rolls}")
-    advantage_mode = _effective_advantage_mode(request, rule)
-    if advantage_mode:
-        if len(rolls) < 2:
-            raise ValueError(f"{advantage_mode} 检定缺少候选骰值")
-        if dice_system == "d100":
-            expected = min(rolls) if advantage_mode == "advantage" else max(rolls)
-        else:
-            expected = max(rolls) if advantage_mode == "advantage" else min(rolls)
-        if roll_value != expected:
-            raise ValueError(f"{advantage_mode} 检定取值错误: {roll_value} != {expected}")
-    elif roll_value not in rolls:
-        raise ValueError(f"检定值 {roll_value} 不在候选骰值 {rolls} 中")
+    if mechanic is not None:
+        # 注册的骰制自己校验骰值，也自己决定是否存在优势/劣势语义。
+        mechanic.validate_roll(request, rule, rolls, roll_value)
+        advantage_mode = ""
+    else:
+        advantage_mode = _validated_builtin_roll(request, rule, dice_system, rolls, roll_value)
 
     text = str(action.get("text") or "")
     # 检定主体：actor_ref=companion:<id> 时属性/技能取 AI 队友的 canonical
@@ -789,6 +826,26 @@ def resolve_check_request(
         "modifier_reason": str(request.get("modifier_reason") or "") or None,
         "planner_notes": list(request.get("planner_notes") or []),
     }
+
+    if mechanic is not None:
+        return mechanic.resolve(CheckResolution(
+            instance=instance,
+            rule=rule,
+            uid=uid,
+            action=action,
+            request=request,
+            character_sheet=character_sheet,
+            attributes=attributes,
+            actor_is_companion=actor_is_companion,
+            roll_value=roll_value,
+            rolls=rolls,
+            circumstance_modifier=_bounded_modifier(request.get("circumstance_modifier")),
+            opponent_ref=opponent_ref,
+            opponent_name=opponent_name,
+            opponent_state=opponent_state,
+            common=common,
+            attribute_label=lambda key: _attribute_label(rule, key),
+        ))
 
     if dice_system == "d100":
         if rule and rule.advantage_mechanic.get("type") == "coc_bonus_penalty":

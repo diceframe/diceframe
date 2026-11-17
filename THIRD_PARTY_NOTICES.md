@@ -63,3 +63,9 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
+
+## Fabula Ultima compatible ruleset
+
+DiceFrame's FU-compatible ruleset (`src/rulesets/fabula_ultima`, `templates/rules/fabula_ultima.json`, `templates/rulesets/fabula_ultima`) is an independent production by the DiceFrame contributors and is not affiliated with Need Games or Rooster Games. It is published under the [Fabula Ultima Third-Party Tabletop License 1.0](https://need.games/wp-content/uploads/2024/06/Fabula-Ultima-Third-Party-Tabletop-License-1.0.pdf). Fabula Ultima is a roleplaying game created by Emanuele Galletto and published by Need Games. Fabula Ultima is © Need Games and Rooster Games.
+
+The ruleset requires the Fabula Ultima Core Rulebook and contains AI-generated content. See `templates/rulesets/fabula_ultima/legal/ATTRIBUTION.md`.

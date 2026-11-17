@@ -77,13 +77,36 @@ class ProgressionResolver:
             atk = instance.players[uid]
             old_hp = cs.get("max_hp", 0)
             old_level = cs.get("level", 1)
+            rule = self._active_rule(instance)
+            # 规则声明 level_up 时按声明成长（例如每级 1 职业等级 + 1 技能点、不加属性），
+            # 否则沿用旧版 +2 自由属性。
+            config = rule.template.get("level_up") if rule is not None else None
+            if not isinstance(config, dict):
+                config = None
+            attr_gain = int(config.get("attribute_points", 0) or 0) if config else 2
+            skill_gain = int(config.get("skill_points", 0) or 0) if config else 0
+            class_gain = int(config.get("class_levels", 0) or 0) if config else 0
             cs["level"] = level
             cs["xp"] = xp
-            cs["level_up_points"] = cs.get("level_up_points", 0) + 2
-            cs["attr_points_max"] = cs.get("attr_points_max", 60) + 2
+            if attr_gain:
+                cs["level_up_points"] = cs.get("level_up_points", 0) + attr_gain
+                cs["attr_points_max"] = cs.get("attr_points_max", 60) + attr_gain
+            if skill_gain:
+                cs["skill_points"] = int(cs.get("skill_points", 0) or 0) + skill_gain
+            if class_gain:
+                cs["pending_class_levels"] = int(cs.get("pending_class_levels", 0) or 0) + class_gain
+            # 规则声明的里程碑属性提升（到达指定等级各 +1 档），由玩家在成长面板里选属性。
+            milestones = rule.template.get("attribute_milestones") if rule is not None else None
+            if isinstance(milestones, list) and level in {int(m) for m in milestones if str(m).isdigit()}:
+                cs["pending_attribute_steps"] = int(cs.get("pending_attribute_steps", 0) or 0) + 1
             try:
-                rule = self._active_rule(instance)
-                if rule:
+                hp_gain = config.get("hp") if config else None
+                if isinstance(hp_gain, int):
+                    # 规则显式声明：0 表示等级不提升 HP（HP 由其它公式决定的规则）。
+                    if hp_gain:
+                        new_hp = int(cs.get("max_hp", 0) or 0) + hp_gain
+                        set_hp(cs, new_hp, new_hp)
+                elif rule:
                     if rule.mechanics == "dnd5e_core":
                         new_hp = int(cs.get("max_hp", 0) or 0) + self._level_hp_gain(rule, cs)
                         set_hp(cs, new_hp, new_hp)
@@ -99,9 +122,16 @@ class ProgressionResolver:
                 new_hp = cs.get("max_hp", 0) + 10
                 set_hp(cs, new_hp, new_hp)
             instance.set_character_sheet(uid, cs)
+            gains: list[str] = []
+            if attr_gain:
+                gains.append(f"获得{attr_gain}点自由属性")
+            if skill_gain:
+                gains.append(f"获得{skill_gain}点技能点")
+            if class_gain:
+                gains.append(f"待分配{class_gain}个职业等级")
             msgs.append(
                 f"🎉 {atk['character_name']} 升到 Lv.{level}！"
-                f"HP {old_hp}→{cs['max_hp']}，获得2点自由属性"
+                f"HP {old_hp}→{cs['max_hp']}" + ("，" + "，".join(gains) if gains else "")
             )
             logger.info(
                 "角色升级: %s Lv.%d→%d HP %d→%d XP剩余=%d",

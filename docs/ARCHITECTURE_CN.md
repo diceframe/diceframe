@@ -2162,6 +2162,17 @@ Planner 只有在：
 
 ---
 
+### 骰制瞬时状态与成长分配
+
+注册的 `CheckMechanic` 可通过 `rollback_sheet_fields` 声明检定消费或生成的瞬时角色卡字段。
+`round_snapshots` 按声明保存字段存在性和值；abort / 历史回退恢复它们，swipe 仍复用原检定结果，
+恢复叙事前快照而不重新返还已消费的加值。旧快照缺少标记时不猜测补偿，通用层不导入具体规则包。
+
+声明式成长分配由 `engine.character_progress` 拥有，规则 intent 与 WebUI 成长事务共同使用；
+XP 升级结算负责发放资格，分配职业等级不重复增加角色等级或技能点。
+WebUI 成长 service 在 authority gate / 状态锁下复核 run、权限与判定期，候选状态校验后发布并保存，
+保存失败或取消恢复 before-image；命刻 intent 的 `plot_tracker` 同样参与宿主意图事务回滚。
+
 # 14. Manual Roll 子系统
 
 手动骰不是简单前端随机数。
@@ -5648,6 +5659,12 @@ bundle/content
 在 generic d20 里加 if new_rule
 ```
 
+规则使用 d20 / d100 之外的骰制时，不在通用检定管线里加分支，而是由规则包向
+`src/engine/check_mechanics.py` 的骰制注册表反向注册一个 `CheckMechanic`
+（建请求、掷骰、校验、结算、给 GM 的结果文本）。内建的 d20 / d100 不经过该表，
+也不能被注册实现覆盖；未注册的骰制在规则模板加载时 fail closed。
+`src/rulesets/fabula_ultima` 是第一个使用该接缝的规则包（`dice_system = "fu"`）。
+
 ---
 
 ## 49.2 新增通用战斗 primitive
@@ -5810,7 +5827,12 @@ inventory
 ```text
 core:legacy
 core:dnd2024
+fabula_ultima
 ```
+
+`fabula_ultima` 是兼容 Fabula Ultima 的第一方规则包（社区贡献并入，含房规，
+见 `docs/rulesets/fabula_ultima/README_CN.md`）。它继承 legacy adapter 的建卡与叙事路径，
+冲突、GM 工具与购物轮走自己的权威意图；runtime id 沿用贡献分支的写法以保持既有存档可读。
 
 这是一种有意的 compatibility architecture。
 

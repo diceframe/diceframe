@@ -32,7 +32,11 @@ def _new_result() -> dict:
         "state_update": {"players": {}, "npcs": {}, "scene_change": "", "loot": []},
         "memory_delta": {"add": [], "update": [], "forget": []},
         "info_asymmetry": {},
-        "plot_update": {"quests": [], "relations": [], "decisions": [], "adventure_completion": None},
+        "plot_update": {
+            "quests": [], "relations": [], "decisions": [], "adventure_completion": None,
+            # 命刻 / 羁绊：规则未让 GM 产出对应标签时保持为空数组，不影响既有逻辑。
+            "clocks": [], "bonds": [],
+        },
         "xp_rewards": {},  # uid -> xp_amount (LLM 可选标签)
         "milestone_grants": [],  # D&D live advancement entitlement targets
         "growth_skills": [],  # [{uid, skill}] 用于 CoC 技能成长检定

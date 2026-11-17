@@ -124,6 +124,46 @@ def parse_world_tag(tag: str, value: str, result: dict) -> None:
         parts = value.split(":", 1)
         if len(parts) == 2:
             result["info_asymmetry"][parts[0].strip()] = parts[1].strip()
+    elif tag == "CLOCK":
+        # CLOCK:名称:已填/总格[:威胁|目标]
+        parts = _FIELD_SEPARATOR.split(value)
+        if len(parts) >= 2:
+            title = parts[0].strip()[:80]
+            match = re.fullmatch(r"(\d+)\s*/\s*(\d+)", parts[1].strip())
+            if title and match:
+                entry = {
+                    "title": title,
+                    "filled": int(match.group(1)),
+                    "segments": int(match.group(2)),
+                }
+                if len(parts) >= 3 and parts[2].strip():
+                    entry["kind"] = parts[2].strip()[:12]
+                result["plot_update"].setdefault("clocks", []).append(entry)
+            else:
+                logger.warning("CLOCK 标签格式非法（应为 名称:已填/总格）: %s", value)
+    elif tag == "BOND":
+        # BOND:持有者>对象:情感1、情感2（强度 = 情感数量，最多 3）
+        parts = _FIELD_SEPARATOR.split(value, 1)
+        if len(parts) == 2:
+            pair = parts[0].strip()
+            separator = "→" if "→" in pair else (">" if ">" in pair else "")
+            if separator:
+                owner, target = (item.strip() for item in pair.split(separator, 1))
+                emotions = [
+                    part.strip()[:12]
+                    for part in re.split(r"[、,，/|+＋]", parts[1])
+                    if part.strip()
+                ][:3]
+                if owner and target and emotions:
+                    result["plot_update"].setdefault("bonds", []).append({
+                        "owner": owner[:40],
+                        "target": target[:80],
+                        "emotions": emotions,
+                    })
+                else:
+                    logger.warning("BOND 标签缺少持有者/对象/情感: %s", value)
+            else:
+                logger.warning("BOND 标签缺少 → 或 > 分隔符: %s", value)
 
 
 def parse_loot_tag(tag: str, value: str, result: dict) -> None:
