@@ -472,6 +472,16 @@ class DockerLauncher:
         if not relative or not path_within(candidate, self.versions_dir):
             raise ValueError("restart signal candidate path is invalid")
         self._validate_dir(candidate, version)
+        active = self.active_dir.resolve() if self.active_dir else None
+        if active is not None and candidate.resolve() == active:
+            # 重复应用当前已在运行的版本（前端状态滞后或用户重复点击）：
+            # 清掉 signal 即可，绝不为“更新到自己”杀掉健康进程重启。
+            self.signal_file.unlink(missing_ok=True)
+            self._write_state(
+                "done", version=self._validate_dir(candidate)["version"],
+                restart_needed=False, applied_at=int(time.time()), error="",
+            )
+            return
         previous = self.active_dir
         self._launch_candidate(candidate, previous)
 
