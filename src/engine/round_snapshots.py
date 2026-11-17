@@ -22,7 +22,6 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from src.engine import progression
-from src.engine.check_mechanics import rollback_sheet_fields
 from src.engine.game_state_contracts import PlayerRollbackSnapshot
 from src.engine.world_state import ensure_world_state
 
@@ -39,7 +38,6 @@ def snapshot_players(instance: GameInstance) -> PlayerRollbackSnapshot:
     不含 identity/progression（race/class/level/xp/skills 不随 swipe 回滚）。
     """
     snap: PlayerRollbackSnapshot = {}
-    mechanic_fields = rollback_sheet_fields()
     for uid in instance.players:
         cs = instance.get_character_sheet(uid)
         snap[uid] = {
@@ -53,22 +51,8 @@ def snapshot_players(instance: GameInstance) -> PlayerRollbackSnapshot:
                     "mana", "currency", "resources", "spells_known"):
             if opt in cs:
                 snap[uid][opt] = copy.deepcopy(cs[opt])
-        # 规则声明的 special_stats 以 <key> / max_<key> 成对写在角色卡顶层
-        # （见建卡），同样是运行时可变资源，一并回滚而不是逐个规则点名。
-        for key in cs:
-            if key.startswith("max_") and key[4:] in cs:
-                for resource_key in (key, key[4:]):
-                    snap[uid].setdefault(resource_key, copy.deepcopy(cs[resource_key]))
         for lst in ("inventory", "equipment", "key_items"):
             snap[uid][lst] = copy.deepcopy(cs.get(lst, []))
-        if mechanic_fields:
-            # Explicit presence preserves absent vs zero, and removes bonuses
-            # first granted in a subsequently discarded branch. Old snapshots
-            # without this marker leave these fields untouched.
-            snap[uid]["_check_mechanic_state"] = {
-                key: {"present": key in cs, "value": copy.deepcopy(cs.get(key))}
-                for key in mechanic_fields
-            }
     return snap
 
 
@@ -79,14 +63,7 @@ def restore_players(instance: GameInstance, snapshot: PlayerRollbackSnapshot) ->
             continue
         cs = instance.get_character_sheet(uid)
         for key, value in snap.items():
-            if key == "_check_mechanic_state":
-                for field, entry in value.items():
-                    if entry["present"]:
-                        cs[field] = copy.deepcopy(entry["value"])
-                    else:
-                        cs.pop(field, None)
-            else:
-                cs[key] = copy.deepcopy(value)
+            cs[key] = value
         instance.players[uid]["character_sheet"] = cs
 
 

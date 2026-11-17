@@ -18,7 +18,6 @@ const routes: RouteRecordRaw[] = [
   { path: '/peer', name: 'peer', component: () => import('@/features/peer/PeerConnectView.vue') },
   { path: '/characters', name: 'characters', component: () => import('@/features/admin/CharactersView.vue') },
   { path: '/library', name: 'library', component: () => import('@/features/library/ContentLibraryView.vue') },
-  { path: '/fu-data', name: 'fu-data', component: () => import('@/features/rulesets/fabula_ultima/FuDataView.vue') },
   { path: '/creator', name: 'creator', component: () => import('@/features/creator/CreatorView.vue') },
   { path: '/creator/studio/:projectId', name: 'creator-studio', component: () => import('@/features/creator/CreatorStudioView.vue') },
   { path: '/map', name: 'map', component: () => import('@/features/maps/MapView.vue') },

@@ -2150,19 +2150,6 @@ If a skill needs a real mechanical effect in the future, that effect should ente
 
 ---
 
-### Transient Check State and Growth Allocation
-
-Registered `CheckMechanic` owners may declare transient sheet fields through `rollback_sheet_fields`.
-`round_snapshots` captures both presence and value for abort and historical rollback. Swipe still reuses
-original check results and restores the pre-narration snapshot, without refunding an already consumed bonus.
-Legacy snapshots without the marker receive no guessed compensation. Generic code imports no concrete ruleset.
-
-`engine.character_progress` owns declarative growth allocation shared by ruleset intents and WebUI transactions.
-XP settlement grants entitlements; allocating a class level does not grant another character level or skill point.
-The WebUI service revalidates run, actor and judgment admission under authority/state gates, validates a candidate,
-then publishes and saves with before-image restoration on failure or cancellation. Clock intents also include
-`plot_tracker` in the host intent transaction's rollback set.
-
 # 14. Manual Roll Subsystem
 
 Manual rolling is not merely frontend randomness.
@@ -5743,13 +5730,6 @@ Do not:
 add if new_rule inside generic d20
 ```
 
-When a ruleset uses a dice system other than d20 / d100, do not add a branch to the generic check
-pipeline. The ruleset package registers a `CheckMechanic` with the dice-system registry in
-`src/engine/check_mechanics.py` (request fields, rolling, validation, settlement, the GM-facing result
-text). The built-in d20 / d100 never go through that registry and cannot be replaced by a registered
-mechanic; an unregistered dice system fails closed when the rule template loads.
-`src/rulesets/fabula_ultima` is the first package using this seam (`dice_system = "fu"`).
-
 ---
 
 ## 49.2 Adding a Generic Combat Primitive
@@ -5912,14 +5892,7 @@ The default registry currently contains both:
 ```text
 core:legacy
 core:dnd2024
-fabula_ultima
 ```
-
-`fabula_ultima` is the first-party ruleset compatible with Fabula Ultima (merged from a community
-contribution, includes house rules; see `docs/rulesets/fabula_ultima/README_CN.md`). It inherits the
-legacy adapter's character creation and narrative path, while conflicts, GM tools and the shopping
-round run through its own authoritative intents. The runtime id keeps the contribution's spelling so
-existing saves stay readable.
 
 This is an intentional compatibility architecture.
 
