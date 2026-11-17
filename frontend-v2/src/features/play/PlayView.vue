@@ -158,6 +158,8 @@ const showMapBackgroundEditor = ref(false)
 const showGameLorebooks = ref(false)
 const showPaymentComposer = ref(false)
 const composerPayerUid = ref('')
+const composerInitialItems = ref<string[]>([])
+const composerSelfCheckout = ref(false)
 const composerRecipientUid = ref('')
 const paymentBusy = ref(false)
 function openSidebar() {
@@ -252,6 +254,23 @@ function openPaymentComposer() {
   const first = game.players.value[0]?.user_id || ''
   composerPayerUid.value = first
   composerRecipientUid.value = first
+  composerInitialItems.value = []
+  composerSelfCheckout.value = false
+  showPaymentComposer.value = true
+}
+const purchaseQuotes = computed(() => game.detail.value?.pending_purchase_quotes || [])
+function quotePlayerName(uid?: string): string {
+  return game.players.value.find(player => player.user_id === uid)?.character_name || uid || '—'
+}
+function openQuoteComposer(quote: { payer_uid: string; target: string; quantity: number }) {
+  composerPayerUid.value = quote.payer_uid
+  composerRecipientUid.value = quote.payer_uid
+  composerInitialItems.value = Array.from(
+    { length: Math.max(1, Math.min(8, quote.quantity)) },
+    () => quote.target,
+  )
+  // 玩家只能给自己出价（服务端同样强制）；GM 代开时保持 gm_manual。
+  composerSelfCheckout.value = !game.isGm.value && quote.payer_uid === actorId.value
   showPaymentComposer.value = true
 }
 async function createPaymentProposal(payload: {
@@ -262,7 +281,9 @@ async function createPaymentProposal(payload: {
   try {
     await api(`/games/${encodeURIComponent(game.currentGame.value)}/payments`, {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(composerSelfCheckout.value
+        ? { ...payload, source: 'player_self' }
+        : payload),
     })
     showPaymentComposer.value = false
     await game.refresh(true)
@@ -1867,6 +1888,31 @@ function onPlayKeydown(event: KeyboardEvent) {
             <HealthPanel v-if="game.isGm.value" :health="health" :detail="game.detail.value" :is-gm="game.isGm.value" @resolve="resolveHealth" />
           </template>
         </GmToolbar>
+      <section
+        v-if="purchaseQuotes.length"
+        class="purchase-quote-panel"
+        data-testid="purchase-quote-panel"
+      >
+        <p class="purchase-quote-title">{{ t('purchaseQuoteTitle') }}</p>
+        <div
+          v-for="(quote, index) in purchaseQuotes"
+          :key="`${quote.payer_uid}:${quote.target}:${index}`"
+          class="purchase-quote-row"
+        >
+          <span class="purchase-quote-body">
+            {{ t('purchaseQuoteBody', { player: quotePlayerName(quote.payer_uid), item: quote.target, count: quote.quantity }) }}
+          </span>
+          <button
+            v-if="game.isGm.value || quote.payer_uid === actorId"
+            type="button"
+            class="purchase-quote-action"
+            @click="openQuoteComposer(quote)"
+          >
+            {{ game.isGm.value ? t('purchaseQuoteGmOpen') : t('purchaseQuoteSelfBid') }}
+          </button>
+        </div>
+      </section>
+
       </aside>
       <button
         v-if="!characterDocked && !sidebarOpen && !mobilePanel"
@@ -1896,6 +1942,8 @@ function onPlayKeydown(event: KeyboardEvent) {
       :recipient-uid="composerRecipientUid"
       :busy="paymentBusy"
       :currency-system="economyCurrencySystem"
+      :initial-items="composerInitialItems"
+      :self-checkout="composerSelfCheckout"
       @close="showPaymentComposer = false"
       @submit="createPaymentProposal"
     />
@@ -2024,3 +2072,20 @@ function onPlayKeydown(event: KeyboardEvent) {
     </section>
   </main>
 </template>
+
+
+<style scoped>
+.purchase-quote-panel {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--df-border-soft);
+  border-radius: var(--df-radius-md);
+  background: color-mix(in srgb, var(--df-surface-1) 92%, transparent);
+}
+.purchase-quote-title { margin: 0; font-weight: 600; }
+.purchase-quote-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.purchase-quote-body { min-width: 0; }
+.purchase-quote-action { flex-shrink: 0; }
+</style>

@@ -248,8 +248,14 @@ async def create_payment_proposal(
     reason: str = "",
     recipient_uid: str = "",
     items: list[str] | None = None,
+    source: str = "gm_manual",
 ) -> dict[str, Any]:
-    """Create a GM-authored payment proposal without changing balances."""
+    """Create a payment proposal without changing balances.
+
+    ``source="player_self"`` 是玩家在“待报价”卡片上自助出价：只允许付款人
+    给自己下单（引擎侧再校验一次），产物与 GM 开单完全同一形态——付款人
+    确认后才扣款交货。
+    """
 
     inst = dependencies.games.get_instance(
         dependencies.games.parse_game_key(game_key),
@@ -298,7 +304,7 @@ async def create_payment_proposal(
                     amount=amount,
                     items=normalized_items,
                     reason=reason,
-                    source="gm_manual",
+                    source=str(source or "gm_manual"),
                     source_ref=f"gm_manual:{inst.run_id}:{uuid4().hex}",
                 )
             except ValueError as exc:

@@ -373,7 +373,12 @@ DICE_CHECKS_TOOL: dict[str, Any] = {
                                     "number themselves. 'gm_narrated' = the GM stated the price in narration. "
                                     "'none' = nobody has stated a price yet. Use 'none' and OMIT amount when "
                                     "the price is not yet established — never invent, estimate, or infer a "
-                                    "price from context, item rarity, or real-world knowledge."
+                                    "price from context, item rarity, or real-world knowledge. If ANY "
+                                    "human stated a concrete number this round — the GM's narration, an "
+                                    "NPC shopkeeper's dialogue, or another player — that IS an established "
+                                    "price: set player_stated/gm_narrated with it instead of 'none'. Do "
+                                    "not downgrade to 'none' merely because the buying player stayed "
+                                    "silent."
                                 ),
                             },
                             "note": {

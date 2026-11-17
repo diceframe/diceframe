@@ -14,6 +14,8 @@ const props = defineProps<{
   recipientUid: string
   busy?: boolean
   currencySystem?: CurrencySystem | null
+  initialItems?: string[]
+  selfCheckout?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -28,7 +30,9 @@ const recipientUid = ref(props.recipientUid)
 // 金额按展示单位输入（0.25 / 12.50），提交前经统一 parser 转为 canonical 整数。
 const amount = ref('1')
 const reason = ref('')
-const items = ref('')
+const items = ref((props.initialItems || []).join('、'))
+// 玩家自助出价：付款人与收款人锁定为自己，不可改。
+const lockedToSelf = computed(() => Boolean(props.selfCheckout))
 
 const normalizedItems = computed(() => items.value.split(/[,，、\n]/).map(item => item.trim()).filter(Boolean))
 const canonicalAmount = computed(() => parseCurrencyInput(amount.value, props.currencySystem))
@@ -57,13 +61,13 @@ function submit() {
     <div class="gm-payment-form">
       <label>
         <span>{{ t('paymentPayer') }}</span>
-        <select v-model="payerUid">
+        <select v-model="payerUid" :disabled="lockedToSelf">
           <option v-for="player in players" :key="player.user_id" :value="player.user_id">{{ player.character_name || player.user_id }}</option>
         </select>
       </label>
       <label>
         <span>{{ t('paymentRecipient') }}</span>
-        <select v-model="recipientUid">
+        <select v-model="recipientUid" :disabled="lockedToSelf">
           <option v-for="player in players" :key="player.user_id" :value="player.user_id">{{ player.character_name || player.user_id }}</option>
         </select>
       </label>

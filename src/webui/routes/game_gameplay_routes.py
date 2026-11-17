@@ -15,6 +15,7 @@ from src.webui.services._common import is_game_gm
 from src.webui.viewer import viewer_for
 
 logger = logging.getLogger("trpg")
+from src.webui.services._common import is_game_gm
 from src.webui.routes.game_route_common import (
     _broadcast_combat_change,
     _broadcast_ruleset_change,
@@ -428,22 +429,36 @@ async def api_payment_create(request: web.Request) -> web.Response:
 
     api = _get_api(request)
     gk = request.match_info["game_key"]
-    _inst, denied = _gm_only_inst(request, gk)
-    if denied is not None:
-        return denied
+    inst = api.get_game_instance(gk)
+    if not inst:
+        return web.json_response({"ok": False, "error": "not found"}, status=404)
     try:
         body = await request.json()
     except Exception:
         body = {}
     if not isinstance(body, dict):
         body = {}
+    actor_uid = str(request.get("user_id", ""))
+    is_gm = is_game_gm(
+        inst, actor_uid, bool(request.get("owner_authenticated", False)),
+    )
+    payer_uid = str(body.get("payer_uid") or "")
+    recipient_uid = str(body.get("recipient_uid") or payer_uid)
+    source = str(body.get("source") or "gm_manual")
+    if not is_gm:
+        # 非 GM 只允许“玩家自助出价”：给自己买、来源固定 player_self。
+        if source != "player_self" or payer_uid != actor_uid or recipient_uid != actor_uid:
+            return web.json_response({"ok": False, "error": "GM only"}, status=403)
+    elif source not in {"gm_manual", "player_self"}:
+        source = "gm_manual"
     result = await api.create_payment_proposal(
         gk,
-        payer_uid=str(body.get("payer_uid") or ""),
+        payer_uid=payer_uid,
         amount=body.get("amount", 0),
         reason=str(body.get("reason") or ""),
-        recipient_uid=str(body.get("recipient_uid") or ""),
+        recipient_uid=recipient_uid,
         items=body.get("items") if isinstance(body.get("items"), list) else [],
+        source=source,
     )
     return web.json_response(result, status=200 if result.get("ok") else 400)
 
