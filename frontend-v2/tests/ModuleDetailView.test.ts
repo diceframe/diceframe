@@ -85,6 +85,7 @@ async function mountView() {
       { path: '/modules', name: 'modules', component: emptyView },
       { path: '/modules/:moduleId', name: 'module-detail', component: ModuleDetailView },
       { path: '/create', name: 'create', component: emptyView },
+      { path: '/plugins', name: 'plugins', component: emptyView },
     ],
   })
   await router.push({ name: 'module-detail', params: { moduleId: 'castle-module' } })
@@ -403,6 +404,26 @@ describe('ModuleDetailView', () => {
     expect(wrapper.get('[data-testid="module-adventures"]')).toBeTruthy()
     expect(wrapper.findComponent({ name: 'ModuleResourceBrowser' }).exists()).toBe(true)
     expect(wrapper.get('[data-testid="module-metadata"]').element.tagName).toBe('DETAILS')
+  })
+
+  it('offers a jump to the extensions center when a ruleset runtime is missing', async () => {
+    mocks.compatibility.mockResolvedValue({
+      ok: false,
+      module_id: 'castle-module',
+      blockers: ['ruleset_runtime_missing:fu:core>=1'],
+      warnings: [],
+    })
+    const { wrapper, router } = await mountView()
+    const compatibility = wrapper.get('[data-testid="module-compatibility"]')
+    // 机器码不再原样丢给用户。
+    expect(compatibility.text()).not.toContain('ruleset_runtime_missing')
+    expect(compatibility.text()).toContain('fu:core')
+    const cta = wrapper.get('[data-testid="module-install-runtime"]')
+    await cta.trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.name).toBe('plugins')
+    // 商店插件 id 用连字符，运行时用命名空间冒号：搜索词要转成能命中的形式。
+    expect(router.currentRoute.value.query).toEqual({ tab: 'marketplace', q: 'fu-core' })
   })
 
   it('surfaces the server MODULE_IN_USE verdict when a save appears after loading', async () => {

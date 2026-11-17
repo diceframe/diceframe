@@ -2104,6 +2104,18 @@ export interface PluginInfo {
   tools?: PluginToolDescriptor[]
   contributions?: PluginContribution[]
   docs?: string
+  /** 宿主投影的硬依赖（requires.plugins）：装到哪个版本、是否满足。 */
+  dependencies?: PluginDependency[]
+  /** 反向边：装了哪些插件依赖它。 */
+  dependents?: string[]
+}
+
+export interface PluginDependency {
+  id: string
+  minimum_version: string
+  available: boolean
+  satisfied: boolean
+  version?: string
 }
 
 export interface PluginToolDescriptor {

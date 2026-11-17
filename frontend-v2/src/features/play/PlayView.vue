@@ -329,6 +329,10 @@ const directorProposal = computed(() => rulesetGameplay.value?.director?.proposa
   ? null : rulesetGameplay.value?.director?.proposal || null)
 const rulesetCombatStatus = computed(() => String(rulesetGameplay.value?.combat?.status || 'none'))
 const rulesetCampaignStatus = computed(() => String(rulesetGameplay.value?.campaign?.tutorial?.status || ''))
+// Keep the sidebar absent when no valid declarative nodes are projected.
+const hasRulesetPanels = computed(() => (rulesetGameplay.value?.panels || []).some(node => (
+  !!node && typeof node === 'object' && typeof (node as { component?: unknown }).component === 'string'
+)))
 const hasCombatExtension = computed(() => Boolean(game.detail.value?.combat_extension))
 const hasProfessionalTools = computed(() => hasCampaignGuidance.value || hasAuthoritativeCombat.value)
 // 自由规则可能只开启 combat_extension：此时 tools 栏也必须出现，否则「战斗动作」没有入口。
@@ -1401,6 +1405,23 @@ function onPlayKeydown(event: KeyboardEvent) {
               :refresh-key="JSON.stringify([game.detail.value.run_id, game.detail.value.last_activity, game.detail.value.rest_activity])"
               @changed="game.refresh(true)"
             />
+            <!-- 规则运行时自带的声明式面板：插件无法携带 Vue 组件，命刻/机会/冲突
+                 步骤这类专属信息只能以节点形式下发，由统一渲染器呈现。这些是
+                 「查看类」信息，放在角色栏折叠区，不占消息流顶部。 -->
+            <details
+              v-if="hasRulesetPanels"
+              class="panel sidebar-disclosure"
+              data-testid="ruleset-panels-disclosure"
+            >
+              <summary><strong>{{ t('rulesetPanelsTitle') }}</strong></summary>
+              <div class="sidebar-disclosure-body">
+                <RulesetPanels
+                  :game-key="game.currentGame.value"
+                  :panels="rulesetGameplay?.panels"
+                  @refresh="refreshRulesetPanels"
+                />
+              </div>
+            </details>
           </template>
         </GameSidebar>
       </aside>

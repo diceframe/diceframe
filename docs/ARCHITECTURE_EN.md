@@ -3074,6 +3074,26 @@ frontend generic component
 
 ---
 
+### External Runtime Apply and Transport Boundaries
+
+Host apply receipts live in the existing `ruleset_runtime.event_ledger` under
+`_host_remote_apply_v1`, binding batch payload, runtime/version and game/run.
+Sheet-only handoffs also require receipts. Identical replay returns a result
+without writing an old post-image; reused IDs with different payloads and
+historical batches without verifiable host receipts are rejected explicitly.
+The child receives only a ledger projection without host metadata. State/ledger
+handoffs preserve history and append exactly one matching batch. Receipts,
+ruleset state and sheets save/rollback through the existing transaction and round
+before-images, with no new persisted module slot. See
+[RULESET_REMOTE_EVENT_BRIDGE.md](RULESET_REMOTE_EVENT_BRIDGE.md) for compatibility
+and cached pre-image validation.
+
+The stdio stderr drain retains at most a 1600-byte incomplete-line prefix and
+discards overflow until newline. Logging allows 64 lines of 400 characters;
+the pipe keeps draining after that budget without accumulating complete lines.
+Each stdout reader is bound to its process generation's stream/response queue,
+so late EOF from an old child cannot contaminate RPC after restart.
+
 ### Runtime Narrative Check Preparation
 
 A `dice_system=none` rule declaring `narrative_checks` resolves free-text checks

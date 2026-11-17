@@ -56,7 +56,10 @@ import PlayView from '../src/features/play/PlayView.vue'
 
 const STUBS = {
   Teleport: true,
-  GameSidebar: true,
+  GameSidebar: defineComponent({
+    name: 'GameSidebar',
+    template: '<aside><slot name="after-character" /></aside>',
+  }),
   KpQuestionDialog: true,
   MapBackgroundSettingsModal: true,
   RulesetPlayHost: true,

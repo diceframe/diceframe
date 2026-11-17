@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { api, apiUrl, errorMessage } from '@/api/client'
 import {
   moduleApi,
@@ -23,7 +23,7 @@ import { promptEnableAfterInstall } from '@/features/plugins/installEnable'
 import { useHubDetail } from '@/features/plugins/useHubDetail'
 import { contentPackSubmissionUrl } from '@/features/creator/submission'
 import { localeLabel } from '@/utils/contentLanguage'
-import { formatModuleBlocker, moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
+import { formatModuleBlocker, missingRuntimeFromBlocker, moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
 
 type RecoveryAdventure = {
   binding?: {
@@ -47,6 +47,7 @@ const { t, locale } = useLocale()
 const copy = computed(() => moduleCopy(locale.value))
 const library = computed(() => libraryCopy(locale.value))
 const route = useRoute()
+const router = useRouter()
 const modules = ref<ModuleSummary[]>([])
 const market = ref<ModuleMarketplaceItem[]>([])
 const marketError = ref('')
@@ -231,6 +232,22 @@ function resetMarketFilters(): void {
 const loading = ref(false)
 const importFile = ref<File | null>(null)
 const preview = ref<ModulePreviewResponse | null>(null)
+// 「缺规则运行时」是用户自己几步就能解掉的阻塞：本地导入、在线安装两条路径都
+// 可能撞上，统一给一个直达扩展中心的入口，而不是只留一句红色文案。
+const installErrorMissingRuntime = ref('')
+const missingRuntimeCta = computed(() => {
+  for (const blocker of preview.value?.blockers || []) {
+    const runtimeId = missingRuntimeFromBlocker(blocker)
+    if (runtimeId) return runtimeId
+  }
+  return installErrorMissingRuntime.value
+})
+function openExtensionsCenter(runtimeId: string): void {
+  void router.push({
+    name: 'plugins',
+    query: { tab: 'marketplace', q: runtimeId.replace(/:/g, '-') },
+  })
+}
 const importBusy = ref(false)
 const recoveryCheck = ref<RecoveryCheck | null>(null)
 const recoveryBusy = ref(false)
@@ -499,6 +516,7 @@ async function installFromMarketplace(item: ModuleMarketplaceItem) {
   installBusy.value = item.id
   installFeedback.value = { id: item.id, kind: 'busy', message: t('modulesInstallingOnline') }
   error.value = ''
+  installErrorMissingRuntime.value = ''
   try {
     const result = await moduleApi.installFromMarketplace(item.id, item.installed)
     if (!result.ok) throw new Error(result.error || result.error_code || t('modulesInstallIncomplete'))
@@ -513,7 +531,9 @@ async function installFromMarketplace(item: ModuleMarketplaceItem) {
     await checkRecovery()
     installFeedback.value = { id: item.id, kind: 'success', message: t('modulesInstalledRefreshed') }
   } catch (cause: unknown) {
-    error.value = formatModuleBlocker(errorMessage(cause), locale.value)
+    const raw = errorMessage(cause)
+    installErrorMissingRuntime.value = missingRuntimeFromBlocker(raw)
+    error.value = formatModuleBlocker(raw, locale.value)
     installFeedback.value = { id: item.id, kind: 'error', message: error.value }
   } finally {
     installBusy.value = ''
@@ -640,6 +660,7 @@ async function checkRecovery() {
               </template>
               <div v-if="preview && (preview.blockers.length || preview.warnings.length)" class="module-import-preview" data-testid="module-import-preview">
                 <p v-if="preview.blockers.length" class="error-text">{{ preview.blockers.map(blocker => formatModuleBlocker(blocker, locale)).join(locale === 'zh-CN' ? '；' : '; ') }}</p>
+                <button v-if="missingRuntimeCta" type="button" class="module-runtime-cta" data-testid="modules-install-runtime" @click="openExtensionsCenter(missingRuntimeCta)">{{ t('modulesInstallRuntimeCta') }}</button>
                 <p v-if="preview.warnings.length" class="muted">{{ preview.warnings.join(', ') }}</p>
               </div>
             </div>
@@ -650,6 +671,7 @@ async function checkRecovery() {
 
     <p v-if="!recoveryAdventure" class="module-boundary-note">{{ t('modulesIntro') }} {{ t('modulesBoundaryNote') }}</p>
     <p v-if="error" class="error-text">{{ error }}</p>
+    <button v-if="error && installErrorMissingRuntime" type="button" class="module-runtime-cta" data-testid="modules-install-runtime-banner" @click="openExtensionsCenter(installErrorMissingRuntime)">{{ t('modulesInstallRuntimeCta') }}</button>
 
     <!-- 恢复模式 -->
     <section v-if="recoveryAdventure" class="module-recovery" role="status" data-testid="modules-recovery">
@@ -953,6 +975,8 @@ async function checkRecovery() {
 .module-import-file input[type="file"] { max-width: 160px; }
 .module-import-preview { width: 100%; display: grid; gap: .3rem; padding: .5rem .75rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); }
 .module-import-preview p { margin: 0; font-size: .8rem; }
+.module-runtime-cta { justify-self: start; min-height: 32px; padding: 0 .7rem; border: 1px solid var(--df-border-strong, var(--df-border)); border-radius: var(--df-radius-sm, 4px); background: var(--df-surface-2, transparent); color: var(--df-interactive-strong); font-size: .8rem; font-weight: 600; cursor: pointer; }
+.module-runtime-cta:hover { border-color: var(--df-accent-strong, var(--df-accent)); }
 .module-update-all-action { border: 1px solid color-mix(in srgb, var(--df-warning) 55%, var(--df-border-soft)); border-radius: var(--df-radius-md); background: transparent; color: var(--df-warning); font-size: .78rem; font-weight: 700; padding: .2rem .6rem; cursor: pointer; }
 .module-update-all-action:disabled { opacity: .5; }
 .module-update-action { min-height: 24px; padding: 0 .55rem; border: 1px solid color-mix(in srgb, var(--df-warning) 55%, var(--df-border-soft)); border-radius: 999px; background: transparent; color: var(--df-warning); font-size: .72rem; font-weight: 700; white-space: nowrap; cursor: pointer; }
