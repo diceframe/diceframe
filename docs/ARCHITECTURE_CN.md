@@ -3003,6 +3003,8 @@ migrate_state
 
 远端 adapter 必须通过独立的 `RulesetCapabilities.automatic_intents=True` 显式声明支持可选 `next_automatic_intent` RPC；默认关闭，不能从 `authoritative_intents`、`deterministic_combat` 或 adapter 方法存在性推断。未声明时 adapter 返回 `None`，不发送该 RPC，普通 intent 仍可正常提交。声明后只有成功的 `null` 响应表示自动阶梯结束；远端拒绝、传输错误或非法响应必须传播，由既有权威事务拒绝并回滚，不能当作“不支持”吞掉。内置 runtime 仍通过可选 Protocol 接入，D&D 同时声明该 capability 以保持元数据准确。
 
+远端 `apply_event_batch` 的重放契约：同一批次重试命中宿主持久收据时，adapter 直接返回 `{"applied": false, "replayed": true}`（连同当前 state / ledger），不重发 RPC、不重复投影公共时间线或记忆；`applied: true` 仅表示首次应用。旧存档中缺少宿主应用收据的账本行按未知历史 fail closed，不会静默重放。
+
 正确扩展方式通常是：
 
 ```text

@@ -3058,6 +3058,8 @@ To avoid forcing every runtime to implement an ever-growing method set, addition
 
 Remote adapters must explicitly declare support for the optional `next_automatic_intent` RPC through the independent `RulesetCapabilities.automatic_intents=True` flag. It defaults to false and is not inferred from `authoritative_intents`, `deterministic_combat`, or the existence of the adapter method. Without this declaration the adapter returns `None` without sending that RPC, so ordinary intents remain usable. Once declared, only a successful `null` response ends the automatic ladder; remote rejection, transport errors and malformed responses propagate to the existing authority transaction for rejection and rollback, rather than being swallowed as “unsupported.” Built-in runtimes still use the optional Protocol; D&D also declares the capability to keep its metadata accurate.
 
+The remote `apply_event_batch` replay contract: when a retried batch hits the host's durable receipt, the adapter returns `{"applied": false, "replayed": true}` (with the current state / ledger) without re-sending the RPC or re-projecting the public timeline and memory; `applied: true` means first application only. Ledger rows from older saves that lack a host apply receipt fail closed as unknown history instead of being silently replayed.
+
 The correct extension pattern is usually:
 
 ```text
