@@ -507,3 +507,31 @@ def test_light_extra_attack_needs_an_unspent_bonus_action(runtime) -> None:
 
     assert result["ok"] is False
     assert "Bonus Action" in result["error"]
+
+
+def test_combat_end_clears_the_grip(runtime) -> None:
+    """遭遇结束就没有"手上拿着什么"：握持与窗口账本都要清掉。"""
+
+    engine, instance = _start(runtime, _sheet(runtime, equipment=["shortsword", "greatsword"]))
+    _turn(engine, instance)
+    _apply(engine, instance, _resolve(
+        engine, instance,
+        _attack_intent(
+            instance, weapon="greatsword",
+            weapon_swap={"stow": "item:greatsword"},
+        ),
+    ))
+
+    _apply(engine, instance, _resolve(engine, instance, {
+        "intent_id": "end-combat",
+        "type": "combat.end",
+        "submitted_by": "gm",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+    }))
+
+    combat = _combat(instance)
+    assert combat["status"] == "ended"
+    assert combat["hands"] == {}
+    assert combat["mounted"] == {}
+    assert combat["light_attacks"] == {}
+    assert combat["loading_shots"] == {}

@@ -271,3 +271,20 @@ combat["hands"] = {
 ### 14.6 提交说明
 
 工作区同时存在另一条在途改动（F39 目标选择、F24 后续）。本切片的提交**按 hunk 摘取**，没有把别人的改动带进 index；`git diff` 的暂存区与未暂存区已分别核对：暂存区不含 `target_candidates` / `abjure` / `channel_effect` / `slippery` 等他人标识符。
+
+### 14.7 审核第二轮（提交后）
+
+对已提交内容做契约面复核，发现一处与文档承诺不符：
+
+| 发现 | 判定 | 处理 |
+|---|---|---|
+| `dnd2024.combat.ended` 只清 `economy`，把 `hands` / `mounted` / `light_attacks` / `loading_shots` 留在已结束的 combat 里，与"随遭遇生灭"的承诺不符 | 应修 | 结束战斗时四个键一起清空；新增 `test_combat_end_clears_the_grip` |
+| 内容包完整性校验会让**没有声明这两个键的第三方 bundle 加载失败** | 兼容性变更，需显式声明（Level 2） | 见下方兼容性声明；不改为 warning，理由同下 |
+
+**兼容性声明（bundle 作者可见的影响）**
+
+- 新增两个武器键：`two_handed`、`loading`，均为布尔；`two_handed_exception` 可选，当前只接受 `"mounted"`。
+- 内置 `srd_combat_core` 要求每条 weapon 显式声明前两个键；**缺失即加载失败**，报错会指出武器 id 与缺失键。
+- 为什么不用降级为 warning：`false` 与"漏写"在行为上等价，但语义不同。若只警告，漏写会让一把双手武器静默地按单手处理——这正是本切片要消除的失败模式。宁可让内容作者在加载期看到明确报错。
+- 旧存档不受影响：`hands` / `mounted` 是战斗内状态，旧档缺失时由 `.get(...) or {}` 兜底，并在下一场战斗重建。
+- 攻击意图新增三个可选字段（`weapon_swap`、`light_extra_attack`、`mounted_player_ids`），旧客户端不传即保持旧行为。
