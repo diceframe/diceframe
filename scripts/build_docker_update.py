@@ -35,6 +35,41 @@ BUILD_ROOT = DIST_DIR / "_docker_update_build"
 LOCK_FILE = ROOT / "requirements-docker-amd64.lock"
 
 
+def _assert_lock_covers_requirements() -> None:
+    """Fail closed when requirements.txt grew a dependency the lock never pinned.
+
+    v3.3.0-beta.1 shipped without ``python-i18n`` because #740 added it to
+    requirements.txt but nobody regenerated the lock; the candidate then died
+    on import inside every Docker update. The lock is the only dependency
+    source for the update artifact, so an uncovered name must stop the build.
+    """
+
+    import re
+
+    separator = re.compile(r"[-_.]+")
+    requirement = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9_.-]*)")
+    wanted: set[str] = set()
+    for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines():
+        stripped = line.split("#", 1)[0].strip()
+        if not stripped or stripped.startswith("-"):
+            continue
+        match = requirement.match(stripped)
+        if match:
+            wanted.add(separator.sub("-", match.group(1)).lower())
+    locked: set[str] = set()
+    for line in LOCK_FILE.read_text(encoding="utf-8").splitlines():
+        match = re.match(r"^([A-Za-z0-9][A-Za-z0-9_.-]*)==", line.strip())
+        if match:
+            locked.add(separator.sub("-", match.group(1)).lower())
+    missing = sorted(wanted - locked)
+    if missing:
+        raise SystemExit(
+            "requirements-docker-amd64.lock is missing pinned entries for: "
+            + ", ".join(missing)
+            + ". Regenerate the lock before building the Docker update."
+        )
+
+
 def install_runtime(target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
     command = [
@@ -146,6 +181,7 @@ def build_package(
             raise RuntimeError("--skip-frontend requires a prebuilt static-v2/index.html")
         shutil.copytree(prebuilt, app_dir / "static-v2", dirs_exist_ok=True)
     shutil.rmtree(app_dir / "frontend-v2", ignore_errors=True)
+    _assert_lock_covers_requirements()
     install_runtime(package_dir / "runtime" / "site-packages")
     write_manifest(package_dir, version, commit)
 

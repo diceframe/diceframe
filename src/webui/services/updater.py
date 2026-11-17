@@ -31,6 +31,7 @@ from src.docker_launcher.contracts import (
 )
 from src.docker_launcher.data_versions import data_for_payload, runtime_for_data
 from src.version import __version__
+from src.docker_launcher.contracts import version_key
 from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
@@ -750,6 +751,17 @@ class UpdaterService:
             )}
 
         version = str(self._state.get("version", ""))
+        if version_key(version) == version_key(__version__):
+            # 已在运行目标版本（常见于上次切换其实已 commit、而前端状态仍停在
+            # “等待切换”时的重复点击）：再发一次 signal 只会让 launcher 把健康的
+            # 自己杀掉重启。直接短路，清掉滞留的暂存状态。
+            self._state.update(
+                state="done", applied_at=int(time.time()), error="",
+                restart_needed=False,
+            )
+            self._save_state()
+            logger.info("已处于目标版本 %s，忽略重复的应用请求", version)
+            return {"ok": True, "state": "done", "version": version}
         self._state.update(state="applying", error="", restart_needed=False)
         self._save_state()
         self._task = asyncio.create_task(
