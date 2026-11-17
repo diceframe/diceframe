@@ -1,4 +1,6 @@
-# DiceFrame v3.3.0
+# DiceFrame v3.3.0-beta.3
+
+> 这是 3.3.0 的**预览版（beta）**。默认稳定频道不会收到它；请在「设置 → 预览版更新」开启后检测。重要存档建议先备份。扩展中心、创作工坊与外部规则运行时均为本批实验性能力，欢迎在预览频道反馈。本版重点修复 DF Agent / 创作工坊的预算与上下文问题。
 
 3.2.1 之后的扩展平台版本：统一扩展中心与模块商店、创作工坊、外部规则运行时平台、本地向量模型管理、后端提示多语言第一批，以及一批可靠性与更新链路修复。
 
@@ -30,6 +32,13 @@
 
 ### 更新链路与可靠性修复（重要）
 
+### DF Agent / 创作工坊修复（本 beta 重点）
+
+- **不再频繁打断**：单段 token 预算触顶时自动整理上下文并接续执行（同一对话、不重做已完成步骤），「继续任务」退为兜底；任务总预算不因续段放大，界面显示真实累计消耗。
+- **上下文体积有界化**：对话历史、工具观察与初始目录压缩到有界视图，长任务不再因重发全量上下文几轮烧光预算；ID、草稿、审批、错误码等结构字段不截断。
+- **供应商输出上限自学习钳制**：max_tokens 超出模型上限（如 DeepSeek 的 393216）时自动钳制重试，不再静默失败成空回复。
+- 工具观察压缩保持合法 JSON 与分页元数据（name 集合、total/offset/has_more/next_offset），能力发现契约不破坏。
+
 - **Docker 更新包依赖缺失**：beta.1 的更新包缺 `python-i18n`，候选进程启动即崩、更新必回滚并报「候选进程已退出」。已补齐锁文件并新增「锁必须覆盖全部依赖，否则拒绝出包」的构建校验；重复应用当前版本不再杀掉健康进程重启。
 - **内置 Fabula Ultima 规则已撤回**：按外部化路线（`.dfplugin` 插件包）执行，主仓不再内置第三方规则数值表。
 - 首次启动时「同意用户协议」不再被版本校验闸门短暂拦截。
@@ -51,6 +60,8 @@
 ## English
 
 
+
+> This is the **beta preview** of 3.3.0. The stable channel does not receive it; enable *Preview updates* in Settings to see it. Back up important saves first. This beta focuses on DF Agent / Creator budget and context fixes. The extension center, Creator studio and external ruleset runtimes are experimental — feedback on the preview channel is welcome.
 
 The extension-platform release after 3.2.1: a unified extension center with a rebuilt module store, the Creator studio, an experimental external ruleset runtime platform, local embedding model management, and the first batch of localized backend messages — plus atomic plugin installs and a round of reliability fixes.
 
@@ -78,6 +89,13 @@ The extension-platform release after 3.2.1: a unified extension center with a re
 
 ### Update-path and reliability fixes (important)
 
+### DF Agent / Creator fixes (the focus of this beta)
+
+- **No more constant interruptions**: when a segment's token budget trips, the agent compacts context and continues automatically within the same conversation (finished steps are not redone); the task total budget never grows via continuations, and the UI shows real cumulative usage.
+- **Bounded context growth**: conversation history, tool observations and the initial catalog are compacted to a bounded view; structural fields (IDs, drafts, approvals, error codes) are never truncated.
+- **Provider output ceilings are self-learned**: a max_tokens beyond the model's range (e.g. DeepSeek's 393216) is clamped and retried instead of failing silently into empty replies.
+- Tool observations compact into valid JSON that preserves pagination metadata (name sets, total/offset/has_more/next_offset).
+
 - **Docker update package dependency**: the beta.1 package shipped without `python-i18n`; every candidate crashed on import, so in-app Docker updates always rolled back with "candidate process exited". The lock is fixed and the build now refuses to ship unless it covers every requirement; re-applying the running version no longer restarts a healthy process.
 - **Built-in Fabula Ultima ruleset reverted**: FU stays external (`.dfplugin` package) per the externalization decision; third-party rule data no longer ships in the main repo.
 - Accepting the user agreement on first boot is no longer briefly blocked by the update-validation gate.
@@ -98,6 +116,6 @@ The extension-platform release after 3.2.1: a unified extension center with a re
 
 ## Downloads
 
-- Windows 安装包 / Windows installer：`DiceFrame-v3.3.0-windows-setup.exe`
-- 便携版 / Portable：`DiceFrame-v3.3.0-windows-portable.zip`
-- Docker：`diceframe`（`3.3.0` 与 `latest` 标签）
+- Windows 安装包 / Windows installer：`DiceFrame-v3.3.0-beta.3-windows-setup.exe`
+- 便携版 / Portable：`DiceFrame-v3.3.0-beta.3-windows-portable.zip`
+- Docker：`diceframe`（`3.3.0-beta.3` 标签；beta 不打 `latest`）

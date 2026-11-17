@@ -131,9 +131,17 @@ def _compact_json_text(value: str, limit: int) -> str:
     text = json.dumps(shrunk, ensure_ascii=False)
     if len(text) <= limit:
         return text
-    return json.dumps({"truncated": True,
-                       "preview": text[:max(200, limit - 200)]},
-                      ensure_ascii=False)[:limit]
+    # 兜底：递减 preview 长度直到整包合法且在限内（review 第三轮 P1-2——
+    # 对已序列化 JSON 直接 [:limit] 截断可能切断转义序列，产生非法 JSON）。
+    preview_len = max(200, limit - 200)
+    while preview_len >= 50:
+        candidate = json.dumps({"truncated": True, "preview": text[:preview_len]},
+                               ensure_ascii=False)
+        if len(candidate) <= limit:
+            json.loads(candidate)  # 合法性验证；不过则继续收缩
+            return candidate
+        preview_len //= 2
+    return json.dumps({"truncated": True}, ensure_ascii=False)
 
 
 def _bound_text(value, limit):
@@ -191,14 +199,13 @@ def _bound_history(history: list) -> list:
     first = _walk_bound(history[0], HISTORY_FIRST_CHARS)
     first_cost = len(json.dumps(first, ensure_ascii=False))
     if first_cost > HISTORY_FIRST_CHARS:
-        first = _compact_json_text(
-            json.dumps(first, ensure_ascii=False), HISTORY_FIRST_CHARS)
-        try:
-            first = json.loads(first)
-        except (TypeError, ValueError):
-            first = {"parts": [{"content": first[:HISTORY_FIRST_CHARS],
-                                "part_kind": "user-prompt"}],
-                     "kind": "request"}
+        # 结构保留的深度收缩：内容键与白名单键按更小的帽压缩，消息的
+        # kind / parts 形状原样保留（review 第三轮 P1-2：truncated 包装
+        # 会丢掉任务结构，伪装成别的消息继续跑）。
+        first = _walk_bound(history[0], 600)
+        first_cost = len(json.dumps(first, ensure_ascii=False))
+        if first_cost > HISTORY_FIRST_CHARS:
+            first = _walk_bound(history[0], 200)
 
     # 2) 最近窗口无条件保留。
     recent: list = []
@@ -273,13 +280,19 @@ class DiceFrameModel(Model):
                 json.dumps({"agent_history": history}, ensure_ascii=False),
                 tools=schemas, max_tokens=self.max_tokens, force_tool_choice=False)
         except LLMToolCallError as exc:
+            # 失败链中已计费的用量先入账一次（补充设计 §2 / review 第三轮
+            # P1-1）：known_usage_tokens 是本次调用全部已上报的用量。
+            known = max(0, int(getattr(exc, 'known_usage_tokens', 0) or 0))
+            known_attempts = max(0, int(getattr(exc, 'planner_attempts', 0) or 0))
+            await self.emit('usage', {'total_tokens': known,
+                                      'planner_attempts': known_attempts})
             raise provider_unavailable(exc, self.language) from exc
         calls = getattr(response, "tool_calls", None)
         reported_tokens = max(0, int(getattr(response, 'total_tokens', 0) or 0))
-        attempted = max(1, int(getattr(response, 'attempted_requests', 0) or 0))
+        planner_attempts = max(1, int(getattr(response, 'planner_attempts', 1) or 1))
         self.task_used += reported_tokens
         await self.emit('usage', {'total_tokens': reported_tokens,
-                                  'attempted_requests': attempted})
+                                  'planner_attempts': planner_attempts})
         text = getattr(response, "content", "")
         parts = []
         self.response_correction = "Return one registered function call with JSON object arguments, or a nonempty final answer."

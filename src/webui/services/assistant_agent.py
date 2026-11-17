@@ -78,22 +78,6 @@ def _bounded_observation(result: Any, *, limit: int = 12000) -> str:
             return node[:cap] + "…"
         return node
 
-    def annotate_dropped(node: Any, key: str = "") -> Any:
-        if isinstance(node, dict):
-            out = {key_: annotate_dropped(item, key_) for key_, item in node.items()}
-            for list_key in ("capabilities", "items", "results", "entries"):
-                items = out.get(list_key)
-                if isinstance(items, list):
-                    original = len(items)
-                    if "returned_count" not in out and original < len(
-                        node.get(list_key, []) or []
-                    ):
-                        pass
-            return out
-        if isinstance(node, list):
-            return [annotate_dropped(item, key) for item in node]
-        return node
-
     shrunk = shrink_strings(result, 600)
     text = json.dumps(shrunk, ensure_ascii=False)
     if len(text) <= limit:
@@ -129,6 +113,33 @@ def _bounded_observation(result: Any, *, limit: int = 12000) -> str:
                       "item_names": names}
             if "offset" in shrunk:
                 shrunk["next_offset"] = int(shrunk.get("offset") or 0) + original_count
+            text = json.dumps(shrunk, ensure_ascii=False)
+            if len(text) <= limit:
+                return text
+
+    # describe_capability 专用路径（review 第三轮 P2-3）：大参数 schema
+    # 不能退化成「只剩键名」的假成功——保留参数名 / 类型 / required /
+    # enum，并显式标注 schema_truncated 与再次获取方式。
+    if isinstance(shrunk, dict) and isinstance(shrunk.get("parameters"), dict):
+        parameters = shrunk["parameters"]
+        props = parameters.get("properties")
+        required = parameters.get("required") or []
+        if isinstance(props, dict):
+            summary = {
+                prop: {
+                    "type": (spec or {}).get("type") if isinstance(spec, dict) else None,
+                    "enum": (spec or {}).get("enum") if isinstance(spec, dict) else None,
+                    "required": prop in required,
+                }
+                for prop, spec in props.items()
+            }
+            compact_params = {
+                "type": parameters.get("type") or "object",
+                "required": required,
+                "properties": summary,
+                "schema_truncated": True,
+            }
+            shrunk = {**shrunk, "parameters": compact_params}
             text = json.dumps(shrunk, ensure_ascii=False)
             if len(text) <= limit:
                 return text
@@ -664,7 +675,7 @@ class AgentRuntime:
                     # 绝不因自动续段归零（补充设计 §2/§6）。
                     session.data['task'].update(
                         used_tokens=0,
-                        provider_requests=0,
+                        planner_attempts=0,
                         token_budget=self.deps.task_max_tokens,
                     )
                     async def checked_emit(event, value):
@@ -672,8 +683,8 @@ class AgentRuntime:
                             raise asyncio.CancelledError()
                         if event == 'usage':
                             session.data['task']['used_tokens'] += value['total_tokens']
-                            session.data['task']['provider_requests'] += \
-                                int(value.get('attempted_requests', 1) or 1)
+                            session.data['task']['planner_attempts'] += \
+                                int(value.get('planner_attempts', 1) or 1)
                             await progress()
                         else:
                             await emit(event, value)
