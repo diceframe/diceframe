@@ -13,7 +13,6 @@
 - **外部规则运行时（实验性）**：规则系统可以打包为 `.dfplugin`（stdio 子进程）接入 DiceFrame——平台侧已提供建局绑定、权威意图、敌方 / AI 席自动行动、自由叙事检定与声明式面板的完整接缝；首批第三方规则插件包将陆续上架。内置规则（D&D 2024 等）行为不变。
 - **顺序 / 组合动作**：服务端权威的顺序多检定与组合技能计划接缝就位（SK-01），规则运行时声明能力后才会出现对应入口。
 - **角色创建规则选择（RC-01）**：创建角色时独立选择规则，加入对局时做规则兼容校验，不兼容的角色卡会被明确拒绝。
-- **内置 Fabula Ultima 兼容规则**：第一方收录社区维护的 FU 兼容规则（命刻、物语点、非 d20 骰制与成长），与外部运行时路线共用同一套引擎接缝；存档往返与命刻键冲突有回归保护。
 
 ### 创作工坊（新增）
 
@@ -55,7 +54,6 @@ The extension-platform batch: a unified extension center with a rebuilt module s
 - **External ruleset runtimes (experimental)**: rule systems can ship as `.dfplugin` packages (stdio child processes). The platform now provides the full seams — save binding, authoritative intents, enemy / AI-seat automatic turns, free-text check resolution and declarative panels; the first third-party ruleset packages will follow. Built-in rules (D&D 2024 and friends) are unchanged.
 - **Sequential / composite actions**: server-authoritative seams for sequential multi-check and composite-skill plans (SK-01); entries only appear when a runtime declares the capability.
 - **Character-creation rule choice (RC-01)**: pick the rule independently at character creation; joining a game validates compatibility and incompatible cards are rejected explicitly.
-- **Built-in Fabula Ultima-compatible ruleset**: the community-maintained FU-compatible ruleset (clocks, fabula points, non-d20 dice and growth) ships first-party, sharing the same engine seams as the external runtime route; save round-trips and clock-key collisions have regression coverage.
 
 ### Creator studio (new)
 
