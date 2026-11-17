@@ -1,0 +1,3 @@
+# src/webui/pairing.py 返回给请求方的提示。
+"en":
+  code_invalid_or_expired: "The pairing code is invalid or has expired"

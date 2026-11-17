@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import {
-  confirmAssistantAgent,
-  resumeAssistantAgent,
+  streamAssistantAgentConfirm,
+  streamAssistantAgentResume,
   authorizeAssistantAgent,
   cancelAssistantAgent,
   getAssistantAgentSession,
@@ -400,9 +400,27 @@ async function confirmApproval(approved = true): Promise<AgentConfirmResult | un
   }
   actionBusy.value = true; actionError.value = ''
   const generation = requestGeneration
+  // Ensure there's an assistant message to stream summary into
+  if (!messages.value.length || messages.value[messages.value.length - 1].role !== 'assistant') {
+    messages.value.push({ role: 'assistant', content: '', events: [] })
+  }
+  const assistantIdx = messages.value.length - 1
   try {
-    const result = await confirmAssistantAgent(currentSession, pending.approval_id, pending.plan_digest, approved)
+    let confirmResult: AgentConfirmResult | undefined
+    await streamAssistantAgentConfirm(currentSession, pending.approval_id, pending.plan_digest, approved, {
+      onDelta(delta) {
+        if (generation !== requestGeneration) return
+        messages.value[assistantIdx] = { ...messages.value[assistantIdx], content: messages.value[assistantIdx].content + delta }
+      },
+      onAgentEvent(event, payload) {
+        if (generation !== requestGeneration) return
+        const current = messages.value[assistantIdx]
+        messages.value[assistantIdx] = { ...current, events: [...(current.events || []), { event, payload }] }
+      },
+      onConfirmResult(result) { confirmResult = result },
+    })
     if (generation !== requestGeneration) return undefined
+    const result = confirmResult ?? { ok: false, error: 'No result received' }
     if (approved && (result.ok || result.pending || result.partial)) cacheReceipt(pending, result)
     applyApprovalResult(result, pending, approved)
     persist(); return result
@@ -412,12 +430,8 @@ async function confirmApproval(approved = true): Promise<AgentConfirmResult | un
       const snapshot = await getAssistantAgentSession(currentSession)
       if (generation === requestGeneration) {
         updateFromSession(snapshot)
-        const receipt = receipts.value.find(item => item.approval_id === pending.approval_id && item.plan_digest === pending.plan_digest)
-        if (receipt) {
-          const recovered = receiptResponse(receipt)
-          applyApprovalResult(recovered, pending, approved)
-          return recovered
-        }
+        const r = receipts.value.find(item => item.approval_id === pending.approval_id && item.plan_digest === pending.plan_digest)
+        if (r) { const recovered = receiptResponse(r); applyApprovalResult(recovered, pending, approved); return recovered }
       }
     } catch { /* Preserve the original confirmation failure for the user. */ }
     actionError.value = error instanceof Error ? error.message : 'Assistant action failed.'; return undefined
@@ -431,17 +445,32 @@ async function resumeApproval(): Promise<AgentConfirmResult | undefined> {
   const generation = requestGeneration
   actionBusy.value = true
   actionError.value = ''
+  if (!messages.value.length || messages.value[messages.value.length - 1].role !== 'assistant') {
+    messages.value.push({ role: 'assistant', content: '', events: [] })
+  }
+  const assistantIdx = messages.value.length - 1
   try {
-    const result = await resumeAssistantAgent(currentSession, pending.approval_id, pending.plan_digest)
+    let resumeResult: AgentConfirmResult | undefined
+    await streamAssistantAgentResume(currentSession, pending.approval_id, pending.plan_digest, {
+      onDelta(delta) {
+        if (generation !== requestGeneration || sessionId.value !== currentSession) return
+        messages.value[assistantIdx] = { ...messages.value[assistantIdx], content: messages.value[assistantIdx].content + delta }
+      },
+      onAgentEvent(event, payload) {
+        if (generation !== requestGeneration || sessionId.value !== currentSession) return
+        const current = messages.value[assistantIdx]
+        messages.value[assistantIdx] = { ...current, events: [...(current.events || []), { event, payload }] }
+      },
+      onConfirmResult(result) { resumeResult = result },
+    })
     if (generation !== requestGeneration || sessionId.value !== currentSession) return undefined
+    const result = resumeResult ?? { ok: false, error: 'No result received' }
     if (result.ok || result.pending || result.partial) cacheReceipt(pending, result)
     applyApprovalResult(result, pending, true)
     persist()
     return result
   } catch (error: unknown) {
     if (generation !== requestGeneration || sessionId.value !== currentSession) return undefined
-    // Keep the signed plan and its report visible after a failed resume so the
-    // owner can retry or reject it explicitly.
     actionError.value = error instanceof Error ? error.message : 'Assistant action failed.'
     return undefined
   } finally {
@@ -473,7 +502,11 @@ async function invalidateApproval(draftId?: string) {
   if (!pending || !currentSession) return
   const generation = requestGeneration
   actionBusy.value = true
-  try { await confirmAssistantAgent(currentSession, pending.approval_id, pending.plan_digest, false) } catch { /* The local dirty fence still prevents confirming the stale proposal. */ }
+  try {
+    await streamAssistantAgentConfirm(currentSession, pending.approval_id, pending.plan_digest, false, {
+      onDelta() { /* 拒绝不产生流式增量展示 */ },
+    })
+  } catch { /* The local dirty fence still prevents confirming the stale proposal. */ }
   finally { if (generation === requestGeneration) actionBusy.value = false }
 }
 function resetRuntime() {

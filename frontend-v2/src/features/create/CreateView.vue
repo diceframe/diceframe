@@ -323,7 +323,14 @@ function adventureDisabled(item: { required_runtime?: unknown; incompatibility_r
 }
 const confirmationName = computed(() => {
   if (seed.value.trim()) return t('restoreBySeed')
-  if (mode.value === 'template') return name.value.trim() || selectedTemplateWorldName.value || t('modeTemplate')
+  // 冒险自带世界时，本局的世界不再是他之前选的那个模板。封面沿用世界名会
+  // 显示成上一个世界的名字（"选了 FU 模组，标题还是灰沼边境"），所以这里
+  // 和 confirmationWorld 用同一套回退顺序。
+  if (mode.value === 'template') {
+    return name.value.trim()
+      || (moduleWorldApplies.value ? moduleWorldName.value : selectedTemplateWorldName.value)
+      || t('modeTemplate')
+  }
   if (mode.value === 'custom') return customName.value.trim() || t('modeCustom')
   return t('modeAi')
 })
@@ -336,14 +343,15 @@ const confirmationWorld = computed(() => {
 const loreSourceSummary = computed(() => {
   const language = locale.value.split('-')[0]
   const copy = {
-    zh: { builtin: '沿用当前世界的资料册（可单独选择本局使用哪些）', blank: '新建独立世界（只有一册空白资料）', copied: '新建独立世界，引用「', copiedEnd: '」的资料册（仅引用，不会复制条目）' },
-    en: { builtin: 'Use this world’s books (choose books for this game)', blank: 'Independent world (blank primary book)', copied: 'Independent world, reference source books: ', copiedEnd: ' (references only; entries are not copied)' },
-    de: { builtin: 'Bücher dieser Welt verwenden (Auswahl für dieses Spiel)', blank: 'Eigene Welt (leeres Hauptbuch)', copied: 'Eigene Welt, Quellbücher referenzieren: ', copiedEnd: ' (nur Referenzen; Einträge werden nicht kopiert)' },
-    ja: { builtin: 'この世界の資料集を使う（このゲームで使う冊を選択）', blank: '独立した世界（空白メイン資料集）', copied: '独立した世界で参照元の資料集を使う：', copiedEnd: '（参照のみ。項目はコピーされません）' },
-    ru: { builtin: 'Использовать книги этого мира (выберите книги для игры)', blank: 'Отдельный мир (пустая основная книга)', copied: 'Отдельный мир со ссылками на исходные книги: ', copiedEnd: ' (только ссылки; записи не копируются)' },
+    zh: { builtin: '沿用当前世界的资料册（可单独选择本局使用哪些）', module: '世界由模组自带，不额外附带资料册', blank: '新建独立世界（只有一册空白资料）', copied: '新建独立世界，引用「', copiedEnd: '」的资料册（仅引用，不会复制条目）' },
+    en: { builtin: 'Use this world’s books (choose books for this game)', module: 'The world comes from the module, with no extra books', blank: 'Independent world (blank primary book)', copied: 'Independent world, reference source books: ', copiedEnd: ' (references only; entries are not copied)' },
+    de: { builtin: 'Bücher dieser Welt verwenden (Auswahl für dieses Spiel)', module: 'Die Welt stammt aus dem Modul, ohne zusätzliche Bücher', blank: 'Eigene Welt (leeres Hauptbuch)', copied: 'Eigene Welt, Quellbücher referenzieren: ', copiedEnd: ' (nur Referenzen; Einträge werden nicht kopiert)' },
+    ja: { builtin: 'この世界の資料集を使う（このゲームで使う冊を選択）', module: '世界はモジュール由来で、追加の資料集はありません', blank: '独立した世界（空白メイン資料集）', copied: '独立した世界で参照元の資料集を使う：', copiedEnd: '（参照のみ。項目はコピーされません）' },
+    ru: { builtin: 'Использовать книги этого мира (выберите книги для игры)', module: 'Мир берётся из модуля, без дополнительных книг', blank: 'Отдельный мир (пустая основная книга)', copied: 'Отдельный мир со ссылками на исходные книги: ', copiedEnd: ' (только ссылки; записи не копируются)' },
   }[language] || {
-    builtin: 'Use this world’s books (choose books for this game)', blank: 'Independent world (blank primary book)', copied: 'Independent world, reference source books: ', copiedEnd: ' (references only; entries are not copied)',
+    builtin: 'Use this world’s books (choose books for this game)', module: 'The world comes from the module, with no extra books', blank: 'Independent world (blank primary book)', copied: 'Independent world, reference source books: ', copiedEnd: ' (references only; entries are not copied)',
   }
+  if (mode.value === 'template' && moduleWorldApplies.value) return copy.module
   if (loreChoice.value === '__blank__') return copy.blank
   if (loreChoice.value.startsWith('copy:')) {
     const source = loreChoice.value.slice(5)
@@ -724,9 +732,9 @@ function openWizard(idx: number | null) {
     if (idx !== null && level > 1) {
       editIdx.value = null
       toast.info(gameDefault(
-        '这个角色已经高于 1 级，已可直接用于本局，不需要重新建卡。高级建卡器只负责创建 1 级角色；职业能力请在角色管理或对局内通过“职业升级”调整。',
-        'This character is already above level 1 and can be used as-is. The advanced builder creates level-1 characters; use Class advancement for later levels.',
-        'Dieser Charakter ist bereits über Stufe 1 und kann direkt für dieses Spiel verwendet werden, ein erneutes Erstellen ist nicht nötig. Der erweiterte Charaktereditor erstellt nur Charaktere auf Stufe 1; Klassenfähigkeiten bitte in der Charakterverwaltung oder im Spiel über „Klassenaufstieg” anpassen.',
+        '这个角色已经高于 1 级，已可直接用于本局，不需要重新建卡。如需更高等级的卡，请新建角色并在建卡时选择起始等级。',
+        'This character is already above level 1 and can be used as-is. For a higher-level character, create a new one and pick a starting level while building it.',
+        'Dieser Charakter ist bereits über Stufe 1 und kann direkt für dieses Spiel verwendet werden, ein erneutes Erstellen ist nicht nötig. Für einen Charakter höherer Stufe erstelle bitte einen neuen und wähle beim Erstellen eine Startstufe.',
       ))
       return
     }
@@ -1025,7 +1033,7 @@ async function create() {
                       <option value="">{{ gameDefault('不使用内容包（内置冒险）', 'No content package (built-in adventures)', 'Kein Inhaltspaket (integrierte Abenteuer)', 'コンテンツパックなし（内蔵冒険）', 'Без пакета контента (встроенные приключения)') }}</option>
                       <option v-for="item in modules" :key="item.id" :value="item.id">{{ item.name }}</option>
                     </select>
-                    <select :aria-label="gameDefault('冒险模组', 'Adventure module', 'Abenteuermodul', '冒険モジュール', 'Модуль приключения')" :value="adventureChoice" :disabled="!catalogueReady" @change="chooseAdventure">
+                    <select :aria-label="gameDefault('冒险内容包', 'Adventure content package', 'Abenteuer-Inhaltspaket', '冒険コンテンツパッケージ', 'Пакет приключения')" :value="adventureChoice" :disabled="!catalogueReady" @change="chooseAdventure">
                       <option value="" disabled>{{ gameDefault('请选择冒险包', 'Choose an adventure package', 'Abenteuerpaket wählen') }}</option>
                       <option v-for="item in availableModuleAdventures" :key="adventureKey(item)" :value="adventureKey(item)" :disabled="adventureDisabled(item)">
                         {{ item.name }} · {{ item.estimated_minutes }} {{ gameDefault('分钟', 'min', 'Min.') }}{{ item.compatibility !== 'compatible' ? gameDefault('（需匹配推荐世界）', ' (requires its recommended world)', ' (benötigt die empfohlene Welt)') : '' }}

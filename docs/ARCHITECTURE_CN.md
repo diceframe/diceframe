@@ -667,6 +667,8 @@ frontend-v2/src/
 - 不把按钮是否显示当成权限检查；
 - UI capability gating 只是体验层，服务端仍需重新校验。
 
+规则 gameplay 投影由 `features/play/useRulesetGameplay.ts` 管理，复用 available-actions 同时同步声明式 panels 与动作目录。取数只要求后端声明 `authoritative_intents`，不依赖 `deterministic_combat` 或顺序/组合动作能力；战斗工具仍单独按战斗能力展示。game、viewer、GM 视角或 runtime 切换会立即清空投影并使旧请求失效；回合、规则状态信号与可见页面轮询负责刷新。
+
 游玩状态同步由 `composables/useGame.ts` 管理。由于 [Cloudflare Quick Tunnels 不支持 SSE](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/#limitations)，`.trycloudflare.com` 玩家页每 2 秒通过原有 API 获取当前局快照，已有刷新未完成时跳过。本机和自定义域名沿用 SSE；P2P 优先使用原有订阅。轮询复用既有权限过滤、入口关闭处理和连接清理。
 
 首页“加入好友”由 `features/peer/FriendJoinPanel.vue` 提供，`joinInvitation.ts` 在本地识别普通邀请链接与 `DFP2-` 直连码，不探测远端或消费凭据。普通链接保留原站点、部署路径、后端参数与席位凭据，经玩家明确点击后打开；直连码交给现有 P2P 流程，连接前仍需隐私同意。Hub 的入口开关只控制实验性直连，不隐藏普通链接加入。游玩邀请弹窗提供独立的官方联机文档链接，不携带游戏或邀请凭据。
@@ -2339,6 +2341,7 @@ LLM
 面向玩家的 GM/KP 问答与完整 GM context 是分开的。
 
 普通主持回合通过 `src/llm/private_perceptions.py` 读取近期角色感知，按角色 ID 和回合标明归属。
+角色提及旧线索时，主持上下文优先收录该角色私录中与本轮行动文字匹配的观察。重生成旧轮时使用该轮保存的行动。
 该区块适用于所有世界和规则，不要求绑定冒险；它只提供历史观察，不修改背包或世界状态。
 区块最多占上下文窗口的 5%，上限为 3000 字符。预算不足时按完整记录取舍，最终收缩时整块移除。
 
@@ -2998,6 +3001,8 @@ migrate_state
 - `RunLifecycleRuntime`
 - `PublicTimelineProjectionRuntime`
 
+远端 adapter 必须通过独立的 `RulesetCapabilities.automatic_intents=True` 显式声明支持可选 `next_automatic_intent` RPC；默认关闭，不能从 `authoritative_intents`、`deterministic_combat` 或 adapter 方法存在性推断。未声明时 adapter 返回 `None`，不发送该 RPC，普通 intent 仍可正常提交。声明后只有成功的 `null` 响应表示自动阶梯结束；远端拒绝、传输错误或非法响应必须传播，由既有权威事务拒绝并回滚，不能当作“不支持”吞掉。内置 runtime 仍通过可选 Protocol 接入，D&D 同时声明该 capability 以保持元数据准确。
+
 正确扩展方式通常是：
 
 ```text
@@ -3011,6 +3016,20 @@ engine
 WebAPI generic method
 frontend generic component
 ```
+
+---
+
+### Runtime 叙事检定准备
+
+`dice_system=none` 且声明 `narrative_checks` 的规则通过可选
+`NarrativeCheckResolverRuntime.resolve_narrative_checks` 结算自由文本检定。
+回合准备在 detached aggregate 上规划，阻塞 RPC 在线程中只访问该快照；完成后
+经 authority → state 锁发布 staged transaction，并检查 registry 对象、run、阶段、
+完整输入及运行期检定 generation。abort/reset 递增 generation，防止同轮重试的
+ABA；取消中的线程可继续完成，但不能回调发布 live 状态。已提交到行动上的 runtime
+结果与原 check identity 在叙事失败重试时复用，不随新 planner UUID 重骰。
+提示及重生成按 `planner_source=runtime` 使用通用格式，保留真实骰制、分骰和结果。
+这是现有存档形状上的恢复/并发边界修复，不新增持久 schema。
 
 ---
 
@@ -3700,6 +3719,10 @@ available_intents
 ```
 
 返回该 intent 时才显示。
+
+探索与战斗通过 `spells/casting.py` 共用 effective known/prepared、始终准备授予、免费来源优先级、资源事件和 canonical 消费；战斗动作经济仍由 combat 拥有。无限槽优先于有限次数，`slot_level=0` 选择合法免费来源，显式正环阶消耗付费法术位：同环阶优先使用 Font 临时槽，再使用普通槽，一次施法只扣一个来源且不消耗免费次数；Font 槽保持独立投影，不并入普通槽或免费来源。探索继续拒绝非探索安全的确定性效果。
+
+法术精通长休研究通过 runtime 声明的 `free_cast` 休息选项接入正式 service → runtime → resting 链路，队伍提交前进行非变更校验；短休不能替换法术。
 
 它与 combat 共用：
 
@@ -5336,7 +5359,9 @@ Managed Docker
 
 覆盖升级同样由 launcher 负责（`src/launcher/OverwriteUpgrade.cs`）。用户把新包解压覆盖到安装目录时，新版本落在根目录 `app/`、`python/`，而 `current.json` 仍指向 `versions/` 里的旧版本。启动时若根目录载荷的 `app/src/version.py` 版本严格新于当前版本，launcher 把它搬进 `versions/v<版本>/`、暂存同一个启动器、写入与应用内更新相同的 restart signal，再走同一套 health / probation / commit；失败回滚到覆盖前的版本。该步骤必须先于旧布局清理执行，否则覆盖进来的载荷会被当成旧布局删除。根目录版本不比当前新、版本读不出、或安装从未使用 `versions/` 时不做任何事。
 
-房主本机界面由 launcher 的应用窗口承载（`src/launcher/AppWindow.cs`，WinForms + WebView2）。WebView2 SDK 程序集不内置在 exe 里，而是随版本载荷放在 `app/launcher/webview2/`：launcher 自更新只替换 exe，而旧版更新器、新版更新器和覆盖升级都整体搬运 `app/`，所以每个版本都带着与自己 launcher 匹配的 SDK；使用前复制到 `data/_launcher/webview2/` 再加载，避免锁住 `versions/` 里的文件。窗口就绪后 launcher 用 `FreeConsole` 与控制台脱离（隐藏窗口在 Windows Terminal 下做不到），之后的输出写入 `logs/launcher.log`，`python.exe` 以无窗口方式启动，失败改用对话框提示。`data/access_token.txt` 存在时（只在首次密码未被修改前存在，服务端启动时会删除与当前密码不一致的旧文件），在页面脚本运行前把它写入前端保存登录凭据的 `localStorage` 键 `trpg_access_token`，仅限本机 origin。缺 SDK、缺 WebView2 运行时或初始化失败时保留控制台并退回默认浏览器；`--browser` 强制浏览器。关闭窗口等同于停止服务。
+房主本机界面由 launcher 的应用窗口承载（`src/launcher/AppWindow.cs`，WinForms + WebView2）。WebView2 SDK 程序集不内置在 exe 里，而是随版本载荷放在 `app/launcher/webview2/`：launcher 自更新只替换 exe，而旧版更新器、新版更新器和覆盖升级都整体搬运 `app/`，所以每个版本都带着与自己 launcher 匹配的 SDK；使用前复制到 `data/_launcher/webview2/` 再加载，避免锁住 `versions/` 里的文件。窗口就绪后 launcher 用 `FreeConsole` 与控制台脱离（隐藏窗口在 Windows Terminal 下做不到），之后的输出写入 `logs/launcher.log`，`python.exe` 以无窗口方式启动，失败改用对话框提示。`data/access_token.txt` 存在时（只在首次密码未被修改前存在，服务端启动时会删除与当前密码不一致的旧文件），在页面脚本运行前把它写入前端保存登录凭据的 `localStorage` 键 `trpg_access_token`，仅限已验证后端的本机 host:port。缺 SDK、缺 WebView2 运行时或初始化失败时保留控制台并退回默认浏览器；`--browser` 强制浏览器。关闭窗口等同于停止服务。
+
+launcher 与后端的关系由一次本机握手决定（`src/launcher/BackendLink.cs` ↔ `src/webui/services/launcher_link.py`、`src/webui/routes/launcher.py`）。端口上的公开元数据（`/api/config` 的 `server_version`）谁都能伪造，同机另一份安装也会有，不能当成归属依据。launcher 在 `data/_launcher/instance.json` 维护一把随机实例密钥（记录的数据目录位置与当前不符——整个文件夹被复制成另一份安装——就重新生成）；后端在匿名端点 `GET /api/system/launcher/identity` 上对 launcher 给的 nonce 做 HMAC，同时认证自己的 `boot_id` 与 `pid`。没有密钥（Docker、源码运行）时握手端点回答不可用。启动时端口上若是通过握手的本安装后端，launcher 以 Attached 方式接管（关窗口不停它）；被无法证明归属的服务占着时按端口冲突报告退出，既不 spawn 必然绑定失败的后端，也不打开对方的页面、不注入本安装的首次访问密码。自己启动的后端（Owned，包括它 execv 出来的接班进程）以健康检查里的 `pid` 与子进程一致为就绪依据；界面只对这两类经过验证的目标打开。更新切换前，Owned 后端照旧结束进程；Attached 后端只能用同一把密钥签名的 `POST /api/system/launcher/stop` 请它优雅退出（`stop_requested` 让清理之后不再 execv），等它退出且端口释放后才启动候选，停不下来就把本次更新记为失败并保持现状，绝不按端口结束任意进程。Windows 上 `os.execv` 会换 PID、原进程以 0 退出：后端在 execv 之前写 `data/_launcher/restart-intent.json`（旧 `pid` + `boot_id`），launcher 只有在「退出码 0 + 意图与该进程匹配」时才在限定时间内等新的 `boot_id` 通过握手、重新取得进程句柄并保持界面；其它退出照常按崩溃取证。新 exe 的提升（launcher 收尾与 `launcher_promotion.py` 的提前提升）都先完整复制到安装目录内的临时文件并校验哈希，再做两次同卷 rename，失败时按原 exe 哈希核对并从备份恢复。
 
 当 `current.json` 同时存在可验证的 `relative_dir` 与 `previous_relative_dir` 时，应用可以写入带 `operation=rollback` 的 restart signal，请求 launcher 将上一版本作为候选执行同一套 health / probation / commit 流程。成功后交换当前与上一版本指针并继续保留两套 payload；应用不直接修改指针，也不删除 `data/`。
 
@@ -6463,6 +6488,8 @@ AI 席位和检定授权的离席/重开清理由所属模块注册生命周期 
 ## 翻译维护与显示回退
 
 `src/localization/registry.json` 负责维护层级和状态：英语、简体中文为核心，日语、德语和俄语为社区目录。暂停后持久化语言 ID 仍用于游戏与内容；界面选择器排除暂停目录，已有界面偏好显示英文。对局叙事语言、canonical identity 和机制不变。
+
+后端文案的统一入口是 `src/localization/messages.py` 的 `t("命名空间.键", 语言)`（python-i18n），文案放在 `src/localization/locales/` 下，目录与源码一一对应：`src/webui/services/x.py` 的文案在 `locales/webui/services/x.<语言>.yml`，命名空间是 `webui.services.x`；占位符写成 `%{name}`，只要求 zh-CN 与 en，回退链为 目标语言 → en → zh-CN。语言有两个来源：返回给请求方的接口提示不传语言，取 `src/webui/request_language.py` 从标准 `Accept-Language` 协商出的语言（前端把它显式设为界面语言；没带头或没有受支持语言时保持中文原文）；写进存档、时间线或发给模型的对局内容显式传对局语言。`src/webui/errors.py` 的错误出口对已登记错误码按协商语言替换 `error` 文案，并保留 `error_code`。存量文案按模块逐步迁入，未迁移的保持原文。
 
 `frontend-v2/src/i18n/policy.ts` 按审核过的英文来源指纹筛选社区译文，递归覆盖 API 错误；缺失、新增和过时键通过 Vue I18n 回退英文。英文改动不重新生成接受基线，志愿者通过 `locales:review` 逐键登记审核。`locales:check` 阻止核心键不齐，社区缺口仅报告，不阻塞功能发布。共享后端文案/字段 helper 与 typed content overlay 遵守暂停状态；集中目录外的功能内及后端文本不自动检测来源过时。见[翻译维护](zh/translations.md)。
 

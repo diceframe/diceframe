@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from src.webui.services.assistant_agent import _digest
+from src.localization.messages import t
 
 _MAX_SNAPSHOT_BYTES = 512 * 1024
 _ID_RE = re.compile(r"^[a-f0-9]{32}$")
@@ -39,17 +40,17 @@ class MetadataRecoveryService:
     @staticmethod
     def _bounded(payload: dict[str, Any]) -> None:
         if len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()) > _MAX_SNAPSHOT_BYTES:
-            raise ValueError("恢复快照过大")
+            raise ValueError(t("webui.services.content_metadata_recovery.snapshot_too_large"))
 
     @staticmethod
     def _snapshot(snapshot: Any, fields: frozenset[str]) -> dict[str, Any]:
         if not isinstance(snapshot, dict):
-            raise ValueError("无法取得安全的编辑快照")
+            raise ValueError(t("webui.services.content_metadata_recovery.no_safe_snapshot"))
         required = {"target_name", "fields", "version"}
         if set(snapshot) != required or not isinstance(snapshot["fields"], dict):
-            raise ValueError("编辑快照格式不受支持")
+            raise ValueError(t("webui.services.content_metadata_recovery.snapshot_format_unsupported"))
         if set(snapshot["fields"]) - fields or not isinstance(snapshot["version"], str) or not snapshot["version"]:
-            raise ValueError("编辑快照字段或版本无效")
+            raise ValueError(t("webui.services.content_metadata_recovery.snapshot_field_or_version_invalid"))
         return deepcopy(snapshot)
 
     def _prepare(self, owner: str, kind: str, target_id: str, fields: dict[str, Any], before: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
@@ -73,10 +74,10 @@ class MetadataRecoveryService:
     def _write(self, owner: str, target_kind: str, target_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         self._owner(owner)
         if not isinstance(patch, dict) or not patch:
-            raise ValueError("必须提供至少一个可编辑字段")
+            raise ValueError(t("webui.services.content_metadata_recovery.editable_field_required"))
         allowed = _WORLD_FIELDS if target_kind == "world" else _CARD_FIELDS
         if set(patch) - allowed:
-            raise ValueError("不支持的元数据字段")
+            raise ValueError(t("webui.services.content_metadata_recovery.unsupported_field"))
         snapshot_fn = self.deps.world_snapshot if target_kind == "world" else self.deps.card_snapshot
         update_fn = self.deps.world_update if target_kind == "world" else self.deps.card_update
         before = self._snapshot(snapshot_fn(target_id), allowed)
@@ -90,7 +91,7 @@ class MetadataRecoveryService:
         payload["after"] = after
         self._bounded(payload)
         if not self.deps.store.update_lorebook_operation(operation_id, owner_key, {"status": "applied", "payload": payload}):
-            raise ValueError("无法保存恢复记录；写入结果处于不确定状态")
+            raise ValueError(t("webui.services.content_metadata_recovery.save_record_uncertain"))
         return {"ok": True, "operation_id": operation_id, "reversible": True,
                 "navigation": {"route": "worlds" if target_kind == "world" else "characters"}}
 
@@ -105,19 +106,19 @@ class MetadataRecoveryService:
             raise ValueError("Invalid metadata operation identity")
         operation = self.deps.store.get_lorebook_operation(operation_id, self._owner(owner))
         if operation is None or operation.get("status") != "applied":
-            raise ValueError("恢复记录不存在、属于其它用户或已处理")
+            raise ValueError(t("webui.services.content_metadata_recovery.record_missing_or_handled"))
         if operation.get("kind") not in {"world_fields", "card_fields"}:
-            raise ValueError("不支持的恢复记录")
+            raise ValueError(t("webui.services.content_metadata_recovery.unsupported_record"))
         payload = operation.get("payload")
         if not isinstance(payload, dict):
-            raise ValueError("恢复记录无效")
+            raise ValueError(t("webui.services.content_metadata_recovery.record_invalid"))
         return operation_id, payload
 
     def _current(self, payload: dict[str, Any]) -> dict[str, Any]:
         target_kind = payload.get("target_kind")
         fields = _WORLD_FIELDS if target_kind == "world" else _CARD_FIELDS if target_kind == "card" else frozenset()
         if not fields or not isinstance(payload.get("target_id"), str):
-            raise ValueError("恢复目标无效")
+            raise ValueError(t("webui.services.content_metadata_recovery.target_invalid"))
         fn = self.deps.world_snapshot if target_kind == "world" else self.deps.card_snapshot
         current = self._snapshot(fn(payload["target_id"]), fields)
         # Known pre-expansion journals captured these three metadata fields.
@@ -133,7 +134,7 @@ class MetadataRecoveryService:
         _, payload = self._operation(owner, operation_id)
         current = self._current(payload)
         if current != payload.get("after"):
-            raise ValueError("内容在该操作之后发生变化；不会覆盖后续编辑")
+            raise ValueError(t("webui.services.content_metadata_recovery.content_changed_since_operation"))
         return {**deepcopy(payload["summary"]), "operation_id": operation_id,
                 "target_kind": payload["target_kind"], "target_id": payload["target_id"],
                 "fields": deepcopy(payload["fields"])}
@@ -148,13 +149,13 @@ class MetadataRecoveryService:
         _, payload = self._operation(owner, operation_id)
         current = self._current(payload)
         if current != payload.get("after"):
-            raise ValueError("内容在该操作之后发生变化；不会覆盖后续编辑")
+            raise ValueError(t("webui.services.content_metadata_recovery.content_changed_since_operation"))
         undo_payload = deepcopy(payload)
         undo_payload["undo_prepared"] = True
         self._bounded(undo_payload)
         if not self.deps.store.update_lorebook_operation(operation_id, owner_key,
                                                          {"status": "prepared", "payload": undo_payload}):
-            raise ValueError("无法准备恢复记录")
+            raise ValueError(t("webui.services.content_metadata_recovery.prepare_record_failed"))
         before_fields = payload["before"]["fields"]
         target_kind = payload["target_kind"]
         update_fn = self.deps.world_update if target_kind == "world" else self.deps.card_update
@@ -166,6 +167,6 @@ class MetadataRecoveryService:
         self._bounded(undo_payload)
         if not self.deps.store.update_lorebook_operation(operation_id, owner_key,
                                                          {"status": "undone", "payload": undo_payload}):
-            raise ValueError("无法保存恢复结果；写入结果处于不确定状态")
+            raise ValueError(t("webui.services.content_metadata_recovery.save_result_uncertain"))
         return {"ok": True, "operation_id": operation_id,
                 "navigation": {"route": "worlds" if target_kind == "world" else "characters"}}

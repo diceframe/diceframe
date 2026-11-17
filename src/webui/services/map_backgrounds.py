@@ -13,6 +13,7 @@ from typing import Any, Callable
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from src.webui.map_presets import builtin_map_preset_by_asset
+from src.localization.messages import t
 
 MAX_MAP_BACKGROUND_BYTES = 8 * 1024 * 1024
 MAX_MAP_BACKGROUND_PIXELS = 24_000_000
@@ -29,46 +30,46 @@ def validate_map_background_selection(
     if not selection:
         return {"kind": "auto"}
     if not isinstance(selection, dict):
-        raise ValueError("地图背景选择必须是对象")
+        raise ValueError(t("webui.services.map_backgrounds.selection_not_object"))
     kind = str(selection.get("kind") or "").strip()
     if kind in {"auto", "none"}:
         return {"kind": kind}
     if kind == "builtin":
         asset_id = str(selection.get("id") or "").strip()
         if builtin_map_preset_by_asset(asset_id) is None:
-            raise ValueError("未知的内置地图背景")
+            raise ValueError(t("webui.services.map_backgrounds.unknown_builtin"))
         return {"kind": "builtin", "id": asset_id}
     if kind == "upload":
         asset_id = str(selection.get("asset_id") or "").strip()
         if map_background_file(backgrounds_dir, asset_id) is None:
-            raise ValueError("上传的地图背景不存在")
+            raise ValueError(t("webui.services.map_backgrounds.uploaded_missing"))
         return {"kind": "upload", "asset_id": asset_id}
     if kind == "generated":
         asset_id = str(selection.get("asset_id") or "").strip()
         if generated_image_file(asset_id) is None:
-            raise ValueError("生成的地图背景不存在")
+            raise ValueError(t("webui.services.map_backgrounds.generated_missing"))
         return {"kind": "generated", "asset_id": asset_id}
     if kind == "plugin":
         map_id = str(selection.get("map_id") or "").strip()
         if not map_id or len(map_id) > 256 or not map_id.startswith("plugin:"):
-            raise ValueError("内容包地图引用无效")
+            raise ValueError(t("webui.services.map_backgrounds.content_pack_reference_invalid"))
         return {"kind": "plugin", "map_id": map_id}
-    raise ValueError("不支持的地图背景选择")
+    raise ValueError(t("webui.services.map_backgrounds.unsupported_selection"))
 
 
 def save_map_background_upload(
     backgrounds_dir: Path, file_data: str, file_name: str = "",
 ) -> dict[str, Any]:
     if not file_data:
-        return {"ok": False, "error": "未提供地图背景文件"}
+        return {"ok": False, "error": t("webui.services.map_backgrounds.file_missing")}
     if len(file_data) > (MAX_MAP_BACKGROUND_BYTES * 4 // 3) + 32:
-        return {"ok": False, "error": "地图背景不能超过 8 MB"}
+        return {"ok": False, "error": t("webui.services.map_backgrounds.file_too_large")}
     try:
         raw = base64.b64decode(file_data, validate=True)
     except (ValueError, binascii.Error):
-        return {"ok": False, "error": "地图背景文件数据无效"}
+        return {"ok": False, "error": t("webui.services.map_backgrounds.file_data_invalid")}
     if not raw or len(raw) > MAX_MAP_BACKGROUND_BYTES:
-        return {"ok": False, "error": "地图背景不能超过 8 MB"}
+        return {"ok": False, "error": t("webui.services.map_backgrounds.file_too_large")}
     try:
         payload = _normalized_map_background(raw)
     except ValueError as exc:
@@ -116,12 +117,12 @@ def _normalized_map_background(raw: bytes) -> bytes:
     try:
         with Image.open(io.BytesIO(raw)) as source:
             if source.format not in {"PNG", "JPEG", "WEBP"}:
-                raise ValueError("地图背景仅支持 PNG、JPEG 或 WebP")
+                raise ValueError(t("webui.services.map_backgrounds.unsupported_format"))
             width, height = source.size
             if width < 320 or height < 180:
-                raise ValueError("地图背景尺寸不能小于 320×180")
+                raise ValueError(t("webui.services.map_backgrounds.too_small"))
             if width > 8192 or height > 8192 or width * height > MAX_MAP_BACKGROUND_PIXELS:
-                raise ValueError("地图背景尺寸过大")
+                raise ValueError(t("webui.services.map_backgrounds.dimensions_too_large"))
             image = ImageOps.exif_transpose(source).convert("RGB")
             if max(image.size) > MAX_MAP_BACKGROUND_EDGE:
                 image.thumbnail(
@@ -134,7 +135,7 @@ def _normalized_map_background(raw: bytes) -> bytes:
     except ValueError:
         raise
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
-        raise ValueError("无法读取地图背景") from exc
+        raise ValueError(t("webui.services.map_backgrounds.unreadable")) from exc
 
 
 class MapBackgroundService:

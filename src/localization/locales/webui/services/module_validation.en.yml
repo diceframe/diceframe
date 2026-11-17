@@ -1,0 +1,5 @@
+# src/webui/services/module_validation.py 返回给请求方的提示。
+"en":
+  requires_not_object: "requires must be an object"
+  requires_ruleset_entry_not_object: "Each requires.rulesets entry must be an object"
+  requires_rulesets_not_array: "requires.rulesets must be an array"

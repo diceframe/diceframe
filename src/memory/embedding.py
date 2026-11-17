@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from hashlib import sha256
+import json
 import logging
 import math
 from typing import List
+from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 
@@ -43,12 +46,34 @@ class EmbeddingClient:
         timeout_seconds: float = 30,
     ):
         self.base_url = base_url.rstrip("/")
+        self.source = "external"
         self.api_key = api_key
         self.model = model
         self.proxy_url = proxy_url.strip()
         self.timeout_seconds = max(5.0, min(float(timeout_seconds), 300.0))
         self.max_input_chars = max_input_override if max_input_override > 0 else self._detect_max_input(model)
         self._session: aiohttp.ClientSession | None = None
+        # Safe diagnostic for the WebUI rebuild receipt; never include API keys.
+        self.last_error: str = ""
+
+    def fingerprint(self) -> str:
+        """Return a secret-free identity for derived vectors."""
+
+        parsed = urlsplit(self.base_url)
+        endpoint = self.base_url
+        if parsed.scheme and parsed.netloc:
+            endpoint = urlunsplit(
+                (parsed.scheme.lower(), parsed.netloc.lower(), parsed.path.rstrip("/"), "", "")
+            )
+        payload = {
+            "algorithm": "memory-embedding-profile-v1",
+            "source": self.source,
+            "model": str(self.model or "").strip(),
+            "endpoint": endpoint,
+            "max_input_chars": int(self.max_input_chars),
+        }
+        encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return f"memory-embedding-profile-v1:{sha256(encoded.encode('utf-8')).hexdigest()[:32]}"
 
     def _detect_max_input(self, model: str) -> int:
         """根据模型名推断最大输入字符数，匹配不到时用保守默认值。"""
@@ -130,6 +155,7 @@ class EmbeddingClient:
             "model": self.model,
             "input": texts,
         }
+        self.last_error = ""
 
         try:
             session = await self._get_session()
@@ -140,10 +166,14 @@ class EmbeddingClient:
                 **request_kwargs,
             ) as resp:
                 if resp.status != 200:
+                    error_text = (await resp.text()).strip()
+                    self.last_error = f"Embedding API HTTP {resp.status}: {error_text[:240]}"
+                    logger.warning("批量 embedding API 失败: %s", self.last_error)
                     return None
                 data = await resp.json()
                 return [item["embedding"] for item in data["data"]]
-        except Exception:
+        except Exception as exc:
+            self.last_error = f"Embedding API 请求失败：{exc}"
             logger.exception("批量 embedding 调用失败")
             return None
 

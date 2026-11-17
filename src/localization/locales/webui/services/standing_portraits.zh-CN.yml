@@ -1,0 +1,17 @@
+# src/webui/services/standing_portraits.py 返回给请求方的提示。
+"zh-CN":
+  data_invalid: "立绘数据无效"
+  delete_failed: "删除立绘失败"
+  dimensions_too_large: "立绘尺寸过大"
+  encoded_too_large: "立绘编码后超过 8 MB，请压缩后重试"
+  file_data_invalid: "立绘文件数据无效"
+  file_missing: "未提供立绘文件"
+  file_too_large: "立绘文件不能超过 8 MB"
+  id_invalid: "无效的立绘 ID"
+  missing: "立绘不存在"
+  still_referenced: "立绘仍被角色引用，请先解除绑定"
+  too_small: "立绘尺寸不能小于 %{min_width}×%{min_height}"
+  type_invalid: "立绘类型无效"
+  unreadable: "无法读取该立绘图片"
+  unsupported_format: "立绘仅支持 PNG 或 WebP（需保留透明背景）"
+  uploaded_missing: "上传立绘不存在"

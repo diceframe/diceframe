@@ -26,6 +26,21 @@ from src.rulesets.dnd2024.play import EncounterAccess
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 
 from dnd2024_monk_common import SequenceRng, advancement_choices
+from test_dnd2024_paladin_auras import paladin_sheet
+
+
+def _preset_draft(preset: dict, preset_id: str) -> dict:
+    """The preset draft, with a playable level-1 Fighting Style for Fighters.
+
+    The preset occupies Defense, while this slice only implements Defense's
+    effect; leaving it there makes the level-7 slot unsatisfiable, so fighters
+    take Archery instead.  Other classes never receive the key at all.
+    """
+
+    draft = {**preset["draft"], "locale": "en", "name": "Arden"}
+    if preset_id == "stalwart_guardian":
+        draft["class_feature_feat_choices"] = {"fighting_style": "feat:archery"}
+    return draft
 
 
 def _sheet(
@@ -40,7 +55,7 @@ def _sheet(
     choices = runtime.builder_choices(None, {"locale": "en"})
     preset = next(item for item in choices["quick_presets"] if item["id"] == preset_id)
     sheet = runtime.finalize_character(
-        None, {**preset["draft"], "locale": "en", "name": "Arden"},
+        None, _preset_draft(preset, preset_id),
     )
     while int(sheet["ruleset_character"]["build"]["level"]) < level:
         preview = runtime.preview_advancement(None, sheet, {})
@@ -113,7 +128,9 @@ def _combat(
     runtime: Dnd2024Runtime, sheet: dict, *, enemy_first: bool = False,
 ) -> tuple[object, object]:
     engine, instance = _instance(runtime.load_bundle("en"), sheet)
-    rolls = [1, 20] if enemy_first else [20, 1]
+    # A Champion of this level owns remarkable_athlete, so the player's
+    # Initiative is rolled with Advantage: two d20s, keep the higher.
+    rolls = [1, 2, 20] if enemy_first else [20, 1]
     resolved = engine.resolve_intent(instance, {
         "intent_id": "start-1", "type": "combat.start", "expected_version": 0,
         "submitted_by": "gm", "enemies": [_goblin()],
@@ -156,6 +173,32 @@ def _check(events: list[dict], kind: str = "death_save") -> dict:
     )
 
 
+def _decline_window(engine, instance, events: list[dict]) -> list[dict]:
+    """Decline every check-window face a death save opens, then read the result.
+
+    A Champion of this level owns Indomitable, and since the death-save ruling
+    that face is offered on a failed death save too (a reroll discards the old
+    die instead of adding to it, so it can genuinely rescue one).  These tests
+    are about Survivor's advantage and crit threshold, not about who spends
+    what, so they decline each face and assert on the outcome that follows.
+    """
+
+    while events and events[-1]["type"] == "dnd2024.decision.pending":
+        window = events[-1]
+        resolved = engine.resolve_intent(instance, {
+            "intent_id": f"decline:{window['decision_id']}",
+            "type": "decision.resolve",
+            "expected_version": ruleset_runtime.state(instance)["version"],
+            "submitted_by": "gm",
+            "decision_id": window["decision_id"],
+            "option": "decline",
+        }, SequenceRng([]))
+        assert resolved["ok"] is True, resolved
+        assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
+        events = resolved["event_batch"]["events"]
+    return events
+
+
 def _resolved(events: list[dict]) -> dict:
     return next(event for event in events if event["type"] == "dnd2024.death_save.resolved")
 
@@ -183,7 +226,7 @@ def _bloodied(sheet: dict) -> tuple[dict, int, int]:
 # --- #1 to #4 catalog validation ----------------------------------------
 
 
-@pytest.mark.parametrize("value", [1, 20, "18", True])
+@pytest.mark.parametrize("value", [1, 21, "18", True])
 def test_catalog_rejects_an_invalid_death_save_threshold(value) -> None:
     runtime = Dnd2024Runtime()
 
@@ -194,7 +237,18 @@ def test_catalog_rejects_an_invalid_death_save_threshold(value) -> None:
         Dnd2024ClassFeatureResolver(_bundle_with(runtime, mutate))
 
 
-@pytest.mark.parametrize("value", [-1, True, "5"])
+def test_catalog_accepts_a_threshold_of_twenty() -> None:
+    """20 is "no special branch", which is a legal thing to declare."""
+
+    runtime = Dnd2024Runtime()
+
+    def mutate(raw: dict) -> None:
+        _survivor(raw)["parameters"]["death_save_crit_threshold"] = 20
+
+    assert Dnd2024ClassFeatureResolver(_bundle_with(runtime, mutate)) is not None
+
+
+@pytest.mark.parametrize("value", [-1, 0, True, "5"])
 def test_catalog_rejects_an_invalid_regeneration_base(value) -> None:
     runtime = Dnd2024Runtime()
 
@@ -241,6 +295,23 @@ def test_catalog_rejects_a_non_true_death_save_advantage(value) -> None:
         Dnd2024ClassFeatureResolver(_bundle_with(runtime, mutate))
 
 
+def test_the_declaration_keeps_its_identity_in_both_locales() -> None:
+    runtime = Dnd2024Runtime()
+    for locale, label in (("en", "Survivor"), ("zh-CN", "百折不挠")):
+        catalog = Dnd2024ClassFeatureResolver(runtime.load_bundle(locale)).catalog
+        definition = catalog.features["survivor"]
+        assert definition.owner == "subclass:champion"
+        assert definition.minimum_level == 18
+        assert definition.source_ref == "srd-5.2.1:p49:survivor"
+        assert dict(definition.parameters) == {
+            "death_save_advantage": True,
+            "death_save_crit_threshold": 18,
+            "turn_start_regen_base": 5,
+            "turn_start_regen_ability": "con",
+        }
+        assert label
+
+
 # --- #5 / #6 ownership ---------------------------------------------------
 
 
@@ -254,7 +325,9 @@ def test_level_eighteen_fighter_owns_survivor() -> None:
     assert resolver.has_feature(_sheet(runtime, 17)["ruleset_character"], "survivor") is False
 
 
-def test_ownership_is_derived_without_features_subclass_ref() -> None:
+def test_ownership_requires_an_explicit_subclass_selection() -> None:
+    """Survivor is Champion's capstone, not a consequence of Fighter levels."""
+
     runtime = Dnd2024Runtime()
     resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle("en"))
 
@@ -262,6 +335,9 @@ def test_ownership_is_derived_without_features_subclass_ref() -> None:
         "build": {"class_levels": [{"class_ref": "class:fighter", "level": 18}]},
     }
 
+    assert resolver.has_feature(character, "survivor") is False
+
+    character["features"] = {"subclass_ref": "subclass:champion"}
     assert resolver.has_feature(character, "survivor") is True
 
 
@@ -340,11 +416,13 @@ def test_regeneration_amount_uses_the_constitution_modifier() -> None:
     assert regen["amount"] == 2
 
 
-def test_zero_base_and_negative_modifier_produce_no_event() -> None:
+def test_a_non_positive_amount_produces_no_event() -> None:
+    """base 1 plus a -3 Constitution modifier nets -2: nothing happens."""
+
     runtime = Dnd2024Runtime()
 
     def mutate(raw: dict) -> None:
-        _survivor(raw)["parameters"]["turn_start_regen_base"] = 0
+        _survivor(raw)["parameters"]["turn_start_regen_base"] = 1
 
     sheet, _hp, _maximum = _bloodied(_sheet(runtime, 18))
     sheet["ruleset_character"]["abilities"]["con"] = 4
@@ -360,7 +438,7 @@ def _combat_for_bundle(bundle, sheet: dict) -> tuple[object, object]:
     resolved = engine.resolve_intent(instance, {
         "intent_id": "start-1", "type": "combat.start", "expected_version": 0,
         "submitted_by": "gm", "enemies": [_goblin()],
-    }, SequenceRng([1, 20]))
+    }, SequenceRng([1, 2, 20]))
     assert resolved["ok"] is True, resolved
     assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
     assert ruleset_runtime.state(instance)["combat"]["initiative"][0] == "enemy:goblin-1"
@@ -444,8 +522,10 @@ def test_death_save_has_advantage_and_provenance() -> None:
     check = _check(events)
     assert len(check["rolls"]) == 2
     assert check["advantage_mode"] == "advantage"
-    assert check["advantage_sources"] == [{"code": "survivor", "mode": "advantage"}]
-    assert check["crit_threshold"] == 18
+    assert check["advantage_sources"] == [
+        {"code": "survivor", "owner": "subclass:champion", "mode": "advantage"},
+    ]
+    assert check["death_save_crit_threshold"] == 18
 
 
 @pytest.mark.parametrize("rolls", [[18, 5], [19, 2], [20, 3]])
@@ -475,7 +555,7 @@ def test_level_seventeen_fighter_keeps_a_single_die_and_normal_success() -> None
     check = _check(events)
     assert len(check["rolls"]) == 1
     assert "advantage_mode" not in check
-    assert "crit_threshold" not in check
+    assert "death_save_crit_threshold" not in check
     resolved = _resolved(events)
     assert resolved["hp"] == 0
     assert resolved["successes"] == 1
@@ -516,7 +596,7 @@ def test_advantage_keeps_natural_one_and_takes_the_highest(
     _at_zero(engine, instance)
     _canonical(instance)["conditions"]["death_saves"] = {"successes": 0, "failures": 1}
 
-    events = _death_save(engine, instance, rolls=rolls)
+    events = _decline_window(engine, instance, _death_save(engine, instance, rolls=rolls))
 
     resolved = _resolved(events)
     assert resolved["successes"] == successes
@@ -524,10 +604,162 @@ def test_advantage_keeps_natural_one_and_takes_the_highest(
     assert resolved["hp"] == 0
 
 
-# --- #19 combat start never ticks ---------------------------------------
+# --- #7 / #8 / #19 start of combat is also a turn start -------------------
 
 
-def test_combat_start_does_not_regenerate() -> None:
+def test_combat_start_regenerates_for_a_bloodied_first_actor() -> None:
+    """The first round is a turn of its own: SRD's "each of your turns" includes it."""
+
+    runtime = Dnd2024Runtime()
+    sheet, hp, _maximum = _bloodied(_sheet(runtime, 18))
+    con_modifier = ability_modifier(int(sheet["ruleset_character"]["abilities"]["con"]))
+    engine, instance = _instance(runtime.load_bundle("en"), sheet)
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": "start-1", "type": "combat.start", "expected_version": 0,
+        "submitted_by": "gm", "enemies": [_goblin()],
+    }, SequenceRng([20, 1]))
+    assert resolved["ok"] is True, resolved
+    events = resolved["event_batch"]["events"]
+    types = [event["type"] for event in events]
+
+    # The started event keeps its shape and the regen is the only thing after
+    # it -- the audit wrapper stays where it was.
+    assert types.index("dnd2024.combat.started") == types.index("intent.submitted") + 1
+    assert types[-1] == "resource.changed"
+    assert len(types) == 3
+    regen = _regen(events)
+    assert regen is not None
+    assert regen["amount"] == 5 + con_modifier
+    assert regen["trigger"] == "turn_start"
+    # No dice, no economy, full provenance.
+    assert regen["rolls"] == []
+    assert regen["feature_id"] == "survivor"
+    assert regen["owner"] == "subclass:champion"
+    assert regen["base"] == 5
+    assert regen["ability"] == "con"
+    assert regen["ability_modifier"] == con_modifier
+    assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
+    assert int(_canonical(instance)["resources"]["hp"]) == hp + 5 + con_modifier
+    # The regen costs nothing: the first turn's economy is still untouched.
+    economy = ruleset_runtime.state(instance)["combat"]["economy"]
+    assert int(economy["action"]) >= 1
+    assert int(economy["reaction"]) >= 1
+
+
+def test_combat_start_does_not_regenerate_for_another_first_actor() -> None:
+    """An enemy winning initiative is not the Champion's turn.
+
+    The Champion's own first turn then arrives through ``turn.advanced``, so
+    the regeneration is deferred, not lost.
+    """
+
+    runtime = Dnd2024Runtime()
+    sheet, hp, _maximum = _bloodied(_sheet(runtime, 18))
+    con_modifier = ability_modifier(int(sheet["ruleset_character"]["abilities"]["con"]))
+    engine, instance = _instance(runtime.load_bundle("en"), sheet)
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": "start-1", "type": "combat.start", "expected_version": 0,
+        "submitted_by": "gm", "enemies": [_goblin()],
+    }, SequenceRng([1, 2, 20]))
+    assert resolved["ok"] is True, resolved
+    events = resolved["event_batch"]["events"]
+    assert [event["type"] for event in events] == [
+        "intent.submitted", "dnd2024.combat.started",
+    ]
+    assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
+    assert int(_canonical(instance)["resources"]["hp"]) == hp
+
+    events = _end_turn(engine, instance, "enemy:goblin-1")
+
+    regen = _regen(events)
+    assert regen is not None
+    assert regen["amount"] == 5 + con_modifier
+    assert int(_canonical(instance)["resources"]["hp"]) == hp + 5 + con_modifier
+
+
+def test_a_condition_that_expires_at_turn_start_does_not_block_twice() -> None:
+    """The regen reads the post-expiry view, the reducer cleans up in order."""
+
+    runtime = Dnd2024Runtime()
+    sheet, hp, _maximum = _bloodied(_sheet(runtime, 18))
+    con_modifier = ability_modifier(int(sheet["ruleset_character"]["abilities"]["con"]))
+    engine, instance = _combat(runtime, sheet, enemy_first=True)
+    canonical = _canonical(instance)
+    canonical.setdefault("conditions", {})["cannot_regain_hp"] = {
+        "source": "expiring", "duration": "actor_turn_start",
+    }
+
+    events = _end_turn(engine, instance, "enemy:goblin-1")
+
+    regen = _regen(events)
+    assert regen is not None
+    assert "blocked_by" not in regen
+    assert regen["amount"] == 5 + con_modifier
+    assert int(_canonical(instance)["resources"]["hp"]) == hp + 5 + con_modifier
+    assert "cannot_regain_hp" not in (_canonical(instance).get("conditions") or {})
+
+
+# --- #6 aggregation across two owned declarations ------------------------
+
+
+def test_two_declarations_take_the_lowest_threshold_and_keep_both_sources() -> None:
+    """Ownership is additive, the dice are not.
+
+    A second declaration adds a provenance row and can only lower the
+    threshold; it never turns two advantage sources into three dice.
+    """
+
+    runtime = Dnd2024Runtime()
+
+    def mutate(raw: dict) -> None:
+        declared = next(
+            feature for feature in raw["classes"]["fighter"]["features"]
+            if feature["id"] == "superior_critical"
+        )
+        declared["parameters"]["death_save_crit_threshold"] = 17
+        declared["parameters"]["death_save_advantage"] = True
+
+    sheet = _sheet(runtime, 18)
+    engine, instance = _instance(_bundle_with(runtime, mutate), sheet)
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": "start-1", "type": "combat.start", "expected_version": 0,
+        "submitted_by": "gm", "enemies": [_goblin()],
+    }, SequenceRng([20, 1]))
+    assert resolved["ok"] is True, resolved
+    assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
+    _at_zero(engine, instance)
+
+    events = _death_save(engine, instance, rolls=[17, 2])
+
+    check = _check(events)
+    assert check["death_save_crit_threshold"] == 17
+    assert len(check["rolls"]) == 2, "two sources still roll two dice"
+    assert check["advantage_sources"] == [
+        {"code": "superior_critical", "owner": "subclass:champion", "mode": "advantage"},
+        {"code": "survivor", "owner": "subclass:champion", "mode": "advantage"},
+    ]
+    # 17 defeats the lowered threshold and restores a hit point.
+    assert _resolved(events)["hp"] == 1
+
+
+def test_advantage_takes_the_eighteen_and_restores_a_hit_point() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _sheet(runtime, 18)
+    engine, instance = _combat(runtime, sheet)
+    _at_zero(engine, instance)
+
+    events = _death_save(engine, instance, rolls=[1, 18])
+
+    check = _check(events)
+    assert check["natural"] == 18
+    assert _resolved(events)["hp"] == 1
+    assert int(_canonical(instance)["resources"]["hp"]) == 1
+
+
+# --- #20 replay ----------------------------------------------------------
+
+
+def test_a_replayed_start_batch_does_not_regenerate_twice() -> None:
     runtime = Dnd2024Runtime()
     sheet, hp, _maximum = _bloodied(_sheet(runtime, 18))
     engine, instance = _instance(runtime.load_bundle("en"), sheet)
@@ -536,11 +768,108 @@ def test_combat_start_does_not_regenerate() -> None:
         "submitted_by": "gm", "enemies": [_goblin()],
     }, SequenceRng([20, 1]))
     assert resolved["ok"] is True, resolved
-    events = resolved["event_batch"]["events"]
     assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
-    # 开场批次不经过 turn.advanced，裁剪行为由此锁定。
+    after_first = int(_canonical(instance)["resources"]["hp"])
+    assert after_first > hp
+
+    replay = engine.apply_batch(instance, resolved["event_batch"])
+
+    assert replay["applied"] is False
+    assert int(_canonical(instance)["resources"]["hp"]) == after_first
+
+
+# --- #27 / #28 / #29 advantage and the Aura of Protection are two entries --
+
+
+def _with_partner(runtime, sheet: dict, partner: dict):
+    """A combat with two party members, both at position 0 (inside 10 feet)."""
+
+    engine, instance = _instance(runtime.load_bundle("en"), sheet)
+    instance.players["p2"] = {
+        "character_name": "Mira", "character_sheet": partner,
+    }
+    assert instance.bind_ruleset_runtime(sheet["ruleset_character"]["rule_binding"])
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": "start-1", "type": "combat.start", "expected_version": 0,
+        "submitted_by": "gm", "enemies": [_goblin()],
+    }, SequenceRng([20, 1, 1]))
+    assert resolved["ok"] is True, resolved
+    assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
+    return engine, instance
+
+
+def test_advantage_and_the_aura_are_separate_entries_on_one_save() -> None:
+    """The aura moves the total, never the face, so 17 stays short of 18."""
+
+    runtime = Dnd2024Runtime()
+    champion = _sheet(runtime, 18)
+    paladin = paladin_sheet(runtime, level=6, abilities={
+        "str": 15, "dex": 10, "con": 14, "int": 8, "wis": 12, "cha": 13,
+    })
+    engine, instance = _with_partner(runtime, champion, paladin)
+    _at_zero(engine, instance)
+    _canonical(instance, "p2")  # the paladin stays up
+
+    events = _decline_window(engine, instance, _death_save(engine, instance, rolls=[17, 3]))
+
+    check = _check(events)
+    assert check["natural"] == 17
+    assert check["advantage_mode"] == "advantage"
+    assert check["advantage_sources"] == [
+        {"code": "survivor", "owner": "subclass:champion", "mode": "advantage"},
+    ]
+    assert check["death_save_crit_threshold"] == 18
+    assert check["aura_bonus"] == 1
+    assert check["total"] == 17 + 1
+    # Aura does not promote a face: no restored HP, one ordinary success.
+    assert _resolved(events)["hp"] == 0
+    assert _resolved(events)["successes"] == 1
+
+    # The same total from a bare face of 9 is a success too -- but still not
+    # a "treated as 20".
+    engine, instance = _with_partner(runtime, _sheet(runtime, 18), paladin)
+    _at_zero(engine, instance)
+    events = _decline_window(engine, instance, _death_save(engine, instance, rolls=[9, 2]))
+    check = _check(events)
+    assert check["natural"] == 9
+    assert check["aura_bonus"] == 1
+    assert check["total"] == 9 + 1
+    assert check["success"] is True
+    assert _resolved(events)["hp"] == 0
+    assert _resolved(events)["successes"] == 1
+
+    # Without the aura the same bare 9 stays a failure: the bonus, not the
+    # face, is what crossed 10.
+    engine, instance = _combat(runtime, _sheet(runtime, 18))
+    _at_zero(engine, instance)
+    events = _decline_window(engine, instance, _death_save(engine, instance, rolls=[9, 2]))
+    check = _check(events)
+    assert check["aura_bonus"] == 0
+    assert check["total"] == 9
+    assert check["success"] is False
+    assert _resolved(events)["failures"] == 2
+
+
+# --- #21 a natural 18 wakes you up without rallying ----------------------
+
+
+def test_a_natural_eighteen_does_not_also_rally() -> None:
+    """The wake-up is a death-save outcome, not a turn start.
+
+    Heroic Rally needs ``1 <= hp <= max_hp // 2``; the restored 1 HP would
+    qualify, so the only thing that keeps it quiet is the boundary itself.
+    """
+
+    runtime = Dnd2024Runtime()
+    sheet = _sheet(runtime, 18)
+    engine, instance = _combat(runtime, sheet)
+    _at_zero(engine, instance)
+
+    events = _death_save(engine, instance, rolls=[18, 3])
+
+    assert _resolved(events)["hp"] == 1
     assert _regen(events) is None
-    assert int(_canonical(instance)["resources"]["hp"]) == hp
+    assert int(_canonical(instance)["resources"]["hp"]) == 1
 
 
 # --- #20 class isolation ------------------------------------------------

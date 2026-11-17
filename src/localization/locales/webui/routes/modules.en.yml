@@ -1,0 +1,12 @@
+# src/webui/routes/modules.py 返回给请求方的提示。
+"en":
+  body_must_be_json_object: "The request body must be a JSON object"
+  dfplugin_file_missing: "The .dfplugin module file is missing"
+  external_metadata_missing: "The external module metadata file is missing"
+  external_module_too_large: "An external module cannot exceed 20 MB"
+  external_preview_multipart_required: "Previewing an external module requires multipart/form-data"
+  install_dfplugin_only: "Local installation accepts .dfplugin files only"
+  install_multipart_required: "Installing a module requires multipart/form-data"
+  package_too_large: "A module package cannot exceed 20 MB"
+  preview_dfplugin_only: "Local preview accepts .dfplugin files only"
+  preview_multipart_required: "Previewing a module requires multipart/form-data"

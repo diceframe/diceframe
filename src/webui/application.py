@@ -13,10 +13,16 @@ from aiohttp import web
 
 from src.plugin_host.package_limits import MAX_PLUGIN_PACKAGE_BYTES
 from src.web_transport import ServerTransport
-from src.webui.abuse_guard import ABUSE_GUARD_KEY, AbuseGuard, abuse_guard_middleware
+from src.webui.abuse_guard import (
+    ABUSE_GUARD_KEY,
+    AbuseGuard,
+    abuse_guard_middleware,
+    write_per_ip_limit_from_env,
+)
 from src.webui.connection_pool import ConnectionPool
 from src.webui.cors import cors_middleware, cors_response_prepare
 from src.webui.errors import error_code_middleware
+from src.webui.request_language import request_language_middleware
 from src.webui.device_tokens import DEVICE_TOKENS_KEY, DeviceTokenStore
 from src.webui.login_audit import LOGIN_AUDIT_KEY, LoginAuditStore
 from src.webui.pairing import PairingService
@@ -31,10 +37,13 @@ from src.webui.routes.bot import register_bot
 from src.webui.routes.character_cards import register_character_cards
 from src.webui.routes.content import register_content
 from src.webui.routes.content_review import register as register_content_review
+from src.webui.routes.creator import register_creator
 from src.webui.routes.games import register_games
 from src.webui.routes.generated_images import register_generated_images
+from src.webui.routes.embedding_models import register_embedding_models
 from src.webui.routes.generation import register_generation
 from src.webui.routes.hub import register_hub
+from src.webui.routes.launcher import LAUNCHER_DATA_DIR_KEY, register_launcher
 from src.webui.routes.legal import register_legal
 from src.webui.routes.lorebooks import register_lorebooks
 from src.webui.routes.maps import register_maps
@@ -51,6 +60,7 @@ from src.webui.routes.sse import register_sse
 from src.webui.routes.system import register_system
 from src.webui.routes.tunnel import register_tunnel
 from src.webui.routes.updater import register_updater
+from src.webui.routes.ui_actions import register_ui_actions
 from src.webui.routes.worlds import register_worlds
 from src.webui.services.security import SecurityTransportService
 from src.webui.session import SessionManager, session_middleware
@@ -92,6 +102,8 @@ def create_app(dependencies: ApplicationDependencies) -> web.Application:
     application.on_startup.append(dependencies.on_startup)
     application.on_cleanup.append(dependencies.on_cleanup)
     application.middlewares.append(cors_middleware)
+    # 最外层之一：让内层所有处理（含错误出口）都能读到请求语言。
+    application.middlewares.append(request_language_middleware)
     application.middlewares.append(update_admission)
     application.on_response_prepare.append(cors_response_prepare)
     application.middlewares.append(session_middleware)
@@ -103,7 +115,7 @@ def create_app(dependencies: ApplicationDependencies) -> web.Application:
     application["_config_reload_lock"] = asyncio.Lock()
     host_data = dependencies.host_data_dir or dependencies.data_dir
     application["session_manager"] = SessionManager(host_data)
-    application[ABUSE_GUARD_KEY] = AbuseGuard()
+    application[ABUSE_GUARD_KEY] = AbuseGuard(write_per_ip_limit=write_per_ip_limit_from_env())
     application[LOGIN_AUDIT_KEY] = LoginAuditStore(host_data)
     application[DEVICE_TOKENS_KEY] = DeviceTokenStore(host_data)
     application[SERVER_IDENTITY_KEY] = ServerIdentityStore(host_data)
@@ -118,9 +130,13 @@ def create_app(dependencies: ApplicationDependencies) -> web.Application:
     application["runtime_control"] = {
         "boot_id": secrets.token_hex(8),
         "restart_requested": False,
+        # 便携版启动器经握手要求停止（更新切换前）：清理之后不再 execv。
+        "stop_requested": False,
         "restart_task": None,
     }
+    application[LAUNCHER_DATA_DIR_KEY] = Path(host_data)
     application["web_transport"] = dependencies.transport
+    application["config_state"] = dependencies.config_state
     application["security_transport"] = SecurityTransportService(
         dependencies.config_state,
         dependencies.save_config,
@@ -150,9 +166,12 @@ def register_routes(
     register_tunnel(application)
     register_system(application)
     register_updater(application)
+    register_launcher(application)
+    register_ui_actions(application)
     register_speech(application)
     register_asr(application)
     register_generated_images(application)
+    register_embedding_models(application)
     register_worlds(application)
     register_lorebooks(application)
     register_rules(application)
@@ -160,6 +179,7 @@ def register_routes(
     register_modules(application)
     register_character_cards(application)
     register_content(application)
+    register_creator(application)
     register_content_review(application)
     register_avatars(application)
     register_scene_images(application)

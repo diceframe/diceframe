@@ -1,0 +1,12 @@
+# src/webui/services/game_master.py 返回给请求方的提示。
+"zh-CN":
+  game_restarted_refresh_and_retry: "对局已重开，请刷新后重试"
+  no_previous_round: "没有可撤回的上一轮"
+  private_command_queued: "GM 私密指令已加入下一轮"
+  resource_missing_in_rule: "当前规则没有资源：%{resource_alias}"
+  revived: "%{name} 已复活（%{method}）"
+  rewriting_wait_and_retry: "GM 正在重写历史回合，请等待完成后重试"
+  rolled_back_to_round: "已撤回到第 %{round_number} 轮开始前的玩家状态"
+  system_not_ready: "系统未就绪"
+  whisper_required: "请输入悄悄话内容"
+  whisper_sent: "悄悄话已发送"

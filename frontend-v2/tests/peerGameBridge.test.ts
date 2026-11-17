@@ -518,6 +518,15 @@ describe('peer host game bridge', () => {
     expect(JSON.parse(String(calls[3].init?.body))).toEqual({
       rest: 'short', hit_dice: { d10: 1 }, expected_revision: 3, operation_id: 'rest-1',
     })
+
+    // 升级面板要读 policy/候选法术：读的是绑定角色，路径里的 uid 不参与授权。
+    await bridge.handle('p_abcdefghijk', 'character.spells', {
+      user_id: 'player_forged',
+    })
+    expect(calls[5].path).toBe(
+      '/games/web%7Cgame%7Chost/character/player_bound/spells?user=player_bound&share=1&delegate=1',
+    )
+    expect(calls[5].init?.method).toBeUndefined()
     expect(changed).toHaveBeenCalledTimes(2)
   })
 
@@ -548,11 +557,14 @@ describe('peer host game bridge', () => {
     await bridge.handle('p_abcdefghijk', 'character.rest', {
       rest: 'long', expected_revision: 5, operation_id: 'rest-2',
       attunement: { attach: ['item:ring_of_protection'], detach: [] },
+      // 长休换准备法术也必须原样转发；职业策略与上限由服务端校验。
+      prepared_spells: { prepared_spell_refs: ['spell:bless', 'spell:healing_word'] },
       uid: 'forged', coins_gp: 999,
     })
     expect(JSON.parse(String(calls.at(-1)?.init?.body))).toEqual({
       rest: 'long', expected_revision: 5, operation_id: 'rest-2',
       attunement: { attach: ['item:ring_of_protection'], detach: [] },
+      prepared_spells: { prepared_spell_refs: ['spell:bless', 'spell:healing_word'] },
     })
   })
 
@@ -694,6 +706,10 @@ describe('peer remote game client', () => {
     })
     expect(requestGame).toHaveBeenLastCalledWith(
       'h_abcdefghijk', 'character.rest', { rest: 'long', operation_id: 'rest-1' },
+    )
+    await client.tryApi('/games/web%7Cgame%7Chost/character/player_forged/spells')
+    expect(requestGame).toHaveBeenLastCalledWith(
+      'h_abcdefghijk', 'character.spells', {},
     )
     await client.tryApi('/games/web%7Cgame%7Chost/character/player_forged/advancement/preview', {
       method: 'POST', body: JSON.stringify({ choices: { feat_ref: 'feat:alert' } }),

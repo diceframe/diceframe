@@ -5,6 +5,8 @@ from src.plugin_host.package_limits import MAX_PLUGIN_PACKAGE_BYTES
 from src.plugin_host.runtime_protocol import PluginInvocationError, PluginProtocolError
 from src.webui.routes._common import _get_api, _require_confirmed_request
 from src.webui.services.modules import ModuleInUse
+from src.localization.messages import t
+from src.webui.viewer import viewer_for
 
 
 def _module_in_use_response(exc: ModuleInUse) -> web.Response:
@@ -22,8 +24,14 @@ def _module_in_use_response(exc: ModuleInUse) -> web.Response:
 async def api_plugins(request: web.Request) -> web.Response:
     return web.json_response(_get_api(request).list_plugins())
 
+async def api_plugin_dependencies(request: web.Request) -> web.Response:
+    return web.json_response(_get_api(request).list_plugin_dependencies())
+
 async def api_plugin_types(request: web.Request) -> web.Response:
     return web.json_response(_get_api(request).list_plugin_types())
+
+async def api_plugin_ui(request: web.Request) -> web.Response:
+    return web.json_response(_get_api(request).list_plugin_ui())
 
 async def api_plugins_rescan(request: web.Request) -> web.Response:
     denied=_require_confirmed_request(request)
@@ -38,6 +46,70 @@ async def api_plugin_detail(request: web.Request) -> web.Response:
 async def api_plugin_docs(request: web.Request) -> web.Response:
     try:
         result = _get_api(request).read_plugin_docs(request.match_info["plugin_id"])
+    except KeyError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=404)
+    return web.json_response(result, status=200 if result.get("ok") else 404)
+
+
+def _viewer_is_gm(request: web.Request) -> bool:
+    # A route may only pass this flag after an owning game service has
+    # established it; query parameters never grant GM access.
+    return bool(request.get("plugin_viewer_is_gm", False))
+
+
+async def api_plugin_rulebooks(request: web.Request) -> web.Response:
+    try:
+        result = _get_api(request).list_plugin_rulebooks(
+            request.match_info["plugin_id"], viewer_is_gm=_viewer_is_gm(request),
+        )
+    except KeyError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=404)
+    return web.json_response(result, status=200 if result.get("ok") else 404)
+
+
+async def api_plugin_rulebook(request: web.Request) -> web.Response:
+    try:
+        result = _get_api(request).read_plugin_rulebook(
+            request.match_info["plugin_id"], request.match_info["book_id"],
+            viewer_is_gm=_viewer_is_gm(request),
+        )
+    except KeyError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=404)
+    return web.json_response(result, status=200 if result.get("ok") else 404)
+
+
+async def api_game_plugin_rulebooks(request: web.Request) -> web.Response:
+    """Game-scoped rulebook projection with server-derived GM authority."""
+
+    api = _get_api(request)
+    instance = api.get_game_instance(request.match_info["game_key"])
+    viewer = viewer_for(request, instance)
+    if instance is None:
+        return web.json_response({"ok": False, "error": "GAME_NOT_FOUND"}, status=404)
+    if not viewer.is_member:
+        return web.json_response({"ok": False, "error": "GAME_MEMBER_REQUIRED"}, status=403)
+    try:
+        result = api.list_plugin_rulebooks(
+            request.match_info["plugin_id"], viewer_is_gm=viewer.is_gm,
+        )
+    except KeyError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=404)
+    return web.json_response(result, status=200 if result.get("ok") else 404)
+
+
+async def api_game_plugin_rulebook(request: web.Request) -> web.Response:
+    api = _get_api(request)
+    instance = api.get_game_instance(request.match_info["game_key"])
+    viewer = viewer_for(request, instance)
+    if instance is None:
+        return web.json_response({"ok": False, "error": "GAME_NOT_FOUND"}, status=404)
+    if not viewer.is_member:
+        return web.json_response({"ok": False, "error": "GAME_MEMBER_REQUIRED"}, status=403)
+    try:
+        result = api.read_plugin_rulebook(
+            request.match_info["plugin_id"], request.match_info["book_id"],
+            viewer_is_gm=viewer.is_gm,
+        )
     except KeyError as exc:
         return web.json_response({"ok": False, "error": str(exc)}, status=404)
     return web.json_response(result, status=200 if result.get("ok") else 404)
@@ -61,9 +133,9 @@ async def api_plugin_install(request: web.Request) -> web.Response:
     denied=_require_confirmed_request(request)
     if denied is not None: return denied
     if request.content_type != "multipart/form-data":
-        return web.json_response({"ok":False,"error":"插件安装需要 multipart/form-data"},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.install_multipart_required")},status=400)
     if request.content_length and request.content_length > MAX_PLUGIN_PACKAGE_BYTES + 1024 * 1024:
-        return web.json_response({"ok":False,"error":"插件包不能超过 20 MB"},status=413)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.package_too_large")},status=413)
     try:
         reader = await request.multipart()
         payload = b""
@@ -84,17 +156,55 @@ async def api_plugin_install(request: web.Request) -> web.Response:
                     break
                 size += len(chunk)
                 if size > MAX_PLUGIN_PACKAGE_BYTES:
-                    return web.json_response({"ok":False,"error":"插件包不能超过 20 MB"},status=413)
+                    return web.json_response({"ok":False,"error":t("webui.routes.plugins.package_too_large")},status=413)
                 chunks.append(chunk)
             payload = b"".join(chunks)
         if not payload:
-            return web.json_response({"ok":False,"error":"缺少 .dfplugin 插件文件"},status=400)
+            return web.json_response({"ok":False,"error":t("webui.routes.plugins.dfplugin_file_missing")},status=400)
         if not filename.lower().endswith(".dfplugin"):
-            return web.json_response({"ok":False,"error":"本地安装只接受 .dfplugin 文件；开源仓库请从插件商店安装"},status=400)
+            return web.json_response({"ok":False,"error":t("webui.routes.plugins.install_dfplugin_only")},status=400)
         result = await _get_api(request).install_plugin(payload, overwrite)
     except ValueError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=400)
     return web.json_response(result,status=200 if result.get("ok") else 400)
+
+
+async def api_plugin_group_install(request: web.Request) -> web.Response:
+    denied = _require_confirmed_request(request)
+    if denied is not None:
+        return denied
+    if request.content_type != "multipart/form-data":
+        return web.json_response({"ok": False, "error": "插件组安装需要 multipart/form-data"}, status=400)
+    try:
+        reader = await request.multipart()
+        payloads: list[bytes] = []
+        overwrite = False
+        total = 0
+        async for part in reader:
+            if part.name in {"overwrite", "replace"}:
+                overwrite = (await part.text()).strip().lower() in {"1", "true", "yes", "on"}
+                continue
+            if part.name not in {"file", "package", "files", "packages"}:
+                continue
+            chunks: list[bytes] = []
+            size = 0
+            while True:
+                chunk = await part.read_chunk()
+                if not chunk:
+                    break
+                size += len(chunk)
+                total += len(chunk)
+                if size > MAX_PLUGIN_PACKAGE_BYTES or total > MAX_PLUGIN_PACKAGE_BYTES * 32:
+                    return web.json_response({"ok": False, "error": "插件组大小超过限制"}, status=413)
+                chunks.append(chunk)
+            if chunks:
+                payloads.append(b"".join(chunks))
+        if not payloads or len(payloads) > 32:
+            return web.json_response({"ok": False, "error": "插件组需要 1 到 32 个 .dfplugin 文件"}, status=400)
+        result = await _get_api(request).install_plugin_group(payloads, overwrite)
+    except ValueError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+    return web.json_response(result, status=200 if result.get("ok") else 400)
 
 async def api_plugin_marketplace(request: web.Request) -> web.Response:
     result = await _get_api(request).list_plugin_marketplace()
@@ -115,13 +225,13 @@ async def api_plugin_tool_invoke(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"ok":False,"error":"请求体必须是 JSON 对象"},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object")},status=400)
     if not isinstance(body, dict):
-        return web.json_response({"ok":False,"error":"请求体必须是 JSON 对象"},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object")},status=400)
     arguments = body.get("arguments", {})
     context = body.get("context", {})
     if not isinstance(arguments, dict) or not isinstance(context, dict):
-        return web.json_response({"ok":False,"error":"arguments 和 context 必须是对象"},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.arguments_context_not_object")},status=400)
     try:
         result = await _get_api(request).invoke_plugin_tool(
             request.match_info["plugin_id"],
@@ -193,9 +303,9 @@ async def api_plugin_export(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"ok":False,"error":"请求体必须是 JSON 对象"},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object")},status=400)
     if not isinstance(body, dict):
-        return web.json_response({"ok":False,"error":"请求体必须是 JSON 对象"},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object")},status=400)
     try:
         result = _get_api(request).export_content_pack(
             body.get("plugin_id", ""),
@@ -241,6 +351,12 @@ async def api_plugin_asset(request: web.Request) -> web.StreamResponse:
         return web.json_response({"ok":False,"error":str(exc)},status=400)
     return web.FileResponse(path)
 
+
+# prebuilt UI 生产路由已撤下：第三方插件 HTML 从应用自身 origin 下发会把 CSP
+# `script-src 'self'` 等于整个 DiceFrame origin；须待独立 origin/nonce 隔离方案
+# 后再暴露（PR #754 审查阻塞 5）。host 侧 prebuilt_plugin_ui_descriptor /
+# prebuilt_ui_asset_path 与 src/webui/ui_isolation.py 模块保留待复用。
+
 async def api_plugin_marketplace_install(request: web.Request) -> web.Response:
     denied=_require_confirmed_request(request)
     if denied is not None: return denied
@@ -249,7 +365,7 @@ async def api_plugin_marketplace_install(request: web.Request) -> web.Response:
         plugin_id = str(body.get("plugin_id") or "").strip()
         overwrite = bool(body.get("overwrite"))
         if not plugin_id:
-            return web.json_response({"ok":False,"error":"缺少 plugin_id"},status=400)
+            return web.json_response({"ok":False,"error":t("webui.routes.plugins.plugin_id_missing")},status=400)
         result = await _get_api(request).install_marketplace_plugin(plugin_id, overwrite)
     except ValueError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=400)
@@ -342,9 +458,12 @@ async def api_plugin_clear_card_cache(request: web.Request) -> web.Response:
 
 def register_plugins(app: web.Application) -> None:
     app.router.add_get("/api/plugins",api_plugins)
+    app.router.add_get("/api/plugins/dependencies", api_plugin_dependencies)
     app.router.add_get("/api/plugins/types",api_plugin_types)
+    app.router.add_get("/api/plugins/ui", api_plugin_ui)
     app.router.add_post("/api/plugins/rescan",api_plugins_rescan)
     app.router.add_post("/api/plugins/install",api_plugin_install)
+    app.router.add_post("/api/plugins/install-group", api_plugin_group_install)
     app.router.add_get("/api/plugins/marketplace",api_plugin_marketplace)
     app.router.add_get("/api/plugins/contributions",api_plugin_contributions)
     app.router.add_get("/api/plugins/themes",api_plugin_themes)
@@ -363,8 +482,12 @@ def register_plugins(app: web.Application) -> None:
     app.router.add_delete("/api/plugins/mirrors/{mirror_id}",api_plugin_mirror_delete)
     app.router.add_get("/api/plugins/{plugin_id}",api_plugin_detail)
     app.router.add_get("/api/plugins/{plugin_id}/docs",api_plugin_docs)
+    app.router.add_get("/api/plugins/{plugin_id}/rulebooks", api_plugin_rulebooks)
+    app.router.add_get("/api/plugins/{plugin_id}/rulebooks/{book_id}", api_plugin_rulebook)
     app.router.add_put("/api/plugins/{plugin_id}/config",api_plugin_config)
     app.router.add_delete("/api/plugins/{plugin_id}",api_plugin_uninstall)
     app.router.add_post("/api/plugins/{plugin_id}/update",api_plugin_marketplace_update)
     app.router.add_post("/api/plugins/{plugin_id}/card-cache/clear",api_plugin_clear_card_cache)
+    app.router.add_get("/api/games/{game_key}/plugins/{plugin_id}/rulebooks", api_game_plugin_rulebooks)
+    app.router.add_get("/api/games/{game_key}/plugins/{plugin_id}/rulebooks/{book_id}", api_game_plugin_rulebook)
     app.router.add_post(r"/api/plugins/{plugin_id}/{action:start|stop|restart}",api_plugin_control)

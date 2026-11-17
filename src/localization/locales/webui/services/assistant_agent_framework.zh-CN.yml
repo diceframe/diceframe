@@ -1,0 +1,7 @@
+# src/webui/services/assistant_agent_framework.py 返回给请求方的提示。
+"zh-CN":
+  planning_next_step: "正在规划下一步…"
+  provider_access_denied: "模型服务商拒绝访问。请在设置中检查服务商凭据与模型权限。"
+  provider_insufficient_balance: "模型服务商返回余额不足（402）。请在设置中检查服务商余额或切换可用模型。"
+  provider_rate_limited: "模型服务商当前限制请求（429）。请稍后重试，或在设置中切换可用模型。"
+  provider_temporarily_unavailable: "模型服务商暂时不可用。请检查网络或服务商配置后重试。"

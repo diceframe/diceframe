@@ -1,0 +1,3 @@
+# src/webui/routes/assistant_agent.py 返回给请求方的提示。
+"en":
+  agent_run_failed: "DF Agent failed to run; please try again."

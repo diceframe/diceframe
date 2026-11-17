@@ -1,0 +1,3 @@
+# src/webui/pairing.py 返回给请求方的提示。
+"zh-CN":
+  code_invalid_or_expired: "配对码无效或已过期"

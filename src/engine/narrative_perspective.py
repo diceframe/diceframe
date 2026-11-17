@@ -12,6 +12,7 @@ from src.engine import module_hooks
 from typing import Any
 
 from src.engine.language import localized_text
+from src.localization.messages import t
 
 
 NARRATIVE_PERSPECTIVE_AUTO = "auto"
@@ -29,7 +30,7 @@ def validate_narrative_perspective(value: Any) -> str:
 
     normalized = str(value or NARRATIVE_PERSPECTIVE_AUTO).strip().casefold()
     if normalized not in NARRATIVE_PERSPECTIVES:
-        raise ValueError("叙事视角必须是 auto、immersive 或 third_person")
+        raise ValueError(t("engine.narrative_perspective.perspective_invalid"))
     return normalized
 
 

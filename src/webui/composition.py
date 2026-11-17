@@ -91,6 +91,7 @@ class RuntimeComposition:
                 api_key=main_api_key,
                 model_name=runtime_config["model"],
                 api_format=main_api_format,
+                reasoning_effort=runtime_config.get("model_reasoning_effort") or None,
             )
         ]
         for index in (1, 2):
@@ -116,6 +117,7 @@ class RuntimeComposition:
                     model_name=fallback_model,
                     api_format=fallback_api_format,
                     fallback=True,
+                    reasoning_effort=runtime_config.get(f"fallback{index}_reasoning_effort") or None,
                 )
             )
 
@@ -130,12 +132,18 @@ class RuntimeComposition:
             embedding_base_url = ""
             embedding_api_key = ""
         embedding_enabled = bool(
-            runtime_config.get("embedding_enabled", False) and embedding_base_url
+            runtime_config.get("embedding_enabled", False)
+            and (
+                str(runtime_config.get("embedding_source") or "external") == "local"
+                or embedding_base_url
+            )
         )
         check_route = resolve_provider(runtime_config, runtime_config.get("check_provider_ref", ""))
         check_model = str(runtime_config.get("check_model") or "").strip()
+        check_reasoning_effort = runtime_config.get("check_model_reasoning_effort") or None
         check_provider = (
-            ProviderConfig("check", check_route["base_url"], check_route["api_key"], check_model, api_format=check_route["api_format"])
+            ProviderConfig("check", check_route["base_url"], check_route["api_key"], check_model,
+                           api_format=check_route["api_format"], reasoning_effort=check_reasoning_effort)
             if check_route and check_route["base_url"] and check_model else None
         )
         # 启动 / 热重载诊断：旧配置可能在磁盘上保留"已启用却解析不出客户端"
@@ -161,6 +169,8 @@ class RuntimeComposition:
             generation_options=runtime_config.get("llm_generation_options", {}),
             context_recent_rounds=runtime_config.get("context_recent_rounds", 0),
             embedding_enabled=embedding_enabled,
+            embedding_source=str(runtime_config.get("embedding_source") or "external"),
+            embedding_local_model_id=str(runtime_config.get("embedding_local_model_id") or ""),
             embedding_base_url=embedding_base_url,
             embedding_api_key=embedding_api_key,
             embedding_model=runtime_config.get(

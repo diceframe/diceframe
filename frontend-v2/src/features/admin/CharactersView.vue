@@ -125,6 +125,15 @@ const editCard = ref<CardEditForm | null>(null)
 const editNpcPortrait = ref<NpcPortraitEdit | null>(null)
 const advancementCard = ref<CharacterCard | null>(null)
 const advancementPlayer = ref<Player | null>(null)
+// A card saved with a starting level above 1 keeps advancing on the saved card:
+// each level is its own persisted transaction, so a cancelled chain keeps the
+// levels it already gained instead of rolling them back.
+const wizardChain = ref<{
+  cardId: string
+  character: CharacterSheet
+  revision: number
+  targetLevel: number
+} | null>(null)
 const professionalEdit = ref<ProfessionalEditTarget | null>(null)
 const showWizard = ref(false)
 const characterSearch = ref('')
@@ -149,15 +158,25 @@ const ruleAttrsTotal = ref(60)
 const ruleId = ref('')
 const ruleDetail = ref<{ skill_pool?: Array<string | SkillSpec>; skills?: Array<string | SkillSpec>; rule_classes?: string[] } | null>(null)
 const ruleSchemaLoading = ref(false)
-const canCreateCard = computed(() => Boolean(ruleId.value && ruleDetail.value && !ruleSchemaLoading.value && !currentLoading.value && !currentError.value))
+// The current game binding and the library authoring binding are deliberately
+// separate. A character-card draft may target another installed ruleset while
+// a game is open; the game pane keeps projecting its own rule.
+const libraryRuleId = ref('')
+const libraryRuleMeta = ref<RuleMeta>({})
+const libraryRuleAttrs = ref<RuleAttr[]>([])
+const libraryRuleAttrsTotal = ref(60)
+const libraryRuleDetail = ref<{ skill_pool?: Array<string | SkillSpec>; skills?: Array<string | SkillSpec> } | null>(null)
+const libraryRuleSchemaLoading = ref(false)
+const canCreateCard = computed(() => Boolean(libraryRuleId.value && libraryRuleDetail.value && !libraryRuleSchemaLoading.value))
 let ruleSchemaSequence = 0
+let libraryRuleSchemaSequence = 0
 const ruleOptions = computed<RuleSummary[]>(() => {
   if (!game.value || !ruleMeta.value.rule_id || rules.value.some(rule => rule.rule_id === ruleMeta.value.rule_id)) return rules.value
   return [{ rule_id: String(ruleMeta.value.rule_id), rule_name: String(ruleMeta.value.rule_name || ruleMeta.value.rule_id) }, ...rules.value]
 })
 
 const skillPool = computed<Array<string | SkillSpec>>(() => {
-  const detail = ruleDetail.value || {}
+  const detail = libraryRuleDetail.value || {}
   return detail.skill_pool || detail.skills || []
 })
 const ruleClasses = computed<string[]>(() => ruleDetail.value?.rule_classes || [])
@@ -230,7 +249,7 @@ function isProfessionalGame(): boolean {
   return hasRulesAwareLifecycle(data.value?.ruleset_runtime?.capabilities)
 }
 function isSelectedProfessionalRule(): boolean {
-  const rule = rules.value.find(candidate => candidate.rule_id === ruleId.value)
+  const rule = rules.value.find(candidate => candidate.rule_id === libraryRuleId.value)
   return hasRulesAwareLifecycle(rule?.ruleset_runtime?.capabilities)
 }
 function professionalLevel(card: CharacterSheet): number {
@@ -242,12 +261,12 @@ function liveAdvancementRow(userId: string) {
   return data.value?.advancement?.players.find(row => row.user_id === userId)
 }
 function currentRuleBinding(): Pick<CharacterCard, 'rule_id' | 'rule_name' | 'rule_version' | 'mechanics' | 'language'> {
-  const rule = rules.value.find(candidate => candidate.rule_id === ruleId.value)
+  const rule = rules.value.find(candidate => candidate.rule_id === libraryRuleId.value)
   return {
-    rule_id: ruleId.value,
-    rule_name: String(ruleMeta.value.rule_name || rule?.rule_name || ruleId.value),
-    rule_version: String(ruleMeta.value.rule_version || ''),
-    mechanics: String(ruleMeta.value.mechanics || ''),
+    rule_id: libraryRuleId.value,
+    rule_name: String(libraryRuleMeta.value.rule_name || rule?.rule_name || libraryRuleId.value),
+    rule_version: String(libraryRuleMeta.value.rule_version || ''),
+    mechanics: String(libraryRuleMeta.value.mechanics || ''),
     language: String(locale.value),
   }
 }
@@ -284,18 +303,68 @@ watch([ruleId, locale], async ([id]) => {
     )
     if (schemaGame !== game.value || sequence !== ruleSchemaSequence) return
     if (!schema.ok) throw new Error(schema.error || t('ruleLoadFailed'))
-    if (!game.value) {
-      ruleMeta.value = schema.rule_meta || {}
-      ruleAttrs.value = schema.rule_attrs || []
-      ruleAttrsTotal.value = Number(schema.rule_attrs_total || 60)
-    }
+    ruleMeta.value = schema.rule_meta || ruleMeta.value
+    ruleAttrs.value = schema.rule_attrs || ruleAttrs.value
+    ruleAttrsTotal.value = Number(schema.rule_attrs_total || ruleAttrsTotal.value)
     ruleDetail.value = { skill_pool: schema.skill_pool || [], rule_classes: schema.rule_classes || [] }
+    if (game.value && libraryRuleId.value === id) {
+      libraryRuleSchemaSequence++
+      libraryRuleMeta.value = ruleMeta.value
+      libraryRuleAttrs.value = ruleAttrs.value
+      libraryRuleAttrsTotal.value = ruleAttrsTotal.value
+      libraryRuleDetail.value = ruleDetail.value
+      libraryRuleSchemaLoading.value = false
+    }
   } catch (e: unknown) {
     if (schemaGame !== game.value || sequence !== ruleSchemaSequence) return
     ruleDetail.value = null
     error.value = errorMessage(e)
   } finally {
     if (sequence === ruleSchemaSequence) ruleSchemaLoading.value = false
+  }
+})
+
+watch([libraryRuleId, ruleId, () => String(ruleMeta.value.rule_id || ''), locale], async ([id]) => {
+  if (!id) {
+    libraryRuleSchemaLoading.value = false
+    libraryRuleDetail.value = null
+    libraryRuleMeta.value = {}
+    libraryRuleAttrs.value = []
+    libraryRuleAttrsTotal.value = 60
+    return
+  }
+  // While a game is open, wait until its binding is known. If the library
+  // selects the same rule, the current-game schema request is shared below;
+  // this avoids two concurrent reads and keeps refresh/loading semantics stable.
+  if (game.value && !ruleId.value) return
+  if (game.value && id === ruleId.value) {
+    if (String(ruleMeta.value.rule_id || '') !== id || !ruleDetail.value) return
+    libraryRuleMeta.value = ruleMeta.value
+    libraryRuleAttrs.value = ruleAttrs.value
+    libraryRuleAttrsTotal.value = ruleAttrsTotal.value
+    libraryRuleDetail.value = ruleDetail.value
+    libraryRuleSchemaLoading.value = false
+    return
+  }
+  const sequence = ++libraryRuleSchemaSequence
+  libraryRuleSchemaLoading.value = true
+  libraryRuleDetail.value = null
+  try {
+    const schema = await api<CharacterSchemaResponse>(
+      `/rules/${encodeURIComponent(String(id))}/character-schema?language=${encodeURIComponent(String(locale.value))}`,
+    )
+    if (sequence !== libraryRuleSchemaSequence) return
+    if (!schema.ok) throw new Error(schema.error || t('ruleLoadFailed'))
+    libraryRuleMeta.value = schema.rule_meta || {}
+    libraryRuleAttrs.value = schema.rule_attrs || []
+    libraryRuleAttrsTotal.value = Number(schema.rule_attrs_total || 60)
+    libraryRuleDetail.value = { skill_pool: schema.skill_pool || [] }
+  } catch (e: unknown) {
+    if (sequence !== libraryRuleSchemaSequence) return
+    libraryRuleDetail.value = null
+    error.value = errorMessage(e)
+  } finally {
+    if (sequence === libraryRuleSchemaSequence) libraryRuleSchemaLoading.value = false
   }
 })
 
@@ -309,11 +378,17 @@ async function load() {
   libraryLoading.value = true
   currentLoading.value = Boolean(requestedGame)
   ruleSchemaSequence++
+  libraryRuleSchemaSequence++
   ruleId.value = ''
+  libraryRuleId.value = ''
   ruleMeta.value = {}
   ruleAttrs.value = []
   ruleAttrsTotal.value = 60
   ruleDetail.value = null
+  libraryRuleMeta.value = {}
+  libraryRuleAttrs.value = []
+  libraryRuleAttrsTotal.value = 60
+  libraryRuleDetail.value = null
 
   const cardsRequest = api<CharacterCardsResponse>('/character-cards')
   const rulesRequest = api<RulesResponse>('/rules')
@@ -334,7 +409,7 @@ async function load() {
   void rulesRequest.then(result => {
     if (!isCurrent()) return
     rules.value = result.rules || []
-    if (!requestedGame && (!ruleId.value || !rules.value.some(rule => rule.rule_id === ruleId.value))) ruleId.value = rules.value[0]?.rule_id || ''
+    if (!libraryRuleId.value || !rules.value.some(rule => rule.rule_id === libraryRuleId.value)) libraryRuleId.value = rules.value[0]?.rule_id || ''
   }).catch(reason => {
     if (isCurrent() && !error.value) error.value = errorMessage(reason)
   })
@@ -347,6 +422,7 @@ async function load() {
       ruleAttrs.value = result.rule_attrs || []
       ruleAttrsTotal.value = result.rule_attrs_total || 60
       ruleId.value = String(ruleMeta.value.rule_id || '')
+      if (!libraryRuleId.value) libraryRuleId.value = ruleId.value
     }
   }).catch(reason => {
     if (!isCurrent()) return
@@ -476,6 +552,7 @@ watch(() => route.query.game, rawGame => {
   if (nextGame === game.value) return
   game.value = nextGame
   ruleId.value = ''
+  libraryRuleId.value = ''
   edit.value = null
   editCard.value = null
   editNpcPortrait.value = null
@@ -791,11 +868,12 @@ async function saveNpcPortrait() {
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
 }
 
-async function onWizardSubmit(c: CharacterSheet) {
+async function onWizardSubmit(c: CharacterSheet, options?: { targetLevel?: number }) {
   if (!canCreateCard.value) return
+  const targetLevel = Math.floor(Number(options?.targetLevel || 0))
   busy.value = true
   try {
-    await api('/character-cards', {
+    const created = await api<{ ok: boolean; card?: CharacterCard }>('/character-cards', {
       method: 'POST',
       body: JSON.stringify({
         ...c,
@@ -805,25 +883,55 @@ async function onWizardSubmit(c: CharacterSheet) {
     })
     showWizard.value = false
     await load()
+    const saved = created?.card
+    if (targetLevel > 1 && saved?.id) {
+      wizardChain.value = {
+        cardId: String(saved.id),
+        character: saved as CharacterSheet,
+        revision: Number(saved.ruleset_revision || 0),
+        targetLevel,
+      }
+      return
+    }
     toast.success(t('characterCardCreated'))
   } catch (e: unknown) { error.value = errorMessage(e) } finally { busy.value = false }
+}
+
+async function onWizardChainCompleted(_character: CharacterSheet) {
+  wizardChain.value = null
+  await load()
+  toast.success(t('characterCardCreated'))
+}
+
+async function onWizardChainCancel() {
+  const chain = wizardChain.value
+  wizardChain.value = null
+  await load()
+  const saved = chain
+    ? (data.value?.cards || []).find(candidate => cardId(candidate) === chain.cardId)
+    : undefined
+  const reached = saved ? professionalLevel(saved) : 0
+  if (reached <= 1) return
+  toast.info(String(locale.value).toLowerCase().startsWith('zh')
+    ? `已升至 ${reached} 级，剩余等级可在卡库继续升级。`
+    : `Advanced to level ${reached}; finish the remaining levels from the card library.`)
 }
 </script>
 
 <template>
   <section class="view archive-page characters-page">
-    <ContentPageHeader class="view-title archive-hero characters-page-heading" kicker="CHARACTER ROSTER" :title="t('characterManagement')" :description="journeyCopy.description">
+    <ContentPageHeader compact class="view-title characters-page-heading" kicker="CHARACTER ROSTER" :title="t('characterManagement')" :description="journeyCopy.description">
       <template #actions>
         <div class="actions character-page-actions">
           <template v-if="activePane === 'library'">
           <label class="standalone-rule-select">
             <span>{{ t('characterCardRule') }}</span>
-            <select v-model="ruleId" :disabled="Boolean(game) || ruleSchemaLoading || !rules.length">
+            <select v-model="libraryRuleId" :disabled="libraryRuleSchemaLoading || !rules.length">
               <option v-for="rule in ruleOptions" :key="rule.rule_id" :value="rule.rule_id">{{ ruleNameOf(rule) }}</option>
             </select>
           </label>
           <button data-testid="new-character-card" class="primary" :disabled="!canCreateCard" @click="showWizard = true">+ {{ t('newCharacterCard') }}</button>
-          <span v-if="!currentLoading && !ruleSchemaLoading && !canCreateCard" class="form-hint">{{ journeyCopy.creationUnavailable }}</span>
+          <span v-if="!currentLoading && !libraryRuleSchemaLoading && !canCreateCard" class="form-hint">{{ journeyCopy.creationUnavailable }}</span>
           </template>
           <button @click="load">{{ t('refresh') }}</button>
         </div>
@@ -1095,18 +1203,32 @@ async function onWizardSubmit(c: CharacterSheet) {
 
     <RulesetExperienceHost
       v-if="showWizard && isSelectedProfessionalRule()"
-      :rule-id="ruleId"
+      :rule-id="libraryRuleId"
       :language="String(locale)"
+      :chain="false"
       @submit="onWizardSubmit"
       @cancel="showWizard = false"
     />
+    <RulesetAdvancementHost
+      v-if="wizardChain"
+      :runtime-id="String(data?.ruleset_runtime?.id || '')"
+      :rule-id="ruleId"
+      :character="wizardChain.character"
+      :card-id="wizardChain.cardId"
+      :revision="wizardChain.revision"
+      :target-level="wizardChain.targetLevel"
+      :language="String(locale)"
+      @chain-completed="onWizardChainCompleted"
+      @applied="onWizardChainCompleted"
+      @cancel="onWizardChainCancel"
+    />
     <CharacterWizard
       v-else-if="showWizard"
-      :rule-meta="ruleMeta"
-      :rule-attrs="ruleAttrs"
-      :attr-total="ruleAttrsTotal"
+      :rule-meta="libraryRuleMeta"
+      :rule-attrs="libraryRuleAttrs"
+      :attr-total="libraryRuleAttrsTotal"
       :skill-pool="skillPool"
-      :rule-id="ruleId"
+      :rule-id="libraryRuleId"
       :language="String(locale)"
       @submit="onWizardSubmit"
       @cancel="showWizard = false"

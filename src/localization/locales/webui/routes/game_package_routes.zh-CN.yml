@@ -1,0 +1,10 @@
+# src/webui/routes/game_package_routes.py 返回给请求方的提示。
+"zh-CN":
+  batch_limit: "单次最多 100 个"
+  body_not_json: "请求体不是合法 JSON"
+  delete_gm_only: "非 GM 不可删除"
+  game_keys_required: "game_keys 必须是非空列表"
+  import_failed: "导入存档失败：%{exc}"
+  key_type_invalid: "key 类型错误"
+  multipart_required: "存档导入需要 multipart/form-data"
+  single_save_file_only: "只能上传一个存档文件"

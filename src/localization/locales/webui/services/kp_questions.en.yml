@@ -1,0 +1,13 @@
+# src/webui/services/kp_questions.py 返回给请求方的提示。
+"en":
+  claim_character_first: "Claim a character in this game before asking the KP"
+  game_advancing: "The game is advancing; ask again later"
+  game_missing_refresh: "The game does not exist; refresh and try again"
+  game_replaced_during_question: "The game was replaced or deleted while the question was being asked; refresh and try again"
+  kp_empty_answer: "The KP did not return an answer that can be shown; please try again"
+  kp_model_unconfigured: "The KP model is not configured or is unavailable"
+  kp_unavailable: "The KP cannot answer right now; try again later"
+  public_answer_save_failed: "The public answer could not be saved right now; try again later"
+  question_required: "Enter the question for the KP"
+  run_read_only: "This run is read-only"
+  visibility_invalid: "Invalid visibility for the question"

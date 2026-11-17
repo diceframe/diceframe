@@ -27,6 +27,8 @@ internal static partial class DiceFrameLauncher
     private const int MaxCrashDumps = 3;
     // 异常退出后等待 WER 写 dump 的窗口（秒）：过短会丢掉本来能拿到的 dump。
     private const int CrashDumpWaitSeconds = 8;
+    // 启动器提升用的同目录临时文件前缀，与 launcher_promotion.py 一致。
+    private const string LauncherTempPrefix = ".DiceFrame.exe.";
     private static Process serverProcess;
     private static bool shuttingDown;
     // 异常退出取证：记录当前 server 的启动信息；主动停止（更新/关机）不报 crash。
@@ -38,14 +40,21 @@ internal static partial class DiceFrameLauncher
     // 本机 DiceFrame endpoint 解析结果：数据目录 + 端口 → scheme 与自签指纹。
     private static string launcherDataDir = "";
     private static string launcherPort = DefaultPort;
-    // 仅对 Launcher → 本机 DiceFrame 生效的证书指纹固定；绝不做全局校验关闭。
-    private static string expectedCertFingerprint = "";
+    // 证书校验一律按 data/certs/self-signed/fingerprint.txt 的当前内容判定，
+    // 只对 Launcher → 本机 DiceFrame 生效；绝不做全局校验关闭。
     private static HttpClient localHttpClient;
 
     [STAThread]
     private static int Main(string[] args)
     {
-        Console.Title = "DiceFrame";
+        try
+        {
+            Console.Title = "DiceFrame";
+        }
+        catch (IOException)
+        {
+            // 没有控制台（被其它程序以无窗口方式拉起）时设置标题会抛异常。
+        }
         foreach (string arg in args)
         {
             if (string.Equals(arg, "--browser", StringComparison.OrdinalIgnoreCase))
@@ -68,12 +77,25 @@ internal static partial class DiceFrameLauncher
         Directory.CreateDirectory(logsDir);
         Directory.CreateDirectory(updaterDir);
         TryDelete(Path.Combine(installRoot, "DiceFrame.exe.old"));
+        // 启动器提升被强行中断（断电、结束进程）时可能留下的同目录临时文件。
+        try
+        {
+            foreach (string leftover in Directory.GetFiles(installRoot, LauncherTempPrefix + "*.tmp"))
+            {
+                TryDelete(leftover);
+            }
+        }
+        catch
+        {
+        }
 
         string port = ResolvePort(Path.Combine(dataDir, "config.json"));
         launcherDataDir = dataDir;
         launcherLogsDir = logsDir;
         launcherPort = port;
         InitLocalHttpClient();
+        // 接管端口上已有的后端前要靠这把密钥做实例握手（见 BackendLink.cs）。
+        EnsureInstanceKey(dataDir);
         string url = ResolveServerEndpoint().Url;
         string activeDir = ResolveActiveDirectory(installRoot, currentPointer);
         // 必须在 MigrateLegacyPortablePayload 之前：否则覆盖进根目录的新版本会被当成旧布局删掉。
@@ -114,8 +136,13 @@ internal static partial class DiceFrameLauncher
 
         try
         {
+#if LAUNCHER_TESTING
+            // 生命周期集成测试的构建（tests/test_launcher_lifecycle.py）：不改用户注册表。
+            crashDumpSnapshot = null;
+#else
             // 崩溃取证失败绝不能阻止 DiceFrame 启动（内部只打印提示）。
             crashDumpSnapshot = EnableCrashDumpCapture(logsDir);
+#endif
             return RunPortable(
                 installRoot,
                 dataDir,
@@ -169,10 +196,30 @@ internal static partial class DiceFrameLauncher
                 DetachConsole(logsDir);
             }
         }
+        // 端口上可能已经有服务：上次切换 HTTPS 时服务端 execv 换了 PID、用户重复双击、
+        // 或上一个启动器被强制结束时留下的孤儿后端。只有经实例握手证明属于本安装的后端
+        // 才接管；另一份安装、旧版本、别的程序占着端口时按端口冲突报告——不 spawn 一个
+        // 必然 10048 的后端，也不打开对方的页面、不把本安装的访问密码注入过去。
+        ServerIdentity running;
+        if (PortHeldByUnverifiedServer(url, out running))
+        {
+            return Fail(PortConflictMessage());
+        }
+        if (running != null)
+        {
+            BindVerifiedProcess(running, ServerOwnership.Attached);
+            url = running.Url;
+            Console.WriteLine(
+                "DiceFrame is already running at " + url + " (pid "
+                    + running.Pid.ToString(CultureInfo.InvariantCulture) + ")；本次启动接管该实例。"
+            );
+        }
+
         if (switchToAdoptedPayload)
         {
             // 覆盖升级：新版本已搬进 versions/，直接按更新流程切过去（失败回滚到覆盖前的
             // 版本），不先把旧版本启动起来再切。候选通过健康检查就打开界面，观察期照常进行。
+            // 接管了本安装的旧实例时，HandleUpdate 会先请它优雅退出。
             activeDir = HandleUpdate(
                 installRoot,
                 dataDir,
@@ -181,13 +228,13 @@ internal static partial class DiceFrameLauncher
                 restartSignal,
                 activeDir,
                 url,
-                delegate(string candidateDir)
+                delegate(ServerIdentity candidate, string candidateDir)
                 {
-                    OpenUi(ResolveServerEndpoint().Url, candidateDir);
+                    OpenUi(candidate, candidateDir);
                     browserOpened = true;
                 }
             );
-            url = ResolveServerEndpoint().Url;
+            url = currentIdentity != null ? currentIdentity.Url : ResolveServerEndpoint().Url;
         }
         if (shuttingDown)
         {
@@ -195,49 +242,65 @@ internal static partial class DiceFrameLauncher
             return 0;
         }
 
-        if (serverProcess == null || serverProcess.HasExited)
+        if (serverOwnership == ServerOwnership.None)
         {
             try
             {
-                serverProcess = StartServer(installRoot, activeDir, dataDir);
+                BindStartedServer(StartServer(installRoot, activeDir, dataDir));
             }
             catch (Exception ex)
             {
                 return Fail("DiceFrame failed to start: " + ex.Message);
             }
+            ServerIdentity ready = WaitForOwnedServer(
+                serverProcess,
+                url,
+                TimeSpan.FromSeconds(ReadyTimeoutSeconds)
+            );
+            if (ready != null)
+            {
+                BindIdentity(ready);
+                url = ready.Url;
+            }
+            else if (shuttingDown)
+            {
+                return 0;
+            }
+            else if (ServerHasExited())
+            {
+                // 启动阶段就退出：可能是自重启（例如启动时应用了新的连接配置），也可能是
+                // python.exe native crash——后者不是用户主动关闭，也不属于更新切换，要留取证。
+                bool announced;
+                if (!FollowServerRestart(url, out announced))
+                {
+                    return ReportServerExit(logsDir, activeDir, announced);
+                }
+                url = currentIdentity.Url;
+            }
+            else
+            {
+                Console.WriteLine("DiceFrame is still starting. Open this address manually:");
+                Console.WriteLine(url);
+                Console.WriteLine();
+            }
         }
 
-        if (WaitForServer(serverProcess, url, TimeSpan.FromSeconds(ReadyTimeoutSeconds)))
+        if (currentIdentity != null && !browserOpened)
         {
-            if (!browserOpened)
-            {
-                OpenUi(url, activeDir);
-            }
-            Console.WriteLine("DiceFrame is running. Close this window to stop it.");
-            Console.WriteLine();
+            OpenUi(currentIdentity, activeDir);
+            browserOpened = true;
         }
-        else if (shuttingDown)
+        if (currentIdentity != null)
         {
-            return 0;
-        }
-        else if (serverProcess.HasExited)
-        {
-            // 启动阶段就异常退出（例如 python.exe native crash）同样要留取证：
-            // 这类退出不是用户主动关闭，也不属于更新切换。
-            if (!suppressCrashReport)
-            {
-                HandleUnexpectedServerExit(logsDir, serverProcess, activeDir);
-                return serverProcess.ExitCode;
-            }
-            return Fail("DiceFrame exited before the Web UI became ready.");
-        }
-        else
-        {
-            Console.WriteLine("DiceFrame is still starting. Open this address manually:");
-            Console.WriteLine(url);
+            Console.WriteLine(
+                serverOwnership == ServerOwnership.Owned
+                    ? "DiceFrame is running. Close this window to stop it."
+                    : "Closing this window leaves the attached DiceFrame running."
+            );
             Console.WriteLine();
         }
 
+        DateTime nextReadyCheck = DateTime.MinValue;
         while (!shuttingDown)
         {
             if (File.Exists(restartSignal))
@@ -251,15 +314,46 @@ internal static partial class DiceFrameLauncher
                     activeDir,
                     url
                 );
+                if (currentIdentity != null)
+                {
+                    url = currentIdentity.Url;
+                }
             }
 
-            if (serverProcess == null || serverProcess.HasExited)
+            if (serverOwnership == ServerOwnership.None)
             {
-                if (serverProcess != null && !suppressCrashReport)
+                // 更新失败且回滚也没能启动服务。
+                return Fail("DiceFrame is not running: the update and its rollback both failed.");
+            }
+
+            if (ServerHasExited())
+            {
+                // 运行中的自重启（切换/关闭 HTTPS、重签证书、设置里的「重启」）与启动阶段
+                // 同一套判定：宣告过重启的接上接班进程，界面不关；其它退出照原样处理。
+                bool announced;
+                if (FollowServerRestart(url, out announced))
                 {
-                    HandleUnexpectedServerExit(logsDir, serverProcess, activeDir);
+                    url = currentIdentity.Url;
+                    continue;
                 }
-                return serverProcess == null ? 1 : serverProcess.ExitCode;
+                return ReportServerExit(logsDir, activeDir, announced);
+            }
+
+            if (currentIdentity == null && DateTime.UtcNow >= nextReadyCheck)
+            {
+                // 启动超过就绪等待时间仍在启动：就绪后补开界面，而不是一直停在启动画面。
+                ServerIdentity ready = ProbeOwnedServer(serverProcess, url);
+                if (ready != null)
+                {
+                    BindIdentity(ready);
+                    url = ready.Url;
+                    if (!browserOpened)
+                    {
+                        OpenUi(ready, activeDir);
+                        browserOpened = true;
+                    }
+                }
+                nextReadyCheck = DateTime.UtcNow.AddSeconds(2);
             }
             Thread.Sleep(500);
         }
@@ -274,7 +368,7 @@ internal static partial class DiceFrameLauncher
         string restartSignal,
         string previousDir,
         string url,
-        Action<string> candidateReady = null
+        Action<ServerIdentity, string> candidateReady = null
     )
     {
         // 注意：这里不能提前 suppress——更新信号读取或候选校验失败时会 early
@@ -325,50 +419,79 @@ internal static partial class DiceFrameLauncher
         }
 
         Console.WriteLine("Applying DiceFrame " + version + "...");
-        // 走到这里才真正开始主动切换：StopServer 与候选/回滚进程的退出由更新
+        // 走到这里才真正开始主动切换：停止旧后端与候选/回滚进程的退出由更新
         // 状态记录，不写 last-crash.json；候选 StartServer 会重新打开取证。
         suppressCrashReport = true;
-        StopServer();
+        bool oldServerRunning;
+        string stopError = StopServerForSwitch(out oldServerRunning);
+        if (stopError != null && oldServerRunning)
+        {
+            // 旧后端还在服务：绝不启动候选去和它抢端口。保持现状，请用户手动退出后重试。
+            suppressCrashReport = false;
+            WriteUpdateState(
+                updaterDir,
+                "failed",
+                version,
+                "无法停止正在运行的 DiceFrame（" + stopError + "），本次更新没有应用。"
+                    + "请关闭所有 DiceFrame 窗口和后台进程后重新执行更新。",
+                operation
+            );
+            TryDelete(restartSignal);
+            Console.WriteLine("Update not applied: " + stopError);
+            return previousDir;
+        }
 
         Process candidateProcess = null;
+        ServerIdentity candidateIdentity = null;
         string failure = "";
-        try
+        if (stopError != null)
         {
-            candidateProcess = StartServer(installRoot, candidateDir, dataDir);
-            serverProcess = candidateProcess;
-            // 数据目录是共享的：候选版本启动后重新解析 scheme（HTTP/HTTPS）。
-            url = ResolveServerEndpoint().Url;
-            if (!WaitForVersion(
-                candidateProcess,
-                url,
-                version,
-                TimeSpan.FromSeconds(ReadyTimeoutSeconds)
-            ))
+            // 旧后端已经停了，但端口被别的程序占着：候选必然起不来，直接走回滚。
+            failure = "旧版本已停止但" + stopError;
+        }
+        else
+        {
+            try
             {
-                failure = candidateProcess.HasExited
-                    ? "候选版本在健康检查前退出"
-                    : "候选版本健康检查超时或版本不匹配";
-            }
-            else
-            {
-                if (candidateReady != null)
-                {
-                    candidateReady(candidateDir);
-                }
-                if (!PassesProbation(
+                candidateProcess = StartServer(installRoot, candidateDir, dataDir);
+                BindStartedServer(candidateProcess);
+                // 数据目录是共享的：候选版本启动后重新解析 scheme（HTTP/HTTPS）。
+                url = ResolveServerEndpoint().Url;
+                candidateIdentity = WaitForVersion(
                     candidateProcess,
                     url,
                     version,
-                    probationSeconds
-                ))
+                    TimeSpan.FromSeconds(ReadyTimeoutSeconds)
+                );
+                if (candidateIdentity == null)
                 {
-                    failure = "候选版本在观察期内退出或失去响应";
+                    failure = candidateProcess.HasExited
+                        ? "候选版本在健康检查前退出"
+                        : "候选版本健康检查超时或版本不匹配";
+                }
+                else
+                {
+                    BindIdentity(candidateIdentity);
+                    url = candidateIdentity.Url;
+                    if (candidateReady != null)
+                    {
+                        candidateReady(candidateIdentity, candidateDir);
+                    }
+                    if (!PassesProbation(
+                        candidateProcess,
+                        url,
+                        version,
+                        probationSeconds
+                    ))
+                    {
+                        failure = "候选版本在观察期内退出或失去响应";
+                    }
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            failure = "候选版本启动失败：" + ex.Message;
+            catch (Exception ex)
+            {
+                failure = "候选版本启动失败：" + ex.Message;
+            }
         }
 
         if (string.IsNullOrEmpty(failure))
@@ -399,11 +522,21 @@ internal static partial class DiceFrameLauncher
 
         Console.WriteLine("Update failed; rolling back: " + failure);
         StopProcess(candidateProcess);
+        ClearServerBinding();
         try
         {
-            serverProcess = StartServer(installRoot, previousDir, dataDir);
+            if (!WaitForPortRelease(TimeSpan.FromSeconds(PortReleaseTimeoutSeconds)))
+            {
+                throw new IOException("端口 " + launcherPort + " 仍被占用");
+            }
+            BindStartedServer(StartServer(installRoot, previousDir, dataDir));
             url = ResolveServerEndpoint().Url;
-            if (!WaitForServer(serverProcess, url, TimeSpan.FromSeconds(ReadyTimeoutSeconds)))
+            ServerIdentity restored = WaitForOwnedServer(
+                serverProcess,
+                url,
+                TimeSpan.FromSeconds(ReadyTimeoutSeconds)
+            );
+            if (restored == null)
             {
                 WriteUpdateState(
                     updaterDir,
@@ -415,13 +548,14 @@ internal static partial class DiceFrameLauncher
             }
             else
             {
+                BindIdentity(restored);
                 WriteUpdateState(updaterDir, "rolled-back", version, failure, operation);
                 Console.WriteLine("Rollback succeeded.");
             }
         }
         catch (Exception ex)
         {
-            serverProcess = null;
+            ClearServerBinding();
             WriteUpdateState(
                 updaterDir,
                 "failed",
@@ -451,6 +585,9 @@ internal static partial class DiceFrameLauncher
             throw new FileNotFoundException("Cannot find DiceFrame server", serverScript);
         }
 
+        // 必须在首次访问 ProcessStartInfo.EnvironmentVariables 之前完成：
+        // 原始环境块里的大小写重复键会让 .NET Framework 在这里直接抛异常。
+        NormalizeProcessEnvironment();
         ProcessStartInfo info = new ProcessStartInfo();
         info.FileName = python;
         info.Arguments = Quote(serverScript);
@@ -741,7 +878,7 @@ internal static partial class DiceFrameLauncher
             }
             if (DateTime.UtcNow >= nextHealthCheck)
             {
-                if (IsHealthyVersion(url, version))
+                if (IsHealthyVersion(url, version, process))
                 {
                     failureStarted = DateTime.MinValue;
                 }
@@ -763,29 +900,7 @@ internal static partial class DiceFrameLauncher
         return true;
     }
 
-    private static bool WaitForServer(
-        Process process,
-        string url,
-        TimeSpan timeout
-    )
-    {
-        DateTime deadline = DateTime.UtcNow.Add(timeout);
-        while (DateTime.UtcNow < deadline)
-        {
-            if (process != null && process.HasExited)
-            {
-                return false;
-            }
-            if (CanOpen(url))
-            {
-                return true;
-            }
-            Thread.Sleep(500);
-        }
-        return false;
-    }
-
-    private static bool WaitForVersion(
+    private static ServerIdentity WaitForVersion(
         Process process,
         string url,
         string expectedVersion,
@@ -795,51 +910,29 @@ internal static partial class DiceFrameLauncher
         DateTime deadline = DateTime.UtcNow.Add(timeout);
         while (DateTime.UtcNow < deadline)
         {
-            if (process != null && process.HasExited)
+            if (process == null || process.HasExited)
             {
-                return false;
+                return null;
             }
-            if (IsHealthyVersion(url, expectedVersion))
+            ServerIdentity ready = ProbeOwnedServer(process, url);
+            if (ready != null && ready.Version == expectedVersion)
             {
-                return true;
+                return ready;
             }
             Thread.Sleep(500);
         }
-        return false;
+        return null;
     }
 
-    private static bool IsHealthyVersion(string baseUrl, string expectedVersion)
+    // 健康检查必须落在本启动器启动的这个候选进程上：同一端口上若是别的实例在应答，
+    // 版本号碰巧一致也不能当成候选健康。
+    private static bool IsHealthyVersion(string baseUrl, string expectedVersion, Process process)
     {
-        try
-        {
-            string body = HttpGet(baseUrl + "/api/system/update/health");
-            return JsonString(body, "version") == expectedVersion;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static bool CanOpen(string url)
-    {
-        try
-        {
-            using (
-                HttpResponseMessage response = localHttpClient
-                    .GetAsync(url, HttpCompletionOption.ResponseHeadersRead)
-                    .GetAwaiter()
-                    .GetResult()
-            )
-            {
-                int statusCode = (int)response.StatusCode;
-                return statusCode >= 200 && statusCode < 500;
-            }
-        }
-        catch
-        {
-            return false;
-        }
+        ServerIdentity health = ProbeHealth(baseUrl);
+        return health != null
+            && process != null
+            && health.Pid == process.Id
+            && health.Version == expectedVersion;
     }
 
     private static string HttpGet(string url)
@@ -876,52 +969,27 @@ internal static partial class DiceFrameLauncher
 
     /// <summary>
     /// 统一解析本机 DiceFrame endpoint：HTTP 保持旧行为；本地 HTTPS 按指纹文件固定。
-    /// WaitForServer、更新健康检查、OpenBrowser 都走这里，不各自拼接 scheme。
+    /// 启动就绪、更新健康检查、打开界面都以这里为首选地址，不各自拼接 scheme。
     /// </summary>
     private static ServerEndpoint ResolveServerEndpoint()
     {
-        string url = "http://127.0.0.1:" + launcherPort;
-        string fingerprint = "";
-        try
-        {
-            string configPath = Path.Combine(launcherDataDir, "config.json");
-            if (File.Exists(configPath))
-            {
-                string text = File.ReadAllText(configPath);
-                bool selfSigned = Regex
-                    .Match(text, "\"tls_mode\"\\s*:\\s*\"self_signed\"")
-                    .Success;
-                if (selfSigned)
-                {
-                    string fingerprintPath = Path.Combine(
-                        launcherDataDir,
-                        "certs",
-                        "self-signed",
-                        "fingerprint.txt"
-                    );
-                    if (File.Exists(fingerprintPath))
-                    {
-                        string recorded = File.ReadAllText(fingerprintPath).Trim();
-                        if (recorded.Length > 0)
-                        {
-                            url = "https://127.0.0.1:" + launcherPort;
-                            fingerprint = recorded;
-                        }
-                    }
-                    // 指纹文件缺失（例如服务端回退 HTTP）时保持 http：
-                    // 宁可健康检查失败，也不做未验证的 HTTPS 信任。
-                }
-            }
-        }
-        catch
-        {
-        }
-        expectedCertFingerprint = fingerprint;
+        string fingerprint = ReadRecordedFingerprint();
+        // 指纹文件缺失（例如服务端回退 HTTP、或配置尚未写入）时保持 http：
+        // 宁可健康检查失败，也不做未验证的 HTTPS 信任。
+        string url =
+            fingerprint.Length > 0
+                ? "https://127.0.0.1:" + launcherPort
+                : "http://127.0.0.1:" + launcherPort;
         return new ServerEndpoint { Url = url, Fingerprint = fingerprint };
     }
 
     private static void InitLocalHttpClient()
     {
+        // csc 直接生成的 exe 没有目标框架 app.config；在本机 .NET Framework 上
+        // ServicePointManager 仍可能默认只有 Ssl3/Tls，而后端最低接受 TLS 1.2。
+        // 必须在首次本机 HTTPS 请求前显式启用 TLS 1.2，否则证书回调还没执行，
+        // 握手就已经被服务端关闭，窗口会一直停在 Starting。
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
         WebRequestHandler handler = new WebRequestHandler();
         // 只影响本机 DiceFrame 请求的 handler；更新、GitHub 等其它流量不走它。
         handler.ServerCertificateValidationCallback = delegate(
@@ -940,6 +1008,41 @@ internal static partial class DiceFrameLauncher
         localHttpClient.Timeout = TimeSpan.FromSeconds(2);
     }
 
+    // 读取本地记录的自签指纹。每次按当前磁盘记录判定，而不是缓存启动时的结果：
+    // 用户可以在运行中开启/重签 HTTPS，服务端 os.execv 原地重启后启动器并不会重新
+    // 解析 endpoint；若沿用启动时的空指纹，应用窗口会被证书错误挡住。
+    // 仍然只信任本地记录（fail-closed）：读不到、或模式不是 self_signed，一律返回空。
+    private static string ReadRecordedFingerprint()
+    {
+        try
+        {
+            string configPath = Path.Combine(launcherDataDir, "config.json");
+            if (!File.Exists(configPath))
+            {
+                return "";
+            }
+            if (!Regex.IsMatch(File.ReadAllText(configPath), "\"tls_mode\"\\s*:\\s*\"self_signed\""))
+            {
+                return "";
+            }
+            string fingerprintPath = Path.Combine(
+                launcherDataDir,
+                "certs",
+                "self-signed",
+                "fingerprint.txt"
+            );
+            if (!File.Exists(fingerprintPath))
+            {
+                return "";
+            }
+            return File.ReadAllText(fingerprintPath).Trim();
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
     private static bool ValidateLocalCertificate(
         X509Certificate certificate,
         SslPolicyErrors errors
@@ -950,14 +1053,27 @@ internal static partial class DiceFrameLauncher
             // 系统信任链验证通过（未来的 Let's Encrypt 证书走这里）。
             return true;
         }
+        if (certificate == null)
+        {
+            return false;
+        }
         // 自签证书：只有指纹与本地记录完全一致时才信任。
-        string expected = expectedCertFingerprint;
-        if (expected.Length == 0 || certificate == null)
+        string expected = ReadRecordedFingerprint();
+        if (expected.Length == 0)
         {
             return false;
         }
         string normalized = expected.Replace(":", "").Replace("-", "").ToUpperInvariant();
-        return Sha256Hex(certificate.GetRawCertData()) == normalized;
+        byte[] raw;
+        try
+        {
+            raw = certificate.GetRawCertData();
+        }
+        catch
+        {
+            return false;
+        }
+        return Sha256Hex(raw) == normalized;
     }
 
     private static string Sha256Hex(byte[] data)
@@ -976,31 +1092,92 @@ internal static partial class DiceFrameLauncher
 
     private static void PromoteLauncher(string installRoot, string stagedLauncher)
     {
+        // 与 launcher_promotion.py 同一顺序：先把新 exe 完整复制到同目录临时文件并核对哈希
+        // （慢、可能失败，但不碰原 exe），之后只剩两次同卷 rename。任何一步失败都按原 exe
+        // 的哈希核对现场、必要时用备份恢复，绝不把 DiceFrame.exe 留成残缺文件。
         string launcher = Path.Combine(installRoot, "DiceFrame.exe");
         string oldLauncher = launcher + ".old";
+        string temporary = Path.Combine(
+            installRoot,
+            LauncherTempPrefix + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture) + ".tmp"
+        );
+        string originalHash = null;
         try
         {
+            string stagedHash = FileSha256(stagedLauncher);
+            if (File.Exists(launcher))
+            {
+                originalHash = FileSha256(launcher);
+                if (originalHash == stagedHash)
+                {
+                    // 候选后端启动时已经提前提升过（launcher_promotion.py）。
+                    TryDelete(stagedLauncher);
+                    return;
+                }
+            }
+            TryDelete(temporary);
+            File.Copy(stagedLauncher, temporary, false);
+            if (FileSha256(temporary) != stagedHash)
+            {
+                throw new IOException("copied launcher does not match the staged file");
+            }
             TryDelete(oldLauncher);
             if (File.Exists(launcher))
             {
                 File.Move(launcher, oldLauncher);
             }
-            File.Copy(stagedLauncher, launcher, true);
+            File.Move(temporary, launcher);
             TryDelete(stagedLauncher);
         }
         catch (Exception ex)
         {
             Console.WriteLine("Launcher replacement deferred: " + ex.Message);
-            try
+            RestoreLauncher(launcher, oldLauncher, originalHash);
+            TryDelete(temporary);
+        }
+    }
+
+    private static void RestoreLauncher(string launcher, string oldLauncher, string originalHash)
+    {
+        try
+        {
+            if (originalHash == null)
             {
-                if (!File.Exists(launcher) && File.Exists(oldLauncher))
-                {
-                    File.Move(oldLauncher, launcher);
-                }
+                return;
             }
-            catch
+            if (File.Exists(launcher) && FileSha256(launcher) == originalHash)
             {
+                return;
             }
+            if (!File.Exists(oldLauncher) || FileSha256(oldLauncher) != originalHash)
+            {
+                Console.WriteLine("Launcher replacement failed and no intact backup is left.");
+                return;
+            }
+            if (File.Exists(launcher))
+            {
+                File.Delete(launcher);
+            }
+            File.Move(oldLauncher, launcher);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Could not restore the previous launcher: " + ex.Message);
+        }
+    }
+
+    private static string FileSha256(string path)
+    {
+        using (SHA256 sha = SHA256.Create())
+        using (FileStream stream = File.OpenRead(path))
+        {
+            byte[] hash = sha.ComputeHash(stream);
+            StringBuilder builder = new StringBuilder(hash.Length * 2);
+            foreach (byte value in hash)
+            {
+                builder.Append(value.ToString("X2"));
+            }
+            return builder.ToString();
         }
     }
 
@@ -1297,6 +1474,10 @@ internal static partial class DiceFrameLauncher
 
     private static void OpenBrowser(string url)
     {
+#if LAUNCHER_TESTING
+        // 生命周期集成测试的构建：只记录「打开了哪个地址」，不拉起真实浏览器。
+        Console.WriteLine("[launcher-test] open-ui " + url);
+#else
         try
         {
             ProcessStartInfo info = new ProcessStartInfo();
@@ -1309,13 +1490,18 @@ internal static partial class DiceFrameLauncher
             Console.WriteLine("Open this address in your browser:");
             Console.WriteLine(url);
         }
+#endif
     }
 
     private static void StopServer()
     {
-        // 主动停止（退出、更新切换、回滚）不算异常退出，不产生 crash 记录。
+        // 主动停止（退出、关窗口）不算异常退出，不产生 crash 记录。
         suppressCrashReport = true;
-        StopProcess(serverProcess);
+        // 接管的实例不是本启动器启动的：关窗口只退出启动器，不停它。
+        if (serverOwnership == ServerOwnership.Owned)
+        {
+            StopProcess(serverProcess);
+        }
     }
 
     private static void StopProcess(Process process)

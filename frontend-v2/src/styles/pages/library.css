@@ -353,9 +353,7 @@
 
 .content-library .library-heading h1 {
   margin: 0;
-  /* 与其它页面保持一致：其它页的 h1 走浏览器默认 2em（16px 基准 = 32px），
-     这里原来用 clamp(28px, 3vw, 32px) + 负字距，在常见窗口宽度下会小 4px 且更紧。 */
-  font-size: 2rem;
+  font-size: clamp(18px, 2vw, 24px);
   letter-spacing: 0;
 }
 

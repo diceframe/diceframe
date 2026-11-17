@@ -1,0 +1,4 @@
+# src/webui/routes/system.py 返回给请求方的提示。
+"en":
+  admin_session_required: "An administrator session is required"
+  transport_not_ready: "The transport layer is not ready"

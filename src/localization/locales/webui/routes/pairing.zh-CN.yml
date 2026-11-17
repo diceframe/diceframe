@@ -1,0 +1,5 @@
+# src/webui/routes/pairing.py 返回给请求方的提示。
+"zh-CN":
+  admin_session_required: "需要管理员会话"
+  device_missing_or_revoked: "设备不存在或已被吊销"
+  install_id_invalid: "install_id 格式无效"

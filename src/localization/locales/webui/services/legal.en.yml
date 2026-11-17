@@ -1,0 +1,4 @@
+# src/webui/services/legal.py 返回给请求方的提示。
+"en":
+  source_verification_failed: "Verification of the current legal text failed"
+  version_updated_reaccept: "The legal document version was updated; read it again and confirm"

@@ -1,0 +1,3 @@
+# src/webui/update_admission.py 返回给请求方的提示。
+"zh-CN":
+  update_validating: "更新仍在验证，请稍后重试。 / Update validation is in progress; retry shortly."

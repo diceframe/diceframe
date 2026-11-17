@@ -55,6 +55,7 @@ export interface ProviderModelSettingsStore {
   secrets: Record<string, string | undefined>
   saveProviders: (providers: AiProviderInput[]) => Promise<string[]>
   saveSection: (keys: string[], secretKeys?: string[]) => Promise<string[]>
+  isConfigDirty?: (keys: readonly string[]) => boolean
   testProvider: (input: ProviderTestInput) => Promise<TestResult>
   fetchProviderModels: (input: ProviderModelsInput) => Promise<ProviderModelsResponse>
   setConfigField: (key: keyof AppConfig, value: unknown) => void
@@ -73,7 +74,7 @@ export const MODEL_ROUTING_CONFIG_KEYS = [
   'llm_provider_ref', 'model',
   'fallback1_enabled', 'fallback1_provider_ref', 'fallback1_model',
   'fallback2_enabled', 'fallback2_provider_ref', 'fallback2_model',
-  'embedding_enabled', 'embedding_provider_ref', 'embedding_model', 'embedding_max_input',
+  'embedding_enabled', 'embedding_source', 'embedding_local_model_id', 'embedding_provider_ref', 'embedding_model', 'embedding_max_input',
   'tts_provider', 'tts_provider_ref', 'tts_model', 'tts_default_voice', 'tts_audio_format', 'tts_cache_mb',
   'asr_provider', 'asr_provider_ref', 'asr_model', 'asr_timeout_seconds',
   'imagegen_enabled', 'imagegen_auto_scene', 'imagegen_manual_scene', 'imagegen_auto_storyboard', 'imagegen_auto_use_manual_prompt', 'imagegen_provider_ref', 'imagegen_model',
@@ -128,6 +129,7 @@ export function useProviderModelSettings(options: UseProviderModelSettingsOption
   const providerCatalogProviderId = ref('')
   const providerCatalogModels = ref<Record<string, string[]>>({})
   const modelRoutingSaving = ref(false)
+  const modelRoutingDirty = computed(() => store.isConfigDirty?.(MODEL_ROUTING_CONFIG_KEYS) || false)
   const catalogAssignmentBusy = ref('')
 
   const providerLibrarySupported = computed(() => (
@@ -500,6 +502,7 @@ export function useProviderModelSettings(options: UseProviderModelSettingsOption
     providerCatalogProviderId,
     providerCatalogModels,
     modelRoutingSaving,
+    modelRoutingDirty,
     catalogAssignmentBusy,
     providerLibrarySupported,
     readyProviderIds,

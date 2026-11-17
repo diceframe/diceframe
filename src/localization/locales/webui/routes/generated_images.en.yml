@@ -1,0 +1,18 @@
+# src/webui/routes/generated_images.py 返回给请求方的提示。
+"en":
+  avatar_option_not_boolean: "The avatar stitching option must be a boolean"
+  description_required: "Enter the picture description"
+  generate_body_not_object: "The image generation request must be a JSON object"
+  generate_requires_membership: "You have not joined this game, so you cannot generate images"
+  generated_image_missing: "The generated image does not exist"
+  history_requires_membership: "You have not joined this game, so you cannot view the generation history"
+  image_requires_membership: "You have not joined this game, so you cannot view generated images"
+  image_type_gm_only: "Only the GM can generate this type of image"
+  optimize_admin_only: "Only an administrator can use AI prompt optimization"
+  optimize_body_not_object: "The optimization request must be a JSON object"
+  optimize_not_on_share_page: "AI prompt optimization is not available on the player share page"
+  panel_count_not_integer: "The number of storyboard panels must be a whole number from 1 to 6"
+  panel_count_out_of_range: "The number of storyboard panels must be between 1 and 6"
+  storyboard_body_not_object: "The storyboard request must be a JSON object"
+  system_image_admin_only: "Only an administrator can generate system images"
+  unsupported_purpose: "Unsupported image purpose"

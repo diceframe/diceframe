@@ -1,0 +1,7 @@
+# src/webui/services/game_creation_phases.py 返回给请求方的提示。
+"zh-CN":
+  first_seat_cannot_be_unclaimed: "第一个角色是房主（GM）自己的席位，不能设为「等待认领」，请改为玩家或 AI 托管。"
+  runtime_binding_failed: "规则运行时绑定失败，未留下半成品存档。"
+  runtime_binding_identity_mismatch: "规则运行时绑定身份不一致"
+  runtime_binding_invalid: "规则运行时绑定无效或不兼容"
+  runtime_no_versioned_binding: "规则运行时未提供版本化状态绑定"

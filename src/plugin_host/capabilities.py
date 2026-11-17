@@ -15,6 +15,7 @@ from .descriptors import (
 )
 from .models import PluginRuntime
 from .runtime_protocol import PluginProtocolError
+from src.localization.messages import t
 
 
 RuntimeCapabilityInitializer = Callable[[PluginRuntime, object], None]
@@ -50,7 +51,7 @@ def initialize_runtime_capabilities(
 ) -> None:
     initializer = RUNTIME_CAPABILITY_INITIALIZERS.get(plugin_type)
     if initializer is None:
-        raise PluginProtocolError(f"插件类型没有运行时能力初始化器：{plugin_type}")
+        raise PluginProtocolError(t("plugin_host.capabilities.no_capability_initializer", plugin_type=plugin_type))
     initializer(runtime, initialized)
 
 
@@ -90,12 +91,15 @@ def find_provider_plugin(
     capability = str(capability or "").strip()
     if not capability:
         return None
+    matches: list[str] = []
     for plugin_id, runtime in runtimes.items():
         if _plugin_type(runtime) != "provider" or runtime.status != "running":
             continue
         if provider_capability(runtime, capability) is not None:
-            return plugin_id
-    return None
+            matches.append(plugin_id)
+    # Provider selection is an authority boundary.  A capability collision
+    # must not silently depend on dictionary order or plugin discovery order.
+    return matches[0] if len(matches) == 1 else None
 
 
 def provider_capability(

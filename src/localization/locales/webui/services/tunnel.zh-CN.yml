@@ -1,0 +1,7 @@
+# src/webui/services/tunnel.py 返回给请求方的提示。
+"zh-CN":
+  already_published: "隧道已由插件 %{current_publisher} 发布，需先停止后再发布"
+  publish_state_and_rollback_failed: "隧道状态写入失败，且公网 URL 回滚失败"
+  release_state_and_rollback_failed: "隧道状态清理失败，且公网 URL 回滚失败"
+  url_not_https: "隧道地址必须是有效的 https URL"
+  url_too_long: "隧道地址过长"

@@ -60,6 +60,7 @@ from src.engine.modules import progression_state
 from src.engine.player_control import SUBMISSION_BLOCK_CODES
 from src.engine.visibility_rules import proposal_visible_to
 from src.webui.services._common import MAX_ACTIONS_PER_TURN
+from src.localization.messages import t
 
 if TYPE_CHECKING:
     from src.engine.game_instance import GameInstance
@@ -139,6 +140,9 @@ class TurnDependencies:
     # 节点完成，并可生成一次场景过渡叙事。返回结算结果 dict 或 None；
     # None = 未配置（提议保持 advisory-only，行为不变）。
     settle_adventure_completion: Callable[[Any], Awaitable[dict[str, Any] | None]] | None = None
+    # Imported or externally bound gameplay modes fail closed instead of
+    # entering the tabletop round pipeline by accident.
+    gameplay_registry: Any | None = None
 
 
 class TurnResult(TypedDict):
@@ -181,7 +185,7 @@ def economy_decision_pending_payload(
     return {
         "ok": False,
         "error_code": "ECONOMY_DECISION_PENDING",
-        "error": "请先处理待确认的经济提案，再继续本局叙事",
+        "error": t("webui.services.turns.economy_proposal_pending"),
         "pending_count": (
             len(unresolved)
             or len(pending_effect_groups(instance))
@@ -207,7 +211,7 @@ def _gate_rejection(instance: "GameInstance", actor_uid: str, code: str) -> Turn
         return _result({
             "ok": False,
             "error_code": code,
-            "error": "当前处于权威战斗，请在专业战斗工具中选择合法动作",
+            "error": t("webui.services.turns.authoritative_combat_active"),
         }, 409)
     if code == ACTOR_DECEASED:
         return _result({"error": "角色已死亡，无法提交行动", "error_code": code}, 403)
@@ -215,7 +219,7 @@ def _gate_rejection(instance: "GameInstance", actor_uid: str, code: str) -> Turn
         return _result(economy_decision_pending_payload(instance, actor_uid), 409)
     if code == RUN_CHANGED:
         return _result({
-            "ok": False, "error_code": "STALE_RUN", "error": "对局已重开，请刷新后重试",
+            "ok": False, "error_code": "STALE_RUN", "error": t("webui.services.turns.game_restarted_refresh_and_retry"),
         }, 409)
     if code == ROUND_PROCESSING:
         return _result({
@@ -224,7 +228,7 @@ def _gate_rejection(instance: "GameInstance", actor_uid: str, code: str) -> Turn
     if code == ADVENTURE_ENDED:
         return _result({
             "ok": False, "error_code": code, "phase": "ended",
-            "error": "故事已经抵达结局，不能再提交行动",
+            "error": t("webui.services.turns.story_ended"),
         }, 409)
     return _result({"ok": False, "error_code": code, "error": code}, 409)
 
@@ -253,7 +257,7 @@ def _pending_luck_payload(
         "ok": True,
         "phase": "luck",
         "advanced": False,
-        "message": "检定已完成，请先处理检定选择再继续叙事",
+        "message": t("webui.services.turns.check_choice_pending"),
         "check_result": checks.last_check(instance),
         "check_results": list(checks.last_checks(instance)),
         "pending_luck_decisions": instance.pending_luck_checks(),
@@ -954,6 +958,16 @@ async def submit_action(
     )
     if not instance:
         return _result({"error": "游戏不存在，请刷新页面重新开始"}, 404)
+    gameplay_registry = getattr(dependencies, "gameplay_registry", None)
+    if gameplay_registry is not None:
+        mode_id = str(adventure_runtime_state.play_mode(instance) or "free")
+        if gameplay_registry.get(mode_id) is None:
+            return _result({
+                "ok": False,
+                "error_code": "UNSUPPORTED_GAMEPLAY",
+                "error": f"当前客户端/服务端未安装玩法扩展：{mode_id}",
+                "play_mode": mode_id,
+            }, 409)
     rule = dependencies.load_rule_for_game(instance)
     requires_structured = False
     if rule is not None:
@@ -1006,7 +1020,7 @@ async def submit_action(
             return _result({
                 "ok": False,
                 "error_code": "REWRITE_IN_PROGRESS",
-                "error": "GM 正在重写历史回合，请等待完成后再提交行动",
+                "error": t("webui.services.turns.rewriting_wait_before_action"),
             }, 409)
         progression.require_writable(instance)
         session_stats.require_writable(instance)
@@ -1030,7 +1044,7 @@ async def submit_action(
         if game_config.solo_mode(instance):
             action_count = sum(1 for action in instance.action_queue if action.get("user_id") == actor_uid)
             if action_count >= MAX_ACTIONS_PER_TURN:
-                return _result({"error": f"本回合已达行动上限（{MAX_ACTIONS_PER_TURN} 条）"}, 400)
+                return _result({"error": t("webui.services.turns.action_limit_reached", max_actions_per_turn=MAX_ACTIONS_PER_TURN)}, 400)
         elif (
             existing_action
             and int(existing_action.get("revision_count", 1) or 1) >= 3
@@ -1088,7 +1102,7 @@ async def submit_action(
                 return _result({
                     "ok": False,
                     "error_code": "REWRITE_IN_PROGRESS",
-                    "error": "GM 正在重写历史回合，请等待完成后再提交行动",
+                    "error": t("webui.services.turns.rewriting_wait_before_action"),
                 }, 409)
             # Purchase requests are recorded together with the action. Persisting
             # here keeps a request recoverable even when another player has not yet
@@ -1213,7 +1227,7 @@ async def advance_round(
     if not instance:
         return _result({"error": "not found"}, 404)
     if actor_uid != instance.gm_uid:
-        return _result({"ok": False, "error": "仅 GM 可推进"}, 403)
+        return _result({"ok": False, "error": t("webui.services.turns.advance_gm_only")}, 403)
     progression.require_writable(instance)
     session_stats.require_writable(instance)
     checks.require_writable(instance)

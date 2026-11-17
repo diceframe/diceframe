@@ -403,6 +403,10 @@ def add_action_locked(
             action_entry["dice_value"] = existing.get("dice_value")
             action_entry["dice_rolls"] = list(existing.get("dice_rolls") or [])
             action_entry["check_request"] = existing.get("check_request")
+            # 规则运行时结算的检定与骰值同属本回合既成事实：玩家改行动文本
+            # 不能让它丢失，否则重算会退回核心的 d20/d100 路径。
+            if existing.get("check_result"):
+                action_entry["check_result"] = existing.get("check_result")
         old_revision = int(existing.get("revision_count", 1) or 1)
         action_entry["revision_count"] = old_revision + 1 if count_revision else old_revision
         instance.action_queue[existing_index] = action_entry

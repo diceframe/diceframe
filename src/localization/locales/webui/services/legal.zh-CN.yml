@@ -1,0 +1,4 @@
+# src/webui/services/legal.py 返回给请求方的提示。
+"zh-CN":
+  source_verification_failed: "当前法律原文校验失败"
+  version_updated_reaccept: "法律文件版本已更新，请重新阅读后确认"

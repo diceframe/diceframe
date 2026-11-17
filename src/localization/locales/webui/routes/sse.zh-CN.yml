@@ -1,0 +1,7 @@
+# src/webui/routes/sse.py 返回给请求方的提示。
+"zh-CN":
+  action_too_long: "行动文本过长（上限 %{max_action_chars} 字）"
+  error_retry_later: "处理出错，请稍后重试"
+  error_see_logs: "处理出错，请查看服务器日志"
+  seat_credential_invalid: "席位凭证无效或已失效，请向 GM 重新获取链接"
+  seat_removed: "席位已被移除"

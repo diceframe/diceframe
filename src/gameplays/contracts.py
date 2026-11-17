@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
+import inspect
 from typing import Any, Protocol
 
 BOT_SURFACE_FULL = "full"
@@ -120,3 +121,147 @@ class TurnDriverRegistry:
         """Driver of a known mode; unknown modes or unbound drivers fail closed."""
         mode = gameplays.get(mode_id)
         return self._drivers.get(mode.turn_driver) if mode is not None else None
+
+
+@dataclass(frozen=True)
+class GameplayProvider:
+    """Owner-supplied gameplay bundle kept independent of TRPG mechanics."""
+
+    mode: GameplayMode
+    turn_driver: TurnDriver
+    project_view: Callable[[Any, str, bool], dict[str, Any]]
+    validate_instance: Callable[[Any], None] | None = None
+    handle_action: Callable[[Any, str, bool, str, dict[str, Any]], Any] | None = None
+    project_slot: Callable[[Any, str, bool, str], dict[str, Any]] | None = None
+
+
+class GameplayProviderRegistry:
+    """Register a gameplay mode and its driver/projection as one lifecycle unit.
+
+    The registry deliberately does not know how a provider stores state or
+    whether it uses a ruleset runtime.  Missing providers/drivers remain
+    observable as ``None`` so callers can fail closed instead of entering the
+    tabletop round pipeline by accident.
+    """
+
+    def __init__(self) -> None:
+        self.gameplays = GameplayRegistry()
+        self.drivers = TurnDriverRegistry()
+        self._providers: dict[str, GameplayProvider] = {}
+
+    def register(self, provider: GameplayProvider) -> None:
+        if not isinstance(provider, GameplayProvider):
+            raise ValueError("gameplay provider must use the explicit contract")
+        mode_id = provider.mode.mode_id
+        if mode_id in self._providers:
+            raise ValueError(f"duplicate gameplay provider: {mode_id!r}")
+        if not callable(provider.project_view):
+            raise ValueError("gameplay provider must declare a view projection")
+        self.gameplays.register(provider.mode)
+        self.drivers.bind(provider.mode.turn_driver, provider.turn_driver)
+        self._providers[mode_id] = provider
+
+    def get(self, mode_id: Any) -> GameplayProvider | None:
+        return self._providers.get(str(mode_id or ""))
+
+    def driver_for(self, mode_id: Any) -> TurnDriver | None:
+        return self.drivers.for_mode(self.gameplays, mode_id)
+
+    def validate_instance(self, mode_id: Any, instance: Any) -> None:
+        provider = self.get(mode_id)
+        if provider is None:
+            raise ValueError(f"gameplay provider is unavailable: {mode_id}")
+        if provider.validate_instance is not None:
+            provider.validate_instance(instance)
+
+    def project_view(self, mode_id: Any, instance: Any, viewer_id: str, viewer_is_gm: bool = False) -> dict[str, Any]:
+        provider = self.get(mode_id)
+        if provider is None:
+            raise ValueError(f"gameplay provider is unavailable: {mode_id}")
+        result = provider.project_view(instance, viewer_id, viewer_is_gm)
+        if not isinstance(result, dict):
+            raise ValueError("gameplay provider projection must be an object")
+        return result
+
+    async def dispatch_action(
+        self,
+        mode_id: Any,
+        instance: Any,
+        viewer_id: str,
+        viewer_is_gm: bool,
+        action: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        provider = self.get(mode_id)
+        if provider is None:
+            raise ValueError(f"gameplay provider is unavailable: {mode_id}")
+        handler = provider.handle_action
+        if handler is None:
+            raise ValueError("gameplay provider has no action handler")
+        result = handler(instance, viewer_id, viewer_is_gm, action, arguments)
+        if inspect.isawaitable(result):
+            result = await result
+        if not isinstance(result, dict):
+            raise ValueError("gameplay provider action result must be an object")
+        return result
+
+    def project_slot(
+        self,
+        mode_id: Any,
+        instance: Any,
+        viewer_id: str,
+        viewer_is_gm: bool,
+        slot: str,
+    ) -> dict[str, Any]:
+        provider = self.get(mode_id)
+        if provider is None:
+            raise ValueError(f"gameplay provider is unavailable: {mode_id}")
+        if provider.project_slot is None:
+            raise ValueError("gameplay provider has no slot projection")
+        result = provider.project_slot(instance, viewer_id, viewer_is_gm, slot)
+        if not isinstance(result, dict):
+            raise ValueError("gameplay provider slot projection must be an object")
+        return result
+
+
+def project_gameplay_view(
+    registry: GameplayProviderRegistry,
+    mode_id: Any,
+    instance: Any,
+    viewer_id: str,
+    *,
+    viewer_is_gm: bool = False,
+) -> dict[str, Any]:
+    """Project a bound gameplay through its owner, failing closed.
+
+    Kept beside the registry contract so generic web/orchestrator code does
+    not import a concrete gameplay package or silently fall back to TRPG.
+    """
+
+    mode = str(mode_id or "")
+    provider = registry.get(mode)
+    if provider is None:
+        return {
+            "ok": False,
+            "code": "UNSUPPORTED_GAMEPLAY",
+            "mode_id": mode,
+            "read_only": True,
+            "diagnostic": "gameplay provider is unavailable",
+        }
+    try:
+        registry.validate_instance(mode, instance)
+        view = registry.project_view(mode, instance, viewer_id, viewer_is_gm)
+    except (KeyError, TypeError, ValueError) as exc:
+        return {
+            "ok": False,
+            "code": "GAMEPLAY_VIEW_UNAVAILABLE",
+            "mode_id": mode,
+            "read_only": True,
+            "diagnostic": str(exc),
+        }
+    return {
+        "ok": True,
+        "mode_id": mode,
+        "read_only": False,
+        "view": view,
+    }

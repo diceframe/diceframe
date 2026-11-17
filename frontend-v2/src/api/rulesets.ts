@@ -7,10 +7,14 @@ import type {
   RulesetBuilderChoicesResponse,
   RulesetBuilderValidationResponse,
   RulesetExperienceResponse,
+  RulesetPendingChoicesResponse,
   RulesetProgressionResponse,
   RulesetRestResponse,
+  RulesetRestOptionsResponse,
+  RestDecisionResponse,
   RulesetGameplayResponse,
   RulesetTemporaryEncounterResponse,
+  SpellPreparationOptionsResponse,
 } from '@/api/types'
 
 function rulePath(ruleId: string, suffix: string, language = ''): string {
@@ -136,6 +140,35 @@ export function applyCharacterCardAdvancement(
   )
 }
 
+/** What a card still owes. Read-only; opening the panel must not write. */
+export function fetchCharacterCardPendingChoices(
+  cardId: string,
+): Promise<RulesetPendingChoicesResponse> {
+  return api<RulesetPendingChoicesResponse>(
+    `/character-cards/${encodeURIComponent(cardId)}/choices/pending`,
+  )
+}
+
+/** Fill outstanding choices without advancing a level. */
+export function completeCharacterCardChoices(
+  cardId: string,
+  repairs: JsonObject,
+  expectedRevision: number,
+  operationId: string,
+): Promise<RulesetAdvancementApplyResponse> {
+  return api<RulesetAdvancementApplyResponse>(
+    `/character-cards/${encodeURIComponent(cardId)}/choices/complete`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        repairs,
+        expected_revision: expectedRevision,
+        operation_id: operationId,
+      }),
+    },
+  )
+}
+
 export function previewLiveCharacterAdvancement(
   gameKey: string,
   userId: string,
@@ -167,6 +200,29 @@ export function applyLiveCharacterAdvancement(
   )
 }
 
+export function fetchLiveCharacterSpellOptions(
+  gameKey: string,
+  userId: string,
+): Promise<SpellPreparationOptionsResponse> {
+  return api<SpellPreparationOptionsResponse>(
+    `/games/${encodeURIComponent(gameKey)}/character/${encodeURIComponent(userId)}/spells`,
+  )
+}
+
+export interface RestPreparationChange {
+  prepared_spell_refs: string[]
+  cantrip_refs?: string[]
+}
+
+export interface RestSubmissionOptions {
+  /** Long-rest preparation change; omitted entirely when nothing changed. */
+  preparedSpells?: RestPreparationChange
+  /** Circle of the Land terrain committed by this long rest. */
+  landTerrain?: string
+  /** slot_id -> spell ref; the server accepts at most `rest_replace` entries. */
+  freeCast?: Record<string, string>
+}
+
 export function resolveLiveCharacterRest(
   gameKey: string,
   userId: string,
@@ -174,19 +230,45 @@ export function resolveLiveCharacterRest(
   hitDice: Record<string, number>,
   expectedRevision: number,
   operationId: string,
+  options: RestSubmissionOptions | null = null,
 ): Promise<RulesetRestResponse> {
+  const body: JsonObject = {
+    rest,
+    hit_dice: rest === 'short' ? hitDice : {},
+    confirm_elapsed_time: true,
+    expected_revision: expectedRevision,
+    operation_id: operationId,
+  }
+  // 空改动会被服务端拒（"would not change anything"），所以只在确有改动时附带。
+  if (options?.preparedSpells) body.prepared_spells = options.preparedSpells
+  // 空值同样不发：空地形不等于"没选"，空研究表仍会开启重绑定路径。
+  if (options?.landTerrain) body.land_terrain = options.landTerrain
+  const freeCast = options?.freeCast || {}
+  if (Object.keys(freeCast).length) body.free_cast = freeCast
   return api<RulesetRestResponse>(
     `/games/${encodeURIComponent(gameKey)}/character/${encodeURIComponent(userId)}/rest`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        rest,
-        hit_dice: rest === 'short' ? hitDice : {},
-        confirm_elapsed_time: true,
-        expected_revision: expectedRevision,
-        operation_id: operationId,
-      }),
-    },
+    { method: 'POST', body: JSON.stringify(body) },
+  )
+}
+
+/** GM verdict on a party rest; approval is where game time actually moves. */
+export function decideLiveRest(
+  gameKey: string,
+  approve: boolean,
+  operationId: string,
+): Promise<RestDecisionResponse> {
+  return api<RestDecisionResponse>(
+    `/games/${encodeURIComponent(gameKey)}/rest/decide`,
+    { method: 'POST', body: JSON.stringify({ approve, operation_id: operationId }) },
+  )
+}
+
+export function fetchLiveCharacterRestOptions(
+  gameKey: string,
+  userId: string,
+): Promise<RulesetRestOptionsResponse> {
+  return api<RulesetRestOptionsResponse>(
+    `/games/${encodeURIComponent(gameKey)}/character/${encodeURIComponent(userId)}/rest/options`,
   )
 }
 

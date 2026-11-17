@@ -35,10 +35,77 @@ def _bound_refs(refs: Collection[str]) -> set[str]:
 PLAIN_SHIELD_AC_BONUS = 2
 
 
-def _feature_proxy(class_ref: str, level: int) -> dict[str, Any]:
-    """The minimal canonical shape ``features_for`` needs to resolve ownership."""
+def _feature_proxy(
+    class_ref: str, level: int, feature_state: Mapping[str, Any] | None = None,
+    equipped_refs: Iterable[str] = (),
+    feature_choices: Iterable[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    """The minimal canonical shape ``features_for`` needs to resolve ownership.
 
-    return {"build": {"class_levels": [{"class_ref": class_ref, "level": level}]}}
+    Subclass features are owned only through a persisted selection, so the
+    proxy carries ``subclass_ref`` when the caller has one.  A draft built at
+    level 1 has none and correctly owns no subclass feature.
+
+    ``equipped_refs`` carries the character's canonical equipment so that an
+    ``equipment_requirement`` is answered against what is actually worn.  Without
+    it every equipment-gated benefit reads as satisfied at creation time, and a
+    Monk holding a Shield would keep the unarmored formula the SRD denies.
+
+    ``feature_choices`` carries the committed ``(owner, feature_id, choice_id)``
+    slots.  Expertise lives only in those slots, so a proxy without them would
+    read every skill as an ordinary proficiency even though the sheet records
+    the selection.
+    """
+
+    proxy: dict[str, Any] = {
+        "build": {"class_levels": [{"class_ref": class_ref, "level": level}]},
+    }
+    if isinstance(feature_state, Mapping):
+        subclass_ref = feature_state.get("subclass_ref")
+        if isinstance(subclass_ref, str) and subclass_ref:
+            proxy["features"] = {"subclass_ref": subclass_ref}
+    choices = [dict(record) for record in feature_choices]
+    if choices:
+        proxy.setdefault("features", {})["feature_choices"] = choices
+    refs = [str(ref) for ref in equipped_refs if str(ref)]
+    if refs:
+        proxy["equipment"] = {"item_refs": refs}
+    return proxy
+
+
+def _passive_armor_class_bonus(bundle: Any, feat_refs: Collection[str]) -> int:
+    """The flat AC bonus owned advancement feats declare for worn armor.
+
+    Every number comes from the feat's own ``passive_effects`` declaration, so
+    the formula holds no magic constant.  A duplicated ref adds its value once,
+    and an effect without ``requires_armor`` never lands here at all.
+    """
+
+    if not feat_refs:
+        return 0
+    catalog = bundle.get("advancement_feat_catalog", "srd_advancement_feats")
+    feats = catalog.get("feats") if isinstance(catalog, Mapping) else None
+    if not isinstance(feats, Mapping):
+        return 0
+    total = 0
+    for ref in {str(raw) for raw in feat_refs}:
+        feat = feats.get(ref.removeprefix("feat:"))
+        if not isinstance(feat, Mapping):
+            continue
+        effects = feat.get("passive_effects")
+        if not isinstance(effects, list):
+            continue
+        for effect in effects:
+            if not isinstance(effect, Mapping):
+                continue
+            if effect.get("kind") != "armor_class_bonus":
+                continue
+            if effect.get("requires_armor") is not True:
+                continue
+            value = effect.get("value")
+            if isinstance(value, int) and not isinstance(value, bool):
+                total += value
+    return total
 
 
 def derive_armor_class(
@@ -50,6 +117,7 @@ def derive_armor_class(
     warnings: list[str] | None = None,
     unarmored_ability_bonuses: Iterable[str] = (),
     attuned_refs: Collection[str] = (),
+    feat_refs: Collection[str] = (),
 ) -> int:
     """The one and only D&D 2024 armor class formula.
 
@@ -74,6 +142,11 @@ def derive_armor_class(
     is used, so a feature formula never competes with the armor's own AC.  Each
     named ability is an alternative candidate, and the best candidate wins --
     ability modifiers are never summed.
+
+    ``feat_refs`` names the advancement feats the character owns.  Only a flat
+    ``armor_class_bonus`` effect that declares ``requires_armor`` is consumed
+    here, and only while an armor was actually selected: Defense-style bonuses
+    never apply unarmored, and a shield is not armor for this purpose.
     """
 
     dex_modifier = ability_modifier(int(abilities["dex"]))
@@ -136,10 +209,288 @@ def derive_armor_class(
                 unarmored,
                 10 + dex_modifier + ability_modifier(int(abilities[str(ability)])),
             )
-    return max(unarmored, best_armor if best_armor is not None else unarmored) + shield_bonus
+    base = max(unarmored, best_armor if best_armor is not None else unarmored)
+    if best_armor is not None:
+        # "While you're wearing Light, Medium, or Heavy armor" 是硬前提：没有
+        # 选中任何护甲时，被动加值一律不加，也不看是否持盾。
+        base += _passive_armor_class_bonus(bundle, feat_refs)
+    return base + shield_bonus
+
+
+def derive_speed(
+    base_speed: int,
+    *,
+    feature_bonus: int = 0,
+    armor_training: Mapping[str, Any] | None = None,
+) -> int:
+    """The one and only derived Speed formula.
+
+    Character creation, advancement, and live equipment reconciliation all call
+    this, so the rule exists exactly once.  ``base_speed`` is the species value;
+    ``feature_bonus`` is the sum the feature resolver reports for *active*
+    declarations only, so an equipment-gated bonus is already gone when its
+    precondition fails.  ``armor_training`` contributes the "-10 feet" a worn
+    armor imposes when the wearer's Strength is below its requirement.
+
+    Speed never goes negative, and no rule number lives here: both the bonus and
+    the penalty arrive from their own declarations.
+    """
+
+    penalty = 0
+    if isinstance(armor_training, Mapping):
+        raw = armor_training.get("speed_penalty", 0)
+        if isinstance(raw, int) and not isinstance(raw, bool):
+            penalty = raw
+    bonus = feature_bonus if isinstance(feature_bonus, int) else 0
+    return max(0, int(base_speed) + bonus - penalty)
+
+
+_SKILL_CHOICE_KEYS = frozenset({"owner", "feature_id", "choice_id", "selected_refs"})
+
+
+def plan_skill_choices(
+    raw_choices: Any,
+    features: Dnd2024ClassFeatureResolver,
+    proxy: Mapping[str, Any],
+    skill_refs: Collection[str],
+    *,
+    level: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Validate the skill selections a draft commits at character creation.
+
+    Only a feature the character actually owns *at this level* may hold a slot,
+    so a submitted record can neither invent an owner nor pre-fill a future
+    level.  Expertise is the only skill choice granted at level 1 today (Rogue),
+    but nothing here names that class: the declaration decides.
+
+    Every rule the level-up path enforces is enforced again, because a draft is
+    an untrusted submission: the exact count, uniqueness inside the slot, the
+    declaration's own whitelist, "you must already be proficient", and "you
+    can't take Expertise in the same skill twice".  Slots are processed in
+    catalog order so the second slot sees what the first one took.
+    """
+
+    errors: list[str] = []
+    if raw_choices is None:
+        raw_choices = []
+    if not isinstance(raw_choices, list):
+        return [], ["feature_choices must be an array"]
+    submitted: list[dict[str, Any]] = []
+    for raw in raw_choices:
+        if not isinstance(raw, Mapping):
+            errors.append("each feature choice must be an object")
+            continue
+        unknown = sorted(set(raw) - _SKILL_CHOICE_KEYS)
+        if unknown:
+            errors.append(f"feature choice has an unknown field: {unknown[0]}")
+            continue
+        submitted.append({
+            "owner": str(raw.get("owner") or ""),
+            "feature_id": str(raw.get("feature_id") or ""),
+            "choice_id": str(raw.get("choice_id") or ""),
+            "selected_refs": raw.get("selected_refs"),
+        })
+
+    slots = [
+        definition for definition in features.features_for(dict(proxy))
+        if definition.choice is not None
+        and definition.choice.kind == "skill_proficiency"
+    ]
+    known_skills = {
+        str(entity.get("id")) for entity in features.bundle.list("skill")
+    }
+    matched: set[int] = set()
+    records: list[dict[str, Any]] = []
+    taken: dict[str, str] = {}
+    proficient = {str(ref) for ref in skill_refs}
+    for definition in slots:
+        choice = definition.choice
+        if choice is None:  # pragma: no cover - filtered above
+            continue
+        slot = [
+            index for index, record in enumerate(submitted)
+            if record["owner"] == definition.owner
+            and record["feature_id"] == definition.id
+            and record["choice_id"] == choice.id
+        ]
+        if len(slot) > 1:
+            errors.append(f"feature choice {definition.id} was submitted more than once")
+            matched.update(slot)
+            continue
+        if not slot:
+            # 建卡阶段把未作答视为"还没选"，而不是整张卡非法：建卡界面会先
+            # 投影这个槽（``builder_choices.skill_choices``）再让玩家作答，
+            # 而历史存档与既有测试夹具里本来就没有这个字段。代价是不发放
+            # Expertise——这是缺口，不是静默通过；升级路径仍然要求作答。
+            continue
+        matched.add(slot[0])
+        raw_refs = submitted[slot[0]]["selected_refs"]
+        if not isinstance(raw_refs, list) or not all(
+            isinstance(ref, str) for ref in raw_refs
+        ):
+            errors.append(f"feature choice {definition.id} selected_refs must be strings")
+            continue
+        if len(raw_refs) != choice.count:
+            errors.append(
+                f"feature choice {definition.id} must select exactly {choice.count} option"
+                + ("" if choice.count == 1 else "s")
+            )
+            continue
+        if len(set(raw_refs)) != len(raw_refs):
+            errors.append(f"feature choice {definition.id} selected_refs repeats an option")
+            continue
+        allowed = set(choice.enabled_options)
+        slot_refs: list[str] = []
+        for ref in raw_refs:
+            if allowed and ref not in allowed:
+                errors.append(f"{ref} is not a declared option of {definition.id}")
+                continue
+            skill_id = str(ref).removeprefix("skill:")
+            if not ref.startswith("skill:") or skill_id not in known_skills:
+                errors.append(f"{ref} is not a declared skill")
+                continue
+            if choice.requires_proficiency and ref not in proficient:
+                errors.append(f"{ref} is not a skill proficiency of this character")
+                continue
+            if choice.exclude_expertise and skill_id in taken:
+                errors.append(f"{ref} already has Expertise from {taken[skill_id]}")
+                continue
+            if choice.grants == "expertise":
+                taken[skill_id] = definition.id
+            slot_refs.append(ref)
+        if len(slot_refs) != choice.count:
+            continue
+        records.append({
+            "owner": definition.owner,
+            "feature_id": definition.id,
+            "choice_id": choice.id,
+            "selected_refs": slot_refs,
+            "granted_level": int(level),
+        })
+    for index, record in enumerate(submitted):
+        if index in matched:
+            continue
+        errors.append(
+            "feature choice references a slot this character does not have: "
+            f"{record['owner']}/{record['feature_id']}/{record['choice_id']}"
+        )
+    return records, errors
 
 
 _ARMOR_CATEGORIES = frozenset({"light", "medium", "heavy"})
+
+
+def derive_skill_check(
+    ability_score: int,
+    *,
+    proficiency_bonus: int,
+    proficient: bool,
+    expertise: bool = False,
+    half_proficiency: bool = False,
+    pb_used_elsewhere: bool = False,
+) -> dict[str, Any]:
+    """The one and only ability-check bonus formula for a skill.
+
+    Character creation, advancement, and live re-derivation all call this, so
+    the rule exists exactly once.  The 2024 SRD states three separate
+    contributions and never stacks them:
+
+    * no proficiency -> ``0``;
+    * proficiency -> ``+PB``;
+    * Expertise -> ``+2 x PB``, because "your Proficiency Bonus is doubled for
+      that check" is a *replacement* of the ordinary contribution, not an
+      additional PB (doubling twice would make a third source silently triple
+      it);
+    * Jack of All Trades -> ``floor(PB / 2)``, and only "for a skill proficiency
+      you lack" that "doesn't otherwise use your Proficiency Bonus".  It never
+      rides on top of proficiency or Expertise, and ``pb_used_elsewhere``
+      carries the second half of that condition for the check that is actually
+      being resolved.
+
+    Expertise without proficiency contributes nothing: every selection path
+    rejects that combination, so reaching it here means the sheet is corrupt and
+    paying out a doubled bonus would reward the corruption.
+    """
+
+    bonus = int(proficiency_bonus)
+    modifier = ability_modifier(int(ability_score))
+    components: list[dict[str, Any]] = [{"code": "ability", "amount": modifier}]
+    contribution = 0
+    applied_half = False
+    if proficient and expertise:
+        contribution = 2 * bonus
+        components.append({"code": "expertise", "amount": contribution})
+    elif proficient:
+        contribution = bonus
+        components.append({"code": "proficiency", "amount": contribution})
+    elif half_proficiency and not pb_used_elsewhere:
+        contribution = bonus // 2
+        applied_half = True
+        components.append({"code": "half_proficiency", "amount": contribution})
+    return {
+        "ability_modifier": modifier,
+        "proficiency_bonus": bonus,
+        "proficient": bool(proficient),
+        "expertise": bool(proficient and expertise),
+        "half_proficiency": applied_half,
+        "contribution": contribution,
+        "total": modifier + contribution,
+        "components": components,
+    }
+
+
+def derive_jump_distances(
+    abilities: Mapping[str, int], *, ability: str = "str",
+) -> dict[str, Any]:
+    """The jump distances an ability score and its modifier produce.
+
+    A Long Jump covers up to the *score*; a High Jump covers ``3`` plus the
+    *modifier*, floored at zero.  A standing jump is half the corresponding
+    running distance, and the halving happens before anything else reads the
+    number -- rounding up would hand out distance the rule does not grant.
+
+    ``ability`` is the score that is read, not an extra bonus: Second-Story Work
+    swaps Strength for Dexterity, so the caller passes ``dex`` and the Strength
+    score stops mattering.  Reach (``1.5 x height``) is deliberately absent: the
+    canonical record carries no height fact, so publishing a reach here would be
+    inventing one.
+    """
+
+    score = int(abilities[str(ability)])
+    high_jump = max(0, 3 + ability_modifier(score))
+    long_jump = max(0, score)
+    return {
+        "jump_ability": str(ability),
+        "long_jump_ft": long_jump,
+        "standing_long_jump_ft": long_jump // 2,
+        "high_jump_ft": high_jump,
+        "standing_high_jump_ft": high_jump // 2,
+    }
+
+
+def derive_movement_profile(
+    speed: int,
+    abilities: Mapping[str, int],
+    features: Dnd2024ClassFeatureResolver,
+    character: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """The special Speeds and jump distances that ride on the derived Speed.
+
+    Climb and Swim Speeds equal the *current* Speed, so they are re-derived here
+    instead of being stored as independent numbers; a mode nobody declared is
+    ``0`` rather than the Speed, because "no Climb Speed" is a real answer that
+    decides whether the extra-per-foot cost applies.
+
+    Order matters only in that this must run after ``derive_speed``: the profile
+    copies that result and never recomputes it.
+    """
+
+    modes = features.movement_modes(character)
+    return {
+        "climb_speed": int(speed) if modes["climb"] else 0,
+        "swim_speed": int(speed) if modes["swim"] else 0,
+        **derive_jump_distances(abilities, ability=features.jump_ability(character)),
+    }
 
 
 def derive_armor_training_state(
@@ -241,21 +592,48 @@ class CharacterDerivationMixin:
         skill_refs = list(dict.fromkeys([
             *background_skills, *class_skills, *species_skills, *skilled_skill_refs,
         ]))
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        # A level-1 build can already own a skill choice (Rogue Expertise), so the
+        # slot has to be validated before any skill value is derived: honouring an
+        # unvalidated slot would pay out a doubled bonus for a selection the
+        # level-up path would have rejected.
+        feature_choices, choice_errors = plan_skill_choices(
+            draft.get("feature_choices"),
+            features,
+            _feature_proxy(draft["class_ref"], level, draft.get("features")),
+            skill_refs,
+            level=level,
+        )
+        if choice_errors:
+            raise ValueError("; ".join(choice_errors))
+        expertise = {
+            row["skill_ref"] for row in features.expertise_skills(
+                _feature_proxy(
+                    draft["class_ref"], level, draft.get("features"),
+                    feature_choices=feature_choices,
+                )
+            )
+        }
+        half_proficiency = features.half_proficiency_bonus(
+            _feature_proxy(
+                draft["class_ref"], level, draft.get("features"),
+                feature_choices=feature_choices,
+            )
+        )
         skill_values: dict[str, int] = {}
         all_skills = self.bundle.list("skill")
         for skill in all_skills:
             ref = f"skill:{skill['id']}"
             ability_id = _ref_id(str(skill["ability_ref"]), "ability")
-            skill_values[str(skill["id"])] = (
-                ability_modifier(abilities[ability_id]) + (prof if ref in skill_refs else 0)
-            )
+            skill_values[str(skill["id"])] = derive_skill_check(
+                int(abilities[ability_id]),
+                proficiency_bonus=prof,
+                proficient=ref in skill_refs,
+                expertise=ref in expertise,
+                half_proficiency=half_proficiency,
+            )["total"]
 
         save_refs = list(class_entity.get("saving_throw_refs") or [])
-        saving_throws = {
-            ability_id: ability_modifier(abilities[ability_id])
-            + (prof if f"ability:{ability_id}" in save_refs else 0)
-            for ability_id in ABILITY_IDS
-        }
         selected_packages = [package, *([background_package] if background_package else [])]
         item_refs = list(dict.fromkeys(
             ref
@@ -276,7 +654,19 @@ class CharacterDerivationMixin:
             # 建卡阶段仍要求装备包里每个引用都真实存在（validation 已保证）。
             self._required_entity(ref, "item")
         features = Dnd2024ClassFeatureResolver(self.bundle)
-        feature_proxy = _feature_proxy(draft["class_ref"], level)
+        feature_proxy = _feature_proxy(
+            draft["class_ref"], level, draft.get("features"), item_refs,
+            feature_choices,
+        )
+        # 全豁免熟练（Disciplined Survivor）由声明决定，不是第二张熟练表：
+        # 与职业自带的两个豁免 ref 合并成一个集合，加值仍只按 PB 计一次。
+        if features.saving_throw_proficiency_all(feature_proxy):
+            save_refs = sorted({*save_refs, *(f"ability:{item}" for item in ABILITY_IDS)})
+        saving_throws = {
+            ability_id: ability_modifier(abilities[ability_id])
+            + (prof if f"ability:{ability_id}" in save_refs else 0)
+            for ability_id in ABILITY_IDS
+        }
         armor_category_refs = [
             f"armor_category:{item}"
             for item in class_entity.get("armor_proficiencies", [])
@@ -287,9 +677,18 @@ class CharacterDerivationMixin:
             unarmored_ability_bonuses=features.unarmored_ac_bonus_abilities(
                 feature_proxy
             ),
+            # 建卡已经能选 1 级 Fighting Style（Defense 是合法选项），这条
+            # 路径必须与 live 协调一致：否则同一张卡在建卡时有 +1、换装后
+            # 才出现，等于两套公式。
+            feat_refs=feat_refs,
         )
         armor_training = derive_armor_training_state(
             abilities, item_refs, armor_category_refs, self.bundle,
+        )
+        derived_speed = derive_speed(
+            int(species["speed"]),
+            feature_bonus=features.speed_bonus(feature_proxy),
+            armor_training=armor_training,
         )
 
         hit_die = int(class_entity["hit_die"])
@@ -300,9 +699,9 @@ class CharacterDerivationMixin:
         max_hp += max(0, level - 1) * max(1, fixed_hp + con_modifier)
         max_hp += species_hp_bonus * level
         max_hp += features.feature_max_hp_bonus(feature_proxy)
-        passive_perception = 10 + ability_modifier(abilities["wis"])
-        if "skill:perception" in skill_refs:
-            passive_perception += prof
+        # 被动察觉就是 10 + 该技能检定的加值，因此直接复用聚合结果：Expertise
+        # 与半熟练若在这里被漏掉，角色卡上会出现两套感知。
+        passive_perception = 10 + int(skill_values.get("perception", 0) or 0)
 
         initiative = ability_modifier(abilities["dex"])
         if "feat:alert" in feat_refs:
@@ -433,6 +832,9 @@ class CharacterDerivationMixin:
             "features": {
                 "feat_refs": feat_refs,
                 "feat_choice_answers": feat_choice_answers,
+                # 技能选择与成长专长选择同住一个槽表：两者都是 (owner,
+                # feature_id, choice_id) 三元组，分成两套账会让重建时只回放一半。
+                "feature_choices": feature_choices,
                 "species_traits": deepcopy(species.get("traits") or []),
             },
             "spellcasting": {"magic_initiate": magic_initiate},
@@ -440,7 +842,10 @@ class CharacterDerivationMixin:
                 "proficiency_bonus": prof,
                 "armor_class": armor_class,
                 "initiative": initiative,
-                "speed": int(species["speed"]),
+                "speed": derived_speed,
+                **derive_movement_profile(
+                    derived_speed, abilities, features, feature_proxy,
+                ),
                 "armor_training": armor_training,
                 "passive_perception": passive_perception,
                 "saving_throws": saving_throws,

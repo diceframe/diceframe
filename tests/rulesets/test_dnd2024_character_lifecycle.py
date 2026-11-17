@@ -26,6 +26,7 @@ from src.webui.services import (
     ruleset_advancement,
     ruleset_characters,
     ruleset_rest,
+    ruleset_ritual,
 )
 from src.webui.services._common import _parse_game_key
 from src.engine.modules import ruleset_runtime
@@ -44,6 +45,15 @@ class _Api:
         })
         self._live_ruleset_rest_dependencies = (
             ruleset_rest.LiveRulesetRestDependencies(
+                get_instance=self._reg.get,
+                parse_game_key=_parse_game_key,
+                save_instance=self._reg.save,
+                load_rule_for_game=self._load_rule_for_game,
+                ruleset_registry=self._ruleset_registry,
+            )
+        )
+        self._live_ruleset_ritual_dependencies = (
+            ruleset_ritual.LiveRulesetRitualDependencies(
                 get_instance=self._reg.get,
                 parse_game_key=_parse_game_key,
                 save_instance=self._reg.save,
@@ -158,6 +168,16 @@ class _Api:
             self._character_card_dependencies, character,
         )
 
+    async def ruleset_ritual_resolve_live(self, game_key: str, user_id: str, body):
+        return await ruleset_ritual.resolve_live(
+            self._live_ruleset_ritual_dependencies, game_key, user_id, body,
+        )
+
+    def ruleset_ritual_options(self, game_key: str, user_id: str):
+        return ruleset_ritual.read_options(
+            self._live_ruleset_ritual_dependencies, game_key, user_id,
+        )
+
     async def ruleset_rest_resolve_live(self, game_key: str, user_id: str, body):
         return await ruleset_rest.resolve_live(
             self._live_ruleset_rest_dependencies, game_key, user_id, body,
@@ -166,6 +186,11 @@ class _Api:
     async def ruleset_rest_submit_live(self, game_key: str, user_id: str, body):
         return await ruleset_rest.submit_live(
             self._live_ruleset_rest_dependencies, game_key, user_id, body,
+        )
+
+    async def ruleset_rest_decide(self, game_key: str, user_id: str, is_gm: bool, body):
+        return await ruleset_rest.decide_live(
+            self._live_ruleset_rest_dependencies, game_key, user_id, is_gm, body,
         )
 
     async def ruleset_rest_resolve_live_party(
@@ -202,6 +227,16 @@ class _Api:
 
     def apply_character_card_advancement(self, card_id: str, body):
         return ruleset_advancement.apply_card(
+            self._card_advancement_dependencies, card_id, body,
+        )
+
+    def pending_character_card_choices(self, card_id: str):
+        return ruleset_advancement.pending_card_choices(
+            self._card_advancement_dependencies, card_id,
+        )
+
+    def complete_character_card_choices(self, card_id: str, body):
+        return ruleset_advancement.complete_card_choices(
             self._card_advancement_dependencies, card_id, body,
         )
 
@@ -680,9 +715,20 @@ async def test_multiplayer_rest_waits_for_every_present_character_and_resolves_o
         },
     )
 
-    assert resolved["resolved"] is True
-    assert resolved["rest_session"]["status"] == "completed"
-    assert {row["user_id"] for row in resolved["party_results"]} == {"gm", "ally"}
+    # 集齐申报只是进入待裁决，角色与时钟都还没动。
+    assert resolved["resolved"] is False
+    assert resolved["rest_session"]["status"] == "awaiting_approval"
+    assert instance.get_character_sheet("gm").get("ruleset_revision", 0) == 0
+
+    decided = await ruleset_rest.decide_live(
+        api._live_ruleset_rest_dependencies,
+        "web|character-lifecycle|web_bot", "gm", True,
+        {"approve": True, "operation_id": "party-rest-decide"},
+    )
+
+    assert decided["resolved"] is True
+    assert decided["rest_session"]["status"] == "completed"
+    assert {row["user_id"] for row in decided["party_results"]} == {"gm", "ally"}
     for uid in ("gm", "ally"):
         sheet = instance.get_character_sheet(uid)
         assert sheet["hp"] > 1
@@ -845,6 +891,55 @@ async def test_profile_http_routes_enforce_live_identity_and_patch_cards(
 
 
 @pytest.mark.asyncio
+async def test_card_choice_routes_answer_with_status_codes_over_http(
+    professional_context,
+) -> None:
+    api, _instance, character = professional_context
+    saved = character_cards.save_character_card(
+        api._character_card_dependencies, character,
+    )["card"]
+    revision = int(saved.get("ruleset_revision", 0) or 0)
+    pending_path = f"/api/character-cards/{saved['id']}/choices/pending"
+    complete_path = f"/api/character-cards/{saved['id']}/choices/complete"
+    headers = {"X-Test-Owner": "1"}
+
+    async with TestClient(TestServer(_http_app(api))) as client:
+        pending = await client.get(pending_path, headers=headers)
+        pending_body = await pending.json()
+        missing_card = await client.get(
+            "/api/character-cards/no-such-card/choices/pending",
+            headers=headers,
+        )
+        stale = await client.post(
+            complete_path,
+            headers=headers,
+            json={
+                "repairs": {"subclass_ref": "subclass:fighter:champion"},
+                "operation_id": "http-choice-stale",
+                "expected_revision": revision + 7,
+            },
+        )
+        empty = await client.post(
+            complete_path,
+            headers=headers,
+            json={
+                "repairs": {},
+                "operation_id": "http-choice-empty",
+                "expected_revision": revision,
+            },
+        )
+        empty_body = await empty.json()
+
+    assert pending.status == 200
+    assert pending_body["ok"] is True
+    assert pending_body["missing"] == []
+    assert missing_card.status == 404
+    assert stale.status == 409
+    assert empty.status == 422
+    assert empty_body["code"] == "ADVANCEMENT_NOT_READY"
+
+
+@pytest.mark.asyncio
 async def test_live_advancement_and_rest_http_routes_enforce_identity(
     professional_context,
 ) -> None:
@@ -895,6 +990,17 @@ async def test_live_advancement_and_rest_http_routes_enforce_identity(
                 "operation_id": "http-long-rest",
             },
         )
+        # 队伍休息集齐申报后停在等裁决：这一条 HTTP 路由属于 DM。
+        decided = await client.post(
+            "/api/games/web%7Ccharacter-lifecycle%7Cweb_bot/rest/decide",
+            headers={"X-Test-User": "gm"},
+            json={"approve": True, "operation_id": "http-rest-decide"},
+        )
+        denied_decide = await client.post(
+            "/api/games/web%7Ccharacter-lifecycle%7Cweb_bot/rest/decide",
+            headers={"X-Test-User": "intruder"},
+            json={"approve": True, "operation_id": "http-rest-decide-2"},
+        )
 
     assert denied_control.status == 403
     assert granted.status == 200
@@ -902,4 +1008,8 @@ async def test_live_advancement_and_rest_http_routes_enforce_identity(
     assert denied.status == 403
     assert applied.status == 200
     assert rested.status == 200
+    assert denied_decide.status == 403
+    assert decided.status == 200
     assert instance.get_character_sheet("gm")["ruleset_revision"] == 2
+    # 长休的 8 小时在裁决时才推进，并且只推进一次。
+    assert instance.world_state["clock"] == {"day": 1, "minute": 480}

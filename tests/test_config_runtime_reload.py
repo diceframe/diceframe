@@ -362,6 +362,8 @@ async def test_common_factory_reuses_live_registry_and_database_stores(tmp_path)
 
     try:
         assert second.registry is first.registry
+        assert second.ruleset_registry is first.ruleset_registry
+        assert second.handler.ruleset_registry is first.ruleset_registry
         assert second.lorebook_store is first.lorebook_store
         assert second.memory_store is first.memory_store
         assert second.lorebook_matcher is first.lorebook_matcher

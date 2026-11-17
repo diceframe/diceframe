@@ -1,0 +1,3 @@
+# src/webui/services/run_story.py 返回给请求方的提示。
+"zh-CN":
+  save_failed_run_retained: "保存失败，原对局状态已保留 / Save failed; original run retained"

@@ -1,0 +1,4 @@
+# src/webui/abuse_guard.py 返回给请求方的提示。
+"zh-CN":
+  body_read_timeout: "请求体读取超时"
+  rate_limited: "操作太频繁，为避免连续请求影响游戏，系统暂时拦截了本次操作。请等待约 %{retry_after} 秒后再试。"

@@ -1,0 +1,3 @@
+# src/webui/services/assistant_authoring.py 返回给请求方的提示。
+"zh-CN":
+  book_visibility_too_many_entries: "整册 visibility 最多支持 1000 条目，请按条目分批"

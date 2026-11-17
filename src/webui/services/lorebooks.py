@@ -17,6 +17,7 @@ from src.engine.world.contracts import SOURCE_REF_KINDS
 from src.lorebook.activation import DEFAULT_VECTOR_ACTIVATION
 from src.lorebook.exporter import export_lorebook_native, export_lorebook_v3
 from src.lorebook.store import LorebookIdentityConflict
+from src.localization.messages import t
 
 #: Canonical defaults for a *newly created* entry. Legacy adapter drafts and the
 #: world-copy / NPC compatibility paths keep their own historical defaults; these
@@ -465,7 +466,7 @@ def commit_lorebook_import(
         return {"ok": False, "code": "IMPORT_UNRESOLVED_REFERENCES", "error": "Import has unresolved content references"}
     if plan_digest:
         if str(current.get("plan_digest") or "") != str(plan_digest):
-            return {"ok": False, "code": "IMPORT_PLAN_STALE", "error": "导入预览已过期，请重新预览"}
+            return {"ok": False, "code": "IMPORT_PLAN_STALE", "error": t("webui.services.lorebooks.import_preview_expired")}
     operations = (current.get("commit_plan") or {}).get("operations") or []
     matched = [row for row in operations if isinstance(row, dict) and row.get("existing_ref")]
     if matched and duplicate_policy == "skip":

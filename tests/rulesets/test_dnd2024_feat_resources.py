@@ -34,6 +34,7 @@ def _warlock(level: int = 6, cha: int = 15) -> dict:
 
     return {
         "build": {"class_levels": [{"class_ref": "class:warlock", "level": level}]},
+        "features": {"subclass_ref": "subclass:fiend_patron"},
         "abilities": {**WARLOCK_ABILITIES, "cha": cha},
         "resources": {"hp": 40, "max_hp": 40, "hit_dice": {"d8": level}},
     }
@@ -210,7 +211,10 @@ def test_cutting_words_die_follows_the_bardic_track(level: int, die_sides: int) 
     """D2: ``die_sides_track`` resolves against the real progression table."""
 
     resolver = Dnd2024ClassFeatureResolver(Dnd2024Runtime().load_bundle("en"))
-    character = {"build": {"class_levels": [{"class_ref": "class:bard", "level": level}]}}
+    character = {
+        "build": {"class_levels": [{"class_ref": "class:bard", "level": level}]},
+        "features": {"subclass_ref": "subclass:college_of_lore"},
+    }
     assert resolver.feature_value(character, "cutting_words", "die_sides") == die_sides
 
 
@@ -230,5 +234,8 @@ def test_dark_ones_own_luck_declares_a_d10_at_level_six() -> None:
     assert definition.minimum_level == 6
     assert definition.parameters["die_sides"] == 10
 
-    character = {"build": {"class_levels": [{"class_ref": "class:warlock", "level": 6}]}}
+    character = {
+        "build": {"class_levels": [{"class_ref": "class:warlock", "level": 6}]},
+        "features": {"subclass_ref": "subclass:fiend_patron"},
+    }
     assert resolver.feature_value(character, "dark_ones_own_luck", "die_sides") == 10

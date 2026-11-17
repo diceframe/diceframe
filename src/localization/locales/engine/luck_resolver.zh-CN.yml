@@ -1,0 +1,10 @@
+# src/engine/luck_resolver.py 返回给请求方的提示。
+"zh-CN":
+  check_missing_or_expired: "检定不存在或已过期"
+  choice_already_handled: "该检定的幸运选择已经处理"
+  insufficient_luck: "幸运不足：需要 %{cost} 点，当前只有 %{current_luck} 点"
+  luck_not_allowed: "该检定不能消耗幸运"
+  luck_not_needed: "该检定不需要消耗幸运"
+  no_pending_choice: "当前没有等待处理的幸运选择"
+  no_pending_push: "该检定没有等待处理的孤注一掷"
+  own_choice_only: "只能处理自己的幸运选择"

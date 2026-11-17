@@ -220,6 +220,7 @@ class SwipeGenerator:
             provider_name=provider_name,
             world_data=world_data,
             history_override=instance.log[:target_idx],
+            perception_actions=target_entry.get("actions", []),
             authoritative_events_text=pending_combat_events_text,
         )
 

@@ -12,6 +12,7 @@ from src.engine.participant_view import Viewer
 from src.engine.staged_transaction import StagedGameTransaction
 from src.game_preferences import validate_preferences
 from src.webui.services.check_decisions import decision_payload
+from src.localization.messages import t
 
 logger = logging.getLogger('trpg')
 
@@ -43,7 +44,7 @@ class GamePreferenceService:
                 result['defaults'] = validate_preferences(self.deps.get_defaults())
             return result
         except (ValueError, ModuleStateError):
-            return {'ok': False, 'error_code': 'UNSUPPORTED_PREFERENCES', 'error': '对局偏好版本不受支持'}
+            return {'ok': False, 'error_code': 'UNSUPPORTED_PREFERENCES', 'error': t("webui.services.game_preferences.version_unsupported")}
 
     async def update(self, key: str, viewer: Viewer, raw: Any) -> dict:
         if not viewer.is_gm:
@@ -57,11 +58,11 @@ class GamePreferenceService:
             return {'ok': False, 'error_code': 'INVALID_PREFERENCES', 'error': str(exc)}
         async with inst.authoritative_write() as entered, inst._lock:
             if not entered:
-                return {'ok': False, 'error_code': 'REWRITE_IN_PROGRESS', 'error': '正在重写历史，请稍后重试'}
+                return {'ok': False, 'error_code': 'REWRITE_IN_PROGRESS', 'error': t("webui.services.game_preferences.rewriting_retry_later")}
             if self.deps.get_instance(key) is not inst:
-                return {'ok': False, 'error_code': 'STALE_RUN', 'error': '对局已重开，请刷新'}
+                return {'ok': False, 'error_code': 'STALE_RUN', 'error': t("webui.services.game_preferences.game_restarted_refresh")}
             if inst.round_processing_in_flight():
-                return {'ok': False, 'error_code': 'ROUND_PROCESSING', 'error': '正在生成本轮，请完成后再修改偏好'}
+                return {'ok': False, 'error_code': 'ROUND_PROCESSING', 'error': t("webui.services.game_preferences.round_generating")}
             transaction = None
             try:
                 transaction = StagedGameTransaction(inst)
@@ -79,7 +80,7 @@ class GamePreferenceService:
                 return {'ok': False, 'error_code': 'INVALID_PREFERENCES', 'error': str(exc)}
             except Exception:
                 logger.exception('Saving table preferences failed')
-                return {'ok': False, 'error_code': 'SAVE_FAILED', 'error': '偏好保存失败，原设置已保留'}
+                return {'ok': False, 'error_code': 'SAVE_FAILED', 'error': t("webui.services.game_preferences.save_failed_settings_kept")}
         result = self.get(key, viewer)
         result['closed_push_decisions'] = closed
         return decision_payload(inst, result) if closed else result

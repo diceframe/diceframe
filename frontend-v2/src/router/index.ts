@@ -20,6 +20,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/library', name: 'library', component: () => import('@/features/library/ContentLibraryView.vue') },
   { path: '/fu-data', name: 'fu-data', component: () => import('@/features/rulesets/fabula_ultima/FuDataView.vue') },
   { path: '/creator', name: 'creator', component: () => import('@/features/creator/CreatorView.vue') },
+  { path: '/creator/studio/:projectId', name: 'creator-studio', component: () => import('@/features/creator/CreatorStudioView.vue') },
   { path: '/map', name: 'map', component: () => import('@/features/maps/MapView.vue') },
   { path: '/lorebook', name: 'lorebook', component: () => import('@/features/lorebook/LorebookView.vue') },
   { path: '/worlds', name: 'worlds', component: () => import('@/features/worlds/WorldsView.vue') },
@@ -28,7 +29,9 @@ const routes: RouteRecordRaw[] = [
   { path: '/modules/:moduleId', name: 'module-detail', component: () => import('@/features/modules/ModuleDetailView.vue') },
   { path: '/memory', name: 'memory', component: () => import('@/features/admin/MemoryView.vue') },
   { path: '/logs', name: 'logs', component: () => import('@/features/admin/LogsView.vue') },
-  { path: '/rules', name: 'rules', component: () => import('@/features/admin/RulesView.vue') },
+  // W2：/rules 路径与名称保留（深链不破坏），页面升级为「规则与玩法」看板，
+  // 旧模板编辑器整组件内嵌为第二个页签。
+  { path: '/rules', name: 'rules', component: () => import('@/features/rules/RulesGameplayView.vue') },
   { path: '/settings', name: 'settings', component: () => import('@/features/admin/SettingsView.vue') },
   { path: '/plugins', name: 'plugins', component: () => import('@/features/plugins/PluginsView.vue') },
   {

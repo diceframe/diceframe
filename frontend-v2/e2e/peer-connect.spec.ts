@@ -17,7 +17,9 @@ test('two clients establish a direct data channel through Hub signaling', async 
   await host.getByRole('button', { name: '创建临时直连房间' }).click()
   // 批量开房会同时生成已绑定角色与空闲席位的链接；该流程需要空闲席位来创建新角色。
   const invitePanel = host.locator('.peer-status .peer-invite')
-  await expect(invitePanel).toContainText('玩家邀请码')
+  // 房间创建与邀请码生成是异步的：慢环境（CI）下 5s 默认超时不够，
+  // 与后续连接断言一样给到 20s——本地复跑证明功能本身正常。
+  await expect(invitePanel).toContainText('玩家邀请码', { timeout: 20_000 })
   const invite = await invitePanel.getByLabel('新玩家 1 的一次性链接码').getByRole('textbox').inputValue()
   expect(invite).toMatch(/^DFP2-/)
 

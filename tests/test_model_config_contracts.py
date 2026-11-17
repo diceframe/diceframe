@@ -153,8 +153,8 @@ async def test_web_composition_passes_proxy_and_keyless_embedding_settings(monke
 
     # Reuse inert stores so actual client construction never opens databases or sends requests.
     reuse = SimpleNamespace(
-        registry=object(), lorebook_store=object(), lorebook_matcher=object(),
-        memory_store=SimpleNamespace(embedding_client=None),
+        registry=object(), ruleset_registry=object(), lorebook_store=object(),
+        lorebook_matcher=object(), memory_store=SimpleNamespace(embedding_client=None),
     )
     monkeypatch.setattr(factory, "GameHandler", Mock())
     monkeypatch.setattr(factory, "build_default_ruleset_registry", Mock())
@@ -179,3 +179,39 @@ async def test_web_composition_passes_proxy_and_keyless_embedding_settings(monke
     finally:
         await runtime.llm_client.close()
         await runtime.memory_store.embedding_client.close()
+
+
+@pytest.mark.asyncio
+async def test_local_embedding_validation_failure_disables_capability(monkeypatch, tmp_path, caplog):
+    import src.common_factory as factory
+    from src.memory import local_embedding
+    from src.webui.composition import RuntimeComposition, RuntimePaths as CompositionPaths
+
+    # 本地模型目录损坏 → 构造期校验抛 LocalModelError；启动不得冒泡，向量能力本次停用。
+    class BrokenBackend:
+        def __init__(self, *args, **kwargs):
+            raise local_embedding.LocalModelError("local model file hash mismatch: model.onnx")
+
+    monkeypatch.setattr(local_embedding, "LocalOnnxEmbeddingBackend", BrokenBackend)
+    reuse = SimpleNamespace(
+        registry=object(), lorebook_store=object(), lorebook_matcher=object(),
+        ruleset_registry=object(), memory_store=SimpleNamespace(embedding_client=None),
+    )
+    monkeypatch.setattr(factory, "GameHandler", Mock())
+    monkeypatch.setattr(factory, "build_default_ruleset_registry", Mock())
+    config = {
+        "ai_providers": [_provider()], "llm_provider_ref": "local", "model": "chat",
+        "embedding_enabled": True, "embedding_provider_ref": "local",
+        "embedding_source": "local", "embedding_local_model_id": "demo",
+    }
+    composition = RuntimeComposition(
+        paths=CompositionPaths(tmp_path, tmp_path, tmp_path, tmp_path, tmp_path),
+        state=config, save_config=lambda: None,
+    )
+    with caplog.at_level("WARNING", logger="trpg"):
+        runtime = composition.build_subsystems(reuse=reuse)
+    try:
+        assert runtime.memory_store.embedding_client is None
+        assert any("本地向量模型校验失败" in record.message for record in caplog.records)
+    finally:
+        await runtime.llm_client.close()

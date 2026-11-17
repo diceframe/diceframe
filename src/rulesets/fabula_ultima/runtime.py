@@ -847,6 +847,7 @@ class FabulaUltimaRuntime(LegacyRulesetAdapter):
 
     def prepare_intent_submission(
         self, intent: dict[str, Any], requester_id: str, requester_is_gm: bool,
+        instance: Any = None,
     ) -> dict[str, Any]:
         prepared = deepcopy(intent)
         # 服务端认定的身份，覆盖客户端可能自带的同名字段；validate_intent 据此

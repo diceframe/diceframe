@@ -59,7 +59,8 @@ function fail(message: string) {
     errorRef.value?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
   })
 }
-const isAdventureModule = computed(() => props.mode === 'adventure')
+const isAdventureModule = computed(() => props.mode === 'adventure' || props.mode === 'unified')
+const isUnifiedPackage = computed(() => props.mode === 'unified')
 const exported = ref<{ blob: Blob; id: string; version: string; source: boolean } | null>(null)
 
 const copy = computed(() => ({
@@ -246,7 +247,10 @@ const exportedFile = computed(() => {
 async function exportPack() {
   if (!packId.value.trim() || !name.value.trim()) { fail(copy.value.needIdName); return }
   if (!CONTENT_PACK_ID_PATTERN.test(packId.value.trim())) { fail(copy.value.idInvalid); return }
-  if (isAdventureModule.value && !selectedAdventures.value.length) { fail(copy.value.adventureRequired); return }
+  if (props.mode === 'adventure' && !selectedAdventures.value.length) { fail(copy.value.adventureRequired); return }
+  if (isUnifiedPackage.value && !selectedAdventures.value.length && !selectedWorld.value && !selectedRule.value && !selectedBooks.value.length && !selectedCards.value.length) {
+    fail(copy.value.resourceRequired); return
+  }
   if (!isAdventureModule.value && !selectedWorld.value && !selectedRule.value && !selectedBooks.value.length && !selectedCards.value.length) {
     fail(copy.value.resourceRequired); return
   }

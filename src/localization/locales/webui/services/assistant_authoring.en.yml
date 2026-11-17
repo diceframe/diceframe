@@ -1,0 +1,3 @@
+# src/webui/services/assistant_authoring.py 返回给请求方的提示。
+"en":
+  book_visibility_too_many_entries: "Whole-book visibility supports at most 1000 entries; split the entries into batches"

@@ -675,6 +675,8 @@ Frontend rules:
 - Do not treat whether a button is visible as authorization;
 - UI capability gating is an experience layer only; the server must validate again.
 
+Ruleset gameplay projections are owned by `features/play/useRulesetGameplay.ts`, sharing one available-actions response for declarative panels and the action catalogue. Fetching requires only the backend's `authoritative_intents` capability, not `deterministic_combat` or sequential/composite actions; combat tools retain their separate capability gate. A game, viewer, GM-role or runtime switch immediately clears the projection and invalidates old requests. Rounds, ruleset-state signals and visible-page polling refresh it.
+
 Play-state synchronization is owned by `composables/useGame.ts`. Because [Cloudflare Quick Tunnels do not support SSE](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/#limitations), `.trycloudflare.com` player pages fetch the current game snapshot through the existing APIs every two seconds, skipping ticks while a refresh is in flight. Local and custom-domain pages retain SSE; P2P subscriptions take precedence. Polling reuses the existing permission filtering, closed-entrance handling and connection cleanup.
 
 The homepage's “Join friends” entry is owned by `features/peer/FriendJoinPanel.vue`. `joinInvitation.ts` classifies regular invitation URLs and `DFP2-` direct-connect codes locally without probing remote hosts or consuming credentials. Regular URLs retain their original origin, deployment path, backend parameter and seat credential and open only after an explicit click. Direct codes enter the existing P2P flow with its connection consent intact. The Hub entry switch gates experimental direct connect only; ordinary invitation joining remains available. The play invitation dialog links to official multiplayer documentation without attaching game or invitation credentials.
@@ -2324,7 +2326,9 @@ The context builder must not import D&D itself and calculate D&D state.
 Player-facing GM/KP Q&A is separate from the full GM context.
 
 Normal GM turns use `src/llm/private_perceptions.py` to recall recent character perceptions,
-attributed by actor ID and round. This applies to every world and ruleset without an Adventure
+attributed by actor ID and round. A character's action can also recall older, matching observations
+from that character's private log. Regenerating a round uses its saved actions.
+This applies to every world and ruleset without an Adventure
 binding and supplies past observations without changing inventories or world state. The block
 uses at most 5% of the context window, capped at 3000 characters. Records are selected whole;
 final context shrinking removes the entire block rather than separating records from its policy.
@@ -3052,6 +3056,8 @@ To avoid forcing every runtime to implement an ever-growing method set, addition
 - `RunLifecycleRuntime`
 - `PublicTimelineProjectionRuntime`
 
+Remote adapters must explicitly declare support for the optional `next_automatic_intent` RPC through the independent `RulesetCapabilities.automatic_intents=True` flag. It defaults to false and is not inferred from `authoritative_intents`, `deterministic_combat`, or the existence of the adapter method. Without this declaration the adapter returns `None` without sending that RPC, so ordinary intents remain usable. Once declared, only a successful `null` response ends the automatic ladder; remote rejection, transport errors and malformed responses propagate to the existing authority transaction for rejection and rollback, rather than being swallowed as “unsupported.” Built-in runtimes still use the optional Protocol; D&D also declares the capability to keep its metadata accurate.
+
 The correct extension pattern is usually:
 
 ```text
@@ -3065,6 +3071,23 @@ engine
 WebAPI generic method
 frontend generic component
 ```
+
+---
+
+### Runtime Narrative Check Preparation
+
+A `dice_system=none` rule declaring `narrative_checks` resolves free-text checks
+through the optional `NarrativeCheckResolverRuntime.resolve_narrative_checks`.
+Preparation plans on a detached aggregate; blocking RPC runs in a worker with
+only that snapshot. Publication uses the authority → state gates and a staged
+transaction, fencing registry identity, run, phase, all persisted inputs and a
+runtime-only check generation. Abort/reset advances that generation to reject
+same-round retry ABA. A cancelled worker may finish but cannot publish to live
+state. Runtime results already committed to an action retain their original
+check identity and dice across narrative failure retries, regardless of new
+planner UUIDs. Prompts and regeneration select generic formatting by
+`planner_source=runtime`, preserving actual dice, individual rolls and outcome.
+This recovery/concurrency fix does not change the persisted schema.
 
 ---
 
@@ -3756,6 +3779,10 @@ available_intents
 ```
 
 returns that intent.
+
+Exploration and combat share effective known/prepared spells, always-prepared grants, free-source priority, resource events and canonical consumption through `spells/casting.py`; combat retains ownership of action economy. Unlimited slots take priority over finite uses. `slot_level=0` selects a legal free source, while an explicit positive level spends a paid slot: a Font-created slot at that level takes priority over an ordinary slot, spending exactly one source and no free use. Font slots retain a separate projection, never merged into ordinary slots or free sources. Exploration continues to reject deterministic effects that are not exploration-safe.
+
+Spell Mastery Long Rest study enters the formal service → runtime → resting chain through the runtime-declared `free_cast` rest option, with non-mutating validation before party submission; a Short Rest cannot replace spells.
 
 It shares with combat:
 
@@ -5413,7 +5440,9 @@ The running application itself must not pretend to perform the launcher's atomic
 
 Overwrite upgrades are also owned by the launcher (`src/launcher/OverwriteUpgrade.cs`). When a user unpacks a new archive over the installation, the new payload lands in the root-level `app/` and `python/` while `current.json` still points to the old payload under `versions/`. If, at startup, the root payload's `app/src/version.py` version is strictly newer than the current one, the launcher moves it into `versions/v<version>/`, stages the same launcher, writes the same restart signal as an in-app update, and runs the same health / probation / commit flow; failure rolls back to the version that was running before the overwrite. This step must run before legacy-layout cleanup, otherwise the overwritten payload would be deleted as legacy files. Nothing happens when the root version is not newer, cannot be read, or the installation has never used `versions/`.
 
-The host's local UI is the launcher's app window (`src/launcher/AppWindow.cs`, WinForms + WebView2). The WebView2 SDK assemblies are not embedded in the exe; they ship with the version payload in `app/launcher/webview2/`. Launcher self-update only replaces the exe, while the old updater, the new updater and overwrite upgrades all move `app/` as a whole, so every version carries the SDK that matches its launcher. They are copied to `data/_launcher/webview2/` before loading so the process never locks files under `versions/`. Once the window is ready the launcher detaches from its console with `FreeConsole` (hiding the window does not work under Windows Terminal); later output goes to `logs/launcher.log`, `python.exe` starts without a window, and failures are reported in a dialog. While `data/access_token.txt` exists (only until the first password is changed; the server deletes a file that no longer matches at startup), its value is written into the frontend's `localStorage` key `trpg_access_token` before page scripts run, for the local origin only. A missing SDK, missing WebView2 runtime or failed initialisation keeps the console and falls back to the default browser; `--browser` forces the browser. Closing the window stops the server.
+The host's local UI is the launcher's app window (`src/launcher/AppWindow.cs`, WinForms + WebView2). The WebView2 SDK assemblies are not embedded in the exe; they ship with the version payload in `app/launcher/webview2/`. Launcher self-update only replaces the exe, while the old updater, the new updater and overwrite upgrades all move `app/` as a whole, so every version carries the SDK that matches its launcher. They are copied to `data/_launcher/webview2/` before loading so the process never locks files under `versions/`. Once the window is ready the launcher detaches from its console with `FreeConsole` (hiding the window does not work under Windows Terminal); later output goes to `logs/launcher.log`, `python.exe` starts without a window, and failures are reported in a dialog. While `data/access_token.txt` exists (only until the first password is changed; the server deletes a file that no longer matches at startup), its value is written into the frontend's `localStorage` key `trpg_access_token` before page scripts run, only for the verified backend's local host:port. A missing SDK, missing WebView2 runtime or failed initialisation keeps the console and falls back to the default browser; `--browser` forces the browser. Closing the window stops the server.
+
+Who owns the backend on the port is settled by a local handshake (`src/launcher/BackendLink.cs` ↔ `src/webui/services/launcher_link.py`, `src/webui/routes/launcher.py`). Public metadata such as `server_version` in `/api/config` can be forged by anything and is also served by any other installation on the machine, so it never proves ownership. The launcher keeps a random instance key in `data/_launcher/instance.json` (regenerated when the recorded data-directory location does not match, i.e. the whole folder was copied into another installation); the backend answers the anonymous `GET /api/system/launcher/identity` with an HMAC over the launcher's nonce that also authenticates its `boot_id` and `pid`. Without a key (Docker, source runs) the handshake endpoints report unavailable. At startup a backend that passes the handshake is adopted as Attached (closing the window leaves it running); a port held by anything that cannot prove ownership is reported as a port conflict, without spawning a backend that would fail to bind, opening the other server's page, or injecting this installation's first-run password. A backend the launcher started itself (Owned, including its execv successors) counts as ready once the health endpoint's `pid` matches the child process; the UI only ever opens on one of these verified targets. Before an update switch an Owned backend is still terminated; an Attached backend can only be asked to exit gracefully via `POST /api/system/launcher/stop`, signed with the same key (`stop_requested` keeps the cleanup from execv-ing). The candidate starts only after it has exited and the port is free; if it does not stop, the update is recorded as failed and nothing changes — the launcher never kills an arbitrary process by port. On Windows `os.execv` changes the PID and the old process exits with 0: the backend writes `data/_launcher/restart-intent.json` (old `pid` + `boot_id`) right before execv, and only when the exit code is 0 and the intent matches that process does the launcher wait, for a bounded time, for a new `boot_id` to pass the handshake, reopen the process handle and keep the UI alive; any other exit still goes through crash forensics. Promoting a new exe (the launcher's commit step and the early promotion in `launcher_promotion.py`) first copies it completely into a temporary file inside the installation directory and verifies its hash, then performs two same-volume renames; on failure the original exe is checked by hash and restored from the backup.
 
 When `current.json` contains both verifiable `relative_dir` and `previous_relative_dir` values, the application may write a restart signal with `operation=rollback`. The launcher then runs the previous payload through the same health, probation, and commit flow. A successful switch exchanges the current and previous pointers while retaining both payloads; the application does not edit the pointer or delete `data/`.
 
@@ -6541,6 +6570,8 @@ The same module owns optional `speaker_aliases`: after explicit GM confirmation,
 ## Translation maintenance and display fallback
 
 `src/localization/registry.json` owns maintenance tier/status metadata. English and Simplified Chinese are core; Japanese/German/Russian are community catalogs. Stable locale IDs remain available to saved games and content even when a catalog is paused. The frontend UI picker excludes paused catalogs, while saved UI preferences render English. Game narration language, canonical identities and mechanics are unchanged.
+
+Backend copy goes through `t("namespace.key", language)` in `src/localization/messages.py` (python-i18n). Catalogs live under `src/localization/locales/` in a tree that mirrors the source: the messages of `src/webui/services/x.py` are in `locales/webui/services/x.<locale>.yml` under the namespace `webui.services.x`. They use `%{name}` placeholders, require zh-CN and en only, and fall back target → en → zh-CN. The language has two sources: API messages returned to the caller omit it and use the language `src/webui/request_language.py` negotiates from the standard `Accept-Language` header (the frontend sets it to the UI language; without the header, or without a supported language in it, the original Chinese text is kept); text that becomes part of a game (saved state, timeline, model prompts) passes the game language explicitly. The error exit in `src/webui/errors.py` replaces the `error` text of registered error codes with the negotiated language and keeps `error_code`. Existing strings migrate module by module; unmigrated ones stay as they are.
 
 `frontend-v2/src/i18n/policy.ts` filters community messages by the reviewed English source fingerprints, recursively including API errors. Missing/new/stale keys use Vue I18n's English fallback. The accepted baseline is not regenerated on source changes; volunteers record individual reviewed keys through `locales:review`. `locales:check` gates core key parity and reports community gaps without blocking feature releases. Backend shared text/field helpers and typed content overlays honor paused status. Feature-local/backend text outside the central catalog has no automatic source fingerprinting. See [translation maintenance](en/translations.md).
 

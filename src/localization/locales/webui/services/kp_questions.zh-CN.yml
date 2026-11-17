@@ -1,0 +1,13 @@
+# src/webui/services/kp_questions.py 返回给请求方的提示。
+"zh-CN":
+  claim_character_first: "请先认领本局角色，再向 KP 询问"
+  game_advancing: "游戏正在推进，请稍后再问"
+  game_missing_refresh: "游戏不存在，请刷新后重试"
+  game_replaced_during_question: "询问期间游戏已被替换或删除，请刷新后重试"
+  kp_empty_answer: "KP 没有返回可显示的回答，请重试"
+  kp_model_unconfigured: "KP 模型尚未配置或不可用"
+  kp_unavailable: "KP 暂时无法回答，请稍后重试"
+  public_answer_save_failed: "公开回答暂时无法保存，请稍后重试"
+  question_required: "请输入要询问 KP 的问题"
+  run_read_only: "本局已结团或正在准备结团，问答未写入 / This run is read-only"
+  visibility_invalid: "询问可见范围无效"

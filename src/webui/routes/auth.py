@@ -7,6 +7,7 @@ import logging
 from aiohttp import web
 
 from src.webui.login_audit import LOGIN_AUDIT_KEY
+from src.localization.messages import t
 
 
 logger = logging.getLogger("trpg")
@@ -27,7 +28,7 @@ async def api_login(request: web.Request) -> web.Response:
             logger.exception("登录记录写入失败")
     if not success:
         return web.json_response(
-            {"ok": False, "error": "密码错误"},
+            {"ok": False, "error": t("webui.routes.auth.wrong_password")},
             status=401,
             headers={"Cache-Control": "no-store"},
         )

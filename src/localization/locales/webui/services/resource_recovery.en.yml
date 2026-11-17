@@ -1,0 +1,9 @@
+# src/webui/services/resource_recovery.py 返回给请求方的提示。
+"en":
+  claim_own_recovery_only: "Claim your own recovery"
+  no_recovery_policy: "No recovery policy declared"
+  recovery_changed_refresh: "Recovery changed; refresh first"
+  request_own_character_only: "Request for your own character"
+  run_changed_refresh: "Run changed; refresh first"
+  run_read_only: "Run is read-only"
+  save_failed_state_retained: "Save failed; original state retained"

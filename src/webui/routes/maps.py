@@ -6,6 +6,7 @@ from aiohttp import web
 
 from src.webui.routes._common import _get_api
 from src.webui.viewer import viewer_for
+from src.localization.messages import t
 
 
 async def api_map_locations(request: web.Request) -> web.Response:
@@ -31,7 +32,7 @@ async def api_game_map_background_file(request: web.Request) -> web.StreamRespon
         str(request.match_info["asset_id"] or ""),
     )
     if path is None:
-        return web.json_response({"error": "地图背景不存在"}, status=404)
+        return web.json_response({"error": t("webui.routes.maps.background_missing")}, status=404)
     return web.FileResponse(path, headers={"Cache-Control": "private, max-age=3600"})
 
 
@@ -42,7 +43,7 @@ async def api_map_background_update(request: web.Request) -> web.Response:
     if not detail:
         return web.json_response({"error": "游戏不存在"}, status=404)
     if request.get("user_id", "") != detail.get("gm_uid", ""):
-        return web.json_response({"error": "仅 GM 可修改地图背景"}, status=403)
+        return web.json_response({"error": t("webui.routes.maps.background_gm_only")}, status=403)
 
     body = await request.json()
     selection = body.get("map_background")

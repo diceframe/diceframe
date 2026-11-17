@@ -1,0 +1,4 @@
+# src/webui/services/speech.py 返回给请求方的提示。
+"en":
+  identity_not_in_game: "Your current identity is not part of this game"
+  public_timeline_only: "Only content from this game's public timeline can be read aloud"

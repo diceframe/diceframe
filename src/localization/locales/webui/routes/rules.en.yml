@@ -1,0 +1,5 @@
+# src/webui/routes/rules.py 返回给请求方的提示。
+"en":
+  body_must_be_json_object: "The request body must be a JSON object"
+  draft_not_object: "The character draft must be a JSON object"
+  draft_too_large: "The character draft is too large"

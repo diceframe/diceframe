@@ -1,0 +1,7 @@
+# src/webui/services/tunnel.py 返回给请求方的提示。
+"en":
+  already_published: "The tunnel is already published by plugin %{current_publisher}; stop it before publishing again"
+  publish_state_and_rollback_failed: "Writing the tunnel state failed, and rolling back the public URL also failed"
+  release_state_and_rollback_failed: "Clearing the tunnel state failed, and rolling back the public URL also failed"
+  url_not_https: "The tunnel address must be a valid https URL"
+  url_too_long: "The tunnel address is too long"

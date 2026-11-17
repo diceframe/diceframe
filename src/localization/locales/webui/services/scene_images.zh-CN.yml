@@ -1,0 +1,17 @@
+# src/webui/services/scene_images.py 返回给请求方的提示。
+"zh-CN":
+  content_pack_cover_missing: "内容包冒险头图不存在或未声明"
+  content_pack_cover_too_large: "内容包冒险头图不能超过 8 MB"
+  content_pack_reference_incomplete: "内容包冒险头图引用不完整"
+  dimensions_too_large: "冒险头图尺寸过大"
+  file_data_invalid: "冒险头图文件数据无效"
+  file_missing: "未提供冒险头图文件"
+  file_too_large: "冒险头图不能超过 8 MB"
+  generated_missing: "生成的冒险头图不存在"
+  reference_not_object: "冒险头图引用必须是对象"
+  too_small: "冒险头图尺寸不能小于 320×180"
+  unknown_builtin: "未知的内置冒险头图"
+  unreadable: "无法读取该冒险头图"
+  unsupported_format: "冒险头图仅支持 PNG、JPEG 或 WebP"
+  unsupported_reference_type: "不支持的冒险头图引用类型"
+  uploaded_missing: "上传的冒险头图不存在"

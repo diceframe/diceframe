@@ -1,0 +1,6 @@
+# src/webui/routes/game_character_routes.py 返回给请求方的提示。
+"zh-CN":
+  body_not_object: "请求体必须是对象"
+  card_unavailable: "这张角色卡不可用"
+  npc_portrait_gm_only: "仅 GM 可修改 NPC 立绘"
+  npc_voice_gm_only: "仅 GM 可修改 NPC 音色"

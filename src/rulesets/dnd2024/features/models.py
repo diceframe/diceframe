@@ -16,22 +16,51 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Mapping
 
 from src.rulesets.bundle import LoadedRulesetBundle
 
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
+_OWNER_RE = re.compile(r"^(class|subclass):[a-z0-9][a-z0-9_.-]*$")
 # v1 只表达本 PR 真正实现的效果原语；未知 kind 必须 fail closed，而不是被静默忽略。
 ACTION_KINDS = frozenset({
     "unarmed_strike", "dash", "dodge", "disengage", "hide", "heal", "rage",
-    "rage_sustain", "action_surge",
+    "rage_sustain", "action_surge", "bardic_grant", "inspiration_slot_exchange",
+    # Font of Magic 的两个方向是两条独立动作：槽换点不要动作、点换槽要附赠
+    # 动作，合成一个 kind 就只能靠 intent 里的字段猜哪一半被声明了。
+    "font_slot_to_points", "font_create_slot",
 })
 ACTION_COST_KINDS = ("bonus_action", "action")
 # 装备前提里可声明的武器类别；同样 fail closed。``simple_melee`` 是 SRD 的
 # Simple Melee 武器栏，``martial_melee_light`` 是带 Light 的 Martial Melee 武器。
 WEAPON_KINDS = frozenset({"simple_melee", "martial_melee_light"})
-EQUIPMENT_REQUIREMENT_KEYS = frozenset({"unarmored", "no_shield", "weapon_kinds"})
+EQUIPMENT_REQUIREMENT_KEYS = frozenset(
+    {"unarmored", "no_shield", "no_heavy_armor", "weapon_kinds"}
+)
+# 本切片只支持成长专长选择与技能熟练类选择；未知 kind 必须加载期拒绝，
+# 不能静默当成无选项特性。``skill_proficiency`` 是 Expertise / Scholar 这类
+# "在已有技能熟练里再选几项"的选择：它的候选项来自技能目录而不是专长目录，
+# 且可以一次选多项（Expertise 一次两项）——用 ``advancement_feat`` 表达不了。
+FEATURE_CHOICE_KINDS = frozenset({
+    "advancement_feat", "skill_proficiency", "feature_option",
+})
+# 技能选择最终"授予什么"的闭集。目前只有 Expertise；未知值必须加载期拒绝，
+# 否则选中一个技能却在运行时什么都不发生。
+SKILL_CHOICE_GRANTS = frozenset({"expertise"})
+# 特性参数的射程键统一以英尺计。``range_ft`` 是"该特性对目标生效的射程"，
+# 与前缀式 ``aura_range_ft``/``defeat_share_range_ft`` 并列：后者是"一个特性有
+# 多条射程"时才需要的消歧前缀，单条射程用裸键即可。
+#
+# 一个特性同时声明 ``range_ft`` 和 ``trigger``，就是一张"掷后窗口"声明：
+# 某个事件发生了，且目标在射程内，窗口才打开。两个键互为前提，所以
+# ``trigger`` 的闭集只在声明了 ``range_ft`` 时校验——其他机制（例如
+# Dark One's Blessing 的 defeat payload）有各自的 trigger 词汇，由各自的
+# 消费方校验，不能被这张表的闭集误伤。
+CHECK_WINDOW_TRIGGERS = frozenset({
+    "attack_roll_success", "grant", "own_check_failure", "save_failure",
+})
 
 
 class ClassFeatureError(ValueError):
@@ -49,6 +78,27 @@ def _require_text(value: Any, field_name: str) -> str:
     text = str(value or "").strip()
     if not text:
         raise ClassFeatureError(f"{field_name} must not be empty")
+    return text
+
+
+def _require_owner(value: Any, field_name: str, class_id: str) -> str:
+    """Validate an owner reference, defaulting an omitted class owner.
+
+    A feature declared in ``classes.<id>.features`` without an explicit owner
+    belongs to that class.  Subclass owners are always explicit: the catalog
+    cannot infer a subclass from the class table, because the character may not
+    have selected one.
+    """
+
+    text = str(value or "").strip()
+    if not text:
+        return f"class:{class_id}"
+    if not _OWNER_RE.fullmatch(text):
+        raise ClassFeatureError(f"{field_name} is not a valid owner ref: {value!r}")
+    if text.startswith("class:") and text != f"class:{class_id}":
+        raise ClassFeatureError(
+            f"{field_name} must name the declaring class: {text!r}"
+        )
     return text
 
 
@@ -74,15 +124,21 @@ def _require_scalar(value: Any, field_name: str) -> Any:
 class EquipmentRequirement:
     """The canonical equipment precondition a class feature declares.
 
-    ``unarmored`` / ``no_shield`` are evaluated against the character's item
-    types; a non-empty ``weapon_kinds`` additionally requires *every* wielded
-    weapon to match one of the declared kinds.  The same kinds are the weapons
-    the feature's own weapon benefits cover (Martial Arts: the Monk Weapon), so
-    a feature never repeats the weapon definition in a second table.
+    ``unarmored`` / ``no_shield`` / ``no_heavy_armor`` are evaluated against the
+    character's item types and armor categories; a non-empty ``weapon_kinds``
+    additionally requires *every* wielded weapon to match one of the declared
+    kinds.  The same kinds are the weapons the feature's own weapon benefits
+    cover (Martial Arts: the Monk Weapon), so a feature never repeats the weapon
+    definition in a second table.
+
+    ``no_heavy_armor`` is the precondition Fast Movement and Roving state:
+    Light, Medium, and no armor all keep the benefit, and a Shield never
+    interferes.
     """
 
     unarmored: bool = False
     no_shield: bool = False
+    no_heavy_armor: bool = False
     weapon_kinds: tuple[str, ...] = ()
 
 
@@ -125,6 +181,219 @@ class FeatureCapability:
 
 
 @dataclass(frozen=True, slots=True)
+class FeatureChoice:
+    """A player choice one class feature requires at the level it is gained.
+
+    Identity is ``(owner, feature_id, choice.id)``: the same choice id may
+    legitimately hang off two features, so neither part alone is a key.
+
+    ``enabled_options`` is an executability whitelist, not a UI filter.
+    Every other option in the category is still projected, but marked
+    unavailable with ``effect_not_implemented`` and rejected on commit --
+    a selection that grants nothing must never look finished.
+
+    ``requires_proficiency`` / ``exclude_expertise`` are only meaningful for
+    ``skill_proficiency``: Expertise and Scholar both pick from skills the
+    character is already proficient in, and neither may re-pick a skill the
+    character already has Expertise in (SRD: "You can't have Expertise in the
+    same skill proficiency more than once").  An empty ``enabled_options`` means
+    "every skill in the catalog"; Scholar names its six explicitly.
+    """
+
+    id: str
+    kind: str
+    category: str
+    count: int
+    enabled_options: tuple[str, ...]
+    grants: str = ""
+    requires_proficiency: bool = True
+    exclude_expertise: bool = True
+
+
+def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
+    """Validate a declared player choice, failing closed on unknown shapes."""
+
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ClassFeatureError(f"{feature_id}.choice must be an object")
+    choice_id = _require_id(raw.get("id"), f"{feature_id}.choice.id")
+    kind = str(raw.get("kind") or "")
+    if kind not in FEATURE_CHOICE_KINDS:
+        raise ClassFeatureError(
+            f"{feature_id}.choice.kind is not a supported choice kind: {kind!r}"
+        )
+    category = _require_id(raw.get("category"), f"{feature_id}.choice.category")
+    count = raw.get("count")
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        raise ClassFeatureError(f"{feature_id}.choice.count must be a positive integer")
+    if kind == "advancement_feat" and count != 1:
+        raise ClassFeatureError(f"{feature_id}.choice.count must be 1")
+    if kind == "feature_option" and count != 1:
+        # 互斥选项（Divine Strike / Potent Spellcasting）只能选一个：选两个
+        # 会让同一个 hit 同时拿到 1d8 与 Wis 加值，而它们在规则上是替代关系。
+        raise ClassFeatureError(
+            f"{feature_id}.choice.count must be 1 for a feature option choice"
+        )
+    raw_refs = raw.get("enabled_options")
+    if raw_refs is None and kind == "skill_proficiency":
+        # 空清单 = 技能目录全集；Expertise 只按"已有熟练"筛选，不点名具体技能。
+        raw_refs = []
+    if not isinstance(raw_refs, list):
+        raise ClassFeatureError(
+            f"{feature_id}.choice.enabled_options must be an array"
+        )
+    if not raw_refs and kind in {"advancement_feat", "feature_option"}:
+        raise ClassFeatureError(
+            f"{feature_id}.choice.enabled_options must be a non-empty array"
+        )
+    prefix = {
+        "advancement_feat": "feat:",
+        "feature_option": "feature:",
+    }.get(kind, "skill:")
+    refs: list[str] = []
+    seen: set[str] = set()
+    for raw_ref in raw_refs:
+        if not isinstance(raw_ref, str) or not raw_ref.startswith(prefix):
+            raise ClassFeatureError(
+                f"{feature_id}.choice.enabled_options must hold {prefix} refs"
+            )
+        ref = f"{prefix}{_require_id(raw_ref[len(prefix):], f'{feature_id}.choice.enabled_options')}"
+        if ref in seen:
+            raise ClassFeatureError(
+                f"{feature_id}.choice.enabled_options repeats {ref}"
+            )
+        seen.add(ref)
+        refs.append(ref)
+    flags: dict[str, bool] = {}
+    for key in ("requires_proficiency", "exclude_expertise"):
+        value = raw.get(key, True)
+        if not isinstance(value, bool):
+            raise ClassFeatureError(f"{feature_id}.choice.{key} must be a boolean")
+        flags[key] = value
+    if kind in {"advancement_feat", "feature_option"}:
+        # 成长专长与特性选项都不使用技能选择的两个约束；写在它们上面会被
+        # 静默忽略，因此宁可加载期拒绝。
+        for key in ("requires_proficiency", "exclude_expertise"):
+            if key in raw and raw[key] is not True:
+                raise ClassFeatureError(
+                    f"{feature_id}.choice.{key} is only meaningful for a "
+                    "skill_proficiency choice"
+                )
+    if kind == "skill_proficiency" and category != "skill":
+        raise ClassFeatureError(
+            f"{feature_id}.choice.category must be 'skill' for a skill choice"
+        )
+    if kind == "feature_option" and category != "feature":
+        raise ClassFeatureError(
+            f"{feature_id}.choice.category must be 'feature' for a feature option choice"
+        )
+    grants = str(raw.get("grants") or "")
+    if kind == "skill_proficiency":
+        # 选中的技能"得到什么"必须显式声明：Expertise 与"获得熟练"是两种不同
+        # 效果，靠 choice id 猜等于让命名承担语义。
+        if grants not in SKILL_CHOICE_GRANTS:
+            raise ClassFeatureError(
+                f"{feature_id}.choice.grants must be one of {sorted(SKILL_CHOICE_GRANTS)}"
+            )
+    elif grants:
+        raise ClassFeatureError(
+            f"{feature_id}.choice.grants is only meaningful for a "
+            "skill_proficiency choice"
+        )
+    return FeatureChoice(
+        id=choice_id,
+        kind=kind,
+        category=category,
+        count=count,
+        enabled_options=tuple(refs),
+        grants=grants,
+        requires_proficiency=flags["requires_proficiency"],
+        exclude_expertise=flags["exclude_expertise"],
+    )
+
+
+def _advancement_feat_categories(bundle: LoadedRulesetBundle) -> dict[str, str]:
+    """Every declared advancement feat's id and category, for cross-catalog checks."""
+
+    catalog = bundle.get("advancement_feat_catalog", "srd_advancement_feats")
+    feats = catalog.get("feats") if isinstance(catalog, Mapping) else None
+    if not isinstance(feats, Mapping):
+        return {}
+    return {
+        str(feat_id): str(feat.get("category") or "")
+        for feat_id, feat in feats.items()
+        if isinstance(feat, Mapping)
+    }
+
+
+def _validate_feature_choices(
+    features: list[ClassFeatureDefinition], bundle: LoadedRulesetBundle,
+) -> None:
+    """Cross-check every declared choice against the catalog it picks from.
+
+    A choice naming a category nothing declares, or whitelisting a ref that is
+    missing or belongs to another category, would offer a slot the runtime can
+    never satisfy.  All three fail at load instead of on the player's turn.
+
+    A ``skill_proficiency`` choice is checked against the *skill* catalog: a
+    whitelisted skill that the bundle does not define could never be granted
+    Expertise, and the count must not exceed the number of skills that exist.
+    """
+
+    categories = _advancement_feat_categories(bundle)
+    known = set(categories.values())
+    skill_ids = {
+        str(entity.get("id")) for entity in bundle.list("skill")
+        if isinstance(entity, Mapping)
+    }
+    for definition in features:
+        choice = definition.choice
+        if choice is None:
+            continue
+        if choice.kind == "skill_proficiency":
+            for ref in choice.enabled_options:
+                if ref[6:] not in skill_ids:
+                    raise ClassFeatureError(
+                        f"{definition.id}.choice references an undeclared skill: {ref}"
+                    )
+            pool = len(choice.enabled_options) if choice.enabled_options else len(skill_ids)
+            if choice.count > pool:
+                raise ClassFeatureError(
+                    f"{definition.id}.choice.count exceeds the {choice.category} pool"
+                )
+            continue
+        if choice.kind == "feature_option":
+            # 候选是同一份特性目录里的声明，不是成长专长：校验它长得像特性
+            # （有声明、同 owner、且自己不是选项父），而不是去专长目录里找。
+            for ref in choice.enabled_options:
+                local_id = ref[len("feature:"):]
+                if not any(
+                    definition.owner == other.owner and other.id == local_id
+                    for other in features
+                ):
+                    raise ClassFeatureError(
+                        f"{definition.id}.choice references an undeclared feature: {ref}"
+                    )
+            continue
+        if choice.category not in known:
+            raise ClassFeatureError(
+                f"{definition.id}.choice.category is not a declared feat category: "
+                f"{choice.category}"
+            )
+        for ref in choice.enabled_options:
+            category = categories.get(ref[5:])
+            if category is None:
+                raise ClassFeatureError(
+                    f"{definition.id}.choice references an undeclared advancement feat: {ref}"
+                )
+            if category != choice.category:
+                raise ClassFeatureError(
+                    f"{definition.id}.choice option {ref} is not a {choice.category} feat"
+                )
+
+
+@dataclass(frozen=True, slots=True)
 class ClassFeatureDefinition:
     """One declared class feature."""
 
@@ -137,7 +406,15 @@ class ClassFeatureDefinition:
     resource_id: str
     option_of: str
     capabilities: tuple[FeatureCapability, ...]
+    owner: str
     equipment_requirement: EquipmentRequirement | None = None
+    choice: FeatureChoice | None = None
+
+    @property
+    def key(self) -> tuple[str, str]:
+        """The feature's owner-scoped identity: ``(owner, local_id)``."""
+
+        return (self.owner, self.id)
 
 
 def _parse_equipment_requirement(
@@ -155,7 +432,7 @@ def _parse_equipment_requirement(
             f"{feature_id}.equipment_requirement has an unknown field: {sorted(unknown)[0]}"
         )
     flags: dict[str, bool] = {}
-    for key in ("unarmored", "no_shield"):
+    for key in ("unarmored", "no_shield", "no_heavy_armor"):
         value = raw.get(key, False)
         if not isinstance(value, bool):
             raise ClassFeatureError(f"{feature_id}.equipment_requirement.{key} must be a boolean")
@@ -179,8 +456,70 @@ def _parse_equipment_requirement(
     return EquipmentRequirement(
         unarmored=flags["unarmored"],
         no_shield=flags["no_shield"],
+        no_heavy_armor=flags["no_heavy_armor"],
         weapon_kinds=tuple(kinds),
     )
+
+
+class FeatureCatalogIndex(Mapping[Any, ClassFeatureDefinition]):
+    """Owner-scoped feature index with a narrow legacy lookup path.
+
+    The authoritative key is ``(owner, local_id)`` so two classes may
+    declare the same local id without overwriting each other.  A bare local id
+    remains readable while it identifies exactly one declaration; that keeps
+    existing presentation code and tests working without making short ids the
+    catalog's unique key.  Ambiguous short ids must be resolved through
+    :attr:`by_key` or :meth:`definitions_for`.
+    """
+
+    __slots__ = ("_by_key", "_by_local")
+
+    def __init__(self, definitions: tuple[ClassFeatureDefinition, ...]) -> None:
+        by_key: dict[tuple[str, str], ClassFeatureDefinition] = {}
+        by_local: dict[str, list[tuple[str, str]]] = {}
+        for definition in definitions:
+            if definition.key in by_key:
+                raise ClassFeatureError(
+                    f"duplicate class feature identity: {definition.key!r}"
+                )
+            by_key[definition.key] = definition
+            by_local.setdefault(definition.id, []).append(definition.key)
+        self._by_key = by_key
+        self._by_local = {key: tuple(keys) for key, keys in by_local.items()}
+
+    @property
+    def by_key(self) -> Mapping[tuple[str, str], ClassFeatureDefinition]:
+        return MappingProxyType(self._by_key)
+
+    def definitions_for(self, local_id: str) -> tuple[ClassFeatureDefinition, ...]:
+        """Every declaration with one local id, across all owners."""
+
+        return tuple(
+            self._by_key[key] for key in self._by_local.get(str(local_id), ())
+        )
+
+    def __getitem__(self, key: Any) -> ClassFeatureDefinition:
+        if isinstance(key, tuple) and len(key) == 2:
+            return self._by_key[(str(key[0]), str(key[1]))]
+        if isinstance(key, str):
+            keys = self._by_local.get(key, ())
+            if len(keys) == 1:
+                return self._by_key[keys[0]]
+            if len(keys) > 1:
+                raise KeyError(
+                    f"class feature id {key!r} is ambiguous; use its owner-scoped key"
+                )
+        raise KeyError(key)
+
+    def __iter__(self):
+        for key, definition in self._by_key.items():
+            if len(self._by_local[definition.id]) == 1:
+                yield definition.id
+            else:
+                yield key
+
+    def __len__(self) -> int:
+        return len(self._by_key)
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,14 +528,27 @@ class Dnd2024ClassFeatureCatalog:
 
     source_ref: str
     labels: Mapping[str, str]
-    features: Mapping[str, ClassFeatureDefinition]
-    by_class: Mapping[str, tuple[str, ...]]
+    features: Mapping[Any, ClassFeatureDefinition]
+    by_class: Mapping[str, tuple[tuple[str, str], ...]]
+
+    @property
+    def features_by_key(self) -> Mapping[tuple[str, str], ClassFeatureDefinition]:
+        """The authoritative owner-scoped index."""
+
+        if isinstance(self.features, FeatureCatalogIndex):
+            return self.features.by_key
+        by_key: dict[tuple[str, str], ClassFeatureDefinition] = {}
+        for definition in self.features.values():
+            if not isinstance(definition, ClassFeatureDefinition):
+                continue
+            by_key[definition.key] = definition
+        return by_key
 
     @classmethod
     def empty(cls) -> Dnd2024ClassFeatureCatalog:
         """An empty catalog, for bundles that ship no feature declarations."""
 
-        return cls(source_ref="", labels={}, features={}, by_class={})
+        return cls(source_ref="", labels={}, features=FeatureCatalogIndex(()), by_class={})
 
     @classmethod
     def from_bundle(cls, bundle: LoadedRulesetBundle) -> Dnd2024ClassFeatureCatalog:
@@ -215,8 +567,9 @@ class Dnd2024ClassFeatureCatalog:
         raw_classes = raw.get("classes")
         if not isinstance(raw_classes, dict):
             raise ClassFeatureError("class feature classes must be an object")
-        features: dict[str, ClassFeatureDefinition] = {}
-        by_class: dict[str, tuple[str, ...]] = {}
+        features: list[ClassFeatureDefinition] = []
+        by_key: dict[tuple[str, str], ClassFeatureDefinition] = {}
+        by_class: dict[str, tuple[tuple[str, str], ...]] = {}
         for raw_class_id, raw_class in raw_classes.items():
             class_id = _require_id(raw_class_id, "class feature class id")
             if not isinstance(raw_class, dict):
@@ -225,29 +578,33 @@ class Dnd2024ClassFeatureCatalog:
             raw_features = raw_class.get("features")
             if not isinstance(raw_features, list) or not raw_features:
                 raise ClassFeatureError(f"classes.{class_id}.features must be a non-empty array")
-            ordered: list[str] = []
+            ordered: list[tuple[str, str]] = []
             for raw_feature in raw_features:
                 definition = cls._parse_feature(class_id, source_ref, raw_feature)
-                if definition.id in features:
-                    raise ClassFeatureError(f"duplicate class feature id: {definition.id}")
-                features[definition.id] = definition
-                ordered.append(definition.id)
-            by_class[class_id] = tuple(ordered)
-        for definition in features.values():
-            if definition.option_of and definition.option_of not in features:
-                raise ClassFeatureError(
-                    f"{definition.id}.option_of references an undeclared feature"
-                )
-            if definition.option_of:
-                parent = features[definition.option_of]
-                if parent.class_id != definition.class_id:
+                if definition.key in by_key:
                     raise ClassFeatureError(
-                        f"{definition.id} cannot be an option of another class's feature"
+                        f"duplicate class feature identity: {definition.key!r}"
                     )
+                features.append(definition)
+                by_key[definition.key] = definition
+                ordered.append(definition.key)
+            by_class[class_id] = tuple(ordered)
+        for definition in features:
+            if not definition.option_of:
+                continue
+            parent_key = (definition.owner, definition.option_of)
+            if parent_key not in by_key:
+                raise ClassFeatureError(
+                    f"{definition.id}.option_of references an undeclared feature "
+                    "with the same owner"
+                )
+            if definition.option_of == definition.id:
+                raise ClassFeatureError(f"{definition.id} cannot be its own option")
+        _validate_feature_choices(features, bundle)
         return cls(
             source_ref=_require_text(raw.get("source_ref"), "class feature catalog source_ref"),
             labels=labels,
-            features=features,
+            features=FeatureCatalogIndex(tuple(features)),
             by_class=by_class,
         )
 
@@ -258,6 +615,9 @@ class Dnd2024ClassFeatureCatalog:
         if not isinstance(raw, dict):
             raise ClassFeatureError(f"classes.{class_id} contains an invalid feature")
         feature_id = _require_id(raw.get("id"), f"classes.{class_id} feature id")
+        owner = _require_owner(
+            raw.get("owner"), f"{feature_id}.owner", class_id,
+        )
         minimum_level = _require_positive_int(
             raw.get("minimum_level", 1), f"{feature_id}.minimum_level",
         )
@@ -270,6 +630,28 @@ class Dnd2024ClassFeatureCatalog:
             str(key): _require_scalar(value, f"{feature_id}.parameters.{key}")
             for key, value in raw_parameters.items()
         }
+        threshold = parameters.get("crit_threshold")
+        if "crit_threshold" in parameters and (
+            isinstance(threshold, bool) or not isinstance(threshold, int)
+            or not 2 <= threshold <= 19
+        ):
+            raise ClassFeatureError(
+                f"{feature_id}.crit_threshold must be an integer from 2 to 19"
+            )
+        range_ft = parameters.get("range_ft")
+        if "range_ft" in parameters:
+            if (
+                isinstance(range_ft, bool) or not isinstance(range_ft, int)
+                or range_ft <= 0
+            ):
+                raise ClassFeatureError(
+                    f"{feature_id}.range_ft must be a positive integer"
+                )
+            if parameters.get("trigger") not in CHECK_WINDOW_TRIGGERS:
+                raise ClassFeatureError(
+                    f"{feature_id}.trigger must be one of "
+                    f"{sorted(CHECK_WINDOW_TRIGGERS)} when range_ft is declared"
+                )
         resource_id = str(raw.get("resource_id") or "")
         if resource_id:
             resource_id = _require_id(resource_id, f"{feature_id}.resource_id")
@@ -297,9 +679,11 @@ class Dnd2024ClassFeatureCatalog:
             resource_id=resource_id,
             option_of=option_of,
             capabilities=tuple(capabilities),
+            owner=owner,
             equipment_requirement=_parse_equipment_requirement(
                 feature_id, raw.get("equipment_requirement"),
             ),
+            choice=_parse_feature_choice(feature_id, raw.get("choice")),
         )
 
     @classmethod
@@ -380,7 +764,9 @@ class Dnd2024ClassFeatureCatalog:
         return self.labels.get(str(key), default or str(key))
 
     def class_features(self, class_id: str) -> tuple[ClassFeatureDefinition, ...]:
-        return tuple(self.features[feature_id] for feature_id in self.by_class.get(class_id, ()))
+        return tuple(
+            self.features_by_key[key] for key in self.by_class.get(class_id, ())
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -398,12 +784,16 @@ class FeatureView:
     summary: str
     source_ref: str
     minimum_level: int
+    owner: str = ""
     values: Mapping[str, Any] = field(default_factory=dict)
     active: bool = True
+    # 只有声明了 choice 的特性才带 selection；其余特性不得凭空多出字段。
+    selection: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "id": self.id,
+            "owner": self.owner,
             "name": self.name,
             "summary": self.summary,
             "source_ref": self.source_ref,
@@ -411,6 +801,9 @@ class FeatureView:
             "values": dict(self.values),
             "active": self.active,
         }
+        if self.selection is not None:
+            payload["selection"] = dict(self.selection)
+        return payload
 
 
 @dataclass(frozen=True, slots=True)

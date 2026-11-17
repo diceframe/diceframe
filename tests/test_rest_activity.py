@@ -141,7 +141,7 @@ def test_recovery_activity_filters_old_runs_departed_players_and_luck() -> None:
     ]
 
 
-def test_dnd_activity_uses_started_at_identity_and_terminal_state() -> None:
+def test_dnd_activity_uses_started_tick_identity_and_terminal_state() -> None:
     instance = GameInstance(("web", "dnd-activity"))
     instance.players.update({"alice": _player("Alice"), "bob": _player("Bob")})
     ruleset_runtime.replace_state(instance, {
@@ -150,7 +150,7 @@ def test_dnd_activity_uses_started_at_identity_and_terminal_state() -> None:
             "rest": "short",
             "required_uids": ["alice", "bob"],
             "participants": {"alice": {"operation_id": "private"}},
-            "started_at": "2026-10-18T01:02:03+00:00",
+            "started_tick": 1442,
         },
     })
 
@@ -166,7 +166,7 @@ def test_dnd_activity_uses_started_at_identity_and_terminal_state() -> None:
     }
     ruleset_runtime.state(instance)["rest_session"].update({
         "status": "completed",
-        "resolved_at": "2026-10-18T01:03:03+00:00",
+        "resolved_tick": 1502,
     })
     completed = rest_activity(instance)
     assert [item["status"] for item in completed] == ["requested", "settled"]
@@ -174,7 +174,7 @@ def test_dnd_activity_uses_started_at_identity_and_terminal_state() -> None:
     assert completed[1]["id"] != requested_id
     assert {actor["uid"] for actor in completed[0]["actors"]} == {"alice", "bob"}
 
-    ruleset_runtime.state(instance)["rest_session"].pop("started_at")
+    ruleset_runtime.state(instance)["rest_session"].pop("started_tick")
     assert rest_activity(instance) == []
 
 
@@ -187,7 +187,7 @@ def test_dnd_activity_requires_a_submitted_participant() -> None:
             "rest": "long",
             "required_uids": ["alice", "bob"],
             "participants": {},
-            "started_at": "2026-10-18T01:02:03+00:00",
+            "started_tick": 1442,
         },
     })
 

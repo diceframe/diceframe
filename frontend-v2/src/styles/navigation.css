@@ -405,7 +405,7 @@
     z-index: 55;
     bottom: 0;
     left: 0;
-    @undefined;
+    right: 0;
     width: 100vw;
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -966,14 +966,12 @@
 
 @media (min-width: 1261px) {
   .content-workspace[data-workspace="content"] .content-workspace-rail, .content-workspace[data-workspace="management"] .content-workspace-rail {
-    @undefined;
     padding-left: calc(max(0px, (100vw - 1680px) / 2) + clamp(16px, 3.8vw, 64px) + 210px);
   }
 }
 
 @media (min-width: 801px) and (max-width: 1260px) {
   .content-workspace[data-workspace="content"] .content-workspace-rail, .content-workspace[data-workspace="management"] .content-workspace-rail {
-    @undefined;
     padding-left: 200px;
   }
 }

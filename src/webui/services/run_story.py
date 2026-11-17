@@ -14,6 +14,7 @@ from src.engine import module_hooks
 from src.engine.modules import run_story, run_finale, skill_growth, session_stats
 from src.engine.participant_view import Viewer
 from src.engine.staged_transaction import StagedGameTransaction, fork_domain_state
+from src.localization.messages import t
 
 logger = logging.getLogger('trpg')
 
@@ -154,7 +155,7 @@ class RunStoryService:
                 return {'ok': False, 'error': str(exc)}
             except Exception:
                 logger.exception('Run story transaction failed: %s', action)
-                return {'ok': False, 'error_code': 'SAVE_FAILED', 'error': '保存失败，原对局状态已保留 / Save failed; original run retained'}
+                return {'ok': False, 'error_code': 'SAVE_FAILED', 'error': t("webui.services.run_story.save_failed_run_retained")}
         return self.get(key, viewer)
 
     async def _carry(self, key: str, instance: Any, body: dict) -> dict:

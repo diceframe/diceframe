@@ -1,0 +1,16 @@
+# src/webui/config_controller.py 返回给请求方的提示。
+"en":
+  base_url_invalid: "The Base URL is invalid or not allowed"
+  base_url_param_invalid: "base_url is invalid or not allowed"
+  body_not_object: "The configuration request must be a JSON object"
+  bot_token_action_unsupported: "Unsupported Bot token action"
+  bot_token_managed_by_env: "The Bot API token is managed by the TRPG_BOT_TOKEN environment variable; change the variable and restart"
+  config_save_failed: "Saving the configuration failed: %{exc}"
+  config_update_invalid_response: "The configuration update returned an invalid response"
+  connection_error_see_logs: "Connection error; see the server logs"
+  cors_origins_managed_by_env: "TRPG_WEB_CORS_ORIGINS is managed by an environment variable; change .env and restart the backend"
+  embedding_api_unexpected: "The Embedding API returned an unexpected response"
+  model_endpoint_required: "Configure a valid model service address first"
+  proxy_enabled_without_address: "The proxy is enabled, but the proxy address is empty"
+  proxy_scheme_unsupported: "The proxy address must start with http:// or https://"
+  runtime_reload_failed: "Reloading the runtime failed; the configuration was not saved: %{exc}"

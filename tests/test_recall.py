@@ -1,7 +1,7 @@
 """记忆召回增强测试。"""
 
 import pytest
-from src.memory.recall import _extract_entities, _extract_ngrams, format_recalled
+from src.memory.recall import _extract_entities, extract_ngrams, format_recalled
 
 
 class TestExtractEntities:
@@ -28,17 +28,17 @@ class TestExtractEntities:
 
 class TestExtractNgrams:
     def test_bigrams(self):
-        result = _extract_ngrams("跑团游戏", n=2)
+        result = extract_ngrams("跑团游戏", n=2)
         assert "跑团" in result
         assert "团游" in result
         assert "游戏" in result
 
     def test_ignore_stop_chars(self):
-        result = _extract_ngrams("？！？")
+        result = extract_ngrams("？！？")
         assert len(result) == 0
 
     def test_empty(self):
-        assert len(_extract_ngrams("")) == 0
+        assert len(extract_ngrams("")) == 0
 
 
 class TestFormatRecalled:

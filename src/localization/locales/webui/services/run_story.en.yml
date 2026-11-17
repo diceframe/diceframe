@@ -1,0 +1,3 @@
+# src/webui/services/run_story.py 返回给请求方的提示。
+"en":
+  save_failed_run_retained: "Save failed; original run retained"

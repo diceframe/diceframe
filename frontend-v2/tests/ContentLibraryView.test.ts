@@ -100,7 +100,7 @@ describe('player content library', () => {
       return { ok: true, adventures: [adventure()] }
     })
     const { wrapper } = await render()
-    await wrapper.get('[data-testid="library-content-filter"]').setValue('lorebook')
+    await wrapper.get('[data-testid="library-tab-lorebook"]').trigger('click')
     expect(wrapper.findAll('[data-testid="library-lorebook"]')).toHaveLength(1)
     expect(wrapper.find('[data-testid="library-adventure"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="library-world"]').exists()).toBe(false)

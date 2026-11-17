@@ -377,15 +377,16 @@ def test_lucky_cancels_advantage_on_an_enemy_attack(runtime, sheets) -> None:
     decision = _pending(instance)[0]
     assert decision["check"]["advantage_mode"] == "advantage"
 
-    events = _resolve(engine, instance, decision, "spend", rng=SequenceRng([10]))
+    # Monk 的无甲防御让它成为 AC 15 的目标，重掷要够高才仍然命中。
+    events = _resolve(engine, instance, decision, "spend", rng=SequenceRng([11]))
     check = _checked(events)
     assert check["advantage_mode"] == ""
     assert check["advantage_sources"] == [
         {"code": "faerie_fire", "mode": "advantage"},
         {"code": "lucky", "mode": "disadvantage"},
     ]
-    assert check["natural"] == 10
-    assert check["total"] == 14
+    assert check["natural"] == 11
+    assert check["total"] == 15
     assert check["success"] is True
 
 
@@ -585,14 +586,14 @@ def test_a_blessed_attackers_bonus_die_survives_the_lucky_window(runtime, sheets
 
 def test_cutting_words_check_face_can_turn_a_hit_into_a_miss(runtime, sheets) -> None:
     engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
-    events = _enemy_attack(engine, instance, [10])
+    events = _enemy_attack(engine, instance, [11])
 
     decision = _pending(instance)[0]
     assert decision["window_code"] == "cutting_words_check"
     assert decision["window_owner_id"] == "player:p2"
     assert decision["assigned_to"] == "p2"
     assert decision["die_sides"] == 6
-    assert decision["check"]["total"] == 14
+    assert decision["check"]["total"] == 15
     assert decision["check"]["success"] is True
 
     events = _resolve(engine, instance, decision, "spend", by="p2", rng=SequenceRng([6]))
@@ -602,7 +603,7 @@ def test_cutting_words_check_face_can_turn_a_hit_into_a_miss(runtime, sheets) ->
     ]
     assert events[2]["resource_id"] == "bardic_inspiration"
     check = _checked(events)
-    assert check["total"] == 8
+    assert check["total"] == 9
     assert check["check_penalty"] == 6
     assert check["check_penalty_rolls"] == [6]
     assert check["success"] is False
@@ -614,9 +615,9 @@ def test_cutting_words_check_face_can_turn_a_hit_into_a_miss(runtime, sheets) ->
 def test_declining_the_cutting_words_check_face_keeps_the_hit(runtime, sheets) -> None:
     engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
     before = _hp(instance)
-    _enemy_attack(engine, instance, [10])
+    _enemy_attack(engine, instance, [11])
     decision = _pending(instance)[0]
-    assert decision["check"]["total"] == 14
+    assert decision["check"]["total"] == 15
     assert decision["check"]["success"] is True
 
     events = _resolve(engine, instance, decision, "decline", by="p2", intent_id="decide-1")
@@ -625,7 +626,7 @@ def test_declining_the_cutting_words_check_face_keeps_the_hit(runtime, sheets) -
     )
     assert cleared["option"] == "decline"
     check = _checked(events)
-    assert check["total"] == 14
+    assert check["total"] == 15
     assert check["success"] is True
     assert "check_penalty" not in check
     assert "check_penalty_rolls" not in check
@@ -657,7 +658,7 @@ def test_cutting_words_needs_the_bard_within_sixty_feet(runtime, sheets) -> None
         runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20],
         positions={"gm": 0, "p2": 100},
     )
-    events = _enemy_attack(engine, instance, [10])
+    events = _enemy_attack(engine, instance, [11])
 
     assert _pending(instance) == []
     assert [event["type"] for event in events].count("resource.changed") == 1
@@ -667,12 +668,12 @@ def test_cutting_words_needs_a_pool_point_and_a_reaction(runtime, sheets) -> Non
     engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
     _pool(instance, "bardic_inspiration", "p2")["current"] = 0
     assert _pending(instance) == []
-    _enemy_attack(engine, instance, [10])
+    _enemy_attack(engine, instance, [11])
     assert _pending(instance) == []
 
     engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
     _state(instance)["combat"]["reactions"]["player:p2"] = 0
-    _enemy_attack(engine, instance, [10])
+    _enemy_attack(engine, instance, [11])
     assert _pending(instance) == []
 
 
@@ -908,7 +909,7 @@ def test_dark_ones_own_luck_is_once_per_roll(runtime, sheets) -> None:
 
 def test_a_pending_check_window_gates_every_other_intent(runtime, sheets) -> None:
     engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
-    _enemy_attack(engine, instance, [10])
+    _enemy_attack(engine, instance, [11])
     assert _pending(instance)[0]["kind"] == "check_window"
 
     version = _state(instance)["version"]
@@ -948,7 +949,7 @@ def test_a_pending_damage_window_gates_every_other_intent(runtime, sheets) -> No
 
 def test_only_the_window_owner_may_resolve_it(runtime, sheets) -> None:
     engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
-    _enemy_attack(engine, instance, [10])
+    _enemy_attack(engine, instance, [11])
     decision = _pending(instance)[0]
 
     verdict = engine.validate_intent(instance, {
@@ -1008,7 +1009,8 @@ def test_ai_lucky_spends_only_when_taking_the_lower_die_can_flip_the_hit(runtime
     engine, instance = _combat(runtime, sheets["monk"], rolls=[1, 20])
     _grant_feat(runtime, instance)
     set_control(instance, "gm", "ai")
-    _mutate_enemy_attack(instance, attack_bonus=12)
+    # AC 15 的目标：取低骰 1+15 仍然命中，所以花幸运没有收益。
+    _mutate_enemy_attack(instance, attack_bonus=15)
     _enemy_attack(engine, instance, [10])
 
     intent = engine.next_automatic_intent(instance)
@@ -1019,7 +1021,7 @@ def test_ai_lucky_spends_only_when_taking_the_lower_die_can_flip_the_hit(runtime
 def test_ai_cutting_words_is_deterministic_on_both_faces(runtime, sheets) -> None:
     engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
     set_control(instance, "p2", "ai")
-    _enemy_attack(engine, instance, [10])
+    _enemy_attack(engine, instance, [11])
     assert engine.next_automatic_intent(instance)["option"] == "spend"
 
     engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
@@ -1167,7 +1169,7 @@ def test_a_pending_check_window_survives_a_save_load_and_settles_once(
     runtime, sheets, option: str,
 ) -> None:
     engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
-    _enemy_attack(engine, instance, [10])
+    _enemy_attack(engine, instance, [11])
     decision = deepcopy(_pending(instance)[0])
     assert decision["kind"] == "check_window"
     assert decision["window_code"] == "cutting_words_check"
@@ -1269,7 +1271,7 @@ def test_reset_drops_a_pending_window_roll_traces_and_reaction_locks(
     runtime, sheets,
 ) -> None:
     engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
-    _enemy_attack(engine, instance, [10])
+    _enemy_attack(engine, instance, [11])
     assert _pending(instance) != []
     _state(instance)["combat"]["reactions"]["player:p2"] = 0
     assert ruleset_runtime.event_ledger(instance) != []
@@ -1304,7 +1306,7 @@ def test_replaying_a_settled_window_intent_is_free(
     runtime, sheets,
 ) -> None:
     engine, instance = _combat(runtime, sheets["monk"], sheets["bard"], rolls=[1, 1, 20])
-    _enemy_attack(engine, instance, [10])
+    _enemy_attack(engine, instance, [11])
     decision = deepcopy(_pending(instance)[0])
     expected_version = _state(instance)["version"]
     rng = SequenceRng([6])
@@ -1342,7 +1344,7 @@ def test_a_round_entry_restore_drops_the_window_and_a_replay_spends_once(
     entry = ruleset_runtime.round_entry_snapshot(instance)
     players = snapshot_players(instance)
 
-    _enemy_attack(engine, instance, [10])
+    _enemy_attack(engine, instance, [11])
     decision = deepcopy(_pending(instance)[0])
     assert ruleset_runtime.restore_round_entry(instance, deepcopy(entry)) is True
     restore_players(instance, deepcopy(players))
@@ -1357,7 +1359,7 @@ def test_a_round_entry_restore_drops_the_window_and_a_replay_spends_once(
         "option": "decline",
     })["ok"] is False
 
-    _enemy_attack(engine, instance, [10], intent_id="g1-replay")
+    _enemy_attack(engine, instance, [11], intent_id="g1-replay")
     replay_decision = _pending(instance)[0]
     rng = SequenceRng([6])
     events = _resolve(engine, instance, replay_decision, "spend", by="p2", rng=rng)
@@ -1379,5 +1381,5 @@ def test_a_legacy_save_without_pending_decisions_loads_and_still_opens_windows(
     restored = GameInstance.from_dict(payload)
     assert _state(restored)["combat"].get("pending_decisions", []) == []
 
-    _enemy_attack(engine, restored, [10])
+    _enemy_attack(engine, restored, [11])
     assert _pending(restored)[0]["kind"] == "check_window"

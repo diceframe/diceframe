@@ -1,0 +1,6 @@
+# src/webui/routes/tunnel.py 返回给请求方的提示。
+"zh-CN":
+  admin_session_required: "需要管理员会话"
+  body_must_be_json: "请求体必须是 JSON"
+  plugin_token_invalid: "插件 Token 无效"
+  tunnel_publish_permission_missing: "插件缺少 tunnel.publish 权限"

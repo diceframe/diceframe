@@ -15,16 +15,15 @@ import { libraryCopy } from '@/features/library/copy'
 import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
 import Modal from '@/components/ui/Modal.vue'
 import DOMPurify from 'dompurify'
-import { NTag } from 'naive-ui'
 import { CubeOutline } from '@vicons/ionicons5'
 import type { PluginMarketplaceItem } from '@/api/types'
-import MarketplaceCard from '@/features/plugins/MarketplaceCard.vue'
+import ContentPackCard from './ContentPackCard.vue'
 import HubDetailModal from '@/features/plugins/modals/HubDetailModal.vue'
 import { promptEnableAfterInstall } from '@/features/plugins/installEnable'
 import { useHubDetail } from '@/features/plugins/useHubDetail'
 import { contentPackSubmissionUrl } from '@/features/creator/submission'
 import { localeLabel } from '@/utils/contentLanguage'
-import { moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
+import { formatModuleBlocker, moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
 
 type RecoveryAdventure = {
   binding?: {
@@ -65,14 +64,53 @@ const marketTrust = ref('all')
 const marketBusy = ref(false)
 const installBusy = ref('')
 const updateBusy = ref('')
+const updateAllBusy = ref(false)
 const marketSource = ref<ModuleMarketplaceResponse['source'] | null>(null)
 const installFeedback = ref<{ id: string; kind: 'busy' | 'success' | 'error'; message: string } | null>(null)
 const submitGuideOpen = ref(false)
 const directSubmissionUrl = contentPackSubmissionUrl()
 const error = ref('')
 
-// 在线列表的筛选全部在客户端完成：服务端只按关键字和规则目标收窄，
-// 语言 / 标签 / 许可证 / 信任级别本来就在市场投影里，不需要新接口。
+// ---- App Store 分类 chip ----
+type MarketCategory = 'all' | 'adventure' | 'rules' | 'official' | string
+const activeCategory = ref<MarketCategory>('all')
+
+// 精选横幅：从 official/verified 里随机取一个，没有则从评分前5随机
+const featuredItem = computed(() => {
+  const items = market.value
+  if (!items.length) return null
+  const featured = items.filter(item => item.trust_level === 'official' || item.trust_level === 'verified')
+  if (featured.length) return featured[Math.floor(Math.random() * featured.length)]
+  const topRated = [...items].sort((a, b) => (b.stats?.rating_average || 0) - (a.stats?.rating_average || 0)).slice(0, 5)
+  return topRated[Math.floor(Math.random() * topRated.length)] || null
+})
+
+// 应用分类筛选后的列表
+const categoryFiltered = computed(() => {
+  const all = filteredMarket.value
+  if (activeCategory.value === 'all') return all
+  if (activeCategory.value === 'adventure') return all.filter(item => (item.capabilities || []).includes('adventure'))
+  if (activeCategory.value === 'rules') return all.filter(item => (item.capabilities || []).includes('rules'))
+  if (activeCategory.value === 'official') return all.filter(item => item.trust_level === 'official')
+  // ruleset 筛选
+  return all.filter(item => (item.ruleset_targets || []).some(target => {
+    const short = target.includes(':') ? target.split(':').slice(1).join(':') : target
+    return short === activeCategory.value
+  }))
+})
+
+// 货架分区
+const shelfAdventure = computed(() => sortedMarket.value.filter(item => (item.capabilities || []).includes('adventure')).slice(0, 12))
+const shelfTopDownloads = computed(() => [...market.value].sort((a, b) => (b.stats?.downloads_total || 0) - (a.stats?.downloads_total || 0)).slice(0, 12))
+const shelfOfficial = computed(() => market.value.filter(item => item.trust_level === 'official' || item.trust_level === 'verified').slice(0, 12))
+const hasRulesItems = computed(() => market.value.some(item => (item.capabilities || []).includes('rules')))
+
+// 我的内容包面板
+const myPanelOpen = ref(false)
+// 筛选面板展开状态
+const showFilters = ref(false)
+// 跳转前保存面板状态，回来后恢复
+watch(myPanelOpen, v => { try { sessionStorage.setItem('df_modules_panel', v ? '1' : '0') } catch { /* ignore */ } })
 function uniqueFilterValues(values: Array<string | undefined>): string[] {
   const unique = new Set(values.map(value => String(value || '').trim()).filter(Boolean))
   return [...unique].sort((a, b) => a.localeCompare(b))
@@ -110,9 +148,7 @@ const marketRulesetOptions = computed(() => {
     .sort((a, b) => a.localeCompare(b))
   return [...core, ...extra]
 })
-const marketHasUndeclaredRuleset = computed(() => market.value.some(item => !itemHasDeclaredRuleset(item)))
 const marketTagOptions = computed(() => uniqueFilterValues(market.value.flatMap(item => item.tags || [])))
-const marketLicenseOptions = computed(() => uniqueFilterValues(market.value.map(item => item.license)))
 const marketTrustOptions = computed(() => uniqueFilterValues(market.value.map(item => item.trust_level)))
 const marketFiltersActive = computed(() => (
   marketRuleset.value !== 'all'
@@ -126,6 +162,10 @@ const marketFiltersActive = computed(() => (
 // 内容包时最先想按"装的人最多 / 点赞最多"看，所以在客户端排，不加接口参数。
 type MarketSort = 'recommended' | 'downloads' | 'likes' | 'rating' | 'name'
 const marketSort = ref<MarketSort>('recommended')
+// 有任何 select 筛选器激活时，切到筛选结果视图
+watch([marketProfile, marketLanguage, marketTag, marketLicense, marketTrust, marketSort], () => {
+  if (marketFiltersActive.value) activeCategory.value = 'all'
+})
 const marketSortOptions: Array<{ value: MarketSort; key: 'modulesSortRecommended' | 'modulesSortDownloads' | 'modulesSortLikes' | 'modulesSortRating' | 'modulesSortName' }> = [
   { value: 'recommended', key: 'modulesSortRecommended' },
   { value: 'downloads', key: 'modulesSortDownloads' },
@@ -210,6 +250,7 @@ function marketCardItem(item: ModuleMarketplaceItem): PluginMarketplaceItem {
   return { ...item, version: item.latest_version || item.version, plugin_type: 'content-pack', latest: { version: item.latest_version } }
 }
 
+
 function openUrl(url?: string) {
   if (url) window.open(url, '_blank', 'noopener')
 }
@@ -291,7 +332,7 @@ function rebuildUpdatableIndex(items: ModuleMarketplaceItem[]) {
 }
 
 async function updateModule(module: ModuleSummary) {
-  if (updateBusy.value) return
+  if (updateBusy.value || updateAllBusy.value) return
   updateBusy.value = module.id
   error.value = ''
   try {
@@ -308,6 +349,38 @@ async function updateModule(module: ModuleSummary) {
   } catch (cause: unknown) {
     error.value = errorMessage(cause)
   } finally {
+    updateBusy.value = ''
+  }
+}
+
+async function updateAllModules() {
+  if (updateAllBusy.value || updateBusy.value || !updatableModules.value.size) return
+  updateAllBusy.value = true
+  error.value = ''
+  const failures: string[] = []
+  const updated = new Set<string>()
+  try {
+    for (const moduleId of updatableModules.value.keys()) {
+      updateBusy.value = moduleId
+      try {
+        const result = await moduleApi.update(moduleId)
+        if (!result.ok) throw new Error(t('modulesUpdateFailed'))
+        updated.add(moduleId)
+      } catch (cause: unknown) {
+        failures.push(`${moduleId}: ${errorMessage(cause)}`)
+      } finally {
+        updateBusy.value = ''
+      }
+    }
+    const next = new Map(updatableModules.value)
+    for (const moduleId of updated) next.delete(moduleId)
+    updatableModules.value = next
+    await load()
+    await loadMarketplace()
+    await checkRecovery()
+    if (failures.length) error.value = failures.join('；')
+  } finally {
+    updateAllBusy.value = false
     updateBusy.value = ''
   }
 }
@@ -367,6 +440,7 @@ onMounted(() => {
   void load()
   void loadMarketplace()
   void checkRecovery()
+  try { if (sessionStorage.getItem('df_modules_panel') === '1') myPanelOpen.value = true } catch { /* ignore */ }
 })
 
 // 恢复判定必须跟着**整组**恢复身份走：hash 导航（同页不同 query）不会重新挂载
@@ -439,8 +513,8 @@ async function installFromMarketplace(item: ModuleMarketplaceItem) {
     await checkRecovery()
     installFeedback.value = { id: item.id, kind: 'success', message: t('modulesInstalledRefreshed') }
   } catch (cause: unknown) {
-    error.value = errorMessage(cause)
-    installFeedback.value = { id: item.id, kind: 'error', message: errorMessage(cause) }
+    error.value = formatModuleBlocker(errorMessage(cause), locale.value)
+    installFeedback.value = { id: item.id, kind: 'error', message: error.value }
   } finally {
     installBusy.value = ''
   }
@@ -491,18 +565,93 @@ async function checkRecovery() {
 
 <template>
   <section class="view modules-page">
-    <ContentPageHeader
-      class="modules-heading"
-      kicker="CONTENT PACKS"
-      :title="recoveryAdventure ? library.sourceTitle : library.sources"
-      :description="library.sourceIntro"
-    >
-      <template #actions>
-        <RouterLink class="content-button modules-return-link" :to="{ name: 'library' }">{{ library.backLibrary }}</RouterLink>
-      </template>
-    </ContentPageHeader>
-    <p v-if="!recoveryAdventure" class="module-boundary-note">{{ t('modulesIntro') }} {{ t('modulesBoundaryNote') }}</p>
+    <!-- 顶部栏：搜索 + 我的内容包 -->
+    <div class="modules-topbar">
+      <ContentPageHeader compact
+        class="modules-heading"
+        kicker="CONTENT PACKS"
+        :title="recoveryAdventure ? library.sourceTitle : library.sources"
+        :description="library.sourceIntro"
+      >
+        <template #actions>
+          <RouterLink class="content-button modules-return-link" :to="{ name: 'library' }">{{ library.backLibrary }}</RouterLink>
+        </template>
+      </ContentPageHeader>
+      <div class="modules-search-bar">
+        <input v-model="marketKeyword" type="search" class="modules-search-input" :placeholder="t('modulesOnlineSearchPlaceholder')" @keyup.enter="loadMarketplace">
+        <button type="button" class="modules-search-btn" :disabled="marketBusy" @click="loadMarketplace">{{ t('modulesOnlineSearch') }}</button>
+        <div class="modules-my-panel-wrap">
+          <button type="button" class="modules-my-btn" :class="{ active: myPanelOpen }" @click="myPanelOpen = !myPanelOpen">
+            {{ locale === 'zh-CN' ? `我的内容包` : 'My packs' }}
+            <span v-if="updatableModules.size" class="modules-my-count is-update">{{ updatableModules.size }}</span>
+            <span v-else-if="modules.length" class="modules-my-count">{{ modules.length }}</span>
+          </button>
+          <!-- 我的内容包下拉面板 -->
+          <div v-if="myPanelOpen" class="modules-my-panel" data-testid="modules-installed">
+            <div class="modules-my-panel-header">
+              <strong>{{ t('modulesSectionInstalled') }}</strong>
+              <div class="modules-my-panel-actions">
+                <button type="button" class="module-update-all-action" :disabled="loading || updateAllBusy || updateBusy !== '' || !updatableModules.size" @click="updateAllModules">
+                  {{ t('modulesUpdateAll', { count: updatableModules.size }) }}
+                </button>
+                <button type="button" :disabled="loading || updateAllBusy" @click="load">{{ t('refresh') }}</button>
+              </div>
+            </div>
+            <p v-if="loading" class="muted">{{ t('modulesLoading') }}</p>
+            <p v-else-if="!modules.length" class="muted modules-my-empty">{{ t('modulesEmpty') }}</p>
+            <div v-else class="modules-my-list">
+              <RouterLink
+                v-for="module in modules"
+                :key="module.id"
+                :to="{ name: 'module-detail', params: { moduleId: module.id } }"
+                class="modules-my-row"
+                :data-testid="`module-card-${module.id}`"
+                @click="myPanelOpen = false"
+              >
+                <span class="modules-my-row-art" :style="moduleCoverStyle(module)" />
+                <span class="modules-my-row-copy">
+                  <strong>{{ module.name }}</strong>
+                  <span class="muted">v{{ module.version }} · {{ inventorySummary(module) }}</span>
+                  <span
+                    v-for="runtime in module.required_runtimes || []"
+                    :key="runtime.id"
+                    class="modules-my-row-runtime"
+                  >
+                    {{ locale === 'zh-CN' ? `需要运行时 ${runtime.id} ≥${runtime.minimum_version}` : `Requires runtime ${runtime.id} >=${runtime.minimum_version}` }}
+                  </span>
+                </span>
+                <span v-if="updateBusy === module.id || updateAllBusy" class="modules-my-row-updating">
+                  <span class="modules-my-update-spinner" />
+                  {{ locale === 'zh-CN' ? '更新中…' : 'Updating…' }}
+                </span>
+                <button v-else-if="updatableModules.has(module.id)" type="button" class="module-update-action" :disabled="updateBusy !== '' || updateAllBusy" @click.prevent.stop="updateModule(module)">
+                  {{ t('modulesUpdateCta') }}
+                </button>
+              </RouterLink>
+            </div>
+            <div class="modules-my-panel-footer">
+              <label class="module-import-file">
+                {{ t('modulesSectionLocal') }}
+                <input type="file" accept=".dfplugin" @change="selectImportFile">
+              </label>
+              <template v-if="importFile">
+                <button type="button" :disabled="importBusy" @click="previewImport">{{ t('modulesPreview') }}</button>
+                <button v-if="preview" type="button" :disabled="Boolean(preview.blockers.length) || importBusy" @click="importModule">{{ t('modulesInstall') }}</button>
+              </template>
+              <div v-if="preview && (preview.blockers.length || preview.warnings.length)" class="module-import-preview" data-testid="module-import-preview">
+                <p v-if="preview.blockers.length" class="error-text">{{ preview.blockers.map(blocker => formatModuleBlocker(blocker, locale)).join(locale === 'zh-CN' ? '；' : '; ') }}</p>
+                <p v-if="preview.warnings.length" class="muted">{{ preview.warnings.join(', ') }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
+    <p v-if="!recoveryAdventure" class="module-boundary-note">{{ t('modulesIntro') }} {{ t('modulesBoundaryNote') }}</p>
+    <p v-if="error" class="error-text">{{ error }}</p>
+
+    <!-- 恢复模式 -->
     <section v-if="recoveryAdventure" class="module-recovery" role="status" data-testid="modules-recovery">
       <strong>{{ t('modulesRecoveryTitle') }}</strong>
       <p>{{ t('modulesRecoveryHint', { adventure: recoveryAdventure, version: recoveryVersion || t('modulesRecoveryUnknownVersion') }) }}</p>
@@ -515,186 +664,205 @@ async function checkRecovery() {
       <template v-else>
         <p v-if="recoveryBusy" class="muted">{{ t('modulesRecoveryChecking') }}</p>
         <template v-else-if="recoveryCheck">
-          <p v-if="recoveryCheck.ready" class="module-recovery-ready" data-testid="modules-recovery-ready">
-            {{ t('modulesRecoveryReady') }}
-          </p>
+          <p v-if="recoveryCheck.ready" class="module-recovery-ready" data-testid="modules-recovery-ready">{{ t('modulesRecoveryReady') }}</p>
           <template v-else>
-            <p class="error-text" data-testid="modules-recovery-blocked">
-              {{ t('modulesRecoveryNotReady', { reason: recoveryReasonLabel(recoveryCheck.reason) }) }}
-            </p>
+            <p class="error-text" data-testid="modules-recovery-blocked">{{ t('modulesRecoveryNotReady', { reason: recoveryReasonLabel(recoveryCheck.reason) }) }}</p>
             <p v-if="!recoveryCheck.digestMatches" class="error-text">{{ t('modulesRecoveryDigestMismatch') }}</p>
             <p v-if="!recoveryCheck.sourceMatches" class="error-text">{{ t('modulesRecoverySourceMismatch') }}</p>
           </template>
         </template>
         <div class="module-recovery-actions">
           <button type="button" :disabled="recoveryBusy" @click="checkRecovery">{{ t('modulesRecoveryCheck') }}</button>
-          <RouterLink v-if="recoveryCheck?.ready" class="primary module-recovery-resume" :to="{ name: 'play', query: { game: recoveryGame } }">
-            {{ t('modulesRecoveryResume') }}
-          </RouterLink>
+          <RouterLink v-if="recoveryCheck?.ready" class="primary module-recovery-resume" :to="{ name: 'play', query: { game: recoveryGame } }">{{ t('modulesRecoveryResume') }}</RouterLink>
         </div>
       </template>
     </section>
 
-    <p v-if="error" class="error-text">{{ error }}</p>
-
-    <section id="modules-installed" class="modules-section" data-testid="modules-installed">
-      <div class="section-title-row"><h2>{{ t('modulesSectionInstalled') }}</h2><button type="button" :disabled="loading" @click="load">{{ t('refresh') }}</button></div>
-      <p v-if="loading" class="muted">{{ t('modulesLoading') }}</p>
-      <div v-else-if="!modules.length && !error" class="empty-state">
-          <p>{{ t('modulesEmpty') }}</p>
-      </div>
-      <div v-else class="modules-grid">
-        <RouterLink
-          v-for="module in modules"
-          :key="module.id"
-          :to="{ name: 'module-detail', params: { moduleId: module.id } }"
-          class="module-card"
-          :class="{ 'has-cover': Boolean(module.cover) }"
-          :style="moduleCoverStyle(module)"
-          :data-testid="`module-card-${module.id}`"
-        >
-          <span v-if="module.cover" class="module-card-art" aria-hidden="true"></span>
-          <div>
-            <p class="eyebrow">{{ moduleCategoryLabel(module, copy) }}</p>
-            <h3>{{ module.name }}</h3>
-            <p class="muted">{{ t('modulesVersion', { version: module.version }) }}</p>
-            <p v-if="updatableModules.has(module.id)" class="module-update" :data-testid="`module-update-${module.id}`">
-              <button type="button" class="module-update-action" :disabled="updateBusy !== ''" @click.prevent.stop="updateModule(module)">
-                {{ t('modulesUpdateCta') }}
-              </button>
-            </p>
-            <p v-if="module.status === 'disabled'" class="muted">{{ t('modulesDisabledBadge') }}</p>
-            <p class="muted">{{ inventorySummary(module) }}</p>
-            <p v-if="module.status === 'disabled' && moduleInventory(module) === 'adventures'" class="muted">{{ copy.disabledAdventures }}</p>
-          </div>
-          <dl>
-            <div><dt>{{ t('modulesAdventures') }}</dt><dd>{{ module.adventure_count ?? '—' }}</dd></div>
-            <div><dt>{{ copy.resourceContributions }}</dt><dd>{{ totalContent(module) ?? '—' }}</dd></div>
-          </dl>
-        </RouterLink>
-      </div>
-    </section>
-
-    <section id="modules-local-import" class="modules-section" data-testid="modules-local-import">
-      <h2>{{ t('modulesSectionLocal') }}</h2>
-      <div class="module-import" :aria-label="t('modulesImport')">
-        <label class="module-import-file">{{ t('modulesImport') }} <input type="file" accept=".dfplugin" @change="selectImportFile"></label>
-        <button type="button" :disabled="!importFile || importBusy" @click="previewImport">{{ t('modulesPreview') }}</button>
-        <button v-if="preview" type="button" :disabled="Boolean(preview.blockers.length) || importBusy" @click="importModule">{{ t('modulesInstall') }}</button>
-      </div>
-      <div v-if="preview && (preview.blockers.length || preview.warnings.length)" class="module-import-preview" data-testid="module-import-preview">
-        <p v-if="preview.blockers.length" class="error-text">{{ preview.blockers.join(', ') }}</p>
-        <p v-if="preview.warnings.length" class="muted">{{ preview.warnings.join(', ') }}</p>
-      </div>
-    </section>
-
-    <section id="modules-online" class="modules-section" data-testid="modules-online">
-      <div class="section-title-row">
-        <h2>{{ t('modulesSectionOnline') }}</h2>
-        <button type="button" class="module-submit-guide-link" data-testid="modules-submit-guide-open" @click="submitGuideOpen = true">{{ t('modulesSubmitGuideLink') }}</button>
-      </div>
-      <div class="module-market-search">
-        <input v-model="marketKeyword" type="search" :placeholder="t('modulesOnlineSearchPlaceholder')" :aria-label="t('modulesOnlineSearch')" @keyup.enter="loadMarketplace">
-        <label class="module-market-filter">
-          <span>{{ t('modulesOnlineFilter') }}</span>
-          <select v-model="marketRuleset" :aria-label="t('modulesOnlineFilter')" @change="loadMarketplace">
-            <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
-            <option v-for="ruleset in marketRulesetOptions" :key="ruleset" :value="ruleset">{{ rulesetLabel(ruleset) }}</option>
-            <option v-if="marketHasUndeclaredRuleset" :value="UNLABELLED_RULESET">{{ t('modulesRulesetUndeclared') }}</option>
-          </select>
-        </label>
-        <button type="button" :disabled="marketBusy" @click="loadMarketplace">{{ t('modulesOnlineSearch') }}</button>
-      </div>
+    <!-- 搜索结果模式 -->
+    <template v-if="marketKeyword.trim()">
       <p v-if="marketBusy" class="muted">{{ t('modulesLoading') }}</p>
       <p v-else-if="marketError" class="error-text">{{ marketError }}</p>
-      <div v-else-if="!market.length" class="empty-state" data-testid="modules-online-empty">
-        <p class="muted">{{ t('modulesOnlineEmpty') }}</p>
-        <p class="muted">{{ t('modulesOnlineEmptyHint') }}</p>
-        <RouterLink :to="{ name: 'creator' }" class="module-submit-action">{{ t('modulesSubmitGoCreator') }}</RouterLink>
+      <div v-else-if="!filteredMarket.length" class="empty-state">
+        <p class="muted">{{ t('modulesFilteredEmpty') }}</p>
+        <button type="button" class="module-filter-reset" @click="marketKeyword = ''">{{ t('modulesFilterReset') }}</button>
       </div>
-      <template v-else>
-        <div class="module-market-filters" data-testid="modules-market-filters">
-          <label class="module-market-filter">
-            <span>{{ t('modulesFilterProfile') }}</span>
-            <select v-model="marketProfile">
-              <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
-              <option value="adventure-module">{{ copy.adventureLabel }}</option>
-              <option value="content-pack">{{ copy.resourceLabel }}</option>
-            </select>
-          </label>
-          <label v-if="marketLanguageOptions.length" class="module-market-filter">
-            <span>{{ t('modulesFilterLanguage') }}</span>
-            <select v-model="marketLanguage">
-              <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
-              <option v-for="language in marketLanguageOptions" :key="language" :value="language">{{ language === UNLABELLED_LANGUAGE ? t('modulesLanguagesUndeclared') : languageLabel(language) }}</option>
-            </select>
-          </label>
-          <label v-if="marketTagOptions.length" class="module-market-filter">
-            <span>{{ t('modulesFilterTag') }}</span>
-            <select v-model="marketTag">
-              <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
-              <option v-for="tag in marketTagOptions" :key="tag" :value="tag">{{ tag }}</option>
-            </select>
-          </label>
-          <label v-if="marketLicenseOptions.length" class="module-market-filter">
-            <span>{{ t('modulesFilterLicense') }}</span>
-            <select v-model="marketLicense">
-              <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
-              <option v-for="license in marketLicenseOptions" :key="license" :value="license">{{ license }}</option>
-            </select>
-          </label>
-          <label v-if="marketTrustOptions.length" class="module-market-filter">
-            <span>{{ t('modulesFilterTrust') }}</span>
-            <select v-model="marketTrust">
-              <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
-              <option v-for="level in marketTrustOptions" :key="level" :value="level">{{ marketTrustLabel(level) }}</option>
-            </select>
-          </label>
-          <!-- 排序放在筛选项之后：先收窄范围，再决定用什么顺序看。 -->
-          <label class="module-market-filter">
-            <span>{{ t('modulesSortLabel') }}</span>
-            <select v-model="marketSort" data-testid="modules-market-sort" :aria-label="t('modulesSortLabel')">
-              <option v-for="option in marketSortOptions" :key="option.value" :value="option.value">{{ t(option.key) }}</option>
-            </select>
-          </label>
-          <button v-if="marketFiltersActive" type="button" class="module-filter-reset" data-testid="modules-filter-reset" @click="resetMarketFilters">{{ t('modulesFilterReset') }}</button>
-        </div>
-        <div v-if="!filteredMarket.length" class="empty-state" data-testid="modules-online-filtered-empty">
-          <p class="muted">{{ t('modulesFilteredEmpty') }}</p>
-          <button type="button" class="module-filter-reset" @click="resetMarketFilters">{{ t('modulesFilterReset') }}</button>
-        </div>
-        <div v-else class="module-market-grid">
-        <MarketplaceCard
-          v-for="item in sortedMarket"
+      <div v-else class="modules-search-grid" data-testid="modules-online">
+        <ContentPackCard
+          v-for="item in filteredMarket.slice(0, 40)"
           :key="item.id"
-          :item="marketCardItem(item)"
-          :icon="CubeOutline"
-          :type-label="moduleCategoryLabel(item, copy)"
-          :show-hub-stats="Boolean(marketSource?.hub)"
-          :has-newer-version="item.update_available"
+          :item="item"
           :installing="installBusy === item.id"
+          :has-newer-version="item.update_available"
+          :show-hub-stats="Boolean(marketSource?.hub)"
           :data-testid="`modules-market-${item.id}`"
           @install="installFromMarketplace(item)"
-          @open-url="openUrl"
           @detail="openMarketDetail(item)"
-        >
-          <template #summary>
-            <p class="muted module-market-summary">{{ item.adventure_count > 0 ? copy.adventureSummary(item.adventure_count) : copy.resourceBrowse }}</p>
-            <p v-if="item.ruleset_targets.length" class="muted module-market-summary">{{ t('modulesRuntimeTargets') }}: {{ item.ruleset_targets.map(shortRuleset).join(' · ') }}</p>
-          </template>
-          <template #tags>
-            <NTag v-for="language in item.languages" :key="language" size="small">{{ languageLabel(language) }}</NTag>
-            <NTag v-if="!(item.languages || []).length" size="small" class="module-language-undeclared">{{ t('modulesLanguagesUndeclared') }}</NTag>
-            <NTag v-if="item.system_agnostic" size="small">{{ t('modulesRulesetAgnostic') }}</NTag>
-            <NTag v-else-if="!itemHasDeclaredRuleset(item)" size="small" class="module-language-undeclared">{{ t('modulesRulesetUndeclared') }}</NTag>
-          </template>
-          <template #footer>
-            <p v-if="installFeedback?.id === item.id" class="module-install-feedback" :class="`is-${installFeedback.kind}`" role="status">{{ installFeedback.message }}</p>
-          </template>
-        </MarketplaceCard>
+        />
+      </div>
+    </template>
+
+    <!-- App Store 浏览模式 -->
+    <template v-else-if="!marketBusy && !marketError">
+      <!-- 分类 chips -->
+      <div class="modules-category-chips" data-testid="modules-category-chips">
+        <button type="button" :class="['modules-category-chip', { active: activeCategory === 'all' }]" @click="activeCategory = 'all'">{{ locale === 'zh-CN' ? '全部' : 'All' }}</button>
+        <button type="button" :class="['modules-category-chip', { active: activeCategory === 'adventure' }]" @click="activeCategory = 'adventure'">{{ locale === 'zh-CN' ? '冒险模组' : 'Adventures' }}</button>
+        <button v-if="hasRulesItems" type="button" :class="['modules-category-chip', { active: activeCategory === 'rules' }]" @click="activeCategory = 'rules'">{{ locale === 'zh-CN' ? '规则·素材' : 'Rules & Assets' }}</button>
+        <button type="button" :class="['modules-category-chip', { active: activeCategory === 'official' }]" @click="activeCategory = 'official'">{{ locale === 'zh-CN' ? '官方认证' : 'Official' }}</button>
+        <button v-for="ruleset in marketRulesetOptions.slice(0, 3)" :key="ruleset" type="button" :class="['modules-category-chip', { active: activeCategory === ruleset }]" @click="activeCategory = ruleset">{{ rulesetLabel(ruleset) }}</button>
+        <button type="button" class="modules-submit-link" @click="submitGuideOpen = true">{{ t('modulesSubmitGuideLink') }}</button>
+        <button type="button" :class="['modules-filter-toggle', { active: showFilters || marketFiltersActive }]" @click="showFilters = !showFilters">
+          {{ locale === 'zh-CN' ? (marketFiltersActive ? `筛选 (${[marketProfile !== 'all', marketLanguage !== 'all', marketTag !== 'all', marketLicense !== 'all', marketTrust !== 'all'].filter(Boolean).length})` : '筛选 ▾') : (marketFiltersActive ? `Filters (${[marketProfile !== 'all', marketLanguage !== 'all', marketTag !== 'all', marketLicense !== 'all', marketTrust !== 'all'].filter(Boolean).length})` : 'Filter ▾') }}
+        </button>
+      </div>
+
+      <!-- 筛选面板（展开时显示） -->
+      <div v-if="showFilters" class="modules-filter-panel" data-testid="modules-market-filters">
+        <label v-if="marketLanguageOptions.length" class="module-market-filter">
+          <span>{{ t('modulesFilterLanguage') }}</span>
+          <select v-model="marketLanguage">
+            <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
+            <option v-for="language in marketLanguageOptions" :key="language" :value="language">{{ language === UNLABELLED_LANGUAGE ? t('modulesLanguagesUndeclared') : languageLabel(language) }}</option>
+          </select>
+        </label>
+        <label class="module-market-filter">
+          <span>{{ t('modulesFilterProfile') }}</span>
+          <select v-model="marketProfile">
+            <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
+            <option value="adventure-module">{{ copy.adventureLabel }}</option>
+            <option value="content-pack">{{ copy.resourceLabel }}</option>
+          </select>
+        </label>
+        <label v-if="marketTagOptions.length" class="module-market-filter">
+          <span>{{ t('modulesFilterTag') }}</span>
+          <select v-model="marketTag">
+            <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
+            <option v-for="tag in marketTagOptions" :key="tag" :value="tag">{{ tag }}</option>
+          </select>
+        </label>
+        <label v-if="marketTrustOptions.length" class="module-market-filter">
+          <span>{{ t('modulesFilterTrust') }}</span>
+          <select v-model="marketTrust">
+            <option value="all">{{ t('modulesOnlineFilterAll') }}</option>
+            <option v-for="level in marketTrustOptions" :key="level" :value="level">{{ marketTrustLabel(level) }}</option>
+          </select>
+        </label>
+        <label class="module-market-filter">
+          <span>{{ t('modulesSortLabel') }}</span>
+          <select v-model="marketSort" data-testid="modules-market-sort">
+            <option v-for="option in marketSortOptions" :key="option.value" :value="option.value">{{ t(option.key) }}</option>
+          </select>
+        </label>
+        <button v-if="marketFiltersActive" type="button" class="module-filter-reset" @click="resetMarketFilters">{{ t('modulesFilterReset') }}</button>
+      </div>
+
+      <!-- 分类筛选结果 grid（非 all 时显示，或有活跃筛选时显示） -->
+      <div v-if="activeCategory !== 'all' || marketFiltersActive" class="modules-search-grid">
+        <ContentPackCard
+          v-for="item in (activeCategory !== 'all' ? categoryFiltered : filteredMarket).slice(0, 60)"
+          :key="item.id"
+          :item="item"
+          :installing="installBusy === item.id"
+          :has-newer-version="item.update_available"
+          :show-hub-stats="Boolean(marketSource?.hub)"
+          :data-testid="`modules-market-${item.id}`"
+          @install="installFromMarketplace(item)"
+          @detail="openMarketDetail(item)"
+        />
+        <p v-if="!(activeCategory !== 'all' ? categoryFiltered : filteredMarket).length" class="muted">{{ t('modulesFilteredEmpty') }}</p>
+      </div>
+
+      <!-- 精选横幅 -->
+      <div v-if="featuredItem && activeCategory === 'all'" class="modules-featured-banner"
+        :class="featuredItem.trust_level === 'official' ? 'is-official' : featuredItem.trust_level === 'verified' ? 'is-verified' : 'is-community'"
+        data-testid="modules-featured">
+        <div class="modules-featured-art" aria-hidden="true" />
+        <div class="modules-featured-body">
+          <p class="modules-featured-eyebrow">{{ moduleCategoryLabel(featuredItem, copy) }} · {{ featuredItem.trust_level === 'official' ? t('pluginTrustOfficial') : t('pluginTrustVerified') }}</p>
+          <h2 class="modules-featured-title">{{ featuredItem.name }}</h2>
+          <p class="modules-featured-desc">{{ featuredItem.description }}</p>
+          <div class="modules-featured-actions">
+            <button type="button" class="modules-featured-install" :disabled="installBusy === featuredItem.id" @click="installFromMarketplace(featuredItem)">
+              {{ featuredItem.installed ? t('update') : t('install') }}
+            </button>
+            <button v-if="Boolean(marketSource?.hub)" type="button" class="modules-featured-detail" @click="openMarketDetail(featuredItem)">{{ t('hubDataAndReviews') }}</button>
+          </div>
+        </div>
+      </div>
+
+      <template v-if="activeCategory === 'all'">
+        <!-- 冒险模组货架 -->
+        <div v-if="shelfAdventure.length" class="modules-shelf" data-testid="modules-shelf-adventure">
+          <div class="modules-shelf-header">
+            <h2>{{ locale === 'zh-CN' ? '冒险模组' : 'Adventures' }}</h2>
+            <button type="button" class="modules-shelf-more" @click="activeCategory = 'adventure'">{{ locale === 'zh-CN' ? '查看全部 →' : 'See all →' }}</button>
+          </div>
+          <div class="modules-shelf-scroll">
+            <ContentPackCard
+              v-for="item in shelfAdventure"
+              :key="item.id"
+              :item="item"
+              :data-testid="`modules-market-${item.id}`"
+              :installing="installBusy === item.id"
+              :has-newer-version="item.update_available"
+              :show-hub-stats="Boolean(marketSource?.hub)"
+              @install="installFromMarketplace(item)"
+              @detail="openMarketDetail(item)"
+            />
+          </div>
+        </div>
+
+        <!-- 下载最多货架 -->
+        <div v-if="shelfTopDownloads.length" class="modules-shelf" data-testid="modules-shelf-downloads">
+          <div class="modules-shelf-header">
+            <h2>{{ locale === 'zh-CN' ? '下载最多' : 'Most Downloaded' }}</h2>
+          </div>
+          <div class="modules-shelf-scroll">
+            <ContentPackCard
+              v-for="item in shelfTopDownloads"
+              :key="item.id"
+              :item="item"
+              :data-testid="`modules-market-${item.id}`"
+              :installing="installBusy === item.id"
+              :has-newer-version="item.update_available"
+              :show-hub-stats="Boolean(marketSource?.hub)"
+              @install="installFromMarketplace(item)"
+              @detail="openMarketDetail(item)"
+            />
+          </div>
+        </div>
+
+        <!-- 官方与认证货架 -->
+        <div v-if="shelfOfficial.length" class="modules-shelf" data-testid="modules-shelf-official">
+          <div class="modules-shelf-header">
+            <h2>{{ locale === 'zh-CN' ? '官方与认证' : 'Official & Verified' }}</h2>
+            <button type="button" class="modules-shelf-more" @click="activeCategory = 'official'">{{ locale === 'zh-CN' ? '查看全部 →' : 'See all →' }}</button>
+          </div>
+          <div class="modules-shelf-scroll">
+            <ContentPackCard
+              v-for="item in shelfOfficial"
+              :key="item.id"
+              :item="item"
+              :data-testid="`modules-market-${item.id}`"
+              :installing="installBusy === item.id"
+              :has-newer-version="item.update_available"
+              :show-hub-stats="Boolean(marketSource?.hub)"
+              @install="installFromMarketplace(item)"
+              @detail="openMarketDetail(item)"
+            />
+          </div>
+        </div>
+
+        <div v-if="!market.length" class="empty-state" data-testid="modules-online-empty">
+          <p class="muted">{{ t('modulesOnlineEmpty') }}</p>
+          <p class="muted">{{ t('modulesOnlineEmptyHint') }}</p>
+          <RouterLink :to="{ name: 'creator' }" class="module-submit-action">{{ t('modulesSubmitGoCreator') }}</RouterLink>
         </div>
       </template>
-    </section>
+    </template>
+
+    <p v-if="marketBusy && !marketKeyword.trim()" class="muted">{{ t('modulesLoading') }}</p>
+    <p v-if="marketError && !marketKeyword.trim()" class="error-text">{{ marketError }}</p>
 
     <HubDetailModal
       v-model:show="hubDetailOpen"
@@ -734,44 +902,110 @@ async function checkRecovery() {
 </template>
 
 <style scoped>
-.modules-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); }
-/* Same grid as the plugin marketplace, which these cards come from. */
-.module-market-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 13px; align-items: stretch; }
-.module-market-summary { margin: 5px 0 0; }
-@media (max-width: 1120px) { .module-market-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 800px) { .module-market-grid { grid-template-columns: minmax(0, 1fr); } }
+/* ── Page shell ───────────────────────────────────── */
+.modules-page { display: grid; gap: 1.5rem; }
 .modules-heading { position: relative; display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 1rem; isolation: isolate; padding: 24px 0 20px; border-bottom: 1px solid color-mix(in srgb, var(--df-accent) 22%, var(--df-border-soft)); }
 .modules-heading::before { position: absolute; z-index: -1; inset: 0 0 0 30%; content: ''; background: linear-gradient(90deg, var(--df-canvas), transparent 72%), var(--df-bg-atmosphere-image) center / cover; mask-image: linear-gradient(90deg, transparent, black 42%, transparent); opacity: .2; pointer-events: none; }
-.modules-heading .eyebrow { margin: 0; color: var(--df-interactive-strong); font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
 .modules-heading h1 { margin: 7px 0 9px; color: var(--df-accent-strong); font-family: var(--df-font-title); font-size: clamp(30px, 3vw, 42px); line-height: 1.18; letter-spacing: .02em; }
-.modules-heading .muted { margin: .25rem 0 0; max-width: 52rem; }
-.module-boundary-note { margin: .55rem 0 0; max-width: 58rem; color: var(--df-accent-strong); font-size: .82rem; }
-.module-empty-links { margin: .3rem 0 0; }
-.modules-section { display: grid; gap: .9rem; margin-top: 2rem; }
-.section-title-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
-.module-submit-guide-link { padding: 0; border: 0; background: none; color: var(--df-interactive-strong); font-size: .85rem; font-weight: 700; cursor: pointer; }
-.module-submit-guide-link:hover, .module-submit-guide-link:focus-visible { text-decoration: underline; }
-.module-submit-steps { display: grid; gap: .45rem; margin: .8rem 0 0; padding-left: 1.2rem; color: var(--df-text-secondary); line-height: 1.5; }
-.module-submit-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .6rem; padding-top: 1rem; }
-.module-submit-action { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 .9rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); color: var(--df-text); background: var(--df-surface-1); font-weight: 700; text-decoration: none; }
-.module-submit-action.is-primary { border-color: color-mix(in srgb, var(--df-accent) 50%, var(--df-border-soft)); color: var(--df-accent-strong); background: color-mix(in srgb, var(--df-accent) 12%, var(--df-surface-1)); }
-.empty-state .module-submit-action { justify-self: start; }
-.modules-section h2 { margin: 0; font-size: 1.05rem; }
-.module-import, .module-market-search { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; padding: 1rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-2); }
-.module-market-filter { display: inline-flex; align-items: center; gap: .45rem; color: var(--df-text-muted); font-size: .85rem; }
-.module-market-filter span { white-space: nowrap; }
-.module-market-filter select { min-height: 34px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); color: var(--df-text); background: var(--df-surface-1); }
-.module-market-search input { flex: 1 1 12rem; min-width: 0; }
-/* 导入行只放「选文件 + 预览 + 安装」三件控件；预览结果单独成块，
-   否则结果段落会变成同一行里的 flex item，把按钮挤歪。 */
-.module-import-file { display: inline-flex; flex: 0 0 auto; flex-wrap: nowrap; align-items: center; gap: .55rem; min-width: 0; min-height: 36px; color: var(--df-text-muted); font-size: .85rem; white-space: nowrap; }
-.module-import-file input[type="file"] { flex: 0 1 22rem; min-width: 8rem; max-width: 22rem; }
-.module-import button { min-height: 36px; }
-.module-import-preview { display: grid; gap: .35rem; margin: 0; padding: .7rem .9rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
-.module-import-preview p { margin: 0; }
-.module-market-filters { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem .9rem; padding: .75rem .9rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
-.module-filter-reset { align-self: center; }
-.module-recovery { margin: 1rem 0; padding: 1rem; border: 1px solid color-mix(in srgb, var(--df-accent) 30%, var(--df-border-soft)); border-left: 3px solid var(--df-accent); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
+.module-boundary-note { margin: 0; max-width: 58rem; color: var(--df-accent-strong); font-size: .82rem; }
+
+/* ── Top search bar ───────────────────────────────── */
+.modules-search-bar { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.modules-search-input { flex: 1 1 240px; min-width: 0; min-height: 36px; padding: 0 .75rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); color: var(--df-text); font: .9rem/1 inherit; }
+.modules-search-btn { min-height: 36px; padding: 0 1rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); color: var(--df-text); font: .9rem/1 inherit; cursor: pointer; white-space: nowrap; }
+.modules-search-btn:hover { background: var(--df-surface-1); border-color: var(--df-interactive); }
+
+/* ── My packs button + dropdown ─────────────────── */
+.modules-my-panel-wrap { position: relative; }
+.modules-my-btn { display: inline-flex; align-items: center; gap: .4rem; min-height: 36px; padding: 0 .9rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); color: var(--df-text); font: .88rem/1 inherit; cursor: pointer; font-weight: 600; white-space: nowrap; }
+.modules-my-btn.active, .modules-my-btn:hover { border-color: var(--df-interactive); background: color-mix(in srgb, var(--df-interactive) 8%, var(--df-surface-1)); }
+.modules-my-count { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 .35rem; border-radius: 999px; background: var(--df-interactive); color: #fff; font-size: .72rem; font-weight: 800; }
+.modules-my-count.is-update { background: var(--df-warning, #d39b4d); color: #fff; }
+.modules-my-panel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 100; width: min(420px, 90vw);
+  /* 窄屏：浮层固定于视口两侧——绝对定位锚点在换行后的工具栏上会把面板推到
+     视口外，撑出 147px 的文档横向滚动（e2e responsive 恢复页实测）。 */ max-height: 70vh; overflow-y: auto; display: flex; flex-direction: column; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-1); box-shadow: 0 8px 32px rgba(0,0,0,.18); }
+
+@media (max-width: 560px) {
+  .modules-my-panel {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: 118px;
+    width: auto;
+  }
+}
+
+.modules-my-panel-header { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .75rem 1rem .5rem; border-bottom: 1px solid var(--df-border-soft); }
+.modules-my-panel-header strong { font-size: .92rem; }
+.modules-my-panel-actions { display: flex; gap: .4rem; }
+.modules-my-empty { padding: .75rem 1rem; margin: 0; }
+.modules-my-list { display: flex; flex-direction: column; }
+.modules-my-row { display: flex; align-items: center; gap: .65rem; padding: .6rem 1rem; text-decoration: none; color: var(--df-text); border-bottom: 1px solid var(--df-border-soft); }
+.modules-my-row:last-child { border-bottom: 0; }
+.modules-my-row:hover { background: var(--df-surface-2); }
+.modules-my-row-art { flex: 0 0 40px; height: 40px; border-radius: var(--df-radius-md); background: var(--df-surface-2) var(--df-bg-cover-image, none) center/cover; }
+.modules-my-row-copy { flex: 1; min-width: 0; display: grid; gap: .1rem; }
+.modules-my-row-copy strong { font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modules-my-row-copy span { font-size: .76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modules-my-row-runtime { color: var(--df-warn-strong, #c97b22); font-size: .72rem; font-weight: 600; }
+.modules-my-panel-footer { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .65rem 1rem; border-top: 1px solid var(--df-border-soft); font-size: .84rem; }
+.module-import-file { display: inline-flex; align-items: center; gap: .4rem; color: var(--df-text-muted); cursor: pointer; }
+.module-import-file input[type="file"] { max-width: 160px; }
+.module-import-preview { width: 100%; display: grid; gap: .3rem; padding: .5rem .75rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); }
+.module-import-preview p { margin: 0; font-size: .8rem; }
+.module-update-all-action { border: 1px solid color-mix(in srgb, var(--df-warning) 55%, var(--df-border-soft)); border-radius: var(--df-radius-md); background: transparent; color: var(--df-warning); font-size: .78rem; font-weight: 700; padding: .2rem .6rem; cursor: pointer; }
+.module-update-all-action:disabled { opacity: .5; }
+.module-update-action { min-height: 24px; padding: 0 .55rem; border: 1px solid color-mix(in srgb, var(--df-warning) 55%, var(--df-border-soft)); border-radius: 999px; background: transparent; color: var(--df-warning); font-size: .72rem; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.module-update-action:hover { background: color-mix(in srgb, var(--df-warning) 12%, transparent); }
+.module-update-action:disabled { opacity: .6; cursor: progress; }
+.modules-my-row-updating { display: inline-flex; align-items: center; gap: .4rem; font-size: .74rem; color: var(--df-interactive-strong); white-space: nowrap; }
+.modules-my-update-spinner { width: 12px; height: 12px; border: 2px solid color-mix(in srgb, var(--df-interactive) 30%, transparent); border-top-color: var(--df-interactive); border-radius: 50%; animation: my-spin .7s linear infinite; flex: 0 0 auto; }
+@keyframes my-spin { to { transform: rotate(360deg); } }
+
+/* ── Category chips ───────────────────────────────── */
+.modules-category-chips { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.modules-category-chip { padding: .3rem .9rem; border: 1px solid var(--df-border-soft); border-radius: 999px; background: var(--df-surface-2); color: var(--df-text-muted); font-size: .84rem; font-weight: 600; cursor: pointer; white-space: nowrap; transition: border-color .12s, background .12s; }
+.modules-category-chip:hover { border-color: var(--df-interactive); color: var(--df-text); }
+.modules-category-chip.active { border-color: var(--df-interactive); background: color-mix(in srgb, var(--df-interactive) 14%, var(--df-surface-2)); color: var(--df-text); }
+.modules-submit-link { margin-left: auto; padding: 0; border: 0; background: none; color: var(--df-interactive-strong); font-size: .82rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.modules-submit-link:hover { text-decoration: underline; }
+.modules-filter-toggle { padding: .3rem .9rem; border: 1px solid var(--df-border-soft); border-radius: 999px; background: var(--df-surface-2); color: var(--df-text-muted); font-size: .84rem; font-weight: 600; cursor: pointer; white-space: nowrap; transition: border-color .12s, background .12s; }
+.modules-filter-toggle:hover, .modules-filter-toggle.active { border-color: var(--df-interactive); background: color-mix(in srgb, var(--df-interactive) 14%, var(--df-surface-2)); color: var(--df-text); }
+.modules-filter-panel { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem .9rem; padding: .75rem .9rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
+
+/* ── Featured banner ──────────────────────────────── */
+.modules-featured-banner { position: relative; min-height: 220px; border-radius: var(--df-radius-lg); overflow: hidden; isolation: isolate; border: 1px solid var(--df-border-soft); display: flex; align-items: flex-end; }
+.modules-featured-art { position: absolute; inset: 0; z-index: 0; background: var(--banner-cover, linear-gradient(135deg, #1e3a5f 0%, #2d1b69 100%)) center/cover; filter: saturate(.85) contrast(1.1); }
+.modules-featured-banner.is-official .modules-featured-art { background: linear-gradient(135deg, #3d2800 0%, #6b4a00 100%); }
+.modules-featured-banner.is-verified .modules-featured-art { background: linear-gradient(135deg, #0e2d4a 0%, #1a3a6b 100%); }
+.modules-featured-banner.is-community .modules-featured-art { background: linear-gradient(135deg, #1e3a5f 0%, #2d1b69 100%); }
+.modules-featured-art::after { position: absolute; inset: 0; content: ''; background: linear-gradient(90deg, rgba(0,0,0,.72) 0%, rgba(0,0,0,.35) 55%, transparent 100%); }
+.modules-featured-body { position: relative; z-index: 1; padding: 1.5rem 2rem; max-width: 60%; }
+.modules-featured-eyebrow { margin: 0 0 .35rem; color: rgba(255,255,255,.65); font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.modules-featured-title { margin: 0 0 .5rem; color: #fff; font-family: var(--df-font-title, inherit); font-size: clamp(1.3rem, 2.5vw, 2rem); line-height: 1.2; }
+.modules-featured-desc { margin: 0 0 1rem; color: rgba(255,255,255,.75); font-size: .88rem; line-height: 1.5; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.modules-featured-actions { display: flex; gap: .6rem; }
+.modules-featured-install { min-height: 36px; padding: 0 1.2rem; border: 0; border-radius: var(--df-radius-md); background: var(--df-interactive); color: #fff; font: 700 .88rem/1 inherit; cursor: pointer; }
+.modules-featured-install:hover { background: var(--df-interactive-strong); }
+.modules-featured-install:disabled { opacity: .6; cursor: progress; }
+.modules-featured-detail { min-height: 36px; padding: 0 1rem; border: 1px solid rgba(255,255,255,.35); border-radius: var(--df-radius-md); background: rgba(255,255,255,.12); color: #fff; font: .88rem/1 inherit; cursor: pointer; }
+.modules-featured-detail:hover { background: rgba(255,255,255,.2); }
+
+/* ── Shelves ──────────────────────────────────────── */
+.modules-shelf { display: grid; gap: .65rem; }
+.modules-shelf-header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.modules-shelf-header h2 { margin: 0; font-size: 1.05rem; }
+.modules-shelf-more { padding: 0; border: 0; background: none; color: var(--df-interactive-strong); font-size: .84rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.modules-shelf-more:hover { text-decoration: underline; }
+.modules-shelf-scroll { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: .85rem; }
+@media (min-width: 1200px) { .modules-shelf-scroll { grid-template-columns: repeat(6, 1fr); } }
+
+/* ── Search results grid ──────────────────────────── */
+.modules-search-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: .85rem; }
+@media (min-width: 1200px) { .modules-search-grid { grid-template-columns: repeat(5, 1fr); } }
+
+/* ── Recovery ─────────────────────────────────────── */
+.module-recovery { padding: 1rem; border: 1px solid color-mix(in srgb, var(--df-accent) 30%, var(--df-border-soft)); border-left: 3px solid var(--df-accent); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
 .module-recovery p { margin: .4rem 0 0; }
 .module-recovery-facts { display: grid; gap: .25rem; margin: .6rem 0 0; }
 .module-recovery-facts dt { color: var(--df-text-muted); font-size: .78rem; }
@@ -779,37 +1013,22 @@ async function checkRecovery() {
 .module-recovery-ready { color: var(--df-success); }
 .module-recovery-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .7rem; }
 .module-recovery-resume { display: inline-flex; align-items: center; padding: .35rem .8rem; border-radius: .6rem; text-decoration: none; }
-.module-card { display: grid; gap: 1.1rem; padding: 1.35rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-lg); background: var(--df-surface-1); color: var(--df-text); text-decoration: none; position: relative; isolation: isolate; overflow: hidden; }
-/* 封面：整卡铺底，底部渐变压暗保证文字可读（与存档卡同一套做法）。 */
-.module-card-art { position: absolute; z-index: 0; inset: 0; pointer-events: none; background-image: var(--df-bg-cover-image); background-position: center; background-size: cover; filter: saturate(.88) contrast(1.04); transform: scale(1.02); transition: filter .22s ease, transform .28s ease; }
-.module-card-art::after { position: absolute; inset: 0; content: ""; background: linear-gradient(180deg, color-mix(in srgb, var(--df-canvas) 24%, transparent) 0%, transparent 24%, color-mix(in srgb, var(--df-surface-1) 58%, transparent) 46%, color-mix(in srgb, var(--df-surface-1) 90%, transparent) 68%, var(--df-surface-1) 100%), linear-gradient(100deg, color-mix(in srgb, var(--df-canvas) 44%, transparent), transparent 64%); }
-.module-card > :not(.module-card-art) { position: relative; z-index: 1; }
-.module-card.has-cover:hover .module-card-art { filter: saturate(.96) contrast(1.06) brightness(1.05); transform: scale(1.05); }
-.module-card h3 { margin: 0; font-size: 1rem; }
-.module-card dl { display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 0; }
-.module-card dt { color: var(--df-text-muted); font-size: .85rem; }
-.module-card dd { margin: .2rem 0 0; font-size: 1.15rem; font-weight: 700; }
-.module-update { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: 0; }
-.module-update-action { padding: .1rem .6rem; border: 1px solid color-mix(in srgb, var(--df-warning) 55%, var(--df-border-soft)); border-radius: 999px; background: transparent; color: var(--df-warning); font-size: .78rem; font-weight: 700; cursor: pointer; }
-.module-update-action:hover { background: color-mix(in srgb, var(--df-warning) 12%, transparent); }
-.module-update-action:disabled { opacity: .6; cursor: progress; }
-.module-market-actions { display: grid; gap: .45rem; align-content: start; margin-top: auto; }
-.module-market-actions button { width: 100%; }
-.module-installed-badge { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 .8rem; border: 1px solid color-mix(in srgb, var(--df-success) 42%, var(--df-border-soft)); border-radius: var(--df-radius-md); color: var(--df-success); background: color-mix(in srgb, var(--df-success) 8%, var(--df-surface-1)); font-size: .82rem; font-weight: 700; }
-.module-install-feedback { margin: 0; color: var(--df-text-muted); font-size: .75rem; line-height: 1.35; }
-.module-install-feedback.is-success { color: var(--df-success); }
-.module-install-feedback.is-error { color: var(--df-danger, #e07a7a); }
-@media (max-width: 480px) {
-  .modules-heading { align-items: stretch; flex-direction: column; }
-  .modules-return-link { width: 100%; min-height: 44px; justify-content: center; }
-  .module-import, .module-market-search { align-items: stretch; flex-direction: column; }
-  .module-import label, .module-import button, .module-market-search button { width: 100%; }
-  .module-import-file { flex-direction: column; align-items: flex-start; gap: .3rem; }
-  /* 竖排后 flex-basis 会变成高度，必须显式取消，否则文件框会被拉成一整屏。 */
-  .module-import-file input[type="file"] { flex: none; }
-  .module-import input[type="file"] { display: block; width: 100%; margin-top: .45rem; }
-  .module-market-search input { flex: 0 0 auto; width: 100%; min-height: 36px; }
-  .modules-grid { grid-template-columns: 1fr; }
-  .module-card { padding: 1rem; }
+
+/* ── Submit guide modal ───────────────────────────── */
+.module-submit-steps { display: grid; gap: .45rem; margin: .8rem 0 0; padding-left: 1.2rem; color: var(--df-text-secondary); line-height: 1.5; }
+.module-submit-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .6rem; padding-top: 1rem; }
+.module-submit-action { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 .9rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); color: var(--df-text); background: var(--df-surface-1); font-weight: 700; text-decoration: none; }
+.module-submit-action.is-primary { border-color: color-mix(in srgb, var(--df-accent) 50%, var(--df-border-soft)); color: var(--df-accent-strong); background: color-mix(in srgb, var(--df-accent) 12%, var(--df-surface-1)); }
+.empty-state .module-submit-action { justify-self: start; }
+.module-filter-reset { padding: .3rem .7rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: transparent; color: var(--df-text-muted); font-size: .84rem; cursor: pointer; }
+
+/* ── Responsive ───────────────────────────────────── */
+@media (max-width: 600px) {
+  .modules-featured-body { max-width: 100%; padding: 1rem; }
+  .modules-search-grid, .modules-shelf-scroll { grid-template-columns: repeat(2, 1fr); }
+  .modules-my-panel { width: 100vw; right: auto; left: 0; }
+}
+@media (max-width: 400px) {
+  .modules-search-grid, .modules-shelf-scroll { grid-template-columns: 1fr; }
 }
 </style>

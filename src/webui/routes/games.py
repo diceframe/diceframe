@@ -17,6 +17,9 @@ from src.webui.routes.game_route_common import (
 from src.webui.routes.game_query_routes import (
     api_games,
     api_detail,
+    api_gameplay_view,
+    api_gameplay_action,
+    api_gameplay_slot,
     api_game_adventure_projection,
     api_game_scene_image_file,
     api_game_scene_image_update,
@@ -77,6 +80,11 @@ from src.webui.routes.game_character_routes import (
     api_live_character_advancement_apply,
     api_live_advancement_control,
     api_live_character_rest,
+    api_live_character_spells,
+    api_live_character_rest_options,
+    api_live_character_ritual,
+    api_live_character_ritual_options,
+    api_game_rest_decide,
     api_char_delete,
     api_npc_portrait_update,
     api_npc_standing_portrait_update,
@@ -138,6 +146,9 @@ def register_games(app: web.Application) -> None:
     app.router.add_get("/api/games", api_games)
     app.router.add_post("/api/games/import", api_import_game)
     app.router.add_get("/api/games/{game_key}", api_detail)
+    app.router.add_get("/api/games/{game_key}/gameplay-view", api_gameplay_view)
+    app.router.add_post("/api/games/{game_key}/gameplay-actions/{action}", api_gameplay_action)
+    app.router.add_get("/api/games/{game_key}/gameplay-slots/{slot}", api_gameplay_slot)
     app.router.add_get("/api/games/{game_key}/adventure", api_game_adventure_projection)
     app.router.add_get("/api/games/{game_key}/scene-image", api_game_scene_image_file)
     app.router.add_get('/api/games/{game_key}/lorebooks', api_game_lorebooks)
@@ -262,6 +273,29 @@ def register_games(app: web.Application) -> None:
     app.router.add_post(
         "/api/games/{game_key}/character/{user_id}/rest",
         api_live_character_rest,
+    )
+    app.router.add_get(
+        "/api/games/{game_key}/character/{user_id}/spells",
+        api_live_character_spells,
+    )
+    # 只读：交出长休要求/允许的选择（地形、法术研究），不开启休息会话。
+    app.router.add_get(
+        "/api/games/{game_key}/character/{user_id}/rest/options",
+        api_live_character_rest_options,
+    )
+    # 队伍级裁决：全员申报后由 DM 决定是否结算，游戏时间只在这里推进。
+    app.router.add_post(
+        "/api/games/{game_key}/rest/decide",
+        api_game_rest_decide,
+    )
+    # 限时仪式（Magical Cunning）：仪式自己的一分钟在同一次权威写里推进。
+    app.router.add_post(
+        "/api/games/{game_key}/character/{user_id}/ritual",
+        api_live_character_ritual,
+    )
+    app.router.add_get(
+        "/api/games/{game_key}/character/{user_id}/ritual/options",
+        api_live_character_ritual_options,
     )
     app.router.add_route(
         "DELETE", "/api/games/{game_key}/character/{user_id}", api_char_delete

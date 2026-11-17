@@ -1,0 +1,13 @@
+# src/webui/services/plugins.py 返回给请求方的提示。
+"en":
+  card_cache_path_invalid: "Invalid card cache path"
+  catalog_resources_not_copyable: "Catalog resources cannot be imported by copying"
+  content_avatar_too_large: "A content pack avatar cannot exceed 3 MB"
+  content_type_catalog_only: "This content type supports catalog references only and cannot be copied into a lorebook"
+  content_type_not_importable: "This content type cannot be imported"
+  lorebook_not_selected: "No lorebook was selected"
+  lorebook_storage_unavailable: "Lorebook storage is unavailable"
+  no_card_cache: "This plugin has no card cache to clear"
+  plugin_operation_invalid: "Invalid plugin operation"
+  select_target_lorebook: "Select the lorebook to import into"
+  target_lorebook_no_canonical_import: "The target lorebook does not support canonical import"

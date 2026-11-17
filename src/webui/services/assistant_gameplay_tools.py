@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from src.engine.modules import adventure_runtime_state, progression_state
+from src.webui.ruleset_rest_projection import public_rest_session
 from src.webui.services._common import is_game_gm
 from src.webui.services.assistant_agent import AgentTool, _digest
 from src.webui.services.assistant_agent_application import obj, string
@@ -32,6 +33,7 @@ class GameplayToolDependencies:
     run_story: Any | None = None
     recovery: Any | None = None
     rest: Any | None = None
+    rest_decide: Callable[[str, str, bool, dict], Any] | None = None
     load_rule: Callable[[Any], Any] | None = None
     room_preferences: Callable[[str, Any], Any] | None = None
     set_room_preferences: Callable[[str, Any, dict], Any] | None = None
@@ -188,8 +190,15 @@ def gameplay_tools(deps: GameplayToolDependencies) -> tuple[AgentTool, ...]:
     if deps.available_ruleset_actions is not None:
         async def read_ruleset_actions(args: dict, owner: str) -> Any:
             _game, viewer = instance(args, owner)
-            return await _call(deps.available_ruleset_actions, args["game_key"],
-                               getattr(viewer, "uid", ""), bool(getattr(viewer, "is_gm", False)))
+            result = await _call(deps.available_ruleset_actions, args["game_key"],
+                                 getattr(viewer, "uid", ""), bool(getattr(viewer, "is_gm", False)))
+            # 自由文本回合流程的规则没有结构化动作：这是明确的产品语义，不是
+            # 故障。降级为"空列表 + 说明"，避免运行日志把每次探询都记成失败，
+            # 也避免 agent 把 409 语义当成可重试错误。
+            if not result.get("ok") and result.get("code") == "RULESET_INTENTS_UNAVAILABLE":
+                return {"ok": True, "available": False, "actions": [],
+                        "reason": str(result.get("error") or "free-text turn flow")}
+            return result
         tools.append(_tool("get_ruleset_available_actions",
             "Read the current ruleset's canonical available actions for this player",
             obj(game_prop, ("game_key",)), read_ruleset_actions, domain="games", effect="read"))
@@ -326,5 +335,31 @@ def gameplay_tools(deps: GameplayToolDependencies) -> tuple[AgentTool, ...]:
         tools.append(_tool("perform_ruleset_rest", "Confirm a server-resolved professional short or long rest",
             obj(rest_props, ("game_key", "run_id", "rest", "expected_revision", "confirm_elapsed_time")), rest_call,
             mutation=True, guard=rest_guard, preview=rest_preview, domain="ruleset", effect="external", automatic=False, version=2))
+
+    if deps.rest_decide is not None:
+        # 队伍休息在全员申报后停在 awaiting_approval：没有这个工具，AI GM 局
+        # 会永久卡在等一个永不发生的裁决。
+        decide_props = {**run_prop, "approve": {"type": "boolean"}}
+        def decide_guard(args: dict, owner: str) -> str:
+            game, _viewer = gm_instance(args, owner)
+            session = public_rest_session(game)
+            return _digest({"run_id": game.run_id, "rest_status": session.get("status"),
+                            "rest": session.get("rest"), "approve": args["approve"]})
+        async def decide_call(args: dict, owner: str) -> Any:
+            game, viewer = gm_instance(args, owner)
+            if args["run_id"] != game.run_id:
+                raise ValueError("Run changed; refresh first")
+            body = {"approve": bool(args["approve"]), "operation_id": uuid.uuid4().hex}
+            return await _call(deps.rest_decide, args["game_key"], getattr(viewer, "uid", ""), True, body)
+        def decide_preview(args: dict, owner: str) -> dict:
+            game, _viewer = gm_instance(args, owner)
+            session = public_rest_session(game)
+            return {"rest_status": session.get("status"), "rest": session.get("rest"),
+                    "participants": [row.get("character_name") for row in session.get("participants", [])],
+                    "time_advance_minutes": session.get("duration_minutes") if args["approve"] else 0,
+                    "approve": bool(args["approve"])}
+        tools.append(_tool("decide_party_rest", "Approve or reject a fully submitted party rest; approval advances game time",
+            obj(decide_props, ("game_key", "run_id", "approve")), decide_call, mutation=True,
+            guard=decide_guard, preview=decide_preview, domain="ruleset", effect="external", automatic=False, version=1))
 
     return tuple(tools)

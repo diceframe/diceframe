@@ -22,10 +22,13 @@ export function useInstalledPlugins(
   const installFile = ref<File | null>(null)
   const overwriteInstall = ref(false)
 
-  // 按插件类型筛选（'' = 全部）。内容包/主题/工具/适配器等不再混在一起。
+  // 扩展中心默认只管理技术扩展；内容包转到内容库/模组页管理。
+  // 具体类型筛选仍保留给兼容旧安装记录的维护入口。
   const filteredPlugins = computed(() => {
     const type = typeFilter.value
-    return type ? plugins.value.filter(p => p.plugin_type === type) : plugins.value
+    return type
+      ? plugins.value.filter(p => p.plugin_type === type)
+      : plugins.value.filter(p => p.plugin_type !== 'content-pack')
   })
 
   async function load() {

@@ -22,7 +22,7 @@ type ModuleCopy = {
 const copies: Record<Locale, ModuleCopy> = {
   'zh-CN': {
     contentProfile: '内容配置',
-    adventureLabel: '冒险模组', resourceLabel: '资源包', playableAdventures: '可玩冒险', resourcePack: '资源包',
+    adventureLabel: '冒险内容包', resourceLabel: '资源内容包', playableAdventures: '可玩冒险', resourcePack: '资源内容包',
     noFixedStory: '不含固定剧情；查看资料并创建自己的内容副本。', resourceContributions: '包含资料',
     resourceBrowse: '包内资料 · 不含固定剧情 · 查看资料',
     packLabel: '内容包', inventoryUnknown: '内容清单暂不可读；请检查包状态后重试。', installedAdventures: '已安装冒险', disabledAdventures: '已禁用，启用后在详情中选择冒险。',
@@ -31,7 +31,7 @@ const copies: Record<Locale, ModuleCopy> = {
   },
   en: {
     contentProfile: 'Content profile',
-    adventureLabel: 'Adventure module', resourceLabel: 'Resource pack', playableAdventures: 'Playable adventures', resourcePack: 'Resource pack',
+    adventureLabel: 'Adventure content package', resourceLabel: 'Resource content package', playableAdventures: 'Playable adventures', resourcePack: 'Resource content package',
     noFixedStory: 'No fixed story included. Browse resources and create your own copies.', resourceContributions: 'Included content',
     resourceBrowse: 'Pack content · No fixed story · Browse resources',
     packLabel: 'Content pack', inventoryUnknown: 'Content inventory is unreadable. Check the package status and retry.', installedAdventures: 'Installed adventures', disabledAdventures: 'Disabled. Enable the pack to choose an adventure in its details.',
@@ -40,7 +40,7 @@ const copies: Record<Locale, ModuleCopy> = {
   },
   ja: {
     contentProfile: 'コンテンツプロファイル',
-    adventureLabel: '冒険コンテンツパック', resourceLabel: 'コンテンツパック', playableAdventures: 'プレイ可能な冒険', resourcePack: 'コンテンツパック',
+    adventureLabel: '冒険コンテンツパッケージ', resourceLabel: 'リソースコンテンツパッケージ', playableAdventures: 'プレイ可能な冒険', resourcePack: 'リソースコンテンツパッケージ',
     noFixedStory: '固定シナリオはありません。資料を確認して自分用のコピーを作成できます。', resourceContributions: '収録コンテンツ',
     resourceBrowse: 'パック内資料 · 固定シナリオなし · 資料を見る',
     packLabel: 'コンテンツパック', inventoryUnknown: '内容一覧を読み取れません。パックの状態を確認して再試行してください。', installedAdventures: 'インストール済みの冒険', disabledAdventures: '無効です。有効にして詳細から冒険を選択してください。',
@@ -49,7 +49,7 @@ const copies: Record<Locale, ModuleCopy> = {
   },
   de: {
     contentProfile: 'Inhaltsprofil',
-    adventureLabel: 'Abenteuer-Inhaltspaket', resourceLabel: 'Inhaltspaket', playableAdventures: 'Spielbare Abenteuer', resourcePack: 'Inhaltspaket',
+    adventureLabel: 'Abenteuer-Inhaltspaket', resourceLabel: 'Ressourcen-Inhaltspaket', playableAdventures: 'Spielbare Abenteuer', resourcePack: 'Ressourcen-Inhaltspaket',
     noFixedStory: 'Keine feste Geschichte enthalten. Ressourcen ansehen und eigene Kopien erstellen.', resourceContributions: 'Enthaltene Inhalte',
     resourceBrowse: 'Paketinhalt · Keine feste Geschichte · Ressourcen ansehen',
     packLabel: 'Inhaltspaket', inventoryUnknown: 'Inhaltsverzeichnis nicht lesbar. Paketstatus prüfen und erneut versuchen.', installedAdventures: 'Installierte Abenteuer', disabledAdventures: 'Deaktiviert. Paket aktivieren und in den Details ein Abenteuer wählen.',
@@ -121,4 +121,15 @@ const contentKindLabels: Record<string, Record<Locale, string>> = {
 
 export function contentKindLabel(kind: string, locale: Locale): string {
   return contentKindLabels[kind]?.[locale] || kind
+}
+
+// 安装深校验的机器可读 blocker（module_validation）翻成用户能懂的话；
+// 未识别的 blocker 原样透出，绝不吞掉或改写语义。
+export function formatModuleBlocker(blocker: string, locale: Locale): string {
+  const match = /adventure_runtime_missing:([^:]+):([^:>]+)>=(\d+)/.exec(blocker)
+  if (!match) return blocker
+  const [, adventure, runtimeId, minimum] = match
+  return locale === 'zh-CN'
+    ? `冒险「${adventure}」需要规则运行时 ${runtimeId}（≥ ${minimum}），请先安装对应的规则运行时插件再导入。`
+    : `Adventure "${adventure}" requires ruleset runtime ${runtimeId} (>= ${minimum}). Install the matching ruleset-runtime plugin first.`
 }

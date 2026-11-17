@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from src.engine.character_utils import parse_tavern_card
 from src.webui.services.character_cards import commit_character_book
+from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 GameKey = tuple[str, ...]
@@ -35,7 +36,7 @@ async def import_tavern_card(dependencies: TavernImportDependencies, file_path: 
 
     if file_data:
         if len(file_data) > 40_000_000:
-            return {"ok": False, "error": "文件过大（上限 30MB）"}
+            return {"ok": False, "error": t("webui.services.tavern.file_too_large")}
         raw_bytes = base64.b64decode(file_data)
         safe_name = Path(file_name).name or "card.png"
         tmp_path = Path(tempfile.gettempdir()) / f"trpg_import_{safe_name}"
@@ -46,9 +47,9 @@ async def import_tavern_card(dependencies: TavernImportDependencies, file_path: 
         except OSError:
             pass
     elif file_path:
-        return {"ok": False, "error": "已禁用 file_path 模式（安全风险），请改用 file_data 上传"}
+        return {"ok": False, "error": t("webui.services.tavern.file_path_disabled")}
     else:
-        return {"ok": False, "error": "未提供文件"}
+        return {"ok": False, "error": t("webui.services.tavern.file_missing")}
 
     if "error" in card:
         return {"ok": False, "error": card["error"]}

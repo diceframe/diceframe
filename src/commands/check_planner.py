@@ -845,8 +845,15 @@ async def plan_round_checks(
     instance: GameInstance,
     rule: RuleSystem | None,
     llm_client: Any,
+    *,
+    narrative_checks: bool = False,
 ) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], dict[str, Any]]:
-    """执行阶段 1；返回已校验的 (action, CheckRequest) 及调用元数据。"""
+    """执行阶段 1；返回已校验的 (action, CheckRequest) 及调用元数据。
+
+    ``narrative_checks`` 由调用方按 runtime 的能力声明传入：无骰规则自己不会
+    掷骰，但声明了这条能力的 runtime 会在规划之后接手结算。此时规划照常进行，
+    否则自由叙事里根本不会产生待结算的检定。
+    """
     # Narrative/no-dice rules still need economy planning when a player is
     # trying to buy something.  Keep the cheap no-model path for ordinary
     # narration, but do not let ``dice_system=none`` disable the independent
@@ -854,6 +861,7 @@ async def plan_round_checks(
     if (
         rule
         and str(rule.dice_system).lower() == "none"
+        and not narrative_checks
         and not _has_possible_purchase_action(instance)
     ):
         return [], {
@@ -975,7 +983,7 @@ async def plan_round_checks(
     planned = _merge_safety_net_checks(instance, rule, planned)
     planned = _apply_d20_assistance(instance, rule, planned)
     planned = _apply_granted_advantage_modes(instance, rule, planned)
-    if rule and str(rule.dice_system).lower() == "none":
+    if rule and str(rule.dice_system).lower() == "none" and not narrative_checks:
         # A no-dice rule only consults the planner for the purchase protocol.
         # Whatever checks the model proposed would otherwise be built as d20
         # rolls; keep the round identical to the no_dice_rule skip apart from

@@ -5,6 +5,7 @@ from __future__ import annotations
 from aiohttp import web
 
 from src.webui.routes._common import _get_api
+from src.localization.messages import t
 
 
 async def api_avatar_upload(request: web.Request) -> web.Response:
@@ -19,7 +20,7 @@ async def api_avatar_upload(request: web.Request) -> web.Response:
 async def api_avatar_file(request: web.Request) -> web.StreamResponse:
     path = _get_api(request).avatar_file(request.match_info["asset_id"])
     if path is None:
-        return web.json_response({"error": "头像不存在"}, status=404)
+        return web.json_response({"error": t("webui.routes.avatars.avatar_missing")}, status=404)
     return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
@@ -50,7 +51,7 @@ async def api_game_avatar_file(request: web.Request) -> web.StreamResponse:
         return web.json_response({"error": "游戏不存在"}, status=404)
     path = api.avatar_file(request.match_info["asset_id"])
     if path is None:
-        return web.json_response({"error": "头像不存在"}, status=404)
+        return web.json_response({"error": t("webui.routes.avatars.avatar_missing")}, status=404)
     return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
@@ -69,7 +70,7 @@ async def api_standing_portrait_upload(request: web.Request) -> web.Response:
 async def api_standing_portrait_file(request: web.Request) -> web.StreamResponse:
     path = _get_api(request).standing_portrait_file(request.match_info["asset_id"])
     if path is None:
-        return web.json_response({"error": "立绘不存在"}, status=404)
+        return web.json_response({"error": t("webui.routes.avatars.standing_portrait_missing")}, status=404)
     return web.FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 

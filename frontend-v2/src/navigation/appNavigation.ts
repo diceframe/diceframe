@@ -53,8 +53,8 @@ export const appNavItems = [
   { id: 'overview', labelKey: 'navOverview', icon: HomeOutline },
   { id: 'play', labelKey: 'navPlay', icon: GameControllerOutline },
   { id: 'characters', labelKey: 'navCharacters', icon: PersonOutline },
-  { id: 'creator', labelKey: 'navCreator', icon: MapOutline },
   { id: 'library', labelKey: 'navContentLibrary', icon: BookOutline },
+  { id: 'creator', labelKey: 'navCreator', icon: MapOutline },
   { id: 'worlds', labelKey: 'navWorlds', icon: EarthOutline },
   { id: 'adventures', labelKey: 'navAdventures', icon: MapOutline },
   { id: 'modules', labelKey: 'navModules', icon: BookOutline },
@@ -66,13 +66,15 @@ export const appNavItems = [
   { id: 'settings', labelKey: 'navSettings', icon: SettingsOutline },
 ] as const satisfies readonly AppNavItem[]
 
+// W1 拍板 F：创作工坊从一级入口移入「内容」组，使用动线排序
+// （内容库=用什么 → 创作工坊=做什么 → 内容包=装什么 → 规则=怎么跑 → 世界书）。
 export const appNavGroups = [
   {
     id: 'content',
     labelKey: 'navContent',
     icon: BookOutline,
     defaultItemId: 'library',
-    itemIds: ['library', 'lorebook', 'modules', 'rules'],
+    itemIds: ['library', 'creator', 'modules', 'rules', 'lorebook'],
   },
   {
     id: 'management',
@@ -103,7 +105,7 @@ export function navGroupForRoute(routeName: string): AppNavGroupId | null {
 }
 
 const navRouteAliases: Partial<Record<AppNavItemId, readonly string[]>> = {
-  library: ['adventures', 'creator'],
+  library: ['adventures'],
   modules: ['module-detail'],
   lorebook: ['worlds'],
 }

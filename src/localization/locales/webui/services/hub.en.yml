@@ -1,0 +1,5 @@
+# src/webui/services/hub.py 返回给请求方的提示。
+"en":
+  hub_disabled: "DiceFrame Hub is not enabled"
+  privacy_policy_required: "Accept the current privacy policy before enabling anonymous usage statistics"
+  readme_unavailable: "The README is not available right now"
