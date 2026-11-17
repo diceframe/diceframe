@@ -125,8 +125,29 @@ export function contentKindLabel(kind: string, locale: Locale): string {
 
 // 安装深校验的机器可读 blocker（module_validation）翻成用户能懂的话；
 // 未识别的 blocker 原样透出，绝不吞掉或改写语义。
+//
+// 两种 blocker 都表示「缺规则运行时」：
+//   ruleset_runtime_missing:fu:core>=1        —— manifest 的 requires.rulesets
+//   adventure_runtime_missing:press_start:fu:core>=1 —— 冒险包自己声明的运行时
+// runtime id 允许带冒号（namespace:id），所以按 `>=` 切分而不是按冒号切。
+export function missingRuntimeFromBlocker(blocker: string): string {
+  const value = String(blocker || '')
+  const ruleset = /^ruleset_runtime_missing:(.+)>=(\d+)$/.exec(value)
+  if (ruleset) return ruleset[1]
+  const adventure = /^adventure_runtime_missing:([^:]+):(.+)>=(\d+)$/.exec(value)
+  if (adventure) return adventure[2]
+  return ''
+}
+
 export function formatModuleBlocker(blocker: string, locale: Locale): string {
-  const match = /adventure_runtime_missing:([^:]+):([^:>]+)>=(\d+)/.exec(blocker)
+  const ruleset = /^ruleset_runtime_missing:(.+)>=(\d+)$/.exec(String(blocker || ''))
+  if (ruleset) {
+    const [, runtimeId, minimum] = ruleset
+    return locale === 'zh-CN'
+      ? `这个内容包需要规则运行时 ${runtimeId}（≥ ${minimum}），请先安装并启用对应的规则插件再导入。`
+      : `This content package requires ruleset runtime ${runtimeId} (>= ${minimum}). Install and enable the matching ruleset plugin first.`
+  }
+  const match = /adventure_runtime_missing:([^:]+):(.+)>=(\d+)/.exec(String(blocker || ''))
   if (!match) return blocker
   const [, adventure, runtimeId, minimum] = match
   return locale === 'zh-CN'

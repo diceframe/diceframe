@@ -10,7 +10,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 MODULES = SRC / "engine" / "modules"
-MAX_TOP_LEVEL_FIELDS = 37
+# One additional runtime-only coordination field fences check preparation
+# against abort/retry ABA; it is not a new persisted feature-state owner.
+MAX_TOP_LEVEL_FIELDS = 38
 
 CONTROL_WRITERS = {
     SRC / "engine" / "player_control.py",

@@ -667,6 +667,8 @@ frontend-v2/src/
 - 不把按钮是否显示当成权限检查；
 - UI capability gating 只是体验层，服务端仍需重新校验。
 
+规则 gameplay 投影由 `features/play/useRulesetGameplay.ts` 管理，复用 available-actions 同时同步声明式 panels 与动作目录。取数只要求后端声明 `authoritative_intents`，不依赖 `deterministic_combat` 或顺序/组合动作能力；战斗工具仍单独按战斗能力展示。game、viewer、GM 视角或 runtime 切换会立即清空投影并使旧请求失效；回合、规则状态信号与可见页面轮询负责刷新。
+
 游玩状态同步由 `composables/useGame.ts` 管理。由于 [Cloudflare Quick Tunnels 不支持 SSE](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/#limitations)，`.trycloudflare.com` 玩家页每 2 秒通过原有 API 获取当前局快照，已有刷新未完成时跳过。本机和自定义域名沿用 SSE；P2P 优先使用原有订阅。轮询复用既有权限过滤、入口关闭处理和连接清理。
 
 首页“加入好友”由 `features/peer/FriendJoinPanel.vue` 提供，`joinInvitation.ts` 在本地识别普通邀请链接与 `DFP2-` 直连码，不探测远端或消费凭据。普通链接保留原站点、部署路径、后端参数与席位凭据，经玩家明确点击后打开；直连码交给现有 P2P 流程，连接前仍需隐私同意。Hub 的入口开关只控制实验性直连，不隐藏普通链接加入。游玩邀请弹窗提供独立的官方联机文档链接，不携带游戏或邀请凭据。
@@ -2988,6 +2990,8 @@ migrate_state
 - `RunLifecycleRuntime`
 - `PublicTimelineProjectionRuntime`
 
+远端 adapter 必须通过独立的 `RulesetCapabilities.automatic_intents=True` 显式声明支持可选 `next_automatic_intent` RPC；默认关闭，不能从 `authoritative_intents`、`deterministic_combat` 或 adapter 方法存在性推断。未声明时 adapter 返回 `None`，不发送该 RPC，普通 intent 仍可正常提交。声明后只有成功的 `null` 响应表示自动阶梯结束；远端拒绝、传输错误或非法响应必须传播，由既有权威事务拒绝并回滚，不能当作“不支持”吞掉。内置 runtime 仍通过可选 Protocol 接入，D&D 同时声明该 capability 以保持元数据准确。
+
 正确扩展方式通常是：
 
 ```text
@@ -3001,6 +3005,36 @@ engine
 WebAPI generic method
 frontend generic component
 ```
+
+---
+
+### 外部 Runtime 应用与传输边界
+
+远端 event bridge 的宿主应用回执保存在现有 `ruleset_runtime.event_ledger`
+的 `_host_remote_apply_v1` 命名空间，绑定 batch payload、runtime/version 与 game/run。
+角色卡单独写回也必须建立回执；相同 batch 重放只返回结果，不再次写入旧 post-image；
+同 ID 不同 payload 或缺失可验证回执的历史 batch 明确拒绝。child 只收到去除宿主
+回执的账本投影；state/ledger 写回必须保留历史并新增恰好一个对应 batch。
+回执、规则状态及角色卡沿既有事务和 round before-image 一起保存、回滚，
+不另建持久模块槽。兼容与缓存 pre-image 校验见
+[RULESET_REMOTE_EVENT_BRIDGE.md](RULESET_REMOTE_EVENT_BRIDGE.md)。
+
+stdio stderr 在读取阶段限制未完成行的字节前缀（1600 bytes），超长部分丢弃直到换行；
+日志最多 64 行、每行 400 字符，达到预算后仍继续 drain，不累积完整行。
+stdout reader 固定绑定子进程代次的 stream/response queue，旧进程迟到的 EOF
+不能污染重启后的 RPC。
+
+### Runtime 叙事检定准备
+
+`dice_system=none` 且声明 `narrative_checks` 的规则通过可选
+`NarrativeCheckResolverRuntime.resolve_narrative_checks` 结算自由文本检定。
+回合准备在 detached aggregate 上规划，阻塞 RPC 在线程中只访问该快照；完成后
+经 authority → state 锁发布 staged transaction，并检查 registry 对象、run、阶段、
+完整输入及运行期检定 generation。abort/reset 递增 generation，防止同轮重试的
+ABA；取消中的线程可继续完成，但不能回调发布 live 状态。已提交到行动上的 runtime
+结果与原 check identity 在叙事失败重试时复用，不随新 planner UUID 重骰。
+提示及重生成按 `planner_source=runtime` 使用通用格式，保留真实骰制、分骰和结果。
+这是现有存档形状上的恢复/并发边界修复，不新增持久 schema。
 
 ---
 

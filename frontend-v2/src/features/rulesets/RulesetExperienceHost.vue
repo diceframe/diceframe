@@ -4,6 +4,7 @@ import { errorMessage } from '@/api/client'
 import { fetchRulesetExperience } from '@/api/rulesets'
 import type { CharacterSheet, RulesetExperienceResponse } from '@/api/types'
 import { resolveRulesetAdvancementExtension, resolveRulesetExperience } from './registry'
+import GenericCharacterBuilder from './GenericCharacterBuilder.vue'
 
 const props = withDefaults(defineProps<{
   ruleId: string
@@ -89,11 +90,16 @@ onMounted(() => {
 })
 onBeforeUnmount(() => returnFocus?.focus())
 
-const component = computed(() => (
-  experience.value
-    ? resolveRulesetExperience(experience.value.experience.profile)
-    : null
-))
+const component = computed(() => {
+  if (!experience.value) return null
+  // 专门为本规则写的建卡器优先；没有时，只要运行时声明自己是专业建卡（会实现
+  // builder_choices / validate / finalize），就走规则驱动的通用建卡器——新插件
+  // 不必再让平台为它补一个 Vue 组件。
+  const bespoke = resolveRulesetExperience(experience.value.experience.profile)
+  if (bespoke) return bespoke
+  const builder = experience.value.ruleset_runtime?.capabilities?.character_builder
+  return builder === 'professional' ? GenericCharacterBuilder : null
+})
 
 watch(
   () => [props.ruleId, props.language] as const,
@@ -107,7 +113,9 @@ watch(
       const result = await fetchRulesetExperience(ruleId, language)
       if (current !== sequence) return
       experience.value = result
-      if (!resolveRulesetExperience(result.experience.profile)) {
+      const hasBespoke = Boolean(resolveRulesetExperience(result.experience.profile))
+      const professional = result.ruleset_runtime?.capabilities?.character_builder === 'professional'
+      if (!hasBespoke && !professional) {
         error.value = `Unsupported ruleset experience: ${result.experience.profile}`
       }
     } catch (cause: unknown) {

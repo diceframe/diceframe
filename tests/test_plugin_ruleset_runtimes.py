@@ -744,10 +744,13 @@ async def test_authoritative_intent_and_restart_recovery(tmp_path):
     assert reapplied["applied"] is True
     assert ruleset_runtime.state(restarted_instance)["version"] == 2
 
-    # A later retry acknowledges the receipt without reapplying an old snapshot.
+    # 宿主应用回执确认重放，但不能再次应用旧 post-image。
+    saved_after_apply = json.loads(json.dumps(ruleset_runtime.state(restarted_instance)))
+    ledger_after_apply = json.loads(json.dumps(ruleset_runtime.event_ledger(restarted_instance)))
     replayed = runtime2.apply_event_batch(restarted_instance, continued["event_batch"])
     assert replayed == {"ok": True, "applied": False, "replayed": True}
-    assert ruleset_runtime.state(restarted_instance)["version"] == 2
+    assert ruleset_runtime.state(restarted_instance) == saved_after_apply
+    assert ruleset_runtime.event_ledger(restarted_instance) == ledger_after_apply
     restarted_source.close()
 
 

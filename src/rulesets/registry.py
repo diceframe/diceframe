@@ -67,6 +67,7 @@ class RulesetRuntimeRegistry:
 
     def __init__(self, runtimes: Iterable[RulesetRuntime] = ()) -> None:
         self._runtimes: dict[str, RulesetRuntime] = {}
+        self._adventure_resolver: Any = None
         for runtime in runtimes:
             self.register(runtime)
 
@@ -81,6 +82,13 @@ class RulesetRuntimeRegistry:
             raise InvalidRulesetBindingError(
                 f"runtime {runtime_id} must declare a positive integer runtime_version"
             )
+        # Runtimes registered after startup (plugin enabled at runtime) still get
+        # the application's resolver: the registry remembers it instead of
+        # relying on construction order.
+        if self._adventure_resolver is not None:
+            setter = getattr(runtime, "set_adventure_resolver", None)
+            if callable(setter):
+                setter(self._adventure_resolver)
         self._runtimes[runtime_id] = runtime
 
     def unregister(self, runtime_id: str) -> bool:
@@ -129,6 +137,7 @@ class RulesetRuntimeRegistry:
 
         if resolver is None:
             return 0
+        self._adventure_resolver = resolver
         attached = 0
         for runtime in self._runtimes.values():
             setter = getattr(runtime, "set_adventure_resolver", None)
