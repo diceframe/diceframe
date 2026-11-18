@@ -11,6 +11,9 @@ from typing import Any
 
 import aiohttp
 
+from src.llm.openai_responses import (
+    OpenAIResponsesTransport, ResponsesIncompleteError, ResponsesStreamInterruptedError, responses_url,
+)
 from src.llm.openai_transport import OpenAIChatTransport
 from src.llm.generation_options import apply_anthropic_options, validate_generation_options
 
@@ -192,6 +195,7 @@ class LLMClient:
         self._native_tool_auto: set[str] = set()
         self.generation_options = validate_generation_options({} if generation_options is None else generation_options)
         self._openai_transport = OpenAIChatTransport(self.generation_options)
+        self._responses_transport = OpenAIResponsesTransport(self.generation_options)
 
     def _anthropic_body(self, body: dict[str, Any]) -> dict[str, Any]:
         apply_anthropic_options(body, self.generation_options)
@@ -377,10 +381,51 @@ class LLMClient:
                 provider, system_prompt, user_message, tools, temperature, max_tokens,
                 force_tool_choice=force_tool_choice,
             )
+        url = responses_url(provider.base_url, provider.model_name, provider.api_format or "openai")
+        if url:
+            result = await self._request_responses(
+                provider, url, system_prompt, user_message, max_tokens,
+                tools=tools, force_tool_choice=force_tool_choice,
+            )
+            if not result.tool_calls and not result.content:
+                raise ValueError("OpenAI Responses returned no function call or final text")
+            return LLMToolResponse(result.tool_calls, result.total_tokens, provider.provider_name, content=result.content)
         return await self._call_tools_openai(
             provider, system_prompt, user_message, tools, temperature, max_tokens,
             force_tool_choice=force_tool_choice,
         )
+
+    async def _request_responses(
+        self, provider: ProviderConfig, url: str, system_prompt: str, user_message: str, max_tokens: int, *,
+        json_mode: bool = False, tools: list[dict[str, Any]] | None = None,
+        force_tool_choice: bool = True, stream: bool = False, on_delta=None,
+    ):
+        transport = self._responses_transport
+        body = transport.body(
+            provider.model_name, system_prompt, user_message, max_tokens,
+            json_mode=json_mode, tools=tools, force_tool_choice=force_tool_choice,
+            reasoning_effort=provider.reasoning_effort if tools else None,
+        )
+        session = await self._get_session()
+        try:
+            if stream:
+                result = await transport.stream(session, url, provider.api_key, body, timeout=self.request_timeout,
+                                                proxy=self.proxy_url, on_delta=on_delta)
+            else:
+                result = await transport.call(session, url, provider.api_key, body, timeout=self.request_timeout,
+                                              proxy=self.proxy_url, tools=tools)
+        except ResponsesIncompleteError as exc:
+            if exc.reason == "max_output_tokens":
+                raise OutputTruncatedError(exc.reason) from exc
+            raise
+        if not result.tool_calls or result.content:
+            try:
+                result.content = strip_reasoning_from_content(result.content)
+            except ValueError as exc:
+                if stream and on_delta and result.content:
+                    raise ResponsesStreamInterruptedError("OpenAI Responses returned no usable final text") from exc
+                raise
+        return result
 
     async def _call_tools_openai(
         self,
@@ -689,7 +734,7 @@ class LLMClient:
                     response.token_budget_initial = max_tokens
                     response.token_budget_used = max_tokens
                     return response
-                except OutputTruncatedError:
+                except (OutputTruncatedError, ResponsesStreamInterruptedError):
                     raise
                 except aiohttp.ClientResponseError as exc:
                     last_error = exc
@@ -740,6 +785,10 @@ class LLMClient:
                 provider, system_prompt, user_message,
                 temperature, max_tokens, json_mode,
             )
+        url = responses_url(provider.base_url, provider.model_name, api_format)
+        if url:
+            result = await self._request_responses(provider, url, system_prompt, user_message, max_tokens, json_mode=json_mode)
+            return self._to_response(result.content, result.total_tokens, provider.provider_name)
         return await self._call_openai_compatible(
             provider, system_prompt, user_message,
             temperature, max_tokens, json_mode,
@@ -869,6 +918,12 @@ class LLMClient:
                 provider, system_prompt, user_message,
                 temperature, max_tokens, json_mode, on_delta,
             )
+        url = responses_url(provider.base_url, provider.model_name, api_format)
+        if url:
+            result = await self._request_responses(
+                provider, url, system_prompt, user_message, max_tokens, json_mode=json_mode, stream=True, on_delta=on_delta,
+            )
+            return result.content, result.total_tokens, "stop"
         return await self._stream_openai_compatible(
             provider, system_prompt, user_message,
             temperature, max_tokens, json_mode, on_delta,
