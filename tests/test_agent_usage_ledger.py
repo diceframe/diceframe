@@ -167,7 +167,7 @@ async def test_creator_trace_correlates_repeat_snapshot_with_bounded_model_histo
 
     async def read(args, owner):
         return {'ok': True, 'project': {'id': 'private-project-id', 'revision': 3, 'digest': 'same',
-                                        'files': {'private-path.json': 'private-file' * 2000}}}
+                                        'files': [{'path': 'private-path.json', 'chars': 24000}]}}
 
     tool = AgentTool('creator_project_read', 'Read', {'type': 'object', 'additionalProperties': False}, read)
     agent = AgentRuntime(AgentDependencies(FakeProvider, lambda lang: None, (tool,), tmp_path / 'agent'))
@@ -184,4 +184,4 @@ async def test_creator_trace_correlates_repeat_snapshot_with_bounded_model_histo
     assert [item['snapshot_reads'] for item in snapshots] == [1, 2]
     assert [item['creator_observations'] for item in histories] == [0, 1, 2]
     assert len({item['run_id'] for item in snapshots + histories}) == 1
-    assert snapshots[0]['ui_chars'] > snapshots[0]['observation_chars'] > 0
+    assert 0 < snapshots[0]['ui_chars'] == snapshots[0]['observation_chars'] < 500

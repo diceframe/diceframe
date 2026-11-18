@@ -8,9 +8,11 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from src.creator.projects import PROJECT_RANGE_CHARS
 from src.engine.modules import progression_state, session_stats
+from src.runtime_diagnostics import redact_runtime_log_text
 from src.webui.services._common import is_game_gm
-from src.webui.services.assistant_agent import AgentTool, _digest
+from src.webui.services.assistant_agent import AgentTool, _digest, safe_data
 
 ROUTES = ("overview", "create", "play", "characters", "library", "creator", "map", "lorebook",
           "worlds", "adventures", "modules", "memory", "logs", "rules", "settings", "plugins")
@@ -251,8 +253,28 @@ def application_tools(deps: AgentApplicationDependencies) -> tuple[AgentTool, ..
                 owner, args["name"], source=args.get("source"),
             )
 
-        async def creator_project_read(args, owner):
-            return deps.creator_projects.read(owner, args["project_id"])
+        def safe_source(text):
+            return redact_runtime_log_text(text) == text
+
+        def safe_source_path(path):
+            # Preserve the previous Agent redaction of credential-like file
+            # keys even though paths now travel as values in the index.
+            return safe_data({path: path}).get(path) == path
+
+        async def creator_project_inspect(args, owner):
+            try:
+                return deps.creator_projects.inspect(owner, args["project_id"], offset=args.get("offset", 0),
+                    expected_revision=args.get("expected_revision"), allow_path=safe_source_path)
+            except KeyError as exc:
+                raise ValueError("Creator 工程不存在") from exc
+
+        async def creator_project_read_file(args, owner):
+            try:
+                return deps.creator_projects.read_file(owner, args["project_id"], expected_revision=args["expected_revision"],
+                    path=args["path"], offset=args.get("offset", 0), max_chars=args.get("max_chars", PROJECT_RANGE_CHARS),
+                    allow_path=safe_source_path, allow_text=safe_source)
+            except KeyError as exc:
+                raise ValueError("Creator 工程或文件不存在") from exc
 
         async def creator_project_validate(args, owner):
             return deps.creator_projects.validate(owner, args["project_id"])
@@ -352,10 +374,35 @@ def application_tools(deps: AgentApplicationDependencies) -> tuple[AgentTool, ..
             ),
             AgentTool(
                 "creator_project_read",
-                "Read one scoped Creator Studio project",
+                "Legacy alias for the first source-free Creator project index page",
                 obj({"project_id": string(64, minimum=1)}, ("project_id",)),
-                creator_project_read,
+                creator_project_inspect,
                 domain="creator",
+                version=2,
+                instructions="Use creator_project_inspect for pagination or creator_project_read_file for exact source.",
+            ),
+            AgentTool(
+                "creator_project_inspect",
+                "Inspect one Creator Studio project revision and its paginated file index (no source text)",
+                obj({"project_id": string(64, minimum=1),
+                     "offset": {"type": "integer", "minimum": 0, "maximum": 2048},
+                     "expected_revision": {"type": "integer", "minimum": 0}}, ("project_id",)),
+                creator_project_inspect,
+                domain="creator",
+                instructions="Use next_offset with the returned revision to continue the index. Reuse the same revision for file reads.",
+            ),
+            AgentTool(
+                "creator_project_read_file",
+                "Read an exact text range in one file of an owned Creator Studio project revision",
+                obj({"project_id": string(64, minimum=1), "path": string(240, minimum=1),
+                     "expected_revision": {"type": "integer", "minimum": 0},
+                     "offset": {"type": "integer", "minimum": 0, "maximum": 262144},
+                     "max_chars": {"type": "integer", "minimum": 1, "maximum": PROJECT_RANGE_CHARS}},
+                    ("project_id", "path", "expected_revision")),
+                creator_project_read_file,
+                domain="creator",
+                instructions="Offsets count Unicode code points (not bytes). Follow next_offset while has_more is true. "
+                             "A range is not a complete replacement file; preserve all untouched text.",
             ),
             AgentTool(
                 "creator_project_validate",

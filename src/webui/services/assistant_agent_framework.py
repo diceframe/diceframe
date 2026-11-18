@@ -22,6 +22,7 @@ from src.llm.client import LLMToolCallError
 from src.llm.tool_usage import run_id as usage_run_id
 from src.assistant_agent_limits import DEFAULT_TASK_MAX_TOKENS
 from src.localization.messages import t
+from src.webui.services.assistant_creator_reads import FILE_TOOL, READ_TOOLS, preserve_source_observations
 
 usage_logger = logging.getLogger('trpg.llm_usage')
 
@@ -169,6 +170,9 @@ _CONTENT_KEYS = frozenset({"content", "text", "answer", "delta", "instructions",
 
 def _walk_bound(node, limit, *, key: str = ""):
     if isinstance(node, dict):
+        if (node.get('part_kind') == 'tool-return' and node.get('tool_name') == FILE_TOOL
+                and isinstance(node.get('content'), dict)):
+            return node  # Store-bounded exact range, or an explicit locator without source.
         return {key_: _walk_bound(item, limit, key=key_) for key_, item in node.items()}
     if isinstance(node, list):
         return [_walk_bound(item, limit, key=key) for item in node]
@@ -197,8 +201,10 @@ def _bound_history(history: list) -> list:
     total = len(history)
     recent_start = max(1, total - HISTORY_RECENT_MESSAGES)
 
+    seen_ranges: set[tuple] = set()
+
     def bound_at(index: int, limit: int):
-        return _walk_bound(history[index], limit)
+        return _walk_bound(preserve_source_observations(history[index], seen_ranges), limit)
 
     # 1) 第 0 条任务消息：结构化压缩到固定预算（身份 / 目录索引保留）。
     first = _walk_bound(history[0], HISTORY_FIRST_CHARS)
@@ -214,8 +220,9 @@ def _bound_history(history: list) -> list:
 
     # 2) 最近窗口无条件保留。
     recent: list = []
-    for index in range(recent_start, total):
+    for index in range(total - 1, recent_start - 1, -1):
         recent.append(bound_at(index, HISTORY_RECENT_CHARS))
+    recent.reverse()
     recent_cost = sum(len(json.dumps(message, ensure_ascii=False)) for message in recent)
 
     # 3) 中间历史从新到旧回收，直到把剩余预算用完。
@@ -225,7 +232,12 @@ def _bound_history(history: list) -> list:
         message = bound_at(index, HISTORY_OLDER_CHARS)
         cost = len(json.dumps(message, ensure_ascii=False))
         if running_cost(cost, middle) > budget:
-            break
+            # If an older source page no longer fits, keep its ref/offsets when
+            # possible instead of leaving a clipped string labelled as exact.
+            message = preserve_source_observations(message, seen_ranges, omit_source=True)
+            cost = len(json.dumps(message, ensure_ascii=False))
+            if running_cost(cost, middle) > budget:
+                break
         middle.append(message)
     middle.reverse()
     return [first, *middle, *recent]
@@ -300,12 +312,13 @@ class DiceFrameModel(Model):
         if usage_logger.isEnabledFor(logging.INFO):
             project_observations = [part.get('content') for message in history for part in message.get('parts', [])
                                     if part.get('part_kind') == 'tool-return'
-                                    and part.get('tool_name') == 'creator_project_read']
+                                    and part.get('tool_name') in READ_TOOLS]
             usage_logger.info('agent_request_history %s', json.dumps({
                 'run_id': usage_run_id.get(), 'history_chars': len(user_message),
                 'instructions_chars': len(instructions),
                 'creator_observations': len(project_observations),
-                'creator_observation_chars': sum(len(part) for part in project_observations if isinstance(part, str)),
+                'creator_observation_chars': sum(len(part) if isinstance(part, str)
+                    else len(json.dumps(part, ensure_ascii=False)) for part in project_observations),
             }))
         try:
             response = await self.client.call_tools(instructions, user_message,

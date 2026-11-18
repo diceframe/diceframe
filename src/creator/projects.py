@@ -16,7 +16,7 @@ import zipfile
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 _PROJECT_ID_RE = re.compile(r"^project-[a-zA-Z0-9_-]{8,48}$")
@@ -24,6 +24,9 @@ _MAX_PROJECTS = 256
 _MAX_FILES = 2048
 _MAX_FILE_BYTES = 256 * 1024
 _MAX_TOTAL_BYTES = 4 * 1024 * 1024
+PROJECT_INDEX_LIMIT = 8
+PROJECT_RANGE_CHARS = 2800
+_PROJECT_PAGE_JSON_CHARS = 3500
 _SECRET_NAME_RE = re.compile(r"(^|/)(?:\.env(?:\.|$)|id_rsa|id_ed25519|secrets?\.json|credentials?\.json)$", re.I)
 
 
@@ -170,12 +173,87 @@ class CreatorProjectStore:
         result = deepcopy(project)
         result.pop("owner_id", None)
         result["id"] = self._project_id(project_id)
-        digest_source = deepcopy(result)
-        # Build receipts are derived evidence, not authored project content;
-        # adding/replaying one must not invalidate the source revision digest.
-        digest_source.pop("build_receipts", None)
-        result["digest"] = _digest(digest_source)
+        result["digest"] = self._source_digest(project, result["id"])
         return {"ok": True, "project": result}
+
+    @staticmethod
+    def _source_digest(project: dict, project_id: str) -> str:
+        # Derived receipts don't change the source revision. The projection is
+        # shallow: digesting does not copy all file text and metadata again.
+        return _digest({**{key: value for key, value in project.items()
+                          if key not in {"owner_id", "build_receipts"}}, "id": project_id})
+
+    @staticmethod
+    def _require_revision(project: dict, expected_revision: int) -> int:
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValueError("expected_revision 必须是非负整数")
+        revision = int(project.get("revision", 0))
+        if revision != expected_revision:
+            raise ValueError("工程版本已变化，请重新读取后再修改")
+        return revision
+
+    def inspect(self, owner_id: str, project_id: str, *, offset: int = 0,
+                expected_revision: int | None = None,
+                allow_path: Callable[[str], bool] | None = None) -> dict[str, Any]:
+        """Return a paginated, source-free index of the current owned revision."""
+        project = self._owned(self._load(), owner_id, project_id)
+        if type(offset) is not int or offset < 0 or (offset and expected_revision is None):
+            raise ValueError("工程文件目录翻页需要有效的 offset 和 expected_revision")
+        revision = (self._require_revision(project, expected_revision) if expected_revision is not None
+                    else int(project.get("revision", 0)))
+        files = project.get("files") or {}
+        paths = sorted(path for path in files if allow_path is None or allow_path(path))
+        if offset > len(paths):
+            raise ValueError("工程文件目录 offset 超出范围")
+        entries = []
+        size = 0
+        for path in paths[offset:offset + PROJECT_INDEX_LIMIT]:
+            encoded = files[path].encode("utf-8")
+            entry = {"path": path, "bytes": len(encoded), "chars": len(files[path]),
+                     "file_hash": "sha256:" + hashlib.sha256(encoded).hexdigest()}
+            size += len(json.dumps(entry, ensure_ascii=False)) + 2
+            if entries and size > _PROJECT_PAGE_JSON_CHARS:
+                break
+            entries.append(entry)
+        end = offset + len(entries)
+        return {"ok": True, "project": {"id": self._project_id(project_id), "name": project.get("name", ""),
+                "revision": revision, "digest": self._source_digest(project, project_id),
+                "file_count": len(paths), "redacted_file_count": len(files) - len(paths), "files": entries,
+                "offset": offset, "has_more": end < len(paths), "next_offset": end if end < len(paths) else None}}
+
+    def read_file(self, owner_id: str, project_id: str, *, expected_revision: int,
+                  path: str, offset: int = 0, max_chars: int = PROJECT_RANGE_CHARS,
+                  allow_path: Callable[[str], bool] | None = None,
+                  allow_text: Callable[[str], bool] | None = None) -> dict[str, Any]:
+        """Read exact Unicode code-point offsets from an owned, live revision."""
+        project = self._owned(self._load(), owner_id, project_id)
+        revision = self._require_revision(project, expected_revision)
+        path = self._file_path(path)
+        if type(max_chars) is not int or not 1 <= max_chars <= PROJECT_RANGE_CHARS:
+            raise ValueError("max_chars 超出工程文件读取范围")
+        if allow_path is not None and not allow_path(path):
+            raise PermissionError("无法向 Agent 提供该工程文件")
+        files = project.get("files") or {}
+        if path not in files:
+            raise KeyError("Creator 工程文件不存在")
+        text = files[path]
+        if type(offset) is not int or not 0 <= offset <= len(text):
+            raise ValueError("工程文件 offset 超出范围")
+        # Check the entire source first so a credential split across two pages
+        # can't bypass the observation redactor. Never pass a modified chunk
+        # off as exact source to a model that might write it back.
+        if allow_text is not None and not allow_text(text):
+            raise PermissionError("工程文件可能含敏感内容，不能通过 Agent 读取；请使用工程编辑器")
+        content = text[offset:offset + max_chars]
+        while len(json.dumps(content, ensure_ascii=False)) > _PROJECT_PAGE_JSON_CHARS - 800:
+            content = content[:len(content) * 3 // 4]
+        if allow_text is not None and not allow_text(content):
+            raise PermissionError("工程片段可能含敏感内容，不能通过 Agent 读取；请使用工程编辑器")
+        end = offset + len(content)
+        return {"ok": True, "project_id": self._project_id(project_id), "revision": revision, "path": path,
+                "file_hash": "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                "offset": offset, "end_offset": end, "total_chars": len(text), "has_more": end < len(text),
+                "next_offset": end if end < len(text) else None, "content": content}
 
     def update(
         self,
@@ -191,9 +269,7 @@ class CreatorProjectStore:
             raise ValueError("expected_revision 必须是非负整数")
         state = self._load()
         project = self._owned(state, owner_id, project_id)
-        current_revision = int(project.get("revision", 0))
-        if current_revision != expected_revision:
-            raise ValueError("工程版本已变化，请重新读取后再修改")
+        current_revision = self._require_revision(project, expected_revision)
         current = self._normalize_files(project.get("files") or {})
         if files is not None:
             current.update(self._normalize_files(files))

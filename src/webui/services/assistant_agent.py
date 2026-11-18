@@ -26,6 +26,10 @@ from src.assistant_agent_limits import DEFAULT_RUN_STEPS, DEFAULT_TASK_MAX_TOKEN
 from src.runtime_diagnostics import redact_runtime_log_text
 from src.webui.services.assistant_authorization import current_authorization, make_authorization, permits
 from src.webui.services.assistant_action_plans import prepare_action, signed_plan, stored_assessment
+from src.webui.services.assistant_creator_reads import (
+    CREATOR_GUIDANCE, INDEX_TOOLS, READ_TOOLS, CreatorReadProgress, creator_receipt_observation,
+    creator_write_observation,
+)
 
 usage_logger = logging.getLogger('trpg.llm_usage')
 
@@ -233,6 +237,10 @@ class _Session:
 
 class AgentExecutionStopped(Exception):
     """A completed or uncertain dispatch must be reconciled before more writes."""
+
+
+class CreatorReadStalled(Exception):
+    """Repeated identical Creator reads did not make progress."""
 
 
 async def _invoke(callback, *args):
@@ -446,6 +454,7 @@ class AgentRuntime:
             session.data['task'] = {'status': 'running', 'completed_steps': 0}
             run_id = uuid.uuid4().hex
             creator_reads: dict[tuple[str, int, str], int] = {}
+            creator_progress = CreatorReadProgress()
             self._write(session)
             try:
                 if self.deps.configuration_error(language) or self.deps.llm_client() is None:
@@ -456,18 +465,7 @@ class AgentRuntime:
                     session.data['task']['status'] = 'completed'
                     await emit('task', deepcopy(session.data['task']))
                     return
-                creator_guidance = (
-                    " Creator Studio workflow is active. For a creator request, first call creator_project_read for the selected project. "
-                    "If the user asks to change project content, use creator_project_update with the revision returned by that read; "
-                    "do not answer with a suggested patch only. Summarize the exact files and intent before the approval boundary. "
-                    "After an approved update, always reply with a natural-language summary of what was changed (e.g. which scenes, NPCs or rules were added or modified) "
-                    "before waiting for further input — never leave the user with only tool-result pills and no text. "
-                    "If the user sends a casual or conversational message (not a project-editing request), respond conversationally in plain text without calling any tools. "
-                    "Let the client refresh the project and show the diff. Use creator_project_validate, "
-                    "creator_project_preview, creator_project_build, or creator_project_submission only when the user asks for that step. "
-                    "Never claim that a gameplay design document is a runnable gameplay provider unless a registered capability says so."
-                    if context.get('route') == 'creator' else ""
-                )
+                creator_guidance = CREATOR_GUIDANCE if context.get('route') == 'creator' else ''
                 system = (
                     "You are DF Agent, the DiceFrame application agent. Work toward the latest user's goal. "
                     "Use only registered tools, read catalogs to discover canonical IDs, never guess IDs or invent APIs. "
@@ -567,6 +565,8 @@ class AgentRuntime:
                                 if not any(_wants_runtime_log_context(m["content"]) for m in messages if m["role"] == "user"):
                                     raise PermissionError("Runtime logs require an explicit diagnosis request")
                             if tool.mutation:
+                                if tool.name == 'creator_project_update':
+                                    creator_progress.require_complete_replacement_source(args)
                                 # Check proposal prerequisites before upstream
                                 # defers the call, without storing a plan yet.
                                 if tool.prepare is not None:
@@ -618,7 +618,9 @@ class AgentRuntime:
                                 raise asyncio.CancelledError()
                             if not result.get('ok'):
                                 raise AgentExecutionStopped('The operation did not succeed; inspect its receipt before continuing')
-                            return result
+                            creator_progress.record(tool.name, result)
+                            return creator_receipt_observation(result) if tool.name in {
+                                'creator_project_create', 'creator_project_update'} else result
                         await emit("tool_start", {"tool": tool.name, "label": tool.label})
                         try:
                             raw = await _invoke(tool.handler, args, owner)
@@ -636,8 +638,10 @@ class AgentRuntime:
                                 "hint": "Use save_content with this draft_id to propose saving."}
                         else:
                             await emit("tool_result", {"tool": tool.name, "result": result})
-                            observation = _bounded_observation(result)
-                            if (tool.name == 'creator_project_read' and isinstance(result, dict)
+                            # These observations are bounded in the Creator store
+                            # and structured to avoid generic text truncation.
+                            observation = result if tool.name in READ_TOOLS else _bounded_observation(result)
+                            if (tool.name in INDEX_TOOLS and isinstance(result, dict)
                                     and usage_logger.isEnabledFor(logging.INFO)):
                                 project = result.get('project')
                                 if isinstance(project, dict) and project.get('id') and type(project.get('revision')) is int:
@@ -649,8 +653,11 @@ class AgentRuntime:
                                         'run_id': run_id, 'project_id_hash': key[0], 'revision': key[1],
                                         'digest_hash': key[2], 'snapshot_reads': creator_reads[key],
                                         'ui_chars': len(json.dumps(result, ensure_ascii=False)),
-                                        'observation_chars': len(observation),
+                                        'observation_chars': len(json.dumps(observation, ensure_ascii=False))
+                                            if isinstance(observation, dict) else len(observation),
                                     }))
+                        if isinstance(result, dict) and creator_progress.record(tool.name, result):
+                            raise CreatorReadStalled()
                         if isinstance(result, dict) and isinstance(result.get("sources"), list):
                             sources = [source for source in result["sources"] if isinstance(source, dict)
                                        and isinstance(source.get("source"), str) and isinstance(source.get("heading"), str)]
@@ -684,7 +691,7 @@ class AgentRuntime:
                     'capability_catalog': catalog,
                     "drafts": {k: {"kind": v.get("kind"), "blockers": v.get("blockers"),
                     "titles": [i["name"] for i in v.get("draft", {}).get("items", [])]} for k, v in session.data["drafts"].items()},
-                    "receipts": session.data["receipts"][-4:],
+                    "receipts": [creator_receipt_observation(receipt) for receipt in session.data["receipts"][-4:]],
                     'execution_policy': current_authorization(session.data, self.deps.clock()),
                     'capability_domains': sorted({tool.domain for tool in self.registry.values()})})
                 try:
@@ -720,6 +727,15 @@ class AgentRuntime:
                         raise
                     session.data['task']['status'] = 'cancelled'
                     await progress()
+                    return
+                except CreatorReadStalled:
+                    session.data['task'].update(status='paused', pause_reason='repeated_creator_read')
+                    await progress()
+                    await emit('delta', {'delta': (
+                        '已暂停：重复读取没有获得新的工程版本或文件片段。可以指定要修改的文件或范围后继续。'
+                        if language.startswith('zh') else
+                        'Paused: repeated reads found no new project revision or source range. Specify the file or range to continue.'
+                    )})
                     return
                 except AgentExecutionStopped as exc:
                     session.data['task']['status'] = 'paused' if (session.data.get('pending') or {}).get('resumable') else 'failed'
@@ -832,7 +848,8 @@ class AgentRuntime:
             client = self.deps.llm_client()
             if client is None:
                 return
-            result_summary = json.dumps(safe_data(response.get('result', {})), ensure_ascii=False)[:1500]
+            result_summary = json.dumps(safe_data(creator_write_observation(response.get('result', {}))),
+                                        ensure_ascii=False)[:1500]
             system = (
                 "A project mutation just completed. Write 1-3 sentences in the conversation language "
                 "summarising what changed. Be specific: name files, scenes, NPCs, rules or tools added/modified. "
