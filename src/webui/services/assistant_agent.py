@@ -785,10 +785,10 @@ class AgentRuntime:
                     adapted.requires_approval = tool.mutation
                     return adapted
 
-                # 索引只做定向：过大目录会把任务对话挤出首条消息的压缩预算
-                # （实测 agent 因此记不起自己刚做的具体改动）。完整目录靠
-                # search_capabilities / describe_capability 分页获取。
-                catalog = self.registry.search(limit=80)
+                # 初始 payload 只带短索引：search 返回全量页，由首条消息的
+                # 结构化压缩压到 ≤20 条并标注 omitted_count（有界索引契约，
+                # 全量目录靠 search_capabilities / describe_capability 分页）。
+                catalog = self.registry.search(limit=160)
                 catalog['capabilities'] = [{key: item[key] for key in
                     ('name', 'label', 'domain', 'effect', 'version', 'requires_confirmation')}
                     for item in catalog['capabilities']]
