@@ -249,8 +249,11 @@ def mark_attack_sources(engine: Any, actor: dict, target: dict) -> list[dict[str
     wanted = marked_target_id(actor)
     if not wanted or wanted != str(target.get("actor_id") or ""):
         return []
-    if not engine.features.has_feature(
+    # 声明自己说"给不给优势"，这里不替它决定：只判 has_feature 会让内容把
+    # ``marked_target_attack_advantage`` 写成 false 时照样给优势（S0-F18 §4.2.3）。
+    if not engine.features.feature_value(
         engine._feature_character(actor), "precise_hunter",
+        "marked_target_attack_advantage", False,
     ):
         return []
     return [{"code": "precise_hunter", "mode": "advantage"}]

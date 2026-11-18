@@ -830,7 +830,7 @@ def test_brutal_options_unlock_at_thirteen_and_double_at_seventeen(
                    reckless_attack=True, brutal_strike=True,
                    brutal_strike_effects=["hamstring", "staggering"],
                    rolls=[12, 3, 5, 5])
-    assert {"hamstrung", "next_save_disadvantage", "reaction_blocked"} <= _codes(
+    assert {"hamstrung", "next_save_disadvantage", "opportunity_attack_blocked"} <= _codes(
         _conditions(instance)
     )
     assert _damage(both, "brutal_strike")[0]["amount"] == 10
@@ -1007,10 +1007,10 @@ def test_staggering_consumes_the_next_save_and_blocks_reactions_separately(
             brutal_strike=True, brutal_strike_effects=["staggering"],
             rolls=[12, 3, 5, 5])
     applied = _conditions(instance)
-    assert {"next_save_disadvantage", "reaction_blocked"} <= _codes(applied)
+    assert {"next_save_disadvantage", "opportunity_attack_blocked"} <= _codes(applied)
     # The saving-throw half carries no duration: only a real save consumes it.
     assert "duration" not in applied["next_save_disadvantage"]
-    assert applied["reaction_blocked"]["duration"] == "attacker_next_turn_start"
+    assert applied["opportunity_attack_blocked"]["duration"] == "attacker_next_turn_start"
 
     # Another creature forces the save; it is rolled with Disadvantage.
     _to_actor(engine, instance, "player:ally")
@@ -1030,10 +1030,10 @@ def test_staggering_consumes_the_next_save_and_blocks_reactions_separately(
     # The save is spent; the reaction block is not its business.
     after_save = _codes(_conditions(instance))
     assert "next_save_disadvantage" not in after_save
-    assert "reaction_blocked" in after_save
+    assert "opportunity_attack_blocked" in after_save
 
     _to_actor(engine, instance, "player:gm")
-    assert "reaction_blocked" not in _codes(_conditions(instance))
+    assert "opportunity_attack_blocked" not in _codes(_conditions(instance))
 
 
 def test_staggering_also_denies_opportunity_attacks(runtime: Dnd2024Runtime) -> None:
@@ -1045,11 +1045,11 @@ def test_staggering_also_denies_opportunity_attacks(runtime: Dnd2024Runtime) -> 
             _attack(engine, instance, weapon_ref="item:greataxe", reckless_attack=True,
                     brutal_strike=True, brutal_strike_effects=["staggering"],
                     rolls=[12, 6, 5, 5])
-            assert "reaction_blocked" in _codes(_conditions(instance))
+            assert "opportunity_attack_blocked" in _codes(_conditions(instance))
         else:
             _attack(engine, instance, weapon_ref="item:greataxe", reckless_attack=True,
                     rolls=[12, 7, 3])
-            assert "reaction_blocked" not in _codes(_conditions(instance))
+            assert "opportunity_attack_blocked" not in _codes(_conditions(instance))
         return _apply(engine, instance, {
             "intent_id": "move-1", "type": "move",
             "expected_version": ruleset_runtime.state(instance)["version"],
@@ -1391,3 +1391,94 @@ def test_a_recomputed_total_keeps_the_sundering_bonus(runtime) -> None:
     assert engine._check_total(base, 10) == 10 + 3 + 1 + 5
     # 没有破甲时不多加：字段缺省即 0。
     assert engine._check_total({"modifier": 3}, 10) == 13
+
+
+# --------------------------------------------------------------------------
+# Review round (2026-11-18)
+# --------------------------------------------------------------------------
+
+def test_the_narrow_block_leaves_other_reactions_alone(runtime: Dnd2024Runtime) -> None:
+    """§4.3.3：Staggering 只禁 Opportunity Attacks，不禁 Shield/Counterspell。
+
+    两者共用 ``_reaction_eligible``，用同一个 ``reaction_blocked`` 会把目标的
+    全部反应一起关掉——比原文宽。窄口径有自己的条件码，且只有借机攻击那条
+    路径读它。
+    """
+
+    engine, _instance = _combat(runtime, {"gm": barbarian(17)}, initiative={"gm": 20})
+    combat = {"reactions": {"enemy:goblin-1": 1}}
+
+    def eligible(conditions: dict, *, opportunity: bool) -> bool:
+        return engine._reaction_eligible(
+            combat,
+            {"actor_id": "enemy:goblin-1", "hp": 10, "conditions": conditions},
+            opportunity=opportunity,
+        )
+
+    triggered = {"opportunity_attack_blocked": {"duration": "attacker_next_turn_start"}}
+    assert eligible(triggered, opportunity=True) is False
+    assert eligible(triggered, opportunity=False) is True
+
+    # 真正的"不能反应"仍然关掉一切，两个口径都要拦。
+    blocked = {"reaction_blocked": {"duration": "target_turn_start"}}
+    assert eligible(blocked, opportunity=True) is False
+    assert eligible(blocked, opportunity=False) is False
+
+
+def test_a_death_save_consumes_the_next_save_marker(runtime: Dnd2024Runtime) -> None:
+    """§4.3.3：死亡豁免也是豁免，"下一次豁免劣势"必须在这里用掉。
+
+    三条真实豁免里只有法术/专注/重复豁免接过消费点；死亡豁免漏了，于是标记
+    会跟着角色走到"复活后的第一次豁免"才被用掉。
+    """
+
+    engine, instance = _combat(runtime, {"gm": barbarian(9)}, initiative={"gm": 20})
+    character = _canonical(instance)
+    character.setdefault("conditions", {})["next_save_disadvantage"] = {
+        "duration": "attacker_next_turn_start",
+    }
+    character["resources"]["hp"] = 0
+
+    # 倒地者就是当前行动者：直接掷死亡豁免（回合结束意图会被"昏迷只能掷
+    # 死亡豁免"的守卫拒绝，那是另一条规则）。
+    _apply(engine, instance, {
+        "intent_id": "death-1", "type": "death_save",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+    }, rolls=[12])
+    assert "next_save_disadvantage" not in (_canonical(instance).get("conditions") or {})
+
+
+def test_a_spell_attack_also_spends_the_sundering_bonus(runtime: Dnd2024Runtime) -> None:
+    """§4.3.4：破甲一击说的是"另一次攻击掷骰"，不区分武器与法术。
+
+    只给武器路径读 +5，会让友军的法术攻击白打一次，而条件挂到自然过期。
+    """
+
+    engine, instance = _combat(
+        runtime, {"gm": barbarian(17), "ally": cleric(5)},
+        initiative={"gm": 20, "ally": 15},
+    )
+    _attack(engine, instance, weapon_ref="item:greataxe", reckless_attack=True,
+            brutal_strike=True, brutal_strike_effects=["sundering"],
+            rolls=[12, 6, 5, 5])
+    assert "sundered" in _codes(_conditions(instance))
+
+    _to_actor(engine, instance, "player:ally")
+    events = _apply(engine, instance, {
+        "intent_id": "bolt-1", "type": "cast_spell",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "ally", "actor_id": "player:ally",
+        "spell_ref": "spell:guiding_bolt", "target_id": "enemy:goblin-1",
+        "slot_level": 1,
+    }, rolls=[13, 3, 3, 3, 3])
+    check = next(
+        row for row in events
+        if row["type"] == "check.resolved" and row["kind"] == "spell_attack"
+    )
+    assert check["sundering_bonus"] == 5
+    assert any(
+        row["type"] == "condition.removed" and row.get("reason") == "sundering_consumed"
+        for row in events
+    )
+    assert "sundered" not in _codes(_conditions(instance))

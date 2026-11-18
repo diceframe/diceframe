@@ -358,15 +358,17 @@ class Dnd2024CombatEngine(
         spells = self._available_spells(
             instance, actor, economy, hit_spell_decision(combat, current),
         )
-        if spells:
+        # 当前标记与"能不能转移"由服务端给出：客户端不该自己从专注里推断
+        # "这个目标归零了没有"。这条入口不能跟着 ``spells`` 一起消失：免费
+        # 次数与法术位都花光之后，转移标记仍是一次合法提交，而过去只有在
+        # 还有法术可放时才投影这一行（S0-F18 §4.1.7）。
+        mark = self._hunters_mark_state(instance, combat, actor)
+        if spells or bool(mark and mark.get("can_retarget")):
             entry: dict[str, Any] = {
                 "type": "cast_spell", "label": "Cast a spell", "actor_id": current,
                 "expected_version": version, "spells": spells,
                 "targets": self._all_targets(instance, combat),
             }
-            # 当前标记与"能不能转移"由服务端给出：客户端不该自己从专注里
-            # 推断"这个目标归零了没有"。
-            mark = self._hunters_mark_state(instance, combat, actor)
             if mark is not None:
                 entry["hunters_mark"] = mark
             senses = sense_declarations(self, actor)

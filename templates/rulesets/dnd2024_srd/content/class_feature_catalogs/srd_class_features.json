@@ -803,7 +803,7 @@
           "parameters": {
             "additional_effect_options": ["staggering", "sundering"],
             "staggering_save_condition": "next_save_disadvantage",
-            "staggering_reaction_condition": "reaction_blocked",
+            "staggering_reaction_condition": "opportunity_attack_blocked",
             "staggering_duration": "attacker_next_turn_start",
             "sundering_condition": "sundered",
             "sundering_attack_bonus": 5,

@@ -1368,3 +1368,154 @@ def test_a_find_check_without_a_mark_gets_no_advantage() -> None:
     assert mark_find_sources(
         engine, actor, "perception", "enemy:goblin-1",
     ) == [{"code": "hunter_s_mark", "mode": "advantage"}]
+
+
+# --------------------------------------------------------------------------
+# Review round (2026-11-18): the four projection / declaration gaps
+# --------------------------------------------------------------------------
+
+def _mutated_resolver(mutate) -> Dnd2024ClassFeatureResolver:
+    from dataclasses import replace
+
+    from src.rulesets.dnd2024.features.models import ClassFeatureError  # noqa: F401
+
+    runtime = Dnd2024Runtime()
+    bundle = runtime.load_bundle(LOCALE)
+    entities = deepcopy(bundle.entities)
+    features = entities["class_feature_catalog"]["srd_class_features"]["classes"]
+    mutate(features)
+    return Dnd2024ClassFeatureResolver(replace(bundle, entities=entities))
+
+
+def _find_parameters(features: dict, feature_id: str) -> dict:
+    for class_features in features.values():
+        for feature in class_features["features"]:
+            if feature["id"] == feature_id:
+                return feature["parameters"]
+    raise AssertionError(f"{feature_id} not found")
+
+
+def test_mark_damage_die_is_only_six_or_ten() -> None:
+    """§4.2.6：原文是 "a d10 rather than a d6"，闭集不能收 12 也不能拒 10。"""
+
+    from src.rulesets.dnd2024.features.models import ClassFeatureError
+
+    def twelve(features: dict) -> None:
+        _find_parameters(features, "foe_slayer")["mark_damage_die"] = 12
+
+    with pytest.raises(ClassFeatureError):
+        _mutated_resolver(twelve)
+
+    def ten(features: dict) -> None:
+        _find_parameters(features, "foe_slayer")["mark_damage_die"] = 10
+
+    # 10 必须被接受——把闭集收成 {6} 会把规则本身拒掉。
+    _mutated_resolver(ten)
+
+
+def test_blindsight_is_thirty_feet_exactly() -> None:
+    """§4.2.4：Feral Senses 给的是固定 30 尺，不是 1..120 的自由量。"""
+
+    from src.rulesets.dnd2024.features.models import ClassFeatureError
+
+    def sixty(features: dict) -> None:
+        _find_parameters(features, "feral_senses")["blindsight_range_ft"] = 60
+
+    with pytest.raises(ClassFeatureError):
+        _mutated_resolver(sixty)
+
+
+def test_the_actor_view_carries_the_senses() -> None:
+    """§4.2.4：Blindsight 是角色属性，不能只挂在 cast_spell 那一行。"""
+
+    engine, instance = _combat({"gm": ranger(18)}, {"gm": 20})
+    actor = engine._actor_view(instance, _combat_state(instance), "player:gm")
+    assert actor["senses"] == [
+        {"code": "blindsight", "range_ft": 30, "source": "feral_senses"},
+    ]
+    # 1 级游侠没有这条特性，字段仍在但为空：读取方不需要判键在不在。
+    engine, instance = _combat({"gm": ranger(1)}, {"gm": 20})
+    low = engine._actor_view(instance, _combat_state(instance), "player:gm")
+    assert low["senses"] == []
+
+
+def test_precise_hunter_reads_its_declaration() -> None:
+    """§4.2.3：声明是唯一来源，写 false 就不能再给 Advantage。"""
+
+    from src.rulesets.dnd2024.combat.check_modes import mark_attack_sources
+
+    # Precise Hunter 是 17 级特性：拿 9 级角色测会得到"没这特性"的假绿。
+    engine, instance = _combat({"gm": ranger(17)}, {"gm": 20})
+    _cast_mark(engine, instance)
+    actor = engine._actor_view(instance, _combat_state(instance), "player:gm")
+    target = {"actor_id": "enemy:goblin-1"}
+    assert mark_attack_sources(engine, actor, target) == [
+        {"code": "precise_hunter", "mode": "advantage"},
+    ]
+
+    original = engine.features.feature_value
+    engine.features.feature_value = (  # type: ignore[method-assign]
+        lambda character, feature_id, key, default=None: (
+            False if key == "marked_target_attack_advantage" else
+            original(character, feature_id, key, default)
+        )
+    )
+    try:
+        assert mark_attack_sources(engine, actor, target) == []
+    finally:
+        engine.features.feature_value = original  # type: ignore[method-assign]
+
+
+def test_a_mark_can_be_retargeted_after_the_last_cast_is_spent() -> None:
+    """§4.1.7：转移标记不是施法，入口不能跟着 ``spells`` 一起消失。
+
+    免费次数与法术位都花光、且当前目标已经倒地时，面板仍然要能发起转移。
+    过去 ``cast_spell`` 整行由 ``if spells:`` 门控，于是唯一还能做的动作
+    在界面上不存在，而同一个意图其实仍能结算。
+    """
+
+    sheet = ranger(1)
+    resources = sheet["ruleset_character"]["resources"]["class"]["favored_enemy"]
+    resources["current"] = 1
+    sheet["ruleset_character"]["spellcasting"]["class"]["slots_current"] = {}
+
+    # 第二只敌人必须活着：否则打倒标记目标就等于结束战斗，投影整份为空，
+    # 测不出"入口还在不在"。
+    second = goblin(position=10)
+    second["id"] = "goblin-2"
+    second["name"] = "Goblin Two"
+    engine, instance = _combat(
+        {"gm": sheet}, {"gm": 20},
+        enemies=[goblin(position=20, hp=6), second],
+    )
+    _cast_mark(engine, instance)
+    assert _resource(instance)["current"] == 0
+    _attack(engine, instance, rolls=[15, 6])
+    assert _mark(instance)["mark_target_id"] == "enemy:goblin-1"
+
+    rows = [
+        row for row in engine.available_intents(instance, "gm")
+        if row.get("type") == "cast_spell"
+    ]
+    assert rows, "转移标记的入口消失了"
+    assert rows[0]["spells"] == []
+    assert rows[0]["hunters_mark"]["can_retarget"] is True
+
+
+def test_the_public_feed_says_which_creature_the_mark_names() -> None:
+    """§4.1.5：Force 伤害出现在 feed 里，就必须能查到它打的是谁。"""
+
+    engine, instance = _combat({"gm": ranger(5)}, {"gm": 20})
+    _cast_mark(engine, instance)
+
+    view = engine.gameplay_view(instance, "gm") if hasattr(
+        engine, "gameplay_view",
+    ) else None
+    feed = (view or {}).get("combat", {}).get("events") or []
+    if not feed:
+        from src.rulesets.dnd2024.runtime import Dnd2024Runtime as _Runtime
+
+        feed = _Runtime()._recent_combat_events(instance)  # type: ignore[attr-defined]
+    casts = [row for row in feed if row.get("type") == "dnd2024.spell.cast"]
+    assert casts, feed
+    assert casts[-1]["target_ids"] == ["enemy:goblin-1"]

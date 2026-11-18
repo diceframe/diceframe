@@ -124,7 +124,9 @@ _MARK_PARAMETER_KEYS: dict[str, frozenset[str]] = {
 }
 
 #: Foe Slayer 只能把骰面换成同为标准骰的一种；d3 或 d20 都不是官方骰面。
-_MARK_DAMAGE_DICE = frozenset({4, 6, 8, 10, 12})
+#: 原文把替换写死为"a d10 rather than a d6"，所以这里只收 6/10：收下 12 会
+#: 让内容把 1d6 加成 1d12，比规则强；收下 20 则比规则弱（S0-F18 §4.2.6）。
+_MARK_DAMAGE_DICE = frozenset({6, 10})
 
 
 def _humanize(feature_id: str) -> str:
@@ -2708,13 +2710,14 @@ class Dnd2024ClassFeatureResolver:
                     f"{feature_id}.marked_target_attack_advantage must be a boolean"
                 )
         elif feature_id == "feral_senses":
+            # 原文给的是固定 30 尺（"Blindsight with a range of 30 feet"）。
+            # 允许 1..120 等于让内容把这条特性改成任意范围，而引擎的
+            # "30 内抵消、31 外不抵消"边界就只有声明撑着了（S0-F18 §4.2.4）。
             range_ft = parameters["blindsight_range_ft"]
-            if (
-                isinstance(range_ft, bool) or not isinstance(range_ft, int)
-                or not 1 <= range_ft <= 120
-            ):
+            if isinstance(range_ft, bool) or range_ft != 30:
                 raise ClassFeatureError(
-                    f"{feature_id}.blindsight_range_ft must be an integer from 1 to 120"
+                    f"{feature_id}.blindsight_range_ft must be 30 (the source "
+                    f"grants exactly 30 feet)"
                 )
         elif feature_id == "foe_slayer":
             die = parameters["mark_damage_die"]

@@ -52,7 +52,7 @@
     "eldritch_blast": {"mode": "spell_attack", "damage": "1d10", "damage_type": "force", "range": 120},
     "ray_of_frost": {"mode": "spell_attack", "damage": "1d8", "damage_type": "cold", "range": 60, "condition": "slowed_10", "condition_duration": "target_turn_start"},
     "sacred_flame": {"mode": "saving_throw", "save": "dex", "damage": "1d8", "damage_type": "radiant", "range": 60},
-    "shocking_grasp": {"mode": "spell_attack", "damage": "1d8", "damage_type": "lightning", "range": 5, "condition": "reaction_blocked", "condition_duration": "target_turn_start"},
+    "shocking_grasp": {"mode": "spell_attack", "damage": "1d8", "damage_type": "lightning", "range": 5, "condition": "opportunity_attack_blocked", "condition_duration": "target_turn_start"},
     "sorcerous_burst": {"mode": "spell_attack", "damage": "1d8", "damage_type_choice": ["acid", "cold", "fire", "lightning", "poison", "psychic", "thunder"], "range": 120},
     "produce_flame": {"mode": "spell_attack", "damage": "1d8", "damage_type": "fire", "range": 60},
     "vicious_mockery": {"mode": "saving_throw", "save": "wis", "damage": "1d6", "damage_type": "psychic", "range": 60, "condition": "next_attack_disadvantage", "condition_duration": "after_next_attack"},

@@ -1613,6 +1613,10 @@ class CombatCheckWindowsMixin:
                 int(settlement.get("modifier", 0) or 0),
                 str(settlement.get("damage_type") or ""), rng,
             ))
+            # 未命中就是未命中：Studied Attacks 的标记与命中与否无关，只看
+            # "这一击打空了"。走过窗口的未命中曾经只补 miss mastery，标记
+            # 于是漏建（S0-F15 §4.3.5）。
+            events.extend(self._studied_mark_events(actor, target_id))
         events.extend(self._consume_attack_conditions(actor_id, target_id, actor, target))
         return events
 

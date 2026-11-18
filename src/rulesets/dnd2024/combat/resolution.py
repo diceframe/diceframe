@@ -1562,8 +1562,13 @@ class CombatResolutionMixin:
             # projection: the projection carries ownership, not live state, so
             # reading Rage from it would make Frenzy silently unreachable.
             active = conditions or {}
+            # "用 Reckless Attack 时"只发生在自己回合：``reckless`` 条件活到
+            # 自己下回合开始，而借机攻击走的是同一条结算路径，只看条件会让
+            # 别人回合的反应攻击再吃一次额外伤害（S0-F15 §4.1.5）。
+            own_turn = str((combat.get("economy") or {}).get("actor_id") or "") == str(actor_id)
             if (
-                sides and count > 0
+                own_turn
+                and sides and count > 0
                 and parameter("frenzy", "damage_type_from_attack")
                 and "reckless" in source_codes
                 and (not required or required in active)
@@ -1991,6 +1996,11 @@ class CombatResolutionMixin:
             check["source_feature"] = "stunning_strike"
             events.append(check)
             succeeded = check["success"]
+            # 这是一次真实豁免：Staggering 的"下一次豁免劣势"在这里就该用掉，
+            # 否则它会跟着目标走进下一场豁免（S0-F15 §4.3.3）。
+            events.extend(
+                self._consume_save_markers(str(target["actor_id"]), target)
+            )
             condition = str(
                 row.get("on_success_condition") if succeeded
                 else row.get("on_fail_condition")
@@ -2058,6 +2068,8 @@ class CombatResolutionMixin:
         )
         check["source_feature"] = "open_hand_technique"
         events.append(check)
+        # 同上：Open Hand 的豁免也是"真实豁免"，标记在这里消费。
+        events.extend(self._consume_save_markers(target_id, target))
         if check["success"]:
             return events
         if choice == "push":
@@ -2474,7 +2486,12 @@ class CombatResolutionMixin:
                 )
                 # 加值骰逐掷骰各一枚：多道射线逐 beam 各掷一次。
                 check_bonus = sum(row["roll"] for row in check_bonus_rolls)
-                total = roll + bonus + check_bonus
+                # 破甲一击的 +5 说的是"另一次攻击掷骰"，不区分武器还是法术：
+                # 只给武器路径加会让友军的 Fire Bolt 白打，而条件挂到自然过期。
+                sundering_bonus, sundering_condition = self._sundering_bonus(
+                    visible_target, actor_id,
+                )
+                total = roll + bonus + check_bonus + sundering_bonus
                 target_ac = effective_armor_class(target)
                 succeeded = roll != 1 and (roll == 20 or total >= target_ac)
                 critical = roll == 20
@@ -2485,6 +2502,14 @@ class CombatResolutionMixin:
                 ):
                     # 法术攻击也是攻击检定：5 尺内命中麻痹/昏迷目标自动重击。
                     critical = True
+                if sundering_bonus and sundering_condition:
+                    # 消费时机与武器路径一致：+5 已经加进这一掷，命中与否都算用过。
+                    events.append({
+                        "type": "condition.removed", "target_id": target_id,
+                        "condition": sundering_condition,
+                        "reason": "sundering_consumed",
+                    })
+                    consumed_conditions.add((target_id, sundering_condition))
                 events.append({
                     "type": "check.resolved", "kind": "spell_attack", "actor_id": actor_id,
                     "target_id": target_id, "rolls": rolls, "natural": roll,
@@ -2492,6 +2517,7 @@ class CombatResolutionMixin:
                     "modifier": bonus,
                     "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
                     "total": total,
+                    **({"sundering_bonus": sundering_bonus} if sundering_bonus else {}),
                     "target": target_ac, "success": succeeded, "critical": critical,
                 })
                 if succeeded:
@@ -2923,8 +2949,10 @@ class CombatResolutionMixin:
                 continue
             threat = self._actor_view(instance, combat, target["actor_id"])
             # 借机攻击同样是反应：失能 / 禁反应 / 反应已耗尽 / 倒地的威胁者
-            # 不构成威胁，也不能为一次无法结算的攻击消耗反应。
-            if not self._reaction_eligible(combat, threat):
+            # 不构成威胁，也不能为一次无法结算的攻击消耗反应。"不能借机"是
+            # 比"不能反应"更窄的一条（Staggering / Shocking Grasp），只有
+            # 这条路径读它。
+            if not self._reaction_eligible(combat, threat, opportunity=True):
                 continue
             # 借机攻击必须是近战武器攻击：远程武器的持有者不构成威胁，
             # 也不应为一次无法结算的借机攻击消耗其反应。敌方档案与玩家
@@ -4020,6 +4048,8 @@ class CombatResolutionMixin:
             events.append({"type": "dnd2024.decision.pending", **window})
             return events
         events.append(check_event)
+        # 死亡豁免同样是豁免：劣势必在这里被用掉，不能留到"复活后的第一次豁免"。
+        events.extend(self._consume_save_markers(actor_id, actor))
         events.extend(
             self._death_save_outcome_events(instance, combat, actor, check_event, rng)
         )
@@ -4211,7 +4241,7 @@ class CombatResolutionMixin:
             threat = self._actor_view(instance, combat, threat_id)
             # 窗口打开后威胁者可能已经失能 / 禁反应 / 耗尽反应：此时借机
             # 攻击无法发生，移动照常结算，也不支付反应。
-            if self._reaction_eligible(combat, threat):
+            if self._reaction_eligible(combat, threat, opportunity=True):
                 attack_intent = {
                     "intent_id": f"{decision['decision_id']}:attack",
                     "actor_id": threat_id,
