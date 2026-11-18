@@ -297,7 +297,11 @@ class CreatorProjectStore:
         })
         project["checkpoints"] = checkpoints[-32:]
         self._save(state)
-        return self.read(owner_id, project_id)
+        # 显式改动清单：agent 的工具观察与前端 files-changed 事件都靠它，
+        # 不必从整包 project.files 反推（观察体积大且会被压缩，前端曾因
+        # 读不到文件清单而永不刷新总览）。
+        changed = sorted({*(files or {}), *(remove or [])})
+        return self.read(owner_id, project_id) | {"changed": changed}
 
     def delete(self, owner_id: str, project_id: str) -> dict[str, Any]:
         state = self._load()

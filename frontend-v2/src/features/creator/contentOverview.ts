@@ -28,10 +28,13 @@ export function computeContentOverview(
           const adv = JSON.parse(content)
           chapters += adv.chapters?.length ?? 0
           const nodes: Array<{ type?: string }> = adv.nodes ?? []
-          scenes += nodes.filter(n => !n.type || n.type === 'scene').length
+          // encounter 也是场景节点（战斗/遭遇场景），不算会把总览少报。
+          scenes += nodes.filter(n => !n.type || n.type === 'scene' || n.type === 'encounter').length
           npcs += nodes.filter(n => n.type === 'npc').length
         } catch { /* skip */ }
       }
+      // NPC 可以作为独立内容文件存在（agent 生成的主形态），不只是节点。
+      if (/^content\/npcs\/[^/]+\.json$/.test(p)) npcs += 1
     }
     const hasMap = Object.keys(files).some(p => p.includes('map'))
     return {

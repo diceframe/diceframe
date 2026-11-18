@@ -180,8 +180,14 @@ watch(eventList, (events: AssistantEventRecord[]) => {
     if (event.event === 'tool_result' && event.payload.tool === 'creator_project_update' && event.payload.ok !== false) {
       projectData.value = null // force reload file list on next open
       const result = event.payload.result as Record<string, unknown> | undefined
-      const files = result?.files as Record<string, unknown> | undefined
-      const paths = files ? Object.keys(files) : []
+      // update 工具的结果是 { ok, project, changed }；changed 是显式改动
+      // 清单。历史形态（顶层 files / 嵌套 project.files）保留为回退，
+      // 确保 studio 的文件面板与内容总览在 agent 改动后立即刷新。
+      const project = result?.project as Record<string, unknown> | undefined
+      const resultFiles = (result?.files ?? project?.files) as Record<string, unknown> | undefined
+      const paths: string[] = Array.isArray(result?.changed)
+        ? (result!.changed as string[])
+        : Object.keys(resultFiles || {})
       if (paths.length) emit('files-changed', paths)
     }
   }

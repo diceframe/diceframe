@@ -225,4 +225,20 @@ async def test_redundant_retrieval_pauses_but_a_new_range_resets_the_streak(tmp_
     assert task['status'] == 'paused' and task['pause_reason'] == 'repeated_creator_read'
     assert task['completed_steps'] == 0
     assert not any(name == 'approval' for name, _ in events)
-    assert any(name == 'delta' and 'repeated reads' in payload['delta'] for name, payload in events)
+    assert any(name == 'delta' and payload['delta'].startswith('Paused:') for name, payload in events)
+
+
+def test_bounded_conversation_never_truncates_user_messages():
+    """用户指令/确认不落 older 帽：agent 不得「失忆于用户想要什么」。"""
+    from src.webui.services.assistant_agent import _bounded_conversation
+    long_plan = "计划" * 900          # 1800 字的助手计划书
+    messages = [
+        {"role": "user", "content": "用户" * 900},   # 1800 字用户指令（旧实现会被砍到 1500）
+        {"role": "assistant", "content": long_plan},
+        {"role": "user", "content": "好"},
+    ] * 5
+    bounded = _bounded_conversation(messages)
+    user_full = [m for m in bounded if m["role"] == "user" and len(m["content"]) > 1500]
+    assert user_full and all("已截断" not in m["content"] for m in user_full)
+    # 助手长文仍会被压缩，预算保护不变。
+    assert any("已截断" in m["content"] for m in bounded if m["role"] == "assistant")

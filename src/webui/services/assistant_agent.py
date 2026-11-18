@@ -51,6 +51,11 @@ def _bounded_conversation(messages: list, *, recent: int = 2, recent_chars: int 
     bounded: list = []
     for index, message in enumerate(window):
         cap = recent_chars if index >= len(window) - recent else older_chars
+        # 用户消息永不落入更紧的 older 帽：指令与确认是任务意图的唯一样本，
+        # 截掉它们会让 agent「失忆于用户想要什么」（creator 实测翻车点）。
+        # 前端已把单条限制在 8000 字符内，此处保持 recent 帽即可。
+        if (message or {}).get("role") == "user":
+            cap = max(cap, recent_chars)
         content = str((message or {}).get("content") or "")
         if len(content) > cap:
             message = {**message, "content": content[:cap] + "\u2026[已截断]"}
@@ -692,9 +697,13 @@ class AgentRuntime:
                     session.data['task'].update(status='paused', pause_reason='repeated_creator_read')
                     await progress()
                     await emit('delta', {'delta': (
-                        '已暂停：重复读取没有获得新的工程版本或文件片段。可以指定要修改的文件或范围后继续。'
+                        '已暂停：我反复读到了同样的内容，没有新信息，为避免空转先停一下。'
+                        '直接告诉我接下来写什么（例如「再加两个 NPC」「把第二章改成三条支线」），'
+                        '我会只读需要的部分然后直接改。'
                         if language.startswith('zh') else
-                        'Paused: repeated reads found no new project revision or source range. Specify the file or range to continue.'
+                        'Paused: I kept reading the same content with nothing new, so I stopped to avoid '
+                        'spinning. Just tell me what to write next (e.g. "add two NPCs", "split chapter 2 '
+                        'into three branches") and I will read only what I need, then edit.'
                     )})
                     return
                 except AgentExecutionStopped as exc:
