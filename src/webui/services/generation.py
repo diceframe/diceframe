@@ -179,7 +179,10 @@ async def _test_openai_connection(
         timeout = aiohttp.ClientTimeout(total=connection_test_timeout(dependencies.config_state()))
         selected_url = responses_url(base_url, model)
         if selected_url:
-            transport = OpenAIResponsesTransport()
+            # P2（review）：探针必须用应用的实际 generation options——否则用户
+            # 全局配置了 Responses 不支持的采样项时，设置页显示 OK 而真实调用报错。
+            transport = OpenAIResponsesTransport(
+                getattr(dependencies.llm_client, "generation_options", None))
             result = await transport.call(
                 session, selected_url, api_key, transport.body(model, "", "回复：OK", 4096),
                 timeout=timeout, proxy=active_proxy,

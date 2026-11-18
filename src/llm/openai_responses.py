@@ -16,6 +16,8 @@ from urllib.parse import urlsplit
 
 import aiohttp
 
+from src.llm.tool_usage import observed_post
+
 logger = logging.getLogger("trpg")
 
 _MODELS = re.compile(r"gpt-6\.2-(?:astra|sol)(?:-\d{4}-\d{2}-\d{2})?\Z")
@@ -261,8 +263,11 @@ class OpenAIResponsesTransport:
     async def call(self, session: Any, url: str, api_key: str, body: dict[str, Any], *,
                    timeout: Any, proxy: str = "", tools: list[dict[str, Any]] | None = None) -> ResponsesResult:
         kwargs = {"proxy": proxy} if proxy else {}
-        async with session.post(url, json=body, headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                                timeout=timeout, **kwargs) as response:
+        # 与 OpenAIChatTransport 相同的账本钩子：DF Agent 工具规划的每次
+        # HTTP 尝试都入 usage ledger；无活动账本时（叙事流/连接测试）直通。
+        async with observed_post(session, url, json=body,
+                                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                                 timeout=timeout, **kwargs) as response:
             await self._check_http(response, api_key)
             result = parse_response(await response.json(), tools)
             choice = body.get("tool_choice")
@@ -278,9 +283,9 @@ class OpenAIResponsesTransport:
         visible = False
         items: dict[int, dict[str, Any]] = {}
         text_parts: dict[int, list[str]] = {}
-        async with session.post(url, json={**body, "stream": True},
-                                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                                timeout=timeout, **kwargs) as response:
+        async with observed_post(session, url, json={**body, "stream": True},
+                                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                                 timeout=timeout, **kwargs) as response:
             await self._check_http(response, api_key)
             try:
                 async for event in _events(response.content.iter_any()):

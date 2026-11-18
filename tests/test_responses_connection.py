@@ -51,13 +51,29 @@ def completed_response():
     }
 
 
-def dependencies(session, timeout=30):
+def dependencies(session, timeout=30, generation_options=None):
     async def get_session():
         return session
     return generation.ConnectionDependencies(
-        llm_client=SimpleNamespace(_get_session=get_session, proxy_url="http://proxy.invalid:8080"),
+        llm_client=SimpleNamespace(_get_session=get_session, proxy_url="http://proxy.invalid:8080",
+                                   generation_options=generation_options),
         config_state=lambda: {"test_timeout_seconds": timeout},
     )
+
+
+@pytest.mark.asyncio
+async def test_connection_probe_rejects_unsupported_sampling_like_real_calls():
+    """P2：探针继承应用 generation options——不支持项要在设置页就报错。"""
+    session = Session(completed_response())
+
+    result = await generation.test_connection(
+        dependencies(session, generation_options={"top_p": 1}),
+        "https://api.openai.com/v1", "fake-key", "gpt-6.2-astra",
+    )
+
+    assert result["ok"] is False
+    assert "sampling" in result["error"]
+    assert len(session.calls) == 0
 
 
 @pytest.mark.asyncio
