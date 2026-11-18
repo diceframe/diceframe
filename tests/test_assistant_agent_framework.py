@@ -79,6 +79,45 @@ async def test_configured_task_budget_is_independent_of_each_reply(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('reported', [140_000, 256_000])
+async def test_final_answer_within_task_budget_does_not_require_a_second_request(tmp_path, reported):
+    class FinalProvider:
+        requests = 0
+
+        async def call_tools(self, *args, **kwargs):
+            self.requests += 1
+            assert self.requests == 1
+            return LLMToolResponse([], reported, 'test', content='Paid final answer')
+
+    provider = FinalProvider()
+    _, events = await execute(tmp_path, provider)
+    assert provider.requests == 1
+    assert ('delta', {'delta': 'Paid final answer'}) in events
+
+
+@pytest.mark.asyncio
+async def test_exactly_exhausted_task_does_not_send_another_model_request(tmp_path):
+    dispatched = []
+
+    async def read(args, owner):
+        dispatched.append(args['value'])
+        return {'ok': True}
+
+    class ProviderAtLimit:
+        requests = 0
+
+        async def call_tools(self, *args, **kwargs):
+            self.requests += 1
+            return LLMToolResponse([{'name': 'change', 'arguments': {'value': 'read'}}], 256_000, 'test')
+
+    provider = ProviderAtLimit()
+    agent, events = await execute(tmp_path, provider, [tool(read)])
+    sid = next(value['session_id'] for event, value in events if event == 'session')
+    assert provider.requests == 1 and dispatched == ['read']
+    assert agent.snapshot('owner', sid)['task']['budget_reason'] == 'tokens'
+
+
+@pytest.mark.asyncio
 async def test_tool_loop_still_stops_at_request_budget_with_specific_reason(tmp_path):
     calls = []
     async def read(args, owner):

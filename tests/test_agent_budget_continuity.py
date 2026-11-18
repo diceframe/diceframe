@@ -1,14 +1,12 @@
 """Agent 预算连续性与输出预算钳制。
 
-三类用户可见故障的回归：供应商拒绝超范围 max_tokens 导致助手静默失败；
-对话历史无界重发导致预算几轮烧光（0 步 40 万 token）；预算触顶硬停要求
-手动点「继续任务」。
+回归覆盖供应商 max_tokens 钳制、有界请求历史、已计费响应连续处理，
+以及硬预算触顶后不派发越界响应、不自动开启新一轮。
 """
 from __future__ import annotations
 
 import json
 from copy import deepcopy
-from types import SimpleNamespace
 
 import pytest
 from aiohttp import web
@@ -16,10 +14,7 @@ from aiohttp.test_utils import TestServer
 
 from src.llm.client import LLMClient, ProviderConfig
 from src.webui.services.assistant_agent import AgentDependencies, AgentRuntime, AgentTool
-from src.webui.services.assistant_agent_framework import (
-    MAX_AUTO_CONTINUES,
-    _bound_history,
-)
+from src.webui.services.assistant_agent_framework import _bound_history
 
 
 def test_bound_history_caps_old_messages_and_total():
@@ -66,12 +61,13 @@ async def test_provider_max_tokens_range_error_is_clamped_and_retried():
         assert calls[0]["max_tokens"] == 25_600_000
         assert calls[1]["max_tokens"] == 393216
     finally:
+        await client.close()
         await server.close()
 
 
 @pytest.mark.asyncio
-async def test_agent_history_stays_bounded_and_budget_auto_continues(tmp_path):
-    """历史有界化 + 预算触顶自动续段：不再要求手动点「继续任务」。"""
+async def test_agent_retains_every_response_across_the_former_soft_threshold(tmp_path):
+    """A soft threshold must not discard a paid response or its tool call."""
     step_index = [0]
     usage_billed = [140_000, 90_000, 0]
     calls: list[dict] = []
@@ -82,8 +78,7 @@ async def test_agent_history_stays_bounded_and_budget_auto_continues(tmp_path):
         step = step_index[0]
         step_index[0] += 1
         if step < 2:
-            # 第一步烧掉巨额输入触发软阈值（总预算一半）→ 自动续段；
-            # 续段后额度从剩余里扣（总预算不放大）。
+            # 第一步超过旧软阈值但仍在任务预算内，响应必须正常处理。
             return web.json_response({
                 "choices": [{
                     "message": {"content": None, "tool_calls": [{
@@ -103,8 +98,11 @@ async def test_agent_history_stays_bounded_and_budget_auto_continues(tmp_path):
     await server.start_server()
     client = LLMClient([ProviderConfig("test", str(server.make_url("/")), "k", "test-model")], "test")
 
+    reads = []
+
     async def read(args, owner):
-        return {"ok": True, "resource": "huge " + "汉" * 20000}
+        reads.append(len(reads) + 1)
+        return {"ok": True, "read_number": reads[-1], "resource": "huge " + "汉" * 20000}
 
     empty = {"type": "object", "properties": {}, "additionalProperties": False}
     agent = AgentRuntime(AgentDependencies(llm_client=lambda: client,
@@ -119,18 +117,27 @@ async def test_agent_history_stays_bounded_and_budget_auto_continues(tmp_path):
     try:
         await agent.run("owner", [{"role": "user", "content": "读取并总结"}], "zh-CN", {}, "", emit)
     finally:
+        await client.close()
         await server.close()
 
     deltas = [value.get("delta", "") for event, value in events if event == "delta"]
-    assert any("整理上下文并继续" in text for text in deltas), deltas
-    # 计数永不归零：UI 显示跨段累计（补充设计 §2）。
+    assert any("任务完成" in text for text in deltas), deltas
+    assert reads == [1, 2]
+    histories = [json.loads(body["messages"][1]["content"])["agent_history"] for body in calls]
+    returns = [part for message in histories[-1] for part in message["parts"]
+               if part["part_kind"] == "tool-return"]
+    assert len(returns) == 2
+    assert all(any(part["part_kind"] == "tool-call" for part in message["parts"])
+               for message in histories[-1] if message["kind"] == "response")
+    # UI displays usage accumulated across the same run.
     sid = next(value["session_id"] for event, value in events if event == "session")
     snap = agent.snapshot("owner", sid)
     used = int((snap.get("task") or {}).get("used_tokens") or 0)
     assert used == 140_000 + 90_000, used
     assert (snap.get("task") or {}).get("token_budget") == 256_000
-    # 续段不重做已完成的工具调用（补充设计 §3）：3 次模型请求，read 只执行 1 次。
+    # Two paid read requests, two executions, then one final answer.
     assert step_index[0] == 3
+    assert snap["task"]["status"] == "completed"
     # 每轮发给模型的历史都有界：不随轮数线性膨胀。
     for body in calls[1:]:
         serialized = json.dumps(body, ensure_ascii=False)
@@ -154,8 +161,8 @@ def test_bound_history_keeps_the_newest_request():
 
 
 @pytest.mark.asyncio
-async def test_budget_pause_when_remaining_is_insufficient(tmp_path):
-    """续段后剩余额度不足以完成 → 明确暂停，累计不重置（补充设计 §3.7）。"""
+async def test_over_budget_response_is_billed_but_not_dispatched(tmp_path):
+    """硬预算被单个响应越过：累计不重置，越界工具不派发。"""
     step_index = [0]
     usage_billed = [140_000, 130_000]
     calls: list[dict] = []
@@ -185,7 +192,10 @@ async def test_budget_pause_when_remaining_is_insufficient(tmp_path):
     await server.start_server()
     client = LLMClient([ProviderConfig("test", str(server.make_url("/")), "k", "test-model")], "test")
 
+    reads = []
+
     async def read(args, owner):
+        reads.append(True)
         return {"ok": True}
 
     empty = {"type": "object", "properties": {}, "additionalProperties": False}
@@ -201,6 +211,7 @@ async def test_budget_pause_when_remaining_is_insufficient(tmp_path):
     try:
         await agent.run("owner", [{"role": "user", "content": "读取"}], "zh-CN", {}, "", emit)
     finally:
+        await client.close()
         await server.close()
 
     sid = next(value["session_id"] for event, value in events if event == "session")
@@ -209,5 +220,6 @@ async def test_budget_pause_when_remaining_is_insufficient(tmp_path):
     assert task["used_tokens"] == 140_000 + 130_000
     assert task["token_budget"] == 256_000
     deltas = [value.get("delta", "") for event, value in events if event == "delta"]
-    assert any("整理上下文并继续" in text for text in deltas)
+    assert reads == [True]  # The response exceeding the hard budget is not dispatched.
+    assert step_index[0] == 2
     assert any("已用完" in text for text in deltas), deltas

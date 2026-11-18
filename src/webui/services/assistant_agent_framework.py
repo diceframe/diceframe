@@ -7,18 +7,23 @@ it does not discover credentials or grant application permissions.
 from __future__ import annotations
 
 import json
+import logging
+import uuid
 from typing import Annotated, Any, Callable
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
-from pydantic_ai import Agent, DeferredToolRequests, ModelRetry, capture_run_messages
+from pydantic_ai import Agent, DeferredToolRequests, ModelRetry
 from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models import Model
 from pydantic_ai.usage import RequestUsage, UsageLimits
 
 from src.llm.client import LLMToolCallError
+from src.llm.tool_usage import run_id as usage_run_id
 from src.assistant_agent_limits import DEFAULT_TASK_MAX_TOKENS
 from src.localization.messages import t
+
+usage_logger = logging.getLogger('trpg.llm_usage')
 
 
 class AgentProviderUnavailable(ValueError):
@@ -224,7 +229,8 @@ def running_cost(cost: int, middle: list) -> int:
 
 
 class DiceFrameModel(Model):
-    def __init__(self, client, emit: Callable, language: str, max_tokens: int, max_steps: int):
+    def __init__(self, client, emit: Callable, language: str, max_tokens: int, max_steps: int,
+                 task_max_tokens: int):
         super().__init__()
         self.client = client
         self.emit = emit
@@ -232,11 +238,8 @@ class DiceFrameModel(Model):
         self.max_tokens = max_tokens
         self.max_steps = max_steps
         self.response_correction = ""
-        # 最近一次请求后的完整消息序列（含已计费的响应）：预算自动续段时用
-        # 它作为 message_history 接续同一对话，不重放已计费请求。
-        self.last_messages: list | None = None
-        self.request_count = 0
-        # 跨段累计的真实用量（与 usage 事件同源）：硬上限与 UI 都以此为准。
+        self.task_max_tokens = task_max_tokens
+        # Only reported usage counts. Missing usage isn't a zero-cost guarantee.
         self.task_used = 0
 
     @property
@@ -247,7 +250,26 @@ class DiceFrameModel(Model):
     def system(self) -> str:
         return "diceframe"
 
+    def _budget_exceeded(self) -> UsageLimitExceeded:
+        return UsageLimitExceeded(f'Exceeded the total_tokens_limit of {self.task_max_tokens} '
+                                  f'(total_tokens={self.task_used})')
+
+    async def _record_usage(self, response) -> dict:
+        usage = getattr(response, 'usage', None)
+        if not isinstance(usage, dict):
+            # Compatibility with planner adapters that only return a total.
+            reported = getattr(response, 'total_tokens', None)
+            attempts = max(1, int(getattr(response, 'attempted_requests', 0) or 0))
+            unknown = attempts if reported is None else 0
+            usage = {'total_tokens': max(0, int(reported or 0)), 'attempted_requests': attempts,
+                     'unknown_usage_requests': unknown, 'usage_complete': unknown == 0}
+        self.task_used += usage['total_tokens']
+        await self.emit('usage', usage)
+        return usage
+
     async def request(self, messages, model_settings, model_request_parameters):
+        if self.task_used >= self.task_max_tokens:
+            raise self._budget_exceeded()
         await self.emit("status", {"message": t("webui.services.assistant_agent_framework.planning_next_step") if self.language.startswith("zh") else "Planning the next step…"})
         parameters = model_request_parameters
         definitions = [*parameters.output_tools, *parameters.function_tools]
@@ -255,7 +277,6 @@ class DiceFrameModel(Model):
             "name": tool.name, "description": tool.description or "",
             "parameters": tool.parameters_json_schema,
         }} for tool in definitions]
-        self.request_count += 1
         # Keep the correlated tool observations and retry prompts, bounded:
         # provider failover stays in LLMClient, context size stays in here.
         history = _bound_history(
@@ -268,18 +289,30 @@ class DiceFrameModel(Model):
             # Only our fixed protocol explanation enters the next request;
             # never echo malformed provider arguments into instructions.
             instructions += "\n\nCorrection for the previous response: " + self.response_correction
+        user_message = json.dumps({'agent_history': history}, ensure_ascii=False)
+        if usage_logger.isEnabledFor(logging.INFO):
+            project_observations = [part.get('content') for message in history for part in message.get('parts', [])
+                                    if part.get('part_kind') == 'tool-return'
+                                    and part.get('tool_name') == 'creator_project_read']
+            usage_logger.info('agent_request_history %s', json.dumps({
+                'run_id': usage_run_id.get(), 'history_chars': len(user_message),
+                'instructions_chars': len(instructions),
+                'creator_observations': len(project_observations),
+                'creator_observation_chars': sum(len(part) for part in project_observations if isinstance(part, str)),
+            }))
         try:
-            response = await self.client.call_tools(instructions,
-                json.dumps({"agent_history": history}, ensure_ascii=False),
+            response = await self.client.call_tools(instructions, user_message,
                 tools=schemas, max_tokens=self.max_tokens, force_tool_choice=False)
         except LLMToolCallError as exc:
+            if exc.usage is not None:
+                await self._record_usage(exc)
             raise provider_unavailable(exc, self.language) from exc
+        usage = await self._record_usage(response)
+        if self.task_used > self.task_max_tokens:
+            # Keep billed usage, but never dispatch a tool or create an approval
+            # from the response that crossed the task ceiling.
+            raise self._budget_exceeded()
         calls = getattr(response, "tool_calls", None)
-        reported_tokens = max(0, int(getattr(response, 'total_tokens', 0) or 0))
-        attempted = max(1, int(getattr(response, 'attempted_requests', 0) or 0))
-        self.task_used += reported_tokens
-        await self.emit('usage', {'total_tokens': reported_tokens,
-                                  'attempted_requests': attempted})
         text = getattr(response, "content", "")
         parts = []
         self.response_correction = "Return one registered function call with JSON object arguments, or a nonempty final answer."
@@ -315,26 +348,16 @@ class DiceFrameModel(Model):
                 "error": self.response_correction}))
         else:
             self.response_correction = ""
-        # 续段用的断点必须包含最后一次已计费的响应：只存请求前输入会让续段
-        # 重放同一请求，重复计费（review P1-3）。pydantic-ai 在收到本响应后
-        # 会把它追加进历史，这里预先拼出等价序列。
-        self.last_messages = [*messages, ModelResponse(parts, model_name=self.model_name,
-            usage=RequestUsage(output_tokens=reported_tokens))]
-        return self.last_messages[-1]
-
-
-# 软阈值（触发整理并续段的内部阈值）：总预算的一半。它不是新的用户额度，
-# 只是连续性触发点；真正的成本边界永远是「任务总预算」本身，跨段累计、
-# 不可重置（补充设计 §1/§3）。
-SEGMENT_SOFT_DIVISOR = 2
-AUTO_SEGMENT_FLOOR = 4000
-MAX_AUTO_CONTINUES = 8
+        # Preserve the actual breakdown when reported. The authoritative task
+        # limit above uses reported totals, not a fabricated output-token count.
+        return ModelResponse(parts, model_name=self.model_name, usage=RequestUsage(
+            input_tokens=usage.get('known_input_tokens', 0), output_tokens=usage.get('known_output_tokens', 0)))
 
 
 async def execute_agent(client, tools, instructions: str, payload: dict, emit: Callable,
                         language: str, max_tokens: int, max_steps: int,
-                        *, task_max_tokens: int = DEFAULT_TASK_MAX_TOKENS):
-    model = DiceFrameModel(client, emit, language, max_tokens, max_steps)
+                        *, task_max_tokens: int = DEFAULT_TASK_MAX_TOKENS, run_id: str | None = None):
+    model = DiceFrameModel(client, emit, language, max_tokens, max_steps, task_max_tokens)
     agent = Agent(model,
         output_type=[FinalAnswer, str, DeferredToolRequests], tools=tools,
         instructions=instructions, retries=3, name="DF Agent")
@@ -345,49 +368,19 @@ async def execute_agent(client, tools, instructions: str, payload: dict, emit: C
             raise ModelRetry("Return a nonempty final answer of at most 24000 characters.")
         return output
 
-    # 连续执行：软阈值触顶时用 capture_run_messages 捕获完整中断历史（含
-    # 已计费响应与工具结果），以 message_history 接续、不重发原 prompt；
-    # 每段扣除已用模型轮次（review P1-4 / 补充设计 §3）。总预算跨段累计
-    # 且绝不放大：剩余额度不足以发起有效请求时明确暂停，交还服务层。
-    prompt = json.dumps(payload, ensure_ascii=False)
-    history = None
-    segment = 0
-    while True:
-        remaining = task_max_tokens - model.task_used
-        if segment > 0 and remaining < AUTO_SEGMENT_FLOOR:
-            raise UsageLimitExceeded(
-                f'Exceeded the total_tokens_limit of {task_max_tokens} '
-                f'(total_tokens={model.task_used})')
-        soft_limit = max(AUTO_SEGMENT_FLOOR, task_max_tokens // SEGMENT_SOFT_DIVISOR)
-        segment_limit = min(soft_limit, remaining)
-        request_budget = max(1, max_steps - model.request_count)
-        with capture_run_messages() as run_messages:
-            try:
-                result = await agent.run(prompt, message_history=history,
-                    usage_limits=UsageLimits(request_limit=request_budget,
-                                             tool_calls_limit=max_steps,
-                                             total_tokens_limit=segment_limit),
-                    infer_name=False)
-                return result.output
-            except UsageLimitExceeded as exc:
-                if 'total_tokens_limit' not in str(exc):
-                    raise  # 步数 / 工具次数触顶：不自动续段
-                if segment >= MAX_AUTO_CONTINUES:
-                    raise
-                captured = list(run_messages)
-                if not captured:
-                    raise
-                segment += 1
-                history = captured
-                prompt = None
-                note = ("\n— 正在整理上下文并继续（累计 "
-                        f"{model.task_used}/{task_max_tokens} tokens）…\n"
-                        if language.startswith("zh") else
-                        "\n— Compacting context and continuing (total "
-                        f"{model.task_used}/{task_max_tokens} tokens)…\n")
-                await emit("delta", {"delta": note})
-            except UnexpectedModelBehavior as exc:
-                raise AgentModelResponseInvalid(language) from exc
+    # One framework run: a soft UsageLimits exception can occur before the
+    # response is appended, so capturing and restarting there loses paid work.
+    # Context remains bounded per request. Framework request/tool limits and
+    # validation retries are never reset mid-task.
+    usage_context = usage_run_id.set(run_id or uuid.uuid4().hex)
+    try:
+        result = await agent.run(json.dumps(payload, ensure_ascii=False),
+            usage_limits=UsageLimits(request_limit=max_steps, tool_calls_limit=max_steps), infer_name=False)
+        return result.output
+    except UnexpectedModelBehavior as exc:
+        raise AgentModelResponseInvalid(language) from exc
+    finally:
+        usage_run_id.reset(usage_context)
 
 
 __all__ = ["DeferredToolRequests", "FinalAnswer", "ModelRetry", "UsageLimitExceeded", "execute_agent"]
