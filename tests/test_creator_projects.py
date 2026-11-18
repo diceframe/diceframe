@@ -239,3 +239,26 @@ def test_creator_validate_skips_package_check_when_structure_fails(tmp_path: Pat
     assert checked["package_check"] is None
     assert checked["installable"] is False
     assert calls == []
+
+
+def test_creator_project_update_reports_explicit_changed_paths(tmp_path: Path):
+    """update 结果带显式 changed 清单：agent 观察与前端刷新都靠它，不靠整包反推。"""
+    store = CreatorProjectStore(tmp_path / "creator-projects.json")
+    project_id = store.create("alice", "Harbor")["project"]["id"]
+
+    updated = store.update(
+        "alice", project_id, expected_revision=0,
+        files={"world.json": '{"id":"harbor"}', "content/npcs/mara.json": '{}'},
+    )
+    assert updated["changed"] == ["content/npcs/mara.json", "world.json"]
+
+    removed = store.update(
+        "alice", project_id, expected_revision=1,
+        files={"world.json": '{"id":"harbor","v":2}'}, remove=["content/npcs/mara.json"],
+    )
+    assert removed["changed"] == ["content/npcs/mara.json", "world.json"]
+    assert "content/npcs/mara.json" not in removed["project"]["files"]
+
+    # 纯改名（不动文件）时清单为空，字段仍然存在。
+    renamed = store.update("alice", project_id, expected_revision=2, name="Harbor 2")
+    assert renamed["changed"] == []
