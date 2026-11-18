@@ -78,7 +78,7 @@ class CombatViewMixin:
             if raw_id not in instance.players:
                 raise CombatIntentError("player actor does not exist")
             character = _canonical(instance.get_character_sheet(raw_id))
-            return self._player_view(raw_id, character)
+            return self._with_hands(combat, self._player_view(raw_id, character))
         if kind == "companion":
             # Companion 是"己方角色"：复用 player canonical 视图结构与装备/法术
             # 目录，不走 enemy attack profile。
@@ -86,7 +86,7 @@ class CombatViewMixin:
             view = self._player_view(raw_id, character)
             view["actor_id"] = _companion_actor(raw_id)
             view["kind"] = "companion"
-            return view
+            return self._with_hands(combat, view)
         if kind == "enemy":
             enemy = combat.get("enemies", {}).get(raw_id)
             if not isinstance(enemy, dict):
@@ -242,6 +242,10 @@ class CombatViewMixin:
                 feature_projection["martial_arts_weapon_refs"]
             ),
             "ranged_attack_bonus": int(feature_projection["ranged_attack_bonus"]),
+            # Light 追加攻击是否吃属性调整值（Two-Weapon Fighting 风格）。
+            "light_extra_attack_ability_damage": bool(
+                feature_projection["light_extra_attack_ability_damage"]
+            ),
         }
         # S0-F18 §4.2.4：感官是角色自己的属性，必须在 actor view 里。挂在
         # cast_spell 那一行会让"法术用尽 / 不在自己回合"时整条感官消失，
@@ -269,6 +273,81 @@ class CombatViewMixin:
             "rule_binding": deepcopy(character["rule_binding"]),
             "ruleset_character": deepcopy(character),
         }
+
+    def _hand_exception_applies(self, actor: dict[str, Any], weapon: dict[str, Any]) -> bool:
+        """``two_handed_exception``（目前只有骑枪的骑乘例外）是否生效。"""
+
+        exception = str(weapon.get("two_handed_exception") or "")
+        if not exception:
+            return False
+        return exception == "mounted" and bool(actor.get("mounted"))
+
+    def _default_hands(self, actor: dict[str, Any]) -> dict[str, Any]:
+        """Derive the opening grip from the equipment list.
+
+        ``equipment`` is a loadout, not a pose: it says what the character
+        carries by default.  This derivation is what turns it into two hands,
+        once per encounter, and only a declared swap may change it afterwards.
+        A two-handed weapon wins both hands; otherwise one-handed weapons fill
+        the right hand first, and shields take whatever hand is left.
+        """
+
+        two_handed: str = ""
+        one_handed: list[str] = []
+        shields: list[str] = []
+        for raw in actor.get("equipment_refs") or []:
+            ref = str(raw)
+            weapon_id = ref.removeprefix("item:")
+            weapon = self.catalog.weapons.get(weapon_id)
+            if isinstance(weapon, dict):
+                if weapon.get("two_handed") and not self._hand_exception_applies(actor, weapon):
+                    two_handed = two_handed or ref
+                else:
+                    one_handed.append(ref)
+                continue
+            item = self.bundle.get("item", weapon_id) or {}
+            if item.get("item_type") == "shield":
+                shields.append(ref)
+        if two_handed:
+            if shields:
+                # 盾牌是绑在手臂上的：戴着盾就不可能把两只手都交给双手武器。
+                # 这种"实际握不住"的姿势要如实表达出来，让校验拒绝，而不是
+                # 在投影里把盾悄悄摘掉。
+                return {"left": shields[0], "right": two_handed}
+            return {"left": two_handed, "right": two_handed}
+        hands: dict[str, Any] = {"left": None, "right": None}
+        for ref in one_handed:
+            if hands["right"] is None:
+                hands["right"] = ref
+            elif hands["left"] is None:
+                hands["left"] = ref
+            else:
+                break
+        for ref in shields:
+            if hands["left"] is None:
+                hands["left"] = ref
+            elif hands["right"] is None:
+                hands["right"] = ref
+        return hands
+
+    def hands_for(self, combat: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
+        """The actor's current grip: a declared swap, else the opening grip.
+
+        Pure by design -- reading combat must not write combat.  Only a swap
+        intent records an override, and that record dies with the encounter.
+        """
+
+        stored = (combat.get("hands") or {}).get(str(actor.get("actor_id") or ""))
+        if isinstance(stored, dict):
+            return {"left": stored.get("left"), "right": stored.get("right")}
+        return self._default_hands(actor)
+
+    def _with_hands(self, combat: dict[str, Any], view: dict[str, Any]) -> dict[str, Any]:
+        """Attach the encounter-scoped grip and mounted flag to a party actor."""
+
+        view["mounted"] = bool((combat.get("mounted") or {}).get(view["actor_id"]))
+        view["hands"] = self.hands_for(combat, view)
+        return view
 
     def _available_attacks(self, actor: dict[str, Any]) -> list[dict[str, Any]]:
         """Every attack profile this actor may declare right now.

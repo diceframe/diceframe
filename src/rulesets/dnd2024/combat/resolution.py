@@ -343,6 +343,14 @@ class CombatResolutionMixin:
             "origin_step_id": str(intent.get("origin_step_id") or ""),
             "mode": str(intent.get("mode") or "sandbox"),
             "adventure_binding": deepcopy(intent.get("adventure_binding")),
+            # 骑乘只影响"骑枪是否需要双手"，因此它是遭遇级的最小声明：
+            # 开局声明一次，战斗结束随状态丢弃。中途上下坐骑属于骑乘系统，
+            # 不在本切片范围内。
+            "mounted": {
+                _player_actor(str(uid)): True
+                for uid in (intent.get("mounted_player_ids") or [])
+                if str(uid)
+            },
         }, *refills, *opening, *self._turn_start_events(first)]
 
     @staticmethod
@@ -1323,7 +1331,11 @@ class CombatResolutionMixin:
             # 提前终止先于消耗支付落账：预约的是"发起攻击检定"这一事实，
             # 命中与否、动作是否还能支付都不影响它（借机攻击同样触发）。
             *self._spell_end_trigger_events(actor, "attack_roll"),
-            *([self._attack_cost_event(combat, actor)] if spend_attack_action else []),
+            *([self._attack_cost_event(
+                combat, actor,
+                resource="bonus_action" if intent.get("light_extra_attack") else "",
+                weapon=weapon,
+            )] if spend_attack_action else []),
         ]
         events.extend(self._attack_declaration_events(
             combat, actor_id, target_id, declaration,
@@ -1391,6 +1403,15 @@ class CombatResolutionMixin:
             target["kind"] == "enemy" and "rage" in actor["conditions"]
             and str((combat.get("economy") or {}).get("actor_id") or "") == str(actor_id)
         )
+        if (
+            intent.get("light_extra_attack")
+            and actor["kind"] in {"player", "companion"}
+            and not bool(actor.get("light_extra_attack_ability_damage"))
+        ):
+            # Light 追加攻击默认不吃属性调整值，但负值仍然生效（规则原文：
+            # "unless that modifier is negative"），所以这里只压掉正数。
+            # 唯一例外是 Two-Weapon Fighting 风格，由角色投影回答。
+            modifier = min(0, modifier)
         settlement = {
             "actor_id": actor_id, "target_id": target_id,
             "weapon": deepcopy(weapon), "ability": ability, "modifier": modifier,

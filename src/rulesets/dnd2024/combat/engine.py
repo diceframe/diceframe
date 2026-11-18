@@ -162,6 +162,8 @@ class Dnd2024CombatEngine(
             "status": "none", "round": 0, "turn_index": 0,
             "initiative": [], "enemies": {}, "positions": {},
             "economy": {}, "pending_decisions": [], "position_mode": "theater",
+            # 持握与骑乘是遭遇级状态；旧档没有这两个键时同样安全。
+            "hands": {}, "mounted": {},
         })
         if state.get("state_schema_version") != 1:
             raise CombatIntentError("unsupported D&D 2024 combat state schema")
@@ -1010,7 +1012,22 @@ class Dnd2024CombatEngine(
                 "text": str(intent.get("text") or "").strip(),
             })
         elif intent_type == "attack":
-            events.extend(self._attack_events(instance, combat, intent, rng))
+            # 换手只是这一次攻击里附带的一次装备/卸下，所以它和攻击在同一个
+            # 批次里结算：事件先落地，攻击按换手之后的手部状态判定。
+            actor_view = None
+            if intent.get("weapon_swap") is not None:
+                base = self._actor_view(instance, combat, str(intent["actor_id"]))
+                hands = self._weapon_swap_hands(base, intent) or base.get("hands") or {}
+                actor_view = {**base, "hands": hands}
+                events.append({
+                    "type": "dnd2024.weapon.swapped",
+                    "actor_id": str(intent["actor_id"]),
+                    "left": hands.get("left"),
+                    "right": hands.get("right"),
+                })
+            events.extend(self._attack_events(
+                instance, combat, intent, rng, actor_view=actor_view,
+            ))
         elif intent_type == "class_capability":
             events.extend(self._class_capability_events(instance, combat, intent, rng))
         elif intent_type == "cast_spell":
@@ -1718,12 +1735,18 @@ class Dnd2024CombatEngine(
         return self.features.attacks_per_action(actor)
 
     def _attack_cost_event(
-        self, combat: dict[str, Any], actor: dict[str, Any],
+        self, combat: dict[str, Any], actor: dict[str, Any], *, resource: str = "",
+        weapon: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "type": "dnd2024.attack.spent", "actor_id": actor["actor_id"],
-            "resource": self._spend_action_resource(combat),
+            "resource": resource or self._spend_action_resource(combat),
             "attacks_per_action": self._attacks_per_action(actor),
+            # 归约需要知道"这一击用的是不是 Light 武器"，才能回答下一问：
+            # "本回合还允许 Light 追加攻击吗"。
+            "light_weapon": bool((weapon or {}).get("light")),
+            # Loading 的节流单位是"一次 action/Bonus/Reaction"，归约按窗口记账。
+            "loading_weapon": bool((weapon or {}).get("loading")),
         }
 
     def _consume_attack_conditions(

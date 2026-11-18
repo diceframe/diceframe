@@ -546,3 +546,115 @@ def test_loot_to_equipment_to_combat_numbers_end_to_end(runtime) -> None:
 
     assert resolved["ok"] is True
     assert _damage_event(resolved)["rolls"] == [7]
+
+
+# --------------------------------------------------------------------------
+# F38 武器基本词条：Two-Handed / Loading 的显式声明与加载期 fail closed
+# --------------------------------------------------------------------------
+
+TWO_HANDED_WEAPONS = frozenset({
+    "crossbow_heavy", "crossbow_light", "glaive", "greataxe", "greatclub",
+    "greatsword", "halberd", "lance", "longbow", "maul", "musket", "pike",
+    "shortbow",
+})
+LOADING_WEAPONS = frozenset({
+    "blowgun", "crossbow_hand", "crossbow_heavy", "crossbow_light", "musket",
+    "pistol",
+})
+
+
+def test_every_weapon_declares_both_hand_properties(bundle) -> None:
+    """缺省不是"未知"，而是漏写：每个武器都必须显式声明两个布尔。"""
+
+    weapons = Dnd2024CombatCatalog.from_bundle(bundle).weapons
+    assert len(weapons) == 38
+    for weapon_id, weapon in weapons.items():
+        assert isinstance(weapon.get("two_handed"), bool), weapon_id
+        assert isinstance(weapon.get("loading"), bool), weapon_id
+
+
+def test_two_handed_and_loading_match_the_srd_table(bundle) -> None:
+    weapons = Dnd2024CombatCatalog.from_bundle(bundle).weapons
+    assert {wid for wid, w in weapons.items() if w["two_handed"]} == TWO_HANDED_WEAPONS
+    assert {wid for wid, w in weapons.items() if w["loading"]} == LOADING_WEAPONS
+    assert weapons["lance"]["two_handed_exception"] == "mounted"
+    # 骑枪的例外不复制给其它双手武器
+    assert [
+        wid for wid, w in weapons.items() if "two_handed_exception" in w
+    ] == ["lance"]
+
+
+def test_dart_is_a_ranged_weapon(bundle) -> None:
+    """SRD 把飞镖列在 Simple Ranged 表里，而不是近战抛掷武器。"""
+
+    assert Dnd2024CombatCatalog.from_bundle(bundle).weapons["dart"]["ranged"] is True
+
+
+@pytest.mark.parametrize("weapon_id,prop", [
+    ("greatsword", "two_handed"),
+    ("longbow", "two_handed"),
+    ("pistol", "loading"),
+])
+def test_missing_hand_property_fails_closed(bundle, weapon_id, prop) -> None:
+    patched = json.loads(json.dumps(bundle.get("combat_catalog", "srd_combat_core")))
+    patched["weapons"][weapon_id].pop(prop)
+    proxy = _BundleProxy(bundle, {("combat_catalog", "srd_combat_core"): patched})
+
+    with pytest.raises(CombatCatalogError, match=prop):
+        Dnd2024CombatCatalog.from_bundle(proxy)
+
+
+@pytest.mark.parametrize("weapon_id,prop,value", [
+    ("greatsword", "two_handed", "yes"),
+    ("pistol", "loading", 1),
+])
+def test_hand_property_must_be_boolean(bundle, weapon_id, prop, value) -> None:
+    patched = json.loads(json.dumps(bundle.get("combat_catalog", "srd_combat_core")))
+    patched["weapons"][weapon_id][prop] = value
+    proxy = _BundleProxy(bundle, {("combat_catalog", "srd_combat_core"): patched})
+
+    with pytest.raises(CombatCatalogError, match=prop):
+        Dnd2024CombatCatalog.from_bundle(proxy)
+
+
+def test_two_handed_cannot_also_be_versatile(bundle) -> None:
+    """longsword 是两用；把它同时声明成"必须双手"是自相矛盾的数据。"""
+
+    patched = json.loads(json.dumps(bundle.get("combat_catalog", "srd_combat_core")))
+    patched["weapons"]["longsword"]["two_handed"] = True
+    proxy = _BundleProxy(bundle, {("combat_catalog", "srd_combat_core"): patched})
+
+    with pytest.raises(CombatCatalogError, match="versatile"):
+        Dnd2024CombatCatalog.from_bundle(proxy)
+
+
+def test_two_handed_cannot_be_light(bundle) -> None:
+    patched = json.loads(json.dumps(bundle.get("combat_catalog", "srd_combat_core")))
+    patched["weapons"]["shortsword"]["two_handed"] = True
+    proxy = _BundleProxy(bundle, {("combat_catalog", "srd_combat_core"): patched})
+
+    with pytest.raises(CombatCatalogError, match="light"):
+        Dnd2024CombatCatalog.from_bundle(proxy)
+
+
+def test_melee_weapon_cannot_be_loading(bundle) -> None:
+    patched = json.loads(json.dumps(bundle.get("combat_catalog", "srd_combat_core")))
+    patched["weapons"]["club"]["loading"] = True
+    proxy = _BundleProxy(bundle, {("combat_catalog", "srd_combat_core"): patched})
+
+    with pytest.raises(CombatCatalogError, match="loading"):
+        Dnd2024CombatCatalog.from_bundle(proxy)
+
+
+def test_hand_exception_requires_two_handed_and_a_known_value(bundle) -> None:
+    non_two_handed = json.loads(json.dumps(bundle.get("combat_catalog", "srd_combat_core")))
+    non_two_handed["weapons"]["longsword"]["two_handed_exception"] = "mounted"
+    proxy = _BundleProxy(bundle, {("combat_catalog", "srd_combat_core"): non_two_handed})
+    with pytest.raises(CombatCatalogError, match="two_handed_exception"):
+        Dnd2024CombatCatalog.from_bundle(proxy)
+
+    unknown = json.loads(json.dumps(bundle.get("combat_catalog", "srd_combat_core")))
+    unknown["weapons"]["lance"]["two_handed_exception"] = "swimming"
+    proxy = _BundleProxy(bundle, {("combat_catalog", "srd_combat_core"): unknown})
+    with pytest.raises(CombatCatalogError, match="hand exception"):
+        Dnd2024CombatCatalog.from_bundle(proxy)

@@ -46,7 +46,10 @@
       "category": "fighting_style",
       "source_ref": "srd-5.2.1:p88:two-weapon-fighting",
       "requires_feature": "fighting_style",
-      "repeatable": false
+      "repeatable": false,
+      "parameters": {
+        "light_extra_attack_ability_damage": true
+      }
     },
     "boon_of_combat_prowess": {
       "category": "epic_boon",
