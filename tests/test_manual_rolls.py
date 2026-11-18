@@ -1,6 +1,9 @@
 import asyncio
 from types import SimpleNamespace
 
+from src.engine.dice_rng import DiceResult, parse_dice_formula
+from src.webui.services import manual_rolls as manual_rolls_service
+
 from src.engine.modules import checks
 from src.llm.context_builder import format_manual_roll_context
 from src.webui.services.manual_rolls import ManualRollDependencies, ManualRollService
@@ -220,7 +223,21 @@ def _context_instance(requests, run_id="run-1", language="zh-CN"):
     return instance
 
 
-def test_resolved_service_requests_flow_into_ai_context():
+def test_resolved_service_requests_flow_into_ai_context(monkeypatch):
+    # 对抗比较的服务端语义是"同值即双方皆胜"，而这条用例要断言一胜一负。
+    # 真随机会让它有 1/20 的概率自己变红，所以固定骰面：检定 4，对抗 4 与 7。
+    faces = iter([4, 4, 7])
+
+    def fixed_roll(formula: str) -> DiceResult:
+        normalized, count, _sides, modifier = parse_dice_formula(formula)
+        face = next(faces)
+        rolls = [face] * count
+        return DiceResult(
+            formula=normalized, rolls=rolls, modifier=modifier,
+            total=sum(rolls) + modifier, natural=rolls[0],
+        )
+
+    monkeypatch.setattr(manual_rolls_service, "roll", fixed_roll)
     instance = SimpleNamespace(
         modules={},
         gm_uid="gm", run_id="run-1", round_number=1,
