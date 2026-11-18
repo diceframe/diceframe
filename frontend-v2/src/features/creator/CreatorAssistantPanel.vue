@@ -7,6 +7,8 @@ import {
 } from '@vicons/ionicons5'
 import { useLocale } from '@/composables/useLocale'
 import { useCreatorAssistant } from '@/composables/useCreatorAssistant'
+import { useAssistantAttachments } from '@/composables/useAssistantAttachments'
+import { promptEnableAfterInstall } from '@/features/plugins/installEnable'
 import { useAssistantWorkspace } from '@/composables/useAssistantWorkspace'
 import { renderSafeMarkdown } from '@/utils/markdown'
 import AgentTaskCard from '@/components/assistant/AgentTaskCard.vue'
@@ -32,7 +34,16 @@ const props = withDefaults(defineProps<{ expanded?: boolean; wide?: boolean; rev
 const emit = defineEmits<{ close: []; toggleExpanded: []; 'files-changed': [paths: string[]] }>()
 const { t, locale } = useLocale()
 const _projectScope = computed(() => props.projectId)
-const { messages, streaming, send: _rawSend, stop, retryLast, pendingApproval, drafts, status, navigation, actionBusy, actionError, confirmApproval, resumeApproval, cancelApproval, reviewDraft, saveDraft, invalidateApproval, authorization, task, authorizationBusy, authorizationError, authorize } = useCreatorAssistant(_projectScope)
+const { messages, streaming, send: _rawSend, stop, retryLast, pendingApproval, drafts, status, navigation, actionBusy, actionError, confirmApproval, resumeApproval, cancelApproval, reviewDraft, saveDraft, invalidateApproval, authorization, task, authorizationBusy, authorizationError, authorize, sessionId } = useCreatorAssistant(_projectScope)
+const attachments = useAssistantAttachments(sessionId, locale)
+const attachInput = ref<HTMLInputElement | null>(null)
+async function onAttachFile(ev: Event) {
+  const file = (ev.target as HTMLInputElement).files?.[0]
+  ;(ev.target as HTMLInputElement).value = ''
+  if (!file) return
+  const ok = await attachments.upload(file, sid => { sessionId.value = sid })
+  if (ok) draft.value = (draft.value ? draft.value + '\n' : '') + `[已上传附件：${file.name}（${attachments.attached.value.at(-1)?.chars ?? '?'} 字符）]`
+}
 
 // Supply identity only. The server owns workflow guidance and live revisions.
 async function send(text: string, loc: string) {
@@ -133,6 +144,34 @@ const publishBuild = ref<PublishStep>('idle')
 const publishSubmit = ref<PublishStep>('idle')
 const publishErrors = ref<string[]>([])
 const builtFileName = ref('')
+
+// 安装到本机：构建产物走与市场安装相同的宿主通道，装进本机插件目录
+const installState = ref<'idle' | 'running' | 'ok' | 'fail'>('idle')
+const installMessage = ref('')
+async function runInstall() {
+  if (!props.projectId || installState.value === 'running') return
+  installState.value = 'running'; installMessage.value = ''
+  const rev = projectData.value?.revision ?? props.projectRevision ?? 0
+  try {
+    const r = await creatorApi.install(props.projectId, rev)
+    const installed = r.install || {}
+    if (r.ok && installed.ok !== false) {
+      installState.value = 'ok'
+      installMessage.value = locale.value === 'zh-CN'
+        ? `已安装${installed.id ? `：${installed.id}${installed.version ? ' v' + installed.version : ''}` : ''}，可在「内容 → 内容包」查看`
+        : `Installed${installed.id ? `: ${installed.id}${installed.version ? ' v' + installed.version : ''}` : ''} — see Content → Packages`
+      // 与市场安装同一惯例：装完询问是否立即启用（启用后内容包才进入来源）
+      await promptEnableAfterInstall(installed as Parameters<typeof promptEnableAfterInstall>[0])
+    } else {
+      installState.value = 'fail'
+      installMessage.value = installed.error || r.error || (r.errors || [])[0] || String(r)
+    }
+  } catch (e) {
+    installState.value = 'fail'
+    installMessage.value = String(e)
+  }
+  setTimeout(() => { installState.value = 'idle'; installMessage.value = '' }, 6000)
+}
 const submissionPluginId = ref('')
 const submissionVersion = ref('')
 
@@ -548,6 +587,13 @@ function toggleTaskWorkspace() {
         {{ locale === 'zh-CN' ? '文件' : 'Files' }}
       </button>
       <div v-if="props.projectId" class="creator-publish-wrap">
+        <button type="button" :class="['creator-head-btn', { active: installState !== 'idle' }]" :disabled="installState === 'running'"
+                :title="installMessage" @click="runInstall">
+          {{ installState === 'running' ? (locale === 'zh-CN' ? '安装中…' : 'Installing…')
+            : installState === 'ok' ? (locale === 'zh-CN' ? '已安装 ✓' : 'Installed ✓')
+            : installState === 'fail' ? (locale === 'zh-CN' ? '安装失败 ✗' : 'Install failed ✗')
+            : (locale === 'zh-CN' ? '安装到本机' : 'Install locally') }}
+        </button>
         <button ref="publishBtnEl" type="button" :class="['creator-head-btn', 'creator-head-btn-primary', { active: publishOpen }]" @click="publishOpen ? publishOpen = false : runPublish()">
           {{ locale === 'zh-CN' ? '发布' : 'Publish' }}
         </button>
@@ -906,6 +952,18 @@ function toggleTaskWorkspace() {
         :autosize="{ minRows: 1, maxRows: 5 }"
         @keydown="onKeydown"
       />
+      <input ref="attachInput" type="file" :accept="attachments.acceptList.value" class="assistant-attach-input" hidden @change="onAttachFile" />
+      <button
+        type="button"
+        class="assistant-mic assistant-attach"
+        data-testid="assistant-attach"
+        :title="attachments.uploadError.value || (locale === 'zh-CN' ? '上传文本附件（规则书 / 剧本 / 资料）' : 'Upload a text attachment (rulebook / script / notes)')"
+        :aria-label="locale === 'zh-CN' ? '上传附件' : 'Upload attachment'"
+        :disabled="attachments.uploading.value || streaming"
+        @click="attachInput?.click()"
+      >
+        <NIcon :component="DocumentTextOutline" size="18" />
+      </button>
       <button
         v-if="voiceInputAvailable"
         type="button"

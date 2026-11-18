@@ -9,6 +9,13 @@ class FakeCreatorApi:
     def preview_creator_project(self, owner_id, project_id):
         return {"ok": True, "owner": owner_id, "project_id": project_id, "preview": {"name": "Harbor"}}
 
+    async def install_creator_project(self, owner_id, project_id, *, expected_revision):
+        return {
+            "ok": True, "owner": owner_id, "project_id": project_id,
+            "revision": expected_revision,
+            "install": {"ok": True, "id": "harbor", "version": "0.1.0"},
+        }
+
     def prepare_creator_submission(self, owner_id, project_id, *, expected_revision):
         return {
             "ok": True,
@@ -55,3 +62,19 @@ async def test_creator_preview_and_submission_routes_keep_owner_and_confirmation
         payload = await submitted.json()
         assert payload["submission"]["release_tag"] == "v1.0.0"
         assert payload["revision"] == 2
+
+
+@pytest.mark.asyncio
+async def test_creator_install_route_is_owner_and_confirmation_bound(creator_app):
+    """安装到本机：需要确认头、绑定 owner、透传 install 结果。"""
+    async with TestClient(TestServer(creator_app)) as client:
+        denied = await client.post("/api/creator/projects/project-harbor/install",
+                                   json={"expected_revision": 2})
+        assert denied.status == 403
+        result = await client.post("/api/creator/projects/project-harbor/install",
+                                   json={"expected_revision": 2},
+                                   headers={"X-TRPG-Confirm": "true"})
+        assert result.status == 200
+        body = await result.json()
+        assert body["ok"] is True and body["owner"] == "alice"
+        assert body["install"] == {"ok": True, "id": "harbor", "version": "0.1.0"}
