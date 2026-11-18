@@ -53,7 +53,7 @@ from .primitives import (
     canonical as _canonical,
     rider_attack_kind,
 )
-from .check_modes import condition_flags
+from .check_modes import condition_flags, owned_mark, vision_codes
 from .check_windows import (
     CHECK_WINDOW_DECISION,
     DAMAGE_WINDOW_DECISION,
@@ -711,6 +711,172 @@ class CombatValidationMixin:
         if distance > long_range:
             raise CombatIntentError(f"target is out of range ({distance} > {long_range} feet)")
         self._validate_hit_riders(actor, intent, combat)
+        self._validate_attack_state_options(instance, combat, intent, actor, weapon, distance)
+
+    def _validate_attack_state_options(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor: dict[str, Any], weapon: dict[str, Any], distance: int,
+    ) -> None:
+        """Reject a pre-roll declaration the actor cannot legally make now.
+
+        Three facts are re-derived from the authoritative state rather than
+        trusted from the panel: whether this is the first attack roll of the
+        turn (Reckless), whether any Disadvantage source exists at all
+        (Brutal), and whether the once-per-turn budget is already spent.  A
+        submitted declaration that fails any of them must fail the intent --
+        silently ignoring it would let the client believe it had Advantage
+        while the roll was a straight d20.
+        """
+
+        reckless = intent.get("reckless_attack")
+        brutal = intent.get("brutal_strike")
+        effects = intent.get("brutal_strike_effects")
+        if reckless is None and brutal is None and effects is None:
+            return
+        character = self._feature_character(actor)
+        actor_id = str(actor["actor_id"])
+
+        if reckless is not None:
+            if not isinstance(reckless, bool):
+                raise CombatIntentError("reckless_attack must be a boolean")
+            if reckless:
+                if not self.features.has_feature(character, "reckless_attack"):
+                    raise CombatIntentError(
+                        "reckless attack is not available to this actor"
+                    )
+                condition = str(self.features.feature_value(
+                    character, "reckless_attack", "self_condition", "",
+                ) or "")
+                if condition and condition in (actor.get("conditions") or {}):
+                    raise CombatIntentError("this actor is already attacking recklessly")
+                if str((combat.get("economy") or {}).get("actor_id") or "") != actor_id:
+                    # "When you make your first attack roll on your turn": an
+                    # Opportunity Attack happens on someone else's turn.
+                    raise CombatIntentError(
+                        "reckless attack can only be declared on your own turn"
+                    )
+                if self._attack_roll_count(combat, actor_id) > 0:
+                    raise CombatIntentError(
+                        "reckless attack must be declared before the first attack roll"
+                    )
+
+        if brutal is not None:
+            if not isinstance(brutal, bool):
+                raise CombatIntentError("brutal_strike must be a boolean")
+            if brutal:
+                if not self.features.has_feature(character, "brutal_strike"):
+                    raise CombatIntentError(
+                        "brutal strike is not available to this actor"
+                    )
+                ability = str(self.features.feature_value(
+                    character, "brutal_strike", "ability", "",
+                ) or "")
+                if ability and self.attack_ability(actor, weapon) != ability:
+                    raise CombatIntentError(
+                        "brutal strike requires a Strength-based attack"
+                    )
+                required = str(self.features.feature_value(
+                    character, "brutal_strike", "requires_declaration", "",
+                ) or "")
+                reckless_condition = str(self.features.feature_value(
+                    character, required, "self_condition", "",
+                ) or "") if required else ""
+                declared_now = bool(reckless) or (
+                    reckless_condition in (actor.get("conditions") or {})
+                )
+                if not declared_now:
+                    raise CombatIntentError(
+                        "brutal strike requires reckless attack this turn"
+                    )
+                if self._feature_used_this_turn(combat, actor_id, "brutal_strike"):
+                    raise CombatIntentError("brutal strike was already used this turn")
+                # "The chosen attack roll mustn't have Disadvantage." 相消不算：
+                # 只要来源里存在任何一份 Disadvantage 就不合格，否则"劣势被
+                # 另一份优势抵消"会变成 Brutal 的通行证。
+                check_mode = self._attack_check_mode(
+                    instance, combat, actor, self._actor_view(
+                        instance, combat, str(intent["target_id"]),
+                    ), self.attack_range_disadvantage(weapon, distance),
+                    ability=self.attack_ability(actor, weapon),
+                    declared_reckless=bool(reckless),
+                    spend_luck=bool(intent.get("spend_luck")),
+                )
+                if any(
+                    str(row.get("mode") or "") == "disadvantage"
+                    for row in check_mode["sources"]
+                ):
+                    raise CombatIntentError(
+                        "brutal strike is not available while the attack has disadvantage"
+                    )
+                self._validate_brutal_strike_effects(
+                    character, intent.get("brutal_strike_effects"),
+                )
+        elif effects:
+            # Options without the declaration are a forged submission: ignoring
+            # them would let a client believe a push was coming while the roll
+            # was a plain one.
+            raise CombatIntentError(
+                "brutal strike effects require a brutal strike declaration"
+            )
+
+    def _validate_brutal_strike_effects(
+        self, character: Any, submitted: Any,
+    ) -> None:
+        """Every chosen option must be one this level unlocks, at most ``cap``."""
+
+        allowed = [str(value) for value in self.features.feature_value(
+            character, "brutal_strike", "effect_options", [],
+        ) or []]
+        if self.features.has_feature(character, "improved_brutal_strike"):
+            allowed.extend(
+                str(value) for value in self.features.feature_value(
+                    character, "improved_brutal_strike",
+                    "additional_effect_options", [],
+                ) or []
+            )
+        state = self.features.class_state(character)
+        level = int(state[1]) if state else 0
+        cap = int(self.features.feature_value(
+            character, "brutal_strike", "effects_per_use", 0,
+        ) or 0)
+        if level >= int(self.features.feature_value(
+            character, "brutal_strike", "upgrade_level", 0,
+        ) or 0):
+            cap = int(self.features.feature_value(
+                character, "brutal_strike", "effects_per_use_upgrade", cap,
+            ) or cap)
+        if submitted is None:
+            return
+        if not isinstance(submitted, list) or any(
+            not isinstance(value, str) for value in submitted
+        ):
+            raise CombatIntentError("brutal strike effects must be a list of ids")
+        if len(submitted) > cap:
+            raise CombatIntentError(
+                f"brutal strike allows at most {cap} effect(s) at this level"
+            )
+        if len(set(submitted)) != len(submitted):
+            raise CombatIntentError(
+                "brutal strike cannot apply the same effect twice"
+            )
+        unavailable = sorted(set(submitted) - set(allowed))
+        if unavailable:
+            raise CombatIntentError(
+                f"brutal strike effect is not available: {unavailable[0]}"
+            )
+
+    @staticmethod
+    def _attack_roll_count(combat: dict[str, Any], actor_id: str) -> int:
+        """Attack rolls this actor has already made in the current turn."""
+
+        record = (combat.get("attack_rolls") or {}).get(str(actor_id))
+        if not isinstance(record, dict):
+            return 0
+        if int(record.get("round", -1)) != int(combat.get("round", 0)):
+            return 0
+        if int(record.get("turn_index", -1)) != int(combat.get("turn_index", 0)):
+            return 0
+        return int(record.get("count", 0) or 0)
 
     def _validate_hit_riders(
         self, actor: dict[str, Any], intent: dict[str, Any], combat: dict[str, Any],
@@ -939,6 +1105,11 @@ class CombatValidationMixin:
             raise CombatIntentError("this spell requires a pending melee hit")
         if trigger is not None and effect["mode"] != "triggered_damage":
             raise CombatIntentError("resolve the melee hit spell decision first")
+        if intent.get("retarget_mark"):
+            # 转移标记是一次独立的声明：它复用同一个法术实例，因此不走
+            # 施法成本、目标数量与免费次数那一整套。
+            self._validate_mark_retarget(instance, combat, intent, actor, economy, effect)
+            return
         if intent.get("spend_luck") and effect["mode"] != "spell_attack":
             raise CombatIntentError("spend_luck requires a spell attack roll")
         self._validate_lucky_spend(instance, intent, actor)
@@ -1021,6 +1192,12 @@ class CombatValidationMixin:
                     combat, actor["actor_id"], target_id,
                     self._spell_effective_range(actor, spell, effect),
                 )
+            if effect.get("marks_target") and not self._spell_target_visible(
+                instance, combat, actor, target,
+            ):
+                # 只有"你能看见的一个生物"才能被标记；不可见目标在 30 尺内
+                # 被 Blindsight 覆盖时算看得见，这正是 Feral Senses 的作用点。
+                raise CombatIntentError("you cannot see the creature you are marking")
         self._validate_cantrip_temp_hp_target(instance, combat, intent, actor, spell, effect)
         damage_choices = effect.get("damage_type_choice")
         if damage_choices and intent.get("damage_type") not in damage_choices:
@@ -1069,6 +1246,78 @@ class CombatValidationMixin:
                 raise CombatIntentError("teleport distance exceeds the spell range")
         elif intent.get("teleport_distance") is not None:
             raise CombatIntentError("teleport distance is not valid for this spell")
+
+    def _spell_target_visible(
+        self, instance: Any, combat: dict[str, Any],
+        actor: dict[str, Any], target: dict[str, Any],
+    ) -> bool:
+        """Whether the caster can see this creature right now.
+
+        Visibility is not "is it invisible": it is "does its Invisible still
+        hide it from *me*".  The registry owns the second half -- the negations
+        that cancel ``invisible`` -- so this method asks the same list the
+        attack matrix asks, at this distance, instead of inventing a second
+        rule for spell targeting.
+        """
+
+        target_conditions = target.get("conditions") or {}
+        if "invisible" not in target_conditions:
+            return True
+        negations: set[str] = set()
+        for declaration in (
+            (self.catalog.conditions.get("invisible") or {}).get("attack_modes") or []
+        ):
+            negations.update(str(code) for code in declaration.get("negated_by") or [])
+        distance = self._distance(
+            combat, str(actor["actor_id"]), str(target["actor_id"]),
+        )
+        return bool(negations & vision_codes(self, actor, distance=distance))
+
+    def _validate_mark_retarget(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor: dict[str, Any], economy: dict[str, Any], effect: dict[str, Any],
+    ) -> None:
+        """Every precondition of "move the mark" is checked before any event.
+
+        The move is free on purpose: it reuses the instance, so it must not
+        look like a second cast to validation, the reducer or the log.  What it
+        does cost is the Bonus Action, and what it requires is that the spell
+        it moves is still *this caster's* current instance.
+        """
+
+        if not effect.get("marks_target"):
+            raise CombatIntentError("this spell has no mark to move")
+        if not owned_mark(actor):
+            raise CombatIntentError("there is no Hunter's Mark to move")
+        if int(economy.get("bonus_action", 0) or 0) < 1:
+            raise CombatIntentError("the bonus action has already been spent")
+        raw = intent.get("target_ids")
+        target_ids = [str(item) for item in raw] if isinstance(raw, list) else []
+        if len(target_ids) != 1 or not target_ids[0]:
+            raise CombatIntentError("the mark moves to exactly one creature")
+        new_target_id = target_ids[0]
+        current_id = str(owned_mark(actor).get("mark_target_id") or "")
+        if not current_id:
+            raise CombatIntentError("this Hunter's Mark has no target")
+        if new_target_id == current_id:
+            raise CombatIntentError("the mark is already on that creature")
+        current = self._actor_view(instance, combat, current_id)
+        if int(current.get("hp", 0) or 0) > 0:
+            raise CombatIntentError(
+                "the mark can only move after its target drops to 0 hit points"
+            )
+        target = self._actor_view(instance, combat, new_target_id)
+        if int(target.get("hp", 0) or 0) <= 0:
+            raise CombatIntentError("spell target is not active")
+        if str(target.get("side") or "") == str(actor.get("side") or ""):
+            # 与施放同一条边界：标记属于进攻性法术，不能落在盟友身上。
+            raise CombatIntentError("Hunter's Mark marks a hostile creature")
+        self._require_range(
+            combat, str(actor["actor_id"]), new_target_id,
+            int(effect.get("mark_retarget_range") or effect.get("range") or 0),
+        )
+        if not self._spell_target_visible(instance, combat, actor, target):
+            raise CombatIntentError("you cannot see the new target")
 
     def _validate_cantrip_temp_hp_target(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],

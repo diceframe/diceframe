@@ -1377,6 +1377,10 @@ class Dnd2024Runtime:
             "check.resolved", "resource.changed", "condition.applied",
             "condition.removed", "dnd2024.death_save.resolved",
             "dnd2024.character.revived", "attune_item", "unattune_item",
+            "dnd2024.heroic_inspiration.changed",
+            # 猎手印记的目标是公共事实：战报要说"这一发 1d6 打在谁身上"、
+            # "标记转给了谁"，否则同一份 feed 里 Force 伤害凭空出现（S0-F18）。
+            "dnd2024.concentration.started", "dnd2024.concentration.retargeted",
         }
         allowed_fields = {
             "type", "kind", "actor_id", "target_id", "text", "natural", "modifier",
@@ -1390,6 +1394,9 @@ class Dnd2024Runtime:
             "distance", "round", "turn_index", "previous_actor_id", "condition", "reason",
             "spell_ref", "resource", "roll", "successes", "failures", "stable", "dead", "hp",
             "item_ref",
+            # 目标列表与标记对象：``spell.cast`` 只带 ``target_ids``（复数），
+            # 转移只带 ``target_id``；两者都是"打的是谁"这一事实的写法。
+            "target_ids", "mark_target_id", "mark_expires_hours",
         }
         combat = (
             ruleset_runtime.state(instance).get("combat")

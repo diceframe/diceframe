@@ -52,7 +52,7 @@
     "eldritch_blast": {"mode": "spell_attack", "damage": "1d10", "damage_type": "force", "range": 120},
     "ray_of_frost": {"mode": "spell_attack", "damage": "1d8", "damage_type": "cold", "range": 60, "condition": "slowed_10", "condition_duration": "target_turn_start"},
     "sacred_flame": {"mode": "saving_throw", "save": "dex", "damage": "1d8", "damage_type": "radiant", "range": 60},
-    "shocking_grasp": {"mode": "spell_attack", "damage": "1d8", "damage_type": "lightning", "range": 5, "condition": "reaction_blocked", "condition_duration": "target_turn_start"},
+    "shocking_grasp": {"mode": "spell_attack", "damage": "1d8", "damage_type": "lightning", "range": 5, "condition": "opportunity_attack_blocked", "condition_duration": "target_turn_start"},
     "sorcerous_burst": {"mode": "spell_attack", "damage": "1d8", "damage_type_choice": ["acid", "cold", "fire", "lightning", "poison", "psychic", "thunder"], "range": 120},
     "produce_flame": {"mode": "spell_attack", "damage": "1d8", "damage_type": "fire", "range": 60},
     "vicious_mockery": {"mode": "saving_throw", "save": "wis", "damage": "1d6", "damage_type": "psychic", "range": 60, "condition": "next_attack_disadvantage", "condition_duration": "after_next_attack"},
@@ -83,6 +83,19 @@
     "hex": {"mode": "debuff", "range": 90, "target_count": 1, "condition": "hexed", "condition_duration": "concentration", "concentration": true},
     "faerie_fire": {"mode": "saving_throw", "save": "dex", "range": 60, "condition": "faerie_fire", "condition_duration": "concentration", "concentration": true},
     "heroism": {"mode": "buff", "range": 5, "target_count": 1, "condition": "heroism", "condition_duration": "concentration", "concentration": true},
+    "hunter_s_mark": {
+      "mode": "debuff",
+      "range": 90,
+      "target_count": 1,
+      "concentration": true,
+      "marks_target": true,
+      "mark_damage": "1d6",
+      "mark_damage_type": "force",
+      "mark_duration_hours": 1,
+      "mark_duration_hours_by_slot": {"3": 8, "5": 24},
+      "mark_retarget_range": 90,
+      "mark_find_skills": ["perception", "survival"]
+    },
     "divine_smite": {
       "mode": "triggered_damage",
       "trigger": "melee_hit",
@@ -115,8 +128,8 @@
     "dodging": {"attack_modes": [{"side": "target", "mode": "disadvantage"}]},
     "blurred": {"attack_modes": [{"side": "target", "mode": "disadvantage", "negated_by": ["blindsight", "truesight"]}]},
     "invisible": {"initiative_advantage": true, "attack_modes": [
-      {"side": "target", "mode": "disadvantage", "negated_by": ["see_invisibility", "truesight"]},
-      {"side": "actor", "mode": "advantage", "negated_by": ["see_invisibility", "truesight"]}
+      {"side": "target", "mode": "disadvantage", "negated_by": ["see_invisibility", "truesight", "blindsight"]},
+      {"side": "actor", "mode": "advantage", "negated_by": ["see_invisibility", "truesight", "blindsight"]}
     ]},
     "rage": {"resist_damage_types": ["bludgeoning", "piercing", "slashing"]},
     "charmed": {"cannot_attack_source": true},
@@ -130,6 +143,8 @@
     "unconscious": {"attack_modes": [{"side": "target", "mode": "advantage"}], "implies_incapacitated": true, "speed_zero": true, "auto_fail_saves": ["str", "dex"], "crit_on_hit_within_5": true},
     "prone": {"attack_modes": [{"side": "actor", "mode": "disadvantage"}]},
     "staggered": {"speed_halved": true},
-    "staggered_opening": {"attack_modes": [{"side": "target", "mode": "advantage", "consume_on": "attack_resolved"}]}
+    "staggered_opening": {"attack_modes": [{"side": "target", "mode": "advantage", "consume_on": "attack_resolved"}]},
+    "reckless": {"attack_modes": [{"side": "target", "mode": "advantage"}]},
+    "hamstrung": {"speed_modifier": -15}
   }
 }

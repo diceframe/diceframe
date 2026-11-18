@@ -42,7 +42,15 @@ from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
 from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch_id
 
 
-from .check_modes import condition_check_bonus_rolls, condition_flags, effective_speed
+from .check_modes import (
+    HUNTERS_MARK_REF,
+    condition_check_bonus_rolls,
+    condition_flags,
+    effective_speed,
+    mark_find_sources,
+    owned_mark,
+    sense_declarations,
+)
 from .check_windows import (
     CHECK_WINDOW_DECISION,
     CombatCheckWindowsMixin,
@@ -329,6 +337,7 @@ class Dnd2024CombatEngine(
                     "lucky_advantage_available": self._window_pool_available(
                         instance, current, LUCKY_RESOURCE,
                     ),
+                    **self._attack_state_options(actor, combat),
                 })
             actions.extend([
                 {"type": "dash", "label": "Dash", "actor_id": current, "expected_version": version},
@@ -349,12 +358,23 @@ class Dnd2024CombatEngine(
         spells = self._available_spells(
             instance, actor, economy, hit_spell_decision(combat, current),
         )
-        if spells:
-            actions.append({
+        # 当前标记与"能不能转移"由服务端给出：客户端不该自己从专注里推断
+        # "这个目标归零了没有"。这条入口不能跟着 ``spells`` 一起消失：免费
+        # 次数与法术位都花光之后，转移标记仍是一次合法提交，而过去只有在
+        # 还有法术可放时才投影这一行（S0-F18 §4.1.7）。
+        mark = self._hunters_mark_state(instance, combat, actor)
+        if spells or bool(mark and mark.get("can_retarget")):
+            entry: dict[str, Any] = {
                 "type": "cast_spell", "label": "Cast a spell", "actor_id": current,
                 "expected_version": version, "spells": spells,
                 "targets": self._all_targets(instance, combat),
-            })
+            }
+            if mark is not None:
+                entry["hunters_mark"] = mark
+            senses = sense_declarations(self, actor)
+            if senses:
+                entry["senses"] = senses
+            actions.append(entry)
         items = self._available_item_activations(instance, combat, actor, economy)
         if items:
             actions.append({
@@ -401,6 +421,133 @@ class Dnd2024CombatEngine(
                 "type": "combat.end", "label": "End combat", "expected_version": version,
             })
         return [*communication, *actions]
+
+    def _hunters_mark_state(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """The current mark this actor owns, as the server sees it.
+
+        ``can_retarget`` is only "the creature it names is down": the range,
+        the visibility and the Bonus Action are re-proved at the intent
+        boundary, so a stale panel can never talk its way into a move.
+        """
+
+        mark = owned_mark(actor)
+        if not mark:
+            return None
+        target_id = str(mark.get("mark_target_id") or "")
+        target = self._actor_view(instance, combat, target_id) if target_id else {}
+        effect = self.catalog.spell_effects.get(
+            HUNTERS_MARK_REF.removeprefix("spell:")
+        ) or {}
+        formula = str(effect.get("mark_damage") or "")
+        sides = formula.rsplit("d", 1)[-1] if "d" in formula else ""
+        upgrade = int(self.features.feature_value(
+            self._feature_character(actor), "foe_slayer", "mark_damage_die", 0,
+        ) or 0)
+        return {
+            "spell_ref": str(mark.get("spell_ref") or ""),
+            "target_id": target_id,
+            "target_hp": int(target.get("hp", 0) or 0),
+            "damage_die": f"1d{upgrade or sides}",
+            "expires_hours": mark.get("mark_expires_hours"),
+            "can_retarget": bool(target_id) and int(target.get("hp", 0) or 0) <= 0,
+        }
+
+    def hunters_mark_find_advantage(
+        self, instance: Any, actor_id: str, skill_id: str, target_id: str,
+    ) -> list[dict[str, Any]]:
+        """Advantage sources for a Wisdom check made to find a creature.
+
+        The combat engine does not roll skill checks, so this is the authority
+        an exploration-side check consumes: it answers with the same sourced
+        list the attack matrix uses, which keeps "who is my quarry" in exactly
+        one place instead of letting each caller re-read concentration.
+        """
+
+        state = self.initialize_state(instance)
+        combat = state["combat"]
+        actor = self._actor_view(instance, combat, f"player:{actor_id}")
+        return mark_find_sources(self, actor, skill_id, target_id)
+
+    def _attack_state_options(
+        self, actor: dict[str, Any], combat: dict[str, Any],
+    ) -> dict[str, Any]:
+        """What this actor may declare before an attack roll, per the server.
+
+        The client echoes these keys back as intent fields; the same facts are
+        re-derived in validation, so a stale panel cannot submit a declaration
+        the character no longer qualifies for.  Absent keys mean "this actor
+        owns no such feature at all", which is why a plain Fighter's attack row
+        carries neither.
+        """
+
+        if actor["kind"] not in {"player", "companion"}:
+            return {}
+        character = self._feature_character(actor)
+        actor_id = str(actor["actor_id"])
+        options: dict[str, Any] = {}
+
+        def parameter(feature_id: str, key: str) -> Any:
+            return self.features.feature_value(character, feature_id, key, None)
+
+        condition = str(parameter("reckless_attack", "self_condition") or "")
+        if condition:
+            record = (combat.get("attack_rolls") or {}).get(actor_id)
+            same_turn = (
+                isinstance(record, dict)
+                and int(record.get("round", -1)) == int(combat.get("round", 0))
+                and int(record.get("turn_index", -1)) == int(combat.get("turn_index", 0))
+            )
+            options["reckless_attack"] = {
+                "available": (
+                    condition not in (actor.get("conditions") or {})
+                    and not same_turn
+                ),
+                "condition": condition,
+                "ability": str(parameter("reckless_attack", "ability") or ""),
+            }
+
+        if self.features.has_feature(character, "brutal_strike"):
+            allowed = [str(value) for value in parameter(
+                "brutal_strike", "effect_options",
+            ) or []]
+            if self.features.has_feature(character, "improved_brutal_strike"):
+                allowed.extend(
+                    str(value) for value in parameter(
+                        "improved_brutal_strike", "additional_effect_options",
+                    ) or []
+                )
+            class_state = self.features.class_state(character)
+            level = int(class_state[1]) if class_state else 0
+            cap = int(parameter("brutal_strike", "effects_per_use") or 0)
+            if level >= int(parameter("brutal_strike", "upgrade_level") or 0):
+                cap = int(
+                    parameter("brutal_strike", "effects_per_use_upgrade") or cap
+                )
+            used = self._feature_used_this_turn(combat, actor_id, "brutal_strike")
+            reckless_ready = bool(
+                str(parameter("reckless_attack", "self_condition") or "")
+                in (actor.get("conditions") or {})
+                or (options.get("reckless_attack") or {}).get("available")
+            )
+            options["brutal_strike"] = {
+                "available": bool(allowed and cap and reckless_ready and not used),
+                "effects": allowed,
+                "count": cap,
+            }
+
+        mark_kind = str(parameter("studied_attacks", "mark_kind") or "")
+        if mark_kind:
+            marks = (
+                ((combat.get("attack_marks") or {}).get(mark_kind) or {})
+                .get(actor_id) or {}
+            )
+            options["studied_attacks"] = {
+                "mark_kind": mark_kind,
+                "targets": sorted(str(key) for key in marks),
+            }
+        return options
 
     def _available_item_activations(
         self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
@@ -1358,6 +1505,11 @@ class Dnd2024CombatEngine(
     ) -> list[dict[str, Any]]:
         if not target.get("concentration") or damage <= 0:
             return []
+        if self._relentless_hunter_holds(target):
+            # 破坏专注的豁免根本没发生：不掷骰、不留"豁免失败"的假记录。
+            # 也不能改发一条 message——``_concentration_with_dool`` 把首事件
+            # 不带 ``success`` 当成失败，会为一次不需要的豁免开窗口。
+            return []
         dc = max(10, damage // 2)
         roll = int(rng.randint(1, 20))
         modifier = int(target["saving_throws"].get("con", 0) or 0)
@@ -1385,6 +1537,28 @@ class Dnd2024CombatEngine(
                 "reason": "failed_concentration_save",
             })
         return events
+
+    def _relentless_hunter_holds(self, target: dict[str, Any]) -> bool:
+        """Whether this creature's current Concentration is exempt from damage.
+
+        Both halves have to hold.  Reading only the feature would make every
+        concentration spell immune, and reading only the spell would hand the
+        exemption to every Ranger who never took the feature.  The spell is
+        named by the declaration, so the pairing is content, not a constant
+        buried here.
+        """
+
+        concentration = target.get("concentration")
+        if not isinstance(concentration, dict):
+            return False
+        spell_ref = str(concentration.get("spell_ref") or "")
+        if not spell_ref:
+            return False
+        declared = str(self.features.feature_value(
+            self._feature_character(target),
+            "relentless_hunter", "concentration_damage_exempt_spell_id", "",
+        ) or "")
+        return bool(declared) and spell_ref == f"spell:{declared}"
 
     @staticmethod
     def _position(combat: dict[str, Any], actor_id: str) -> int:
@@ -1758,10 +1932,43 @@ class Dnd2024CombatEngine(
             ]:
                 conditions.pop(condition_id, None)
 
+    def _expire_attack_marks(
+        self, combat: dict[str, Any], actor_id: str,
+    ) -> None:
+        """Age the accepting actor's own attack marks at the start of their turn.
+
+        Studied Attacks lasts "before the end of your next turn", which is one
+        turn longer than a turn-start expiry: the mark must survive the whole
+        of the attacker's next turn.  A ``turns_remaining`` counter therefore
+        counts *turn starts still to come* -- created at 1, it drops to 0 as
+        that turn begins (and stays usable), and is removed when the following
+        turn begins.
+        """
+
+        marks = combat.get("attack_marks")
+        if not isinstance(marks, dict):
+            return
+        for per_kind in marks.values():
+            if not isinstance(per_kind, dict):
+                continue
+            per_actor = per_kind.get(str(actor_id))
+            if not isinstance(per_actor, dict):
+                continue
+            for target_id in list(per_actor):
+                row = per_actor[target_id]
+                remaining = int(row.get("turns_remaining", 0) or 0) if isinstance(
+                    row, dict
+                ) else 0
+                if remaining > 0:
+                    row["turns_remaining"] = remaining - 1
+                else:
+                    per_actor.pop(target_id, None)
+
     def _expire_conditions(
         self, snapshot: dict[str, Any], combat: dict[str, Any], actor_id: str,
         previous_actor_id: str,
     ) -> None:
+        self._expire_attack_marks(combat, actor_id)
         conditions = self._conditions(snapshot, combat, actor_id)
         for condition_id in [
             key for key, value in conditions.items()

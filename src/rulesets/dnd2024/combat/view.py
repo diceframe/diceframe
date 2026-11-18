@@ -16,6 +16,7 @@ from src.rulesets.dnd2024.features.resources import (
 )
 from src.rulesets.dnd2024.spells.casting import spell_caster, spellcasting_projection
 
+from .check_modes import sense_declarations
 from .check_windows import LUCKY_RESOURCE
 from .primitives import (
     FEATURE_STATE_KEYS,
@@ -163,7 +164,7 @@ class CombatViewMixin:
         # 固定环阶、recharge、剩余次数与所选法术，结算时按 (slot, level)
         # 匹配一个来源。
         free_cast_slots = casting["free_cast_slots"]
-        return {
+        view: dict[str, Any] = {
             "actor_id": _player_actor(uid), "kind": "player", "id": uid, "side": "party",
             "hp": int(resources.get("hp", 0) or 0),
             "max_hp": int(resources.get("max_hp", 0) or 0),
@@ -238,6 +239,11 @@ class CombatViewMixin:
             ),
             "ranged_attack_bonus": int(feature_projection["ranged_attack_bonus"]),
         }
+        # S0-F18 §4.2.4：感官是角色自己的属性，必须在 actor view 里。挂在
+        # cast_spell 那一行会让"法术用尽 / 不在自己回合"时整条感官消失，
+        # 而 Blindsight 30 与能否施法无关。
+        view["senses"] = sense_declarations(self, view)
+        return view
 
     @staticmethod
     def _spell_caster(actor: dict[str, Any], spell_ref: str) -> dict[str, Any]:

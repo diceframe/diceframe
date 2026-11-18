@@ -53,7 +53,8 @@ class CombatReactionSpellsMixin:
     __slots__ = ()
 
     def _reaction_eligible(
-        self, combat: dict[str, Any], actor: dict[str, Any],
+        self, combat: dict[str, Any], actor: dict[str, Any], *,
+        opportunity: bool = False,
     ) -> bool:
         """Whether ``actor`` may spend a reaction right now.
 
@@ -61,6 +62,13 @@ class CombatReactionSpellsMixin:
         and opportunity attacks so every reaction path enforces the same
         HP / reaction-budget / incapacitated / reaction-blocked boundary at
         both window creation and final resolution.
+
+        ``opportunity`` narrows the stop list to "no Opportunity Attacks".
+        Two rules say exactly that -- Staggering Blow and Shocking Grasp -- and
+        they do not take Shield or Counterspell away from the target.  Using
+        one condition for both strengths made those two features stronger than
+        the sentence they came from (S0-F15 §4.3.3), so the narrow block has
+        its own code and only the opportunity-attack path reads it.
         """
 
         if int(actor.get("hp", 0) or 0) <= 0:
@@ -69,6 +77,8 @@ class CombatReactionSpellsMixin:
             return False
         conditions = actor.get("conditions") or {}
         if "reaction_blocked" in conditions:
+            return False
+        if opportunity and "opportunity_attack_blocked" in conditions:
             return False
         if condition_flags(self.catalog.conditions, conditions)["incapacitated"]:
             return False
