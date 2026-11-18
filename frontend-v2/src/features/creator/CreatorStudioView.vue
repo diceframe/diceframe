@@ -30,6 +30,8 @@ const stageLabels = computed(() => ({
 // Files panel
 const filesOpen = ref(false)
 const viewMode = ref<'chat' | 'edit'>('chat')
+// 最大化由 studio 自己持有（此前写死 false + 空回调，按钮完全无效）
+const assistantExpanded = ref(false)
 
 const projectKind = computed<string>(() => {
   if (!project.value?.files) return 'adventure'
@@ -264,7 +266,7 @@ watch(projectId, load)
     <div v-if="loading" class="studio-loading muted">{{ t('modulesLoading') }}</div>
 
     <!-- Main area -->
-    <div v-else-if="project" :class="['studio-body', `mode-${viewMode}`]">
+    <div v-else-if="project" :class="['studio-body', `mode-${viewMode}`, { 'assistant-max': assistantExpanded }]">
       <!-- AI chat -->
       <div class="studio-chat">
         <CreatorAssistantPanel
@@ -272,10 +274,10 @@ watch(projectId, load)
           :project-name="project.name"
           :project-revision="project.revision"
           :project-kind="projectKind"
-          :expanded="false"
+          :expanded="assistantExpanded"
           :wide="viewMode === 'edit' && filesOpen"
           @close="router.push({ name: 'creator' })"
-          @toggle-expanded="() => {}"
+          @toggle-expanded="assistantExpanded = !assistantExpanded"
           @files-changed="reloadProject"
         />
       </div>
@@ -382,6 +384,10 @@ watch(projectId, load)
 .studio-body.mode-chat { grid-template-columns: 1fr 260px; }
 .studio-body.mode-edit { grid-template-columns: 1fr; }
 .studio-body.mode-edit:has(.studio-files) { grid-template-columns: 1fr 320px; }
+/* 最大化对话：收起总览/文件栏，对话占满整行 */
+.studio-body.assistant-max { grid-template-columns: 1fr !important; }
+.studio-body.assistant-max .studio-overview,
+.studio-body.assistant-max .studio-files { display: none; }
 
 /* Chat — full height; the assistant panel manages its own scrolling */
 .studio-chat { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
