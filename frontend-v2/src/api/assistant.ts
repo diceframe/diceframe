@@ -12,6 +12,7 @@ export type AssistantContext = {
   world_id?: string
   adventure_id?: string
   book_id?: string
+  project_id?: string
 }
 
 export type AgentEventName = 'session' | 'status' | 'tool_start' | 'tool_result' | 'draft' | 'approval' | 'navigate' | 'authorization' | 'task'
