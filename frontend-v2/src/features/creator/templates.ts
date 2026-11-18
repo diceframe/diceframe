@@ -74,6 +74,24 @@ export function templateSource(id: CreatorTemplateId, name: string): Record<stri
           transitions: [],
         }],
       }, null, 2),
+      // 包内实体样例：实体必须带 schema_version/kind/id/source_ref/automation_level，
+      // 且声明的 locale 需要真实目录与至少一个合法覆盖文件（文件型存储表达不了
+      // 空目录）。没有这两样，官方脚手架直接「构建 .dfplugin」会 fail-closed。
+      [`${adventureRoot}/content/npcs/guide.json`]: JSON.stringify({
+        schema_version: 1,
+        kind: 'npc',
+        id: 'guide',
+        source_ref: `creator:${slug}`,
+        automation_level: 'guided',
+        name: '向导',
+        summary: '示例 NPC：替换成你的角色，或删除后在同目录添加更多。',
+      }, null, 2),
+      [`${adventureRoot}/locales/zh-CN/guide.json`]: JSON.stringify({
+        locale_schema_version: 1,
+        locale: 'zh-CN',
+        target: { kind: 'npc', id: 'guide' },
+        fields: { name: '向导', summary: '示例 NPC 的中文覆盖。' },
+      }, null, 2),
       'README.md': readme(name, [
         '这是一个符合当前 DiceFrame 冒险目录契约的内容包工程。',
         '',

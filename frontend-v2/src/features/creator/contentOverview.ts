@@ -33,8 +33,9 @@ export function computeContentOverview(
           npcs += nodes.filter(n => n.type === 'npc').length
         } catch { /* skip */ }
       }
-      // NPC 可以作为独立内容文件存在（agent 生成的主形态），不只是节点。
-      if (/^content\/npcs\/[^/]+\.json$/.test(p)) npcs += 1
+      // NPC 可以作为独立实体文件存在（工程根或冒险包内的 content/npcs/），
+      // 不只是 adventure.json 节点。
+      if (/(^|\/)content\/npcs\/[^/]+\.json$/.test(p)) npcs += 1
     }
     const hasMap = Object.keys(files).some(p => p.includes('map'))
     return {

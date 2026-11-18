@@ -38,13 +38,14 @@ describe('creator content overview', () => {
   it('counts standalone content/npcs files as NPCs', () => {
     const files = adventureFiles({
       'content/npcs/mara.json': '{}',
-      'content/npcs/mayor.json': '{}',
-      'content/npcs/guardian.json': '{}',
+      'adventures/pack-1/content/npcs/mayor.json': '{}',
+      'adventures/pack-1/content/npcs/guardian.json': '{}',
       'content/items/lantern.json': '{}',
       'docs/npcs-notes.md': 'not a npc file',
     })
     const overview = computeContentOverview(files, 'adventure', true)
     const stat = (label: string) => overview!.stats.find(s => s.label === label)!.value
+    // 工程根与冒险包内的 content/npcs/ 都计入
     expect(stat('NPC')).toBe(3)
     // 有 NPC 后不再提示「还没有 NPC」
     expect(overview!.hints).not.toContain('还没有 NPC，试试说"加两个 NPC"')
