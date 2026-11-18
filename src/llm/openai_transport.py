@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 from src.llm.generation_options import validate_generation_options
+from src.llm.tool_usage import observed_post
 
 logger = logging.getLogger("trpg")
 
@@ -55,7 +56,7 @@ class OpenAIChatTransport:
                 body.pop("temperature", None)
             if capabilities.reasoning_effort_unsupported:
                 body.pop("reasoning_effort", None)
-            async with session.post(url, json=body, **kwargs) as response:
+            async with observed_post(session, url, json=body, negotiation_retry=attempt > 0, **kwargs) as response:
                 if response.status == 400 and attempt < 2:
                     if self._learn(capabilities, body, await response.text(), frozenset(self._generation_options)):
                         continue

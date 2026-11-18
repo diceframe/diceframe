@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import inspect
 import json
+import logging
 import math
 import re
 import time
@@ -26,6 +27,7 @@ from src.runtime_diagnostics import redact_runtime_log_text
 from src.webui.services.assistant_authorization import current_authorization, make_authorization, permits
 from src.webui.services.assistant_action_plans import prepare_action, signed_plan, stored_assessment
 
+usage_logger = logging.getLogger('trpg.llm_usage')
 
 
 def _digest(value: Any) -> str:
@@ -139,7 +141,8 @@ def _bounded_observation(result: Any, *, limit: int = 12000) -> str:
 def safe_data(value: Any) -> Any:
     """Exclude credential fields from observations, task cards and receipts."""
     public_budget_fields = {'max_tokens', 'total_tokens', 'input_tokens', 'output_tokens',
-                            'used_tokens', 'token_budget',
+                            'used_tokens', 'token_budget', 'known_input_tokens',
+                            'known_output_tokens', 'known_reasoning_tokens',
                             'narrative_max_tokens', 'character_gen_max_tokens', 'summary_max_tokens',
                             'brief_max_tokens', 'analysis_max_tokens', 'text_gen_max_tokens',
                             'assistant_agent_max_tokens', 'assistant_agent_task_max_tokens'}
@@ -430,6 +433,8 @@ class AgentRuntime:
                 return
             session.data.update(status="running", updated_at=self.deps.clock())
             session.data['task'] = {'status': 'running', 'completed_steps': 0}
+            run_id = uuid.uuid4().hex
+            creator_reads: dict[tuple[str, int, str], int] = {}
             self._write(session)
             try:
                 if self.deps.configuration_error(language) or self.deps.llm_client() is None:
@@ -621,6 +626,20 @@ class AgentRuntime:
                         else:
                             await emit("tool_result", {"tool": tool.name, "result": result})
                             observation = _bounded_observation(result)
+                            if (tool.name == 'creator_project_read' and isinstance(result, dict)
+                                    and usage_logger.isEnabledFor(logging.INFO)):
+                                project = result.get('project')
+                                if isinstance(project, dict) and project.get('id') and type(project.get('revision')) is int:
+                                    # Opaque fingerprint, not a title, file path, content or user id.
+                                    key = (_digest(project['id']), project['revision'],
+                                           _digest(project.get('digest')))
+                                    creator_reads[key] = creator_reads.get(key, 0) + 1
+                                    usage_logger.info('creator_snapshot_read %s', json.dumps({
+                                        'run_id': run_id, 'project_id_hash': key[0], 'revision': key[1],
+                                        'digest_hash': key[2], 'snapshot_reads': creator_reads[key],
+                                        'ui_chars': len(json.dumps(result, ensure_ascii=False)),
+                                        'observation_chars': len(observation),
+                                    }))
                         if isinstance(result, dict) and isinstance(result.get("sources"), list):
                             sources = [source for source in result["sources"] if isinstance(source, dict)
                                        and isinstance(source.get("source"), str) and isinstance(source.get("heading"), str)]
@@ -660,27 +679,30 @@ class AgentRuntime:
                 try:
                     grant = current_authorization(session.data, self.deps.clock())
                     budget = min(64, max(self.MAX_STEPS, (grant or {}).get('max_steps', self.MAX_STEPS)))
-                    # UI 口径 = 用户设置的任务总预算；used_tokens 跨段累计，
-                    # 绝不因自动续段归零（补充设计 §2/§6）。
                     session.data['task'].update(
-                        used_tokens=0,
-                        provider_requests=0,
-                        token_budget=self.deps.task_max_tokens,
+                        used_tokens=0, provider_requests=0, token_budget=self.deps.task_max_tokens,
+                        usage_complete=True, unknown_usage_requests=0,
+                        known_input_tokens=0, known_output_tokens=0, known_reasoning_tokens=0,
                     )
                     async def checked_emit(event, value):
+                        if event == 'usage':
+                            task = session.data['task']
+                            task['used_tokens'] += value['total_tokens']
+                            task['provider_requests'] += int(value.get('attempted_requests', 1))
+                            task['unknown_usage_requests'] += value.get('unknown_usage_requests', 0)
+                            task['usage_complete'] = task['unknown_usage_requests'] == 0
+                            for key in ('known_input_tokens', 'known_output_tokens', 'known_reasoning_tokens'):
+                                task[key] += value.get(key, 0)
                         if session.stop.is_set() and session.data['status'] != 'executing':
                             raise asyncio.CancelledError()
                         if event == 'usage':
-                            session.data['task']['used_tokens'] += value['total_tokens']
-                            session.data['task']['provider_requests'] += \
-                                int(value.get('attempted_requests', 1) or 1)
                             await progress()
                         else:
                             await emit(event, value)
                     session.model_task = asyncio.create_task(execute_agent(self.deps.llm_client(),
                         [adapt(tool) for tool in (*self.registry.values(), *discovery)],
                         system, payload, checked_emit, language, self.deps.max_tokens, budget,
-                        task_max_tokens=self.deps.task_max_tokens))
+                        task_max_tokens=self.deps.task_max_tokens, run_id=run_id))
                     output = await session.model_task
                 except asyncio.CancelledError:
                     if not session.stop.is_set():

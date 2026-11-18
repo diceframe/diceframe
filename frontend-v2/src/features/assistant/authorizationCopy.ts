@@ -17,6 +17,7 @@ export function assistantAuthorizationCopy(locale: string) {
     currentUnavailable: zh ? '当前页面没有有效资源 ID；请明确选择“全部我的内容”。' : 'No valid page resource ID; choose All my content explicitly.',
     all: zh ? '全部我的内容' : 'All my content',
     steps: zh ? '步骤上限' : 'Step budget',
+    usageUnknown: zh ? '部分用量未知' : 'some usage unknown',
     active: zh ? '已授权' : 'Authorized',
     mode: (value: string) => ({ suggest: zh ? '建议' : 'Suggest', routine: zh ? '自动处理日常' : 'Routine', task: zh ? '本次任务' : 'This task' }[value] || value),
     taskStatus: (value: string) => ({ pending: zh ? '等待中' : 'Pending', running: zh ? '执行中' : 'Running', completed: zh ? '已完成' : 'Completed', cancelled: zh ? '已取消' : 'Cancelled', failed: zh ? '失败' : 'Failed', partial: zh ? '部分完成' : 'Partially completed', paused: zh ? '已暂停' : 'Paused', approval_required: zh ? '等待授权' : 'Approval required', recovery_required: zh ? '结果待核实' : 'Outcome uncertain', interrupted: zh ? '已中断' : 'Interrupted', budget_reached: zh ? '已达到预算' : 'Budget reached' }[value] || value),

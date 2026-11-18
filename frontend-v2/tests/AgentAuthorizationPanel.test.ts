@@ -110,6 +110,14 @@ describe('AgentAuthorizationPanel', () => {
     expect(wrapper.text()).toContain('120/1000 tokens')
   })
 
+  it.each([[0, '—'], [120, '≥120']])('marks incomplete token totals (%s)', async (used_tokens, label) => {
+    const wrapper = mount(AgentAuthorizationPanel, { props: { locale: 'en', task: {
+      status: 'running', completed_steps: 0, used_tokens, token_budget: 1000, usage_complete: false,
+    } } })
+    await wrapper.get('[data-testid="agent-authorization"] > button').trigger('click')
+    expect(wrapper.text()).toContain(`${label}/1000 tokens (some usage unknown)`)
+  })
+
   it('uses live domains, appends paged results without duplicates, and resets offset on search', async () => {
     capabilities
       .mockResolvedValueOnce({ ok: true, revision: 'r1', domains: [{ domain: 'new-module', count: 3 }], offset: 0, has_more: true, capabilities: [{ name: 'one', label: 'One', domain: 'new-module', version: 1, effect: 'read', automatic: true, description: 'one' }] })

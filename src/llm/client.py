@@ -11,8 +11,9 @@ from typing import Any
 
 import aiohttp
 
-from src.llm.openai_transport import OpenAIChatTransport
 from src.llm.generation_options import apply_anthropic_options, validate_generation_options
+from src.llm.openai_transport import OpenAIChatTransport
+from src.llm.tool_usage import ToolUsageLedger, collect_tool_usage, observed_post
 
 logger = logging.getLogger("trpg")
 
@@ -142,9 +143,9 @@ class LLMResponse:
 class LLMToolResponse:
     """一次工具规划调用的结构化结果。
 
-    ``total_tokens`` 是本次调用全部计费尝试的聚合用量（含原生 → 回退 →
-    截断重试），``attempted_requests`` 是发出的真实请求次数——两者由
-    ``LLMClient.call_tools`` 聚合，供任务账本做准确成本核算。
+    ``total_tokens`` 累加本次调用中服务商已报告的用量，``attempted_requests``
+    统计传输层 HTTP 尝试（包括协商重试）。``usage`` 同时标记缺报次数与
+    可用分项；已知用量不等同于最终账单。
     """
 
     tool_calls: list[dict[str, Any]]
@@ -153,14 +154,16 @@ class LLMToolResponse:
     native_tools: bool = True
     content: str = ""
     attempted_requests: int = 0
+    usage: dict[str, Any] | None = None
 
 
 class LLMToolCallError(RuntimeError):
     """Provider failure with HTTP facts preserved for application feedback."""
 
-    def __init__(self, message: str, status_codes: frozenset[int]):
+    def __init__(self, message: str, status_codes: frozenset[int], *, usage: dict[str, Any] | None = None):
         super().__init__(message)
         self.status_codes = status_codes
+        self.usage = usage
 
 
 class LLMClient:
@@ -209,6 +212,25 @@ class LLMClient:
             self._session = None
 
     async def call_tools(
+        self, system_prompt: str, user_message: str, *, tools: list[dict[str, Any]],
+        max_tokens: int = 4096, temperature: float = 0.1, force_tool_choice: bool = True,
+    ) -> LLMToolResponse:
+        # The HTTP boundary owns accounting, before parsing can discard a paid
+        # response. Success and failure carry the same task-local ledger.
+        with collect_tool_usage() as ledger:
+            try:
+                result = await self._call_tools_with_usage(system_prompt, user_message,
+                    tools=tools, max_tokens=max_tokens, temperature=temperature,
+                    force_tool_choice=force_tool_choice, ledger=ledger)
+            except LLMToolCallError as exc:
+                exc.usage = ledger.summary()
+                raise
+            result.usage = ledger.summary()
+            result.total_tokens = result.usage['total_tokens']
+            result.attempted_requests = result.usage['attempted_requests']
+            return result
+
+    async def _call_tools_with_usage(
         self,
         system_prompt: str,
         user_message: str,
@@ -217,6 +239,7 @@ class LLMClient:
         max_tokens: int = 4096,
         temperature: float = 0.1,
         force_tool_choice: bool = True,
+        ledger: ToolUsageLedger,
     ) -> LLMToolResponse:
         """调用模型工具；不支持原生 tools 的供应商自动回退严格 JSON。
 
@@ -235,16 +258,22 @@ class LLMClient:
         ]
         errors: list[str] = []
         status_codes: set[int] = set()
-        # 账本聚合：一次 call_tools 可能触发多次真实计费请求（原生 → auto 重试
-        # → JSON 回退 → 截断放大重试）。每个携带 usage 的响应都累加进池，
-        # 最终 LLMToolResponse.total_tokens 是整次调用的真实总消耗，而不是
-        # 最后一次成功响应的片段（review 第二轮 P1-4）。
-        usage_pool = 0
-        attempts = 0
+
+        def record_failure(exc: Exception) -> str:
+            # Provider errors may echo submitted headers, prompt text or tool
+            # arguments. Keep raw details only for internal negotiation.
+            reason = type(exc).__name__
+            if isinstance(exc, aiohttp.ClientResponseError):
+                status_codes.add(exc.status)
+                reason = f'HTTP {exc.status}'
+            errors.append(f'{ledger.provider} ({ledger.stage}): {reason}')
+            return reason
+
         for provider in ordered:
+            ledger.provider, ledger.model = provider.provider_name, provider.model_name
+            ledger.stage = 'native'
             forced = force_tool_choice and provider.provider_name not in self._native_tool_unsupported
             if not force_tool_choice or forced or provider.provider_name in self._native_tool_auto:
-                attempts += 1
                 try:
                     native_result = await self._call_tools_one(
                         provider,
@@ -255,26 +284,14 @@ class LLMClient:
                         max_tokens,
                         force_tool_choice=forced,
                     )
-                    usage_pool += native_result.total_tokens
                     if force_tool_choice and not native_result.tool_calls:
                         raise ValueError("供应商未返回必需的工具调用")
-                    native_result.total_tokens = usage_pool
-                    native_result.attempted_requests = attempts
                     return native_result
                 except Exception as exc:
-                    if isinstance(exc, aiohttp.ClientResponseError):
-                        status_codes.add(exc.status)
-                    errors.append(f"{provider.provider_name}: {exc}")
-                    try:
-                        usage_pool += native_result.total_tokens
-                    except UnboundLocalError:
-                        pass
-                    if isinstance(exc, aiohttp.ClientResponseError):
-                        status_codes.add(exc.status)
-                    errors.append(f"{provider.provider_name}: {exc}")
+                    reason = record_failure(exc)
                     if forced and "does not support this tool_choice" in str(exc):
                         self._native_tool_unsupported.add(provider.provider_name)
-                        attempts += 1
+                        ledger.stage = 'native_auto'
                         try:
                             result = await self._call_tools_one(
                                 provider,
@@ -285,18 +302,13 @@ class LLMClient:
                                 max_tokens,
                                 force_tool_choice=False,
                             )
-                            usage_pool += result.total_tokens
                             if not result.tool_calls:
                                 raise ValueError("供应商未返回必需的工具调用")
                             self._native_tool_auto.add(provider.provider_name)
-                            result.total_tokens = usage_pool
-                            result.attempted_requests = attempts
                             return result
                         except Exception as auto_exc:
-                            if isinstance(auto_exc, aiohttp.ClientResponseError):
-                                status_codes.add(auto_exc.status)
-                            errors.append(f"{provider.provider_name} (tool_choice=auto): {auto_exc}")
-                    logger.warning("模型原生工具调用失败，尝试 JSON 回退 (%s): %s", provider.provider_name, exc)
+                            reason = record_failure(auto_exc)
+                    logger.warning("模型原生工具调用失败，尝试 JSON 回退 (%s): %s", provider.provider_name, reason)
             try:
                 tool_names = [
                     str(tool.get("function", {}).get("name") or "tool")
@@ -323,7 +335,7 @@ class LLMClient:
                 budgets = length_retry_budgets(max_tokens)
                 response = None
                 for attempt, budget in enumerate(budgets, 1):
-                    attempts += 1
+                    ledger.stage = 'json_fallback' if attempt == 1 else 'json_truncation_retry'
                     try:
                         response = await self._call_one(
                             provider,
@@ -333,7 +345,6 @@ class LLMClient:
                             budget,
                             True,
                         )
-                        usage_pool += response.total_tokens
                         break
                     except OutputTruncatedError:
                         if attempt >= len(budgets):
@@ -350,16 +361,13 @@ class LLMClient:
                     raise ValueError("模型未返回必需的工具调用")
                 return LLMToolResponse(
                     tool_calls=calls,
-                    total_tokens=usage_pool,
+                    total_tokens=0,  # Filled from the HTTP ledger at the public boundary.
                     provider_used=provider.provider_name,
                     native_tools=False,
-                    attempted_requests=attempts,
                 )
             except Exception as exc:
-                if isinstance(exc, aiohttp.ClientResponseError):
-                    status_codes.add(exc.status)
-                errors.append(f"{provider.provider_name} JSON fallback: {exc}")
-                logger.warning("模型 JSON 工具回退失败 (%s): %s", provider.provider_name, exc)
+                reason = record_failure(exc)
+                logger.warning("模型 JSON 工具回退失败 (%s): %s", provider.provider_name, reason)
         raise LLMToolCallError("所有模型工具调用均失败: " + "; ".join(errors), frozenset(status_codes))
 
     async def _call_tools_one(
@@ -437,7 +445,10 @@ class LLMClient:
                     headers=resp.headers,
                 )
             data = await resp.json()
-        message = data.get("choices", [{}])[0].get("message", {})
+        choice = data.get("choices", [{}])[0]
+        if choice.get("finish_reason") == "length":
+            raise OutputTruncatedError("length")
+        message = choice.get("message", {})
         calls = _normalize_openai_tool_calls(message.get("tool_calls") or [])
         content = _openai_text_content(message.get("content"))
         if not calls and content:
@@ -446,14 +457,14 @@ class LLMClient:
                 if explicit_calls is not None:
                     return LLMToolResponse(
                         tool_calls=explicit_calls,
-                        total_tokens=int(data.get("usage", {}).get("total_tokens", 0) or 0),
+                        total_tokens=0,
                         provider_used=provider.provider_name,
                         native_tools=True,
                         content=content,
                     )
                 return LLMToolResponse(
                     tool_calls=[],
-                    total_tokens=int(data.get("usage", {}).get("total_tokens", 0) or 0),
+                    total_tokens=0,
                     provider_used=provider.provider_name,
                     native_tools=True,
                     content=content,
@@ -463,7 +474,7 @@ class LLMClient:
             raise ValueError("供应商未返回强制工具调用")
         return LLMToolResponse(
             tool_calls=calls,
-            total_tokens=int(data.get("usage", {}).get("total_tokens", 0) or 0),
+            total_tokens=0,
             provider_used=provider.provider_name,
             native_tools=True,
             content=content,
@@ -509,7 +520,7 @@ class LLMClient:
             body["tool_choice"] = {"type": "auto"}
         session = await self._get_session()
         request_kwargs = {"proxy": self.proxy_url} if self.proxy_url else {}
-        async with session.post(
+        async with observed_post(session,
             _anthropic_messages_url(provider.base_url),
             json=self._anthropic_body(body),
             headers=headers,
@@ -526,6 +537,8 @@ class LLMClient:
                     headers=resp.headers,
                 )
             data = await resp.json()
+        if data.get("stop_reason") == "max_tokens":
+            raise OutputTruncatedError("max_tokens")
         calls = [
             {"name": str(block.get("name") or ""), "arguments": block.get("input") or {}}
             for block in data.get("content", [])
@@ -535,19 +548,14 @@ class LLMClient:
         if not calls and content and not force_tool_choice:
             return LLMToolResponse(
                 tool_calls=[],
-                total_tokens=(
-                    int(data.get("usage", {}).get("input_tokens", 0) or 0)
-                    + int(data.get("usage", {}).get("output_tokens", 0) or 0)
-                ),
+                total_tokens=0,
                 provider_used=provider.provider_name,
                 native_tools=True,
                 content=content,
             )
         if not calls:
             raise ValueError("供应商未返回强制工具调用")
-        usage = data.get("usage", {})
-        total_tokens = int(usage.get("input_tokens", 0) or 0) + int(usage.get("output_tokens", 0) or 0)
-        return LLMToolResponse(calls, total_tokens, provider.provider_name, True, content)
+        return LLMToolResponse(calls, 0, provider.provider_name, True, content)
 
     async def call(
         self,
@@ -830,7 +838,7 @@ class LLMClient:
 
         session = await self._get_session()
         request_kwargs = {"proxy": self.proxy_url} if self.proxy_url else {}
-        async with session.post(url, json=self._anthropic_body(body), headers=headers,
+        async with observed_post(session, url, json=self._anthropic_body(body), headers=headers,
                                 timeout=self.request_timeout,
                                 **request_kwargs) as resp:
             if resp.status != 200:

@@ -31,6 +31,7 @@ export interface AgentTask {
   total_steps?: number
   used_tokens?: number
   token_budget?: number
+  usage_complete?: boolean
   budget_reason?: 'tokens' | 'steps'
   error?: string
 }

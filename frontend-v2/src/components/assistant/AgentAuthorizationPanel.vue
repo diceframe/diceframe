@@ -58,11 +58,15 @@ function toggleAuthorization() {
 }
 const progress = computed(() => {
   if (!props.task) return ''
-  const total = props.task.total_steps ? `/${props.task.total_steps}` : ''
-  const tokens = typeof props.task.used_tokens === 'number' && typeof props.task.token_budget === 'number'
-    ? ` · ${props.task.used_tokens}/${props.task.token_budget} tokens`
-    : ''
-  return `${props.task.completed_steps}${total}${tokens}`
+  const { total_steps, completed_steps, used_tokens, token_budget, usage_complete } = props.task
+  const total = total_steps ? `/${total_steps}` : ''
+  let tokens = ''
+  if (typeof used_tokens === 'number' && typeof token_budget === 'number') {
+    const reported = usage_complete === false ? (used_tokens > 0 ? `≥${used_tokens}` : '—') : used_tokens
+    tokens = ` · ${reported}/${token_budget} tokens`
+    if (usage_complete === false) tokens += ` (${copy.value.usageUnknown})`
+  }
+  return `${completed_steps}${total}${tokens}`
 })
 async function choose(mode: AgentAuthorizationMode) {
   if (props.disabled || props.busy) return
