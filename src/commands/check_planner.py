@@ -316,7 +316,7 @@ def normalize_check_specs(
     rule: RuleSystem | None,
     raw_checks: list[Any],
 ) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], list[str]]:
-    """校验模型参数并映射到行动；单条无效不会阻断同批其他检定。"""
+    """校验模型参数并映射到行动；任一检定无效则整案拒绝（fail-closed）。"""
     action_by_uid = {
         str(action.get("user_id") or ""): action
         for action in instance.action_queue
@@ -816,6 +816,7 @@ from src.commands.economy_planner import (
 
 def _unavailable_plan(
     instance: GameInstance, rule: RuleSystem | None, reason: str,
+    paid_tokens: int = 0,
 ) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], dict[str, Any]]:
     recovered_offers: list[dict[str, Any]] = []
     recovered_unpriced: list[dict[str, Any]] = []
@@ -825,9 +826,16 @@ def _unavailable_plan(
     return [], {
         "available": False,
         "errors": [reason],
+        # P3：被拒方案也是已计费调用——如实上报，实例侧用量不漏记。
+        "total_tokens": max(0, int(paid_tokens or 0)),
         "economy_offers": recovered_offers,
         "unpriced_purchase_intents": recovered_unpriced,
     }
+
+
+def _paid_tokens(response: Any) -> int:
+    """已计费但被拒绝的调用的真实用量（usage ledger 聚合值）。"""
+    return max(0, int(getattr(response, "total_tokens", 0) or 0))
 
 
 def _check_arguments(response: Any) -> dict[str, Any]:
@@ -896,10 +904,12 @@ async def plan_round_checks(
         checks_schema = DICE_CHECKS_TOOL["function"]["parameters"]["properties"]["checks"]
         validate_arguments(raw_checks, checks_schema, "checks")
     except ValueError as exc:
-        return _unavailable_plan(instance, rule, str(exc))
+        return _unavailable_plan(instance, rule, str(exc),
+                                 _paid_tokens(response))
     planned, errors = normalize_check_specs(instance, rule, raw_checks)
     if errors:
-        return _unavailable_plan(instance, rule, "unresolvable_check")
+        return _unavailable_plan(instance, rule, "unresolvable_check",
+                                 _paid_tokens(response))
     raw_economy_actions: list[Any] = []
     overreach_notes: list[dict[str, str]] = []
     world_requirements: list[dict[str, Any]] = []

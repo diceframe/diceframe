@@ -491,6 +491,8 @@ class RoundProcessor:
                     raise
                 # Handle decoding/normalization failures after the stale-run fence.
                 # A dedicated planner must not silently settle the round offline.
+                # P3：程序性 bug 不能只留异常类名——保留完整堆栈便于排障。
+                logger.exception("检定规划器抛出未预期异常: %s", type(exc).__name__)
                 planned, metadata = [], {"available": False, "errors": [type(exc).__name__]}
             if not planning_target_is_current():
                 logger.info(
@@ -502,6 +504,10 @@ class RoundProcessor:
                 return []
             if self.check_model_enabled and instance.action_queue and not metadata.get("available"):
                 logger.warning("独立检定方案不可用: %s", metadata.get("errors"))
+                # P3：被拒方案也是已计费调用——先入账再中止，实例侧用量不漏记。
+                rejected_tokens = int(metadata.get("total_tokens", 0) or 0)
+                if rejected_tokens > 0:
+                    instance.record_llm_usage(rejected_tokens, calls=1)
                 raise InvalidCheckPlan(
                     "独立检定模型未返回有效检定方案，请重试或检查模型配置",
                 )

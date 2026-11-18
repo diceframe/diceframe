@@ -606,7 +606,10 @@ async def test_incomplete_native_batch_cannot_become_a_no_check_decision(monkeyp
     class FallbackResponse(_FakeResponse):
         async def json(self):
             if api_format == "anthropic":
-                return {"content": [{"type": "text", "text": json.dumps(retried)}], "usage": {"output_tokens": 2}}
+                # usage ledger 语义：分项不全的 attempt 总量按未知处理、不猜数，
+                # 这里给出完整分项使聚合总额可断言（原生 7 + 回退 2）。
+                return {"content": [{"type": "text", "text": json.dumps(retried)}],
+                        "usage": {"input_tokens": 0, "output_tokens": 2}}
             return {"choices": [{"message": {"content": json.dumps(retried)}}], "usage": {"total_tokens": 2}}
 
     provider = ProviderConfig("provider", "https://example.invalid", "test", "model", api_format=api_format)
