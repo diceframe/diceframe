@@ -156,8 +156,13 @@ async def test_creator_agent_tools_use_the_selected_author_project_and_revisions
     submission_result = await submission.handler({"project_id": project_id, "expected_revision": 1}, "alice")
     assert submission_result["submission"]["requires_manual_upload"] is True
     read = tool(dependencies, "creator_project_read")
-    assert (await read.handler({"project_id": project_id}, "alice"))["project"]["files"]["README.md"] == "draft"
-    with pytest.raises(KeyError):
+    index = await read.handler({"project_id": project_id}, "alice")
+    assert index["project"]["files"][0]["path"] == "README.md"
+    assert "draft" not in str(index)
+    source = tool(dependencies, "creator_project_read_file")
+    assert (await source.handler({"project_id": project_id, "path": "README.md", "expected_revision": 1},
+                                 "alice"))["content"] == "draft"
+    with pytest.raises(ValueError, match="不存在"):
         await read.handler({"project_id": project_id}, "bob")
 
 

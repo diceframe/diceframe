@@ -34,16 +34,9 @@ const { t, locale } = useLocale()
 const _projectScope = computed(() => props.projectId)
 const { messages, streaming, send: _rawSend, stop, retryLast, pendingApproval, drafts, status, navigation, actionBusy, actionError, confirmApproval, resumeApproval, cancelApproval, reviewDraft, saveDraft, invalidateApproval, authorization, task, authorizationBusy, authorizationError, authorize } = useCreatorAssistant(_projectScope)
 
-// Live revision — starts from prop, updated whenever AI edits the project
-const liveRevision = ref(props.projectRevision ?? 0)
-watch(() => props.projectRevision, v => { if (v !== undefined && v > liveRevision.value) liveRevision.value = v })
-
-// Wrap send to inject project context
+// Supply identity only. The server owns workflow guidance and live revisions.
 async function send(text: string, loc: string) {
-  const contextNote = props.projectId
-    ? `（当前工程：${props.projectName || props.projectId}，工程 id ${props.projectId}，当前 revision ${liveRevision.value}。这是执行型请求：先用一两句话说明你的计划，再用 creator_project_read 读取工程；需要改变内容时调用 creator_project_update，携带 expected_revision=${liveRevision.value}；当前工程类型是 ${props.projectKind || 'adventure'}，只修改与该类型对应的源文件。每次操作完成后用文字告知用户结果。）`
-    : ''
-  await _rawSend(text, loc, contextNote)
+  await _rawSend(text, loc, props.projectId ? `（当前工程：${props.projectId}）` : '')
 }
 // ── File panel ───────────────────────────────────────────────
 const filesOpen = ref(false)
@@ -80,7 +73,6 @@ async function loadProjectFiles() {
   try {
     const r = await creatorApi.read(props.projectId)
     projectData.value = r.project
-    if (r.project.revision > liveRevision.value) liveRevision.value = r.project.revision
   } catch { /* silent */ }
 }
 
@@ -188,11 +180,6 @@ watch(eventList, (events: AssistantEventRecord[]) => {
     if (event.event === 'tool_result' && event.payload.tool === 'creator_project_update' && event.payload.ok !== false) {
       projectData.value = null // force reload file list on next open
       const result = event.payload.result as Record<string, unknown> | undefined
-      // Update live revision from tool result so next send uses the correct value
-      const newRevision = (result?.project as Record<string, unknown> | undefined)?.revision
-      if (typeof newRevision === 'number' && newRevision > liveRevision.value) {
-        liveRevision.value = newRevision
-      }
       const files = result?.files as Record<string, unknown> | undefined
       const paths = files ? Object.keys(files) : []
       if (paths.length) emit('files-changed', paths)
