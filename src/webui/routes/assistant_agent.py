@@ -9,7 +9,7 @@ import re
 from aiohttp import web
 
 from src.engine.language import normalize_language
-from src.webui.routes._common import _get_api
+from src.webui.routes._common import _get_api, _require_confirmed_request
 from src.webui.routes.assistant import _validated_messages
 from src.webui.services.assistant_agent_application import ROUTES
 from src.webui.session import apply_session_cookie
@@ -205,6 +205,52 @@ async def api_agent_capabilities(request):
         return web.json_response({'ok': False, 'error': str(exc)}, status=400)
 
 
+_ATTACHMENT_EXTENSIONS = {'.txt', '.md', '.markdown', '.json', '.csv', '.log'}
+_ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024
+
+
+async def api_agent_attachments(request):
+    """上传一个文本文档进当前 agent 会话（规则书 / 剧本 / 设定资料）。
+
+    内容保存在会话文件里；模型通过 read_attachment 分页读取，
+    全文不进上下文（上下文预算保护）。
+    """
+    owner = _owner(request)
+    if (denied := _require_confirmed_request(request)) is not None:
+        return denied
+    try:
+        if request.content_type != 'multipart/form-data':
+            raise ValueError('attachments require multipart/form-data')
+        reader = await request.multipart()
+        sid = ''
+        name = ''
+        payload = bytearray()
+        files = 0
+        async for part in reader:
+            if part.name == 'session_id':
+                sid = _id((await part.text()).strip(), optional=True)
+            elif part.name == 'file':
+                files += 1
+                if files > 1 or not part.filename:
+                    raise ValueError('attachments accept exactly one file')
+                name = str(part.filename or '')
+                while chunk := await part.read_chunk():
+                    if len(payload) + len(chunk) > _ATTACHMENT_MAX_BYTES:
+                        raise ValueError('attachment is too large (2MB limit)')
+                    payload.extend(chunk)
+        if not name:
+            raise ValueError('attachment file is missing')
+        if not name.lower().endswith(tuple(_ATTACHMENT_EXTENSIONS)):
+            raise ValueError('attachment must be a text file: ' + ', '.join(sorted(_ATTACHMENT_EXTENSIONS)))
+        result = _get_api(request).assistant_agent_attach(
+            owner, sid, name, bytes(payload).decode('utf-8', errors='replace'))
+    except (ValueError, TypeError, UnicodeError) as exc:
+        return web.json_response({'ok': False, 'error': str(exc)}, status=400)
+    except PermissionError as exc:
+        return web.json_response({'ok': False, 'error': str(exc)}, status=403)
+    return web.json_response(result)
+
+
 async def api_agent_authorization(request):
     owner = _owner(request)
     try:
@@ -231,6 +277,7 @@ async def api_agent_cancel(request):
 
 def register_agent(app):
     app.router.add_get('/api/assistant/agent/capabilities', api_agent_capabilities)
+    app.router.add_post('/api/assistant/agent/attachments', api_agent_attachments)
     app.router.add_post('/api/assistant/agent/authorization', api_agent_authorization)
     app.router.add_post('/api/assistant/agent/cancel', api_agent_cancel)
     app.router.add_post('/api/assistant/agent/plan', api_agent_plan)

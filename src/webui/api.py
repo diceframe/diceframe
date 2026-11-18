@@ -1461,6 +1461,9 @@ class WebAPI:
     async def assistant_agent_run(self, owner, messages, language, context, session_id, emit):
         return await self._assistant_agent.run(owner, messages, language, context, session_id, emit)
 
+    def assistant_agent_attach(self, owner, session_id, name, text):
+        return self._assistant_agent.attach(owner, session_id, name, text)
+
     async def assistant_agent_confirm(self, owner, session_id, approval_id, plan_digest, approved, emit=None):
         return await self._assistant_agent.confirm(owner, session_id, approval_id, plan_digest, approved, emit=emit)
 
@@ -1715,6 +1718,24 @@ class WebAPI:
                 "requires_user_review": True,
             },
         }
+
+    async def install_creator_project(
+        self, owner_id: str, project_id: str, *, expected_revision: int,
+    ) -> dict[str, Any]:
+        """把当前工程构建产物直接装进本机插件目录（作者自装）。
+
+        走与发布/市场安装完全相同的宿主安装通道（含深度包校验与收据），
+        overwrite=True 让反复改稿后的重装更新本地版本。
+        """
+        result = self.build_creator_project(
+            owner_id, project_id, expected_revision=expected_revision,
+        )
+        if not result.get("ok"):
+            return {key: value for key, value in result.items() if key != "payload"}
+        installed = await self.install_plugin(result["payload"], overwrite=True)
+        return {
+            key: value for key, value in result.items() if key != "payload"
+        } | {"install": installed}
 
     def list_speech_voices(self) -> dict[str, Any]:
         return self._web_speech.list_voices()

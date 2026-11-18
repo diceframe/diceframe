@@ -143,6 +143,25 @@ async def api_creator_project_build(request: web.Request) -> web.StreamResponse:
         )
 
 
+async def api_creator_project_install(request: web.Request) -> web.Response:
+    denied = _require_confirmed_request(request)
+    if denied is not None:
+        return denied
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("请求体必须是 JSON 对象")
+        result = await _get_api(request).install_creator_project(
+            _owner_id(request), request.match_info["project_id"],
+            expected_revision=body.get("expected_revision"),
+        )
+    except (KeyError, ValueError, PermissionError) as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=409)
+    except (TypeError,) as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+    return web.json_response(result, status=200 if result.get("ok") else 422)
+
+
 async def api_creator_project_submission(request: web.Request) -> web.Response:
     denied = _require_confirmed_request(request)
     if denied is not None:
@@ -183,5 +202,6 @@ def register_creator(app: web.Application) -> None:
     app.router.add_post("/api/creator/projects/{project_id}/validate", api_creator_project_validate)
     app.router.add_post("/api/creator/projects/{project_id}/preview", api_creator_project_preview)
     app.router.add_post("/api/creator/projects/{project_id}/build", api_creator_project_build)
+    app.router.add_post("/api/creator/projects/{project_id}/install", api_creator_project_install)
     app.router.add_post("/api/creator/projects/{project_id}/submission", api_creator_project_submission)
     app.router.add_delete("/api/creator/projects/{project_id}", api_creator_project_delete)

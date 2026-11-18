@@ -294,7 +294,7 @@ export function useCreatorAssistant(scope: Ref<string | undefined>) {
     }
   })
 
-  return { messages, streaming, status, task, actionError, pendingApproval, actionBusy, autoApprove, toggleAutoApprove, send, stop, confirmApproval,
+  return { messages, streaming, status, task, actionError, pendingApproval, actionBusy, autoApprove, toggleAutoApprove, send, stop, confirmApproval, sessionId,
     // Stubs to match useAssistant interface (not needed in creator context)
     drafts: ref<Record<string, import('./useAssistant').AssistantDraft>>({}),
     navigation: ref<import('./useAssistant').AssistantNavigation | null>(null),

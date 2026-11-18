@@ -466,7 +466,35 @@ class AgentRuntime:
         data = self._session(owner, session_id).data
         return deepcopy({"ok": True, **{key: data[key] for key in ("session_id", "pending", "drafts", "receipts", "status")},
                          'memory': data.get('memory') or [],
+                         'attachments': [{'id': a['id'], 'name': a['name'], 'chars': a['chars']}
+                                         for a in data.get('attachments') or []],
                          'authorization': current_authorization(data, self.deps.clock()), 'task': data.get('task')})
+
+    ATTACHMENT_MAX_FILES = 4
+    ATTACHMENT_MAX_CHARS = 400_000
+
+    def attach(self, owner: str, session_id: str, name: str, text: str) -> dict:
+        """把一个文本文档存进会话；模型经 read_attachment 分页读取。"""
+        name = str(name or '').strip()[:120] or 'attachment.txt'
+        content = str(text or '')
+        if not content.strip():
+            raise ValueError('attachment is empty')
+        session = self._session(owner, session_id)
+        if session.lock.locked():
+            raise ValueError('Wait for the current operation before uploading attachments')
+        attachments = session.data.setdefault('attachments', [])
+        total = sum(a['chars'] for a in attachments) + len(content)
+        while attachments and (len(attachments) >= self.ATTACHMENT_MAX_FILES
+                               or total > self.ATTACHMENT_MAX_CHARS):
+            dropped = attachments.pop(0)
+            total -= dropped['chars']
+        attachments.append({'id': uuid.uuid4().hex[:12], 'name': name,
+                            'chars': len(content), 'content': content})
+        session.data['updated_at'] = self.deps.clock()
+        self._write(session)
+        return deepcopy({'ok': True, 'session_id': session.data['session_id'],
+                         'attachment': {'id': attachments[-1]['id'], 'name': name, 'chars': len(content)},
+                         'attachments': [{'name': a['name'], 'chars': a['chars']} for a in attachments]})
 
     async def plan(self, owner: str, tool_name: str, arguments: dict, session_id: str = '') -> dict:
         """Deterministic owner UI candidates use the same delayed approval path."""
@@ -601,6 +629,8 @@ class AgentRuntime:
                     "payload.project, when present, is the live Creator project state card (revision, file "
                     "list, content counts): use it to orient before reading any project files, and to pick "
                     "exact ranges when you do read. "
+                    "payload.attachments lists user-uploaded documents with a short excerpt; read the full "
+                    "text with read_attachment by name, paginating with offset until has_more is false. "
                     + creator_guidance
                 )
                 from pydantic_ai.tools import Tool
@@ -608,6 +638,13 @@ class AgentRuntime:
                     DeferredToolRequests, FinalAnswer, ModelRetry,
                     UsageLimitExceeded, execute_agent,
                 )
+
+                # 会话附件：全文留在会话文件，模型按范围分页读取（与 creator
+                # 工程读取同一哲学——全文进上下文必然挤爆预算）。
+                session_attachments = [
+                    {'id': a['id'], 'name': a['name'], 'chars': a['chars'],
+                     'excerpt': str(a['content'])[:600]}
+                    for a in (session.data.get('attachments') or [])]
 
                 loaded = {tool.name for tool in self.registry.values() if tool.domain == 'application'}
                 initial_grant = current_authorization(session.data, self.deps.clock())
@@ -618,6 +655,10 @@ class AgentRuntime:
                 active_domains.update(page_domains.get(context.get('route'), set()))
                 loaded.update(tool.name for tool in self.registry.values() if tool.domain in active_domains)
                 loaded.update({'search_capabilities', 'describe_capability'})
+                if session_attachments:
+                    # 会话附件读取工具随附件存在即挂载，不经能力目录发现
+                    # （模型会先查目录，目录里没有就会如实报告「不支持」）。
+                    loaded.add('read_attachment')
 
                 async def search(args, actor):
                     result = self.registry.search(args.get('query', ''), args.get('domain', ''),
@@ -630,7 +671,7 @@ class AgentRuntime:
                     loaded.add(args['name'])
                     return descriptor
 
-                discovery = (
+                discovery = [
                     AgentTool('search_capabilities', 'Find available actions by query/domain; matched actions become callable',
                               {'type': 'object', 'properties': {'query': {'type': 'string', 'maxLength': 200},
                                'domain': {'type': 'string', 'maxLength': 40},
@@ -639,7 +680,33 @@ class AgentRuntime:
                     AgentTool('describe_capability', 'Load the exact parameters and behavior of an application action',
                               {'type': 'object', 'properties': {'name': {'type': 'string', 'maxLength': 96}},
                                'required': ['name'], 'additionalProperties': False}, describe),
-                )
+                ]
+
+                def read_attachment(args, _owner):
+                    name = str(args.get('name') or '').strip()
+                    offset = max(0, min(int(args.get('offset') or 0), 1_000_000_000))
+                    max_chars = max(500, min(int(args.get('max_chars') or 4000), 8000))
+                    for a in session.data.get('attachments') or []:
+                        if a['name'] == name or a['id'] == name:
+                            content = str(a['content'])
+                            chunk = content[offset:offset + max_chars]
+                            return {'ok': True, 'name': a['name'], 'chars': a['chars'],
+                                    'offset': offset, 'end_offset': offset + len(chunk),
+                                    'next_offset': offset + len(chunk) if chunk else None,
+                                    'has_more': offset + len(chunk) < len(content),
+                                    'content': chunk}
+                    raise ModelRetry(f'No attachment named {name!r} in this session')
+
+                if session_attachments:
+                    discovery.append(AgentTool(
+                        'read_attachment',
+                        'Read a character range of a user-uploaded document (rulebook, script, notes). '
+                        'Paginate with offset until has_more is false; never ask the user to paste the text.',
+                        {'type': 'object', 'properties': {'name': {'type': 'string', 'maxLength': 120},
+                           'offset': {'type': 'integer', 'minimum': 0},
+                           'max_chars': {'type': 'integer', 'minimum': 500, 'maximum': 8000}},
+                         'required': ['name'], 'additionalProperties': False}, read_attachment))
+                discovery = tuple(discovery)
 
                 def allowed(tool, args):
                     prepared = prepare_action(tool, args, owner)
@@ -656,7 +723,7 @@ class AgentRuntime:
                                 raise asyncio.CancelledError()
                             validate_arguments(args, tool.schema)
                             current = self.registry.get(tool.name)
-                            if tool.name not in {'search_capabilities', 'describe_capability'} and (
+                            if tool.name not in {'search_capabilities', 'describe_capability', 'read_attachment'} and (
                                     current is None or current.contract_digest != tool.contract_digest):
                                 raise ValueError('Capability changed; discover it again')
                             if tool.authorize:
@@ -803,6 +870,8 @@ class AgentRuntime:
                     payload['memory_card'] = memory_card
                 if project_card is not None:
                     payload['project'] = project_card
+                if session_attachments:
+                    payload['attachments'] = session_attachments
                 try:
                     grant = current_authorization(session.data, self.deps.clock())
                     budget = min(64, max(self.MAX_STEPS, (grant or {}).get('max_steps', self.MAX_STEPS)))

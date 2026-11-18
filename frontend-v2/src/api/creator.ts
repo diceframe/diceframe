@@ -59,6 +59,12 @@ export const creatorApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ expected_revision: expectedRevision }),
     }),
+  install: (projectId: string, expectedRevision: number) =>
+    api<{ ok: boolean; install?: { ok?: boolean; id?: string; version?: string; error?: string }; errors?: string[]; error?: string }>('/creator/projects/' + encodeURIComponent(projectId) + '/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    }),
   delete: (projectId: string) =>
     api<{ ok: boolean; deleted?: boolean }>('/creator/projects/' + encodeURIComponent(projectId), {
       method: 'DELETE',

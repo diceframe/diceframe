@@ -7,6 +7,7 @@ import {
 } from '@vicons/ionicons5'
 import { useLocale } from '@/composables/useLocale'
 import { useAssistant } from '@/composables/useAssistant'
+import { useAssistantAttachments } from '@/composables/useAssistantAttachments'
 import { useAssistantWorkspace } from '@/composables/useAssistantWorkspace'
 import { renderSafeMarkdown } from '@/utils/markdown'
 import AgentTaskCard from '@/components/assistant/AgentTaskCard.vue'
@@ -28,7 +29,16 @@ import { generatedImageUrl } from '@/api/generatedImages'
 const props = withDefaults(defineProps<{ expanded?: boolean; wide?: boolean; reviewRequest?: number }>(), { expanded: false, wide: false, reviewRequest: 0 })
 const emit = defineEmits<{ close: []; toggleExpanded: [] }>()
 const { t, locale } = useLocale()
-const { messages, streaming, send, stop, retryLast, pendingApproval, drafts, status, navigation, actionBusy, actionError, confirmApproval, resumeApproval, cancelApproval, reviewDraft, saveDraft, invalidateApproval, authorization, task, authorizationBusy, authorizationError, authorize } = useAssistant()
+const { messages, streaming, send, stop, retryLast, pendingApproval, drafts, status, navigation, actionBusy, actionError, confirmApproval, resumeApproval, cancelApproval, reviewDraft, saveDraft, invalidateApproval, authorization, task, authorizationBusy, authorizationError, authorize, sessionId } = useAssistant()
+const attachments = useAssistantAttachments(sessionId, locale)
+const attachInput = ref<HTMLInputElement | null>(null)
+async function onAttachFile(ev: Event) {
+  const file = (ev.target as HTMLInputElement).files?.[0]
+  ;(ev.target as HTMLInputElement).value = ''
+  if (!file) return
+  const ok = await attachments.upload(file, sid => { sessionId.value = sid })
+  if (ok) draft.value = (draft.value ? draft.value + '\n' : '') + `[已上传附件：${file.name}（${attachments.attached.value.at(-1)?.chars ?? '?'} 字符）]`
+}
 const draftList = computed(() => Object.values(drafts.value))
 const eventList = computed(() => messages.value.flatMap(message => message.events || []))
 const agentCopy = computed(() => assistantCopy(locale.value))
@@ -591,6 +601,18 @@ function toggleTaskWorkspace() {
         :autosize="{ minRows: 1, maxRows: 5 }"
         @keydown="onKeydown"
       />
+      <input ref="attachInput" type="file" :accept="attachments.acceptList.value" hidden @change="onAttachFile" />
+      <button
+        type="button"
+        class="assistant-mic"
+        data-testid="assistant-attach"
+        :title="attachments.uploadError.value || (locale === 'zh-CN' ? '上传文本附件（规则书 / 剧本 / 资料）' : 'Upload a text attachment (rulebook / script / notes)')"
+        :aria-label="locale === 'zh-CN' ? '上传附件' : 'Upload attachment'"
+        :disabled="attachments.uploading.value || streaming"
+        @click="attachInput?.click()"
+      >
+        <NIcon :component="DocumentTextOutline" size="18" />
+      </button>
       <button
         v-if="voiceInputAvailable"
         type="button"

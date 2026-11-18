@@ -192,3 +192,51 @@ async def test_latest_user_request_is_pinned_to_every_model_request(tmp_path):
     assert capturing.users, "模型请求未发出"
     for user in capturing.users:
         assert '给我加一章 ch9' in user, "最新用户指令未随请求注入"
+
+
+@pytest.mark.asyncio
+async def test_attachments_are_stored_and_readable_via_tool(tmp_path):
+    """附件：全文存会话，模型经 read_attachment 分页读取，payload 只带清单+摘录。"""
+    from src.llm.client import LLMToolResponse
+
+    calls = []
+
+    class ReadingPlanner:
+        async def call_tools(self, system, user, **kwargs):
+            calls.append(user)
+            if len(calls) == 1:
+                return LLMToolResponse([{'name': 'read_attachment',
+                                         'arguments': {'name': '规则书.md', 'offset': 0, 'max_chars': 800}}],
+                                       5, 'test')
+            return LLMToolResponse([], 5, 'test', content='已读完规则书第一章')
+
+    runtime = AgentRuntime(AgentDependencies(lambda: ReadingPlanner(), lambda _: None,
+                           application_tools(deps()), tmp_path / 'agent'))
+    attached = runtime.attach('alice', '', '规则书.md', '第一章：光与暗。' + '细则' * 900 + '【结尾标记】')
+    sid = attached['session_id']
+    assert attached['attachment']['chars'] == len('第一章：光与暗。' + '细则' * 900 + '【结尾标记】')
+
+    async def emit(*_args):
+        return None
+
+    await runtime.run('alice', [{'role': 'user', 'content': '读一下附件的第一章'}],
+                      'zh-CN', {}, sid, emit)
+    payload = calls[0]
+    assert '规则书.md' in payload and 'read_attachment' in payload
+    assert '第一章：光与暗' in payload            # 摘录保留开头
+    assert '【结尾标记】' not in payload        # 全文尾部不进 payload，只有摘录
+    # 工具执行链：第二次请求里应包含工具返回的正文片段
+    assert '第一章：光与暗' in calls[1]
+
+
+def test_attach_rejects_empty_and_caps_total(tmp_path):
+    runtime = AgentRuntime(AgentDependencies(lambda: None, lambda _: None,
+                           (), tmp_path / 'agent'))
+    with pytest.raises(ValueError):
+        runtime.attach('alice', '', '空.txt', '   ')
+    first = runtime.attach('alice', '', 'a.md', 'x' * 200_000)
+    sid = first['session_id']
+    runtime.attach('alice', sid, 'b.md', 'y' * 200_000)
+    third = runtime.attach('alice', sid, 'c.md', 'z' * 200_000)  # 超总预算，最旧的被挤掉
+    names = [a['name'] for a in third['attachments']]
+    assert names == ['b.md', 'c.md'] and third['ok']
