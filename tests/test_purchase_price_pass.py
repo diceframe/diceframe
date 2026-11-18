@@ -463,7 +463,8 @@ async def test_planner_context_lists_recent_purchases() -> None:
         async def call_tools(self, system_prompt, user_message, **kwargs):
             captured["user"] = user_message
             return SimpleNamespace(
-                tool_calls=[], total_tokens=1, provider_used="fake", native_tools=True,
+                tool_calls=[{"name": "dice_checks", "arguments": {"checks": []}}],
+                total_tokens=1, provider_used="fake", native_tools=True,
             )
 
     await plan_round_checks(instance, None, _Client())

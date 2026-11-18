@@ -42,8 +42,10 @@ When enabled, `check_provider_ref` and `check_model` select a separate client fo
 check/world-intent planning; dice and settlement remain server-authoritative.
 An enabled but unconfigured route cannot silently use old credentials or the main
 model. Configure it or disable the dedicated route. Ordinary offline/manual check
-resolution does not require an AI model. Provider failure retains the existing
-deterministic offline recovery policy.
+resolution does not require an AI model. In a round with a dedicated model, an explicit
+empty `checks` array is a valid proposal. If the tool call is missing or its checks
+fail validation, the round returns to the action phase for a retry. The shared
+model route retains deterministic offline recovery.
 
 ## Context and sampling
 

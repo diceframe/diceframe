@@ -56,6 +56,7 @@ from src.engine.world_state import project_visible_state
 from src.llm.parser import sanitize_narration
 from src.llm.tools import DICE_CHECKS_TOOL, DICE_CHECKS_TOOL_NAME
 from src.rules.rule_system import RuleSystem
+from src.tool_arguments import validate_arguments
 
 logger = logging.getLogger("trpg")
 
@@ -813,6 +814,38 @@ from src.commands.economy_planner import (
     _recover_purchase_intents_from_player_actions,
 )
 
+def _unavailable_plan(
+    instance: GameInstance, rule: RuleSystem | None, reason: str,
+) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], dict[str, Any]]:
+    recovered_offers: list[dict[str, Any]] = []
+    recovered_unpriced: list[dict[str, Any]] = []
+    _recover_purchase_intents_from_player_actions(
+        instance, rule, recovered_offers, recovered_unpriced,
+    )
+    return [], {
+        "available": False,
+        "errors": [reason],
+        "economy_offers": recovered_offers,
+        "unpriced_purchase_intents": recovered_unpriced,
+    }
+
+
+def _check_arguments(response: Any) -> dict[str, Any]:
+    calls = getattr(response, "tool_calls", None)
+    if not isinstance(calls, list) or len(calls) != 1:
+        raise ValueError("expected one dice_checks call")
+    call = calls[0]
+    if not isinstance(call, dict) or call.get("name") != DICE_CHECKS_TOOL_NAME:
+        raise ValueError("expected dice_checks")
+    arguments = call.get("arguments")
+    if not isinstance(arguments, dict) or not isinstance(arguments.get("checks"), list):
+        raise ValueError("expected dice_checks.checks array")
+    properties = DICE_CHECKS_TOOL["function"]["parameters"]["properties"]
+    if set(arguments) - set(properties):
+        raise ValueError("unknown dice_checks argument")
+    return arguments
+
+
 async def plan_round_checks(
     instance: GameInstance,
     rule: RuleSystem | None,
@@ -847,17 +880,7 @@ async def plan_round_checks(
     if not instance.action_queue:
         return [], {"available": False, "errors": ["tool_call_unavailable"]}
     if not llm_client or not hasattr(llm_client, "call_tools"):
-        recovered_offers: list[dict[str, Any]] = []
-        recovered_unpriced: list[dict[str, Any]] = []
-        _recover_purchase_intents_from_player_actions(
-            instance, rule, recovered_offers, recovered_unpriced,
-        )
-        return [], {
-            "available": False,
-            "errors": ["tool_call_unavailable"],
-            "economy_offers": recovered_offers,
-            "unpriced_purchase_intents": recovered_unpriced,
-        }
+        return _unavailable_plan(instance, rule, "tool_call_unavailable")
     response = await llm_client.call_tools(
         _planner_system_prompt(instance, rule),
         _planner_context(instance, rule),
@@ -865,97 +888,100 @@ async def plan_round_checks(
         max_tokens=4096,
         temperature=0.1,
     )
-    raw_checks: list[Any] = []
+    economy_only = bool(rule and str(rule.dice_system).lower() == "none" and not narrative_checks)
+    try:
+        arguments = _check_arguments(response)
+        raw_checks = [] if economy_only else arguments["checks"]
+        # Optional annotations and purchase intents have their own validators.
+        checks_schema = DICE_CHECKS_TOOL["function"]["parameters"]["properties"]["checks"]
+        validate_arguments(raw_checks, checks_schema, "checks")
+    except ValueError as exc:
+        return _unavailable_plan(instance, rule, str(exc))
+    planned, errors = normalize_check_specs(instance, rule, raw_checks)
+    if errors:
+        return _unavailable_plan(instance, rule, "unresolvable_check")
     raw_economy_actions: list[Any] = []
     overreach_notes: list[dict[str, str]] = []
     world_requirements: list[dict[str, Any]] = []
     world_time_advance: dict[str, Any] | None = None
-    for call in response.tool_calls:
-        if str(call.get("name") or "") != DICE_CHECKS_TOOL_NAME:
-            continue
-        arguments = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
-        checks = arguments.get("checks")
-        if isinstance(checks, list):
-            raw_checks.extend(checks)
-        # economy_actions 与 checks/overreach 独立解析：畸形/缺失只影响报价本身。
-        try:
-            economy = arguments.get("economy_actions")
-            if isinstance(economy, list):
-                raw_economy_actions.extend(economy)
-        except Exception:
-            logger.warning("economy_actions 解析失败，已忽略 (round=%d)", progression_state.round_value(instance), exc_info=True)
-        # overreach 与 checks 独立解析：畸形/缺失只影响标注本身，绝不波及检定规划。
-        try:
-            over = arguments.get("overreach")
-            if isinstance(over, list):
-                for item in over[:8]:
-                    if not isinstance(item, dict):
-                        continue
-                    uid = _match_player(instance, item.get("player"))
-                    reason = str(item.get("reason") or "").strip()[:160]
-                    if uid and reason:
-                        overreach_notes.append({"player": uid, "reason": reason})
-        except Exception:
-            logger.warning("overreach 标注解析失败，已忽略 (round=%d)", progression_state.round_value(instance), exc_info=True)
-        # world_requirements 与 checks/overreach 独立解析：畸形/缺失只影响世界
-        # 合法性判定本身，绝不波及检定规划。这里只做形状与花名册校验；「是否真的
-        # 与世界真相矛盾」由 server 侧 world_legality 判定。
-        try:
-            raw_requirements = arguments.get("world_requirements")
-            if isinstance(raw_requirements, list):
-                for item in raw_requirements[:MAX_WORLD_REQUIREMENTS]:
-                    if len(world_requirements) >= MAX_WORLD_REQUIREMENTS:
-                        break
-                    if not isinstance(item, dict):
-                        continue
-                    uid = _match_player(instance, item.get("player"))
-                    kind = str(item.get("kind") or "act").strip()
-                    location = str(item.get("location") or "").strip()[:120]
-                    if not uid or not location or kind not in REQUIREMENT_KINDS:
-                        continue
-                    requirement: dict[str, Any] = {
-                        "player": uid, "kind": kind, "location": location,
-                    }
-                    raw_via = item.get("via")
-                    if isinstance(raw_via, list):
-                        via = [
-                            str(hop).strip()[:120]
-                            for hop in raw_via[:MAX_ROUTE_HOPS]
-                            if isinstance(hop, str) and str(hop).strip()
-                        ]
-                        if via:
-                            requirement["via"] = list(dict.fromkeys(via))
-                    world_requirements.append(requirement)
-        except Exception:
-            logger.warning(
-                "world_requirements 解析失败，已忽略 (round=%d)",
-                progression_state.round_value(instance), exc_info=True,
-            )
-        # world_time_advance 与 checks 独立解析：只报告本轮确实经过的逻辑时间，
-        # 由 server 推进世界时钟并结算到期事件。
-        try:
-            raw_time = arguments.get("world_time_advance")
-            if isinstance(raw_time, dict):
-                raw_minutes = raw_time.get("minutes")
-                if (
-                    isinstance(raw_minutes, int) and not isinstance(raw_minutes, bool)
-                    and 0 < raw_minutes <= MAX_ADVANCE_MINUTES
-                ):
-                    advance = {"minutes": raw_minutes}
-                    note = str(raw_time.get("reason") or "").strip()[:160]
-                    if note:
-                        advance["reason"] = note
-                    world_time_advance = advance
-        except Exception:
-            logger.warning(
-                "world_time_advance 解析失败，已忽略 (round=%d)",
-                progression_state.round_value(instance), exc_info=True,
-            )
-    planned, errors = normalize_check_specs(instance, rule, raw_checks)
+    # economy_actions 与 checks/overreach 独立解析：畸形/缺失只影响报价本身。
+    try:
+        economy = arguments.get("economy_actions")
+        if isinstance(economy, list):
+            raw_economy_actions.extend(economy)
+    except Exception:
+        logger.warning("economy_actions 解析失败，已忽略 (round=%d)", progression_state.round_value(instance), exc_info=True)
+    # overreach 与 checks 独立解析：畸形/缺失只影响标注本身，绝不波及检定规划。
+    try:
+        over = arguments.get("overreach")
+        if isinstance(over, list):
+            for item in over[:8]:
+                if not isinstance(item, dict):
+                    continue
+                uid = _match_player(instance, item.get("player"))
+                reason = str(item.get("reason") or "").strip()[:160]
+                if uid and reason:
+                    overreach_notes.append({"player": uid, "reason": reason})
+    except Exception:
+        logger.warning("overreach 标注解析失败，已忽略 (round=%d)", progression_state.round_value(instance), exc_info=True)
+    # world_requirements 与 checks/overreach 独立解析：畸形/缺失只影响世界
+    # 合法性判定本身，绝不波及检定规划。这里只做形状与花名册校验；「是否真的
+    # 与世界真相矛盾」由 server 侧 world_legality 判定。
+    try:
+        raw_requirements = arguments.get("world_requirements")
+        if isinstance(raw_requirements, list):
+            for item in raw_requirements[:MAX_WORLD_REQUIREMENTS]:
+                if len(world_requirements) >= MAX_WORLD_REQUIREMENTS:
+                    break
+                if not isinstance(item, dict):
+                    continue
+                uid = _match_player(instance, item.get("player"))
+                kind = str(item.get("kind") or "act").strip()
+                location = str(item.get("location") or "").strip()[:120]
+                if not uid or not location or kind not in REQUIREMENT_KINDS:
+                    continue
+                requirement: dict[str, Any] = {
+                    "player": uid, "kind": kind, "location": location,
+                }
+                raw_via = item.get("via")
+                if isinstance(raw_via, list):
+                    via = [
+                        str(hop).strip()[:120]
+                        for hop in raw_via[:MAX_ROUTE_HOPS]
+                        if isinstance(hop, str) and str(hop).strip()
+                    ]
+                    if via:
+                        requirement["via"] = list(dict.fromkeys(via))
+                world_requirements.append(requirement)
+    except Exception:
+        logger.warning(
+            "world_requirements 解析失败，已忽略 (round=%d)",
+            progression_state.round_value(instance), exc_info=True,
+        )
+    # world_time_advance 与 checks 独立解析：只报告本轮确实经过的逻辑时间，
+    # 由 server 推进世界时钟并结算到期事件。
+    try:
+        raw_time = arguments.get("world_time_advance")
+        if isinstance(raw_time, dict):
+            raw_minutes = raw_time.get("minutes")
+            if (
+                isinstance(raw_minutes, int) and not isinstance(raw_minutes, bool)
+                and 0 < raw_minutes <= MAX_ADVANCE_MINUTES
+            ):
+                advance = {"minutes": raw_minutes}
+                note = str(raw_time.get("reason") or "").strip()[:160]
+                if note:
+                    advance["reason"] = note
+                world_time_advance = advance
+    except Exception:
+        logger.warning(
+            "world_time_advance 解析失败，已忽略 (round=%d)",
+            progression_state.round_value(instance), exc_info=True,
+        )
     planned = _merge_safety_net_checks(instance, rule, planned)
     planned = _apply_d20_assistance(instance, rule, planned)
     planned = _apply_granted_advantage_modes(instance, rule, planned)
-    if rule and str(rule.dice_system).lower() == "none" and not narrative_checks:
+    if economy_only:
         # A no-dice rule only consults the planner for the purchase protocol.
         # Whatever checks the model proposed would otherwise be built as d20
         # rolls; keep the round identical to the no_dice_rule skip apart from

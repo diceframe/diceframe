@@ -247,16 +247,8 @@ class RoundProcessingFailure(RuntimeError):
         self.rolled_back = rolled_back
 
 
-class CheckModelNotConfigured(RuntimeError):
-    """独立检定模型已启用但无法构建客户端，检定规划无法进行。
-
-    这是可恢复的配置错误而不是程序缺陷：调用方必须翻译成稳定的
-    ``error_code``（``CHECK_MODEL_NOT_CONFIGURED``）与非 2xx 响应，并把对局
-    状态完整退回（见回合服务的推进回滚），绝不让它冒泡成 500 或被当成
-    成功回合。``error_code`` 是对外契约，不得随文案改动。
-    """
-
-    error_code = "CHECK_MODEL_NOT_CONFIGURED"
+class CheckPreparationError(RuntimeError):
+    """Failure before check settlement; callers own the rollback of the turn."""
 
     def __init__(
         self,
@@ -271,6 +263,23 @@ class CheckModelNotConfigured(RuntimeError):
         # direct caller (luck timeout/CLI).
         self.rolled_back = rolled_back
         self.rollback_failed = rollback_failed
+
+
+class CheckModelNotConfigured(CheckPreparationError):
+    """独立检定模型已启用但无法构建客户端，检定规划无法进行。
+
+    这是可恢复的配置错误而不是程序缺陷：调用方必须翻译成稳定的
+    ``error_code``（``CHECK_MODEL_NOT_CONFIGURED``）与非 2xx 响应，并把对局
+    状态完整退回（见回合服务的推进回滚），绝不让它冒泡成 500 或被当成
+    成功回合。``error_code`` 是对外契约，不得随文案改动。
+    """
+
+    error_code = "CHECK_MODEL_NOT_CONFIGURED"
+
+
+class InvalidCheckPlan(CheckPreparationError):
+    """The configured check model did not produce a usable plan."""
+
 
 class RoundProcessor:
     """处理完整的一轮判定：context 拼接 → LLM 调用 → 解析 → 更新状态 → 播报。"""
@@ -471,11 +480,18 @@ class RoundProcessor:
 
         try:
             plan_started = time.perf_counter()
-            planned, metadata = await plan_round_checks(
-                instance, rule_ctx.rule,
-                self.check_llm_client if self.check_model_enabled else self.llm_client,
-                narrative_checks=narrative_resolver is not None,
-            )
+            try:
+                planned, metadata = await plan_round_checks(
+                    instance, rule_ctx.rule,
+                    self.check_llm_client if self.check_model_enabled else self.llm_client,
+                    narrative_checks=narrative_resolver is not None,
+                )
+            except Exception as exc:
+                if isinstance(exc, LLMToolCallError) or not self.check_model_enabled or not instance.action_queue:
+                    raise
+                # Handle decoding/normalization failures after the stale-run fence.
+                # A dedicated planner must not silently settle the round offline.
+                planned, metadata = [], {"available": False, "errors": [type(exc).__name__]}
             if not planning_target_is_current():
                 logger.info(
                     "丢弃过期检定规划: game=%s run=%s",
@@ -484,6 +500,11 @@ class RoundProcessor:
                 )
                 instance.reset_round_checks()
                 return []
+            if self.check_model_enabled and instance.action_queue and not metadata.get("available"):
+                logger.warning("独立检定方案不可用: %s", metadata.get("errors"))
+                raise InvalidCheckPlan(
+                    "独立检定模型未返回有效检定方案，请重试或检查模型配置",
+                )
             logger.info(
                 "检定规划: 完成 (round=%d, 耗时=%dms)",
                 progression_state.round_value(instance),
@@ -625,6 +646,8 @@ class RoundProcessor:
                 planned_only=True,
                 skip_action_indexes=deferred_indexes,
             )
+        except CheckPreparationError:
+            raise
         except LLMToolCallError as exc:
             if self.check_model_enabled:
                 # A configured dedicated model is an explicit user choice.  If
@@ -690,16 +713,16 @@ class RoundProcessor:
             raise RoundNotProcessed("economy_pending")
         try:
             await self.prepare_round_checks_ai(instance)
-        except CheckModelNotConfigured as exc:
+        except CheckPreparationError as exc:
             # Direct callers (luck timeout/CLI) may enter process_round without
             # the turns service's preparation boundary.  Never leave those
             # callers in ACTIVE_JUDGMENT after a dedicated provider failure.
             rolled_back = await self._recover_failed_round(instance, on_reset=on_reset)
             if not rolled_back:
-                raise CheckModelNotConfigured(
+                raise type(exc)(
                     str(exc), rolled_back=False, rollback_failed=True,
                 ) from exc
-            raise CheckModelNotConfigured(str(exc), rolled_back=True) from exc
+            raise type(exc)(str(exc), rolled_back=True) from exc
         from src.engine import check_decisions
 
         if check_decisions.pending_any(instance):
