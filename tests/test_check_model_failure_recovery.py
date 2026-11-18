@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -48,6 +49,51 @@ async def test_dedicated_provider_failure_does_not_use_offline_check_fallback(
         await processor.prepare_round_checks_ai(instance)
 
     assert instance.state == GameState.ACTIVE_JUDGMENT
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("calls", [
+    RuntimeError("unsupported provider response"),
+    [],
+    [{"name": "other", "arguments": {"checks": []}}],
+    [{"name": "dice_checks", "arguments": {"checks": []}}] * 2,
+    [{"name": "dice_checks", "arguments": {}}],
+    [{"name": "dice_checks", "arguments": {"checks": None}}],
+    [{"name": "dice_checks", "arguments": {"checks": [{"player": "Hero", "target": True}]}}],
+    [{"name": "dice_checks", "arguments": {"checks": [
+        {"player": "Hero", "attribute": "str", "target": 12, "modifier": "unknown"},
+    ]}}],
+    [{"name": "dice_checks", "arguments": {"checks": [
+        {"player": "Hero", "attribute": "str", "target": 12},
+        {"player": "Unknown", "attribute": "str", "target": 12},
+    ]}}],
+], ids=["unexpected-planner-error", "missing-tool", "wrong-tool", "duplicate-tool", "missing-checks", "null-checks",
+        "invalid-target", "invalid-modifier", "unresolved-player-in-batch"])
+async def test_invalid_dedicated_plan_rolls_back_without_advancing(web_api, calls):
+    api, _lorebook, registry, _llm, _worlds = web_api
+    created = await api.create_game(
+        "template_world", "Invalid check plan",
+        players=[{"character_name": "Hero", "attributes": {"str": 12}}],
+    )
+    key = created["game_key"]
+    instance = registry.get(api._parse_key(key))
+    uid = next(iter(instance.players))
+
+    class Planner:
+        async def call_tools(self, *_args, **_kwargs):
+            if isinstance(calls, Exception):
+                raise calls
+            return SimpleNamespace(tool_calls=calls, total_tokens=1, provider_used="test")
+
+    processor = api._handler._round_processor
+    processor.check_model_enabled = True
+    processor.check_llm_client = Planner()
+    result = await api.submit_action(key, uid, "我查看公开告示栏")
+    assert result["status"] == 502
+    assert result["payload"]["error_code"] == "ROUND_PROCESSING_FAILED"
+    assert result["payload"]["rolled_back"] is True
+    assert result["payload"]["advanced"] is False
+    assert instance.state == GameState.ACTIVE_ACTION
 
 
 @pytest.mark.asyncio

@@ -455,6 +455,18 @@ async def test_empty_model_plan_cannot_auto_succeed_explicit_dodge_skill() -> No
 
 
 @pytest.mark.asyncio
+async def test_invalid_plan_still_protects_unpriced_purchase_in_shared_offline_recovery():
+    instance = make_instance()
+    instance.action_queue = [{"user_id": "p1", "text": "我买3瓶药水"}]
+    planned, metadata = await plan_round_checks(instance, make_rule(), _client_returning({}))
+    assert planned == []
+    assert metadata["available"] is False
+    assert metadata["unpriced_purchase_intents"] == [
+        {"payer_uid": "p1", "target": "药水", "quantity": 3},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_empty_model_plan_still_allows_routine_public_notice_without_roll() -> None:
     instance = make_instance()
     instance.action_queue = [{"user_id": "p1", "text": "阅读车站外公开告示栏"}]

@@ -155,6 +155,14 @@ class LLMToolResponse:
     attempted_requests: int = 0
 
 
+class _RejectedToolBatch(ValueError):
+    """A provider reported usage for an incomplete or malformed native batch."""
+
+    def __init__(self, reason: str, reported_tokens: int):
+        super().__init__(reason)
+        self.reported_tokens = reported_tokens
+
+
 class LLMToolCallError(RuntimeError):
     """Provider failure with HTTP facts preserved for application feedback."""
 
@@ -265,13 +273,8 @@ class LLMClient:
                     if isinstance(exc, aiohttp.ClientResponseError):
                         status_codes.add(exc.status)
                     errors.append(f"{provider.provider_name}: {exc}")
-                    try:
-                        usage_pool += native_result.total_tokens
-                    except UnboundLocalError:
-                        pass
-                    if isinstance(exc, aiohttp.ClientResponseError):
-                        status_codes.add(exc.status)
-                    errors.append(f"{provider.provider_name}: {exc}")
+                    if isinstance(exc, _RejectedToolBatch):
+                        usage_pool += exc.reported_tokens
                     if forced and "does not support this tool_choice" in str(exc):
                         self._native_tool_unsupported.add(provider.provider_name)
                         attempts += 1
@@ -293,6 +296,8 @@ class LLMClient:
                             result.attempted_requests = attempts
                             return result
                         except Exception as auto_exc:
+                            if isinstance(auto_exc, _RejectedToolBatch):
+                                usage_pool += auto_exc.reported_tokens
                             if isinstance(auto_exc, aiohttp.ClientResponseError):
                                 status_codes.add(auto_exc.status)
                             errors.append(f"{provider.provider_name} (tool_choice=auto): {auto_exc}")
@@ -437,8 +442,15 @@ class LLMClient:
                     headers=resp.headers,
                 )
             data = await resp.json()
-        message = data.get("choices", [{}])[0].get("message", {})
-        calls = _normalize_openai_tool_calls(message.get("tool_calls") or [])
+        total_tokens = int(data.get("usage", {}).get("total_tokens", 0) or 0)
+        choice = data.get("choices", [{}])[0]
+        if choice.get("finish_reason") == "length":
+            raise _RejectedToolBatch("tool batch truncated (finish_reason=length)", total_tokens)
+        message = choice.get("message", {})
+        try:
+            calls = _normalize_openai_tool_calls(message.get("tool_calls") or [])
+        except ValueError as exc:
+            raise _RejectedToolBatch(str(exc), total_tokens) from exc
         content = _openai_text_content(message.get("content"))
         if not calls and content:
             if not force_tool_choice:
@@ -446,14 +458,14 @@ class LLMClient:
                 if explicit_calls is not None:
                     return LLMToolResponse(
                         tool_calls=explicit_calls,
-                        total_tokens=int(data.get("usage", {}).get("total_tokens", 0) or 0),
+                        total_tokens=total_tokens,
                         provider_used=provider.provider_name,
                         native_tools=True,
                         content=content,
                     )
                 return LLMToolResponse(
                     tool_calls=[],
-                    total_tokens=int(data.get("usage", {}).get("total_tokens", 0) or 0),
+                    total_tokens=total_tokens,
                     provider_used=provider.provider_name,
                     native_tools=True,
                     content=content,
@@ -463,7 +475,7 @@ class LLMClient:
             raise ValueError("供应商未返回强制工具调用")
         return LLMToolResponse(
             tool_calls=calls,
-            total_tokens=int(data.get("usage", {}).get("total_tokens", 0) or 0),
+            total_tokens=total_tokens,
             provider_used=provider.provider_name,
             native_tools=True,
             content=content,
@@ -526,6 +538,10 @@ class LLMClient:
                     headers=resp.headers,
                 )
             data = await resp.json()
+        usage = data.get("usage", {})
+        total_tokens = int(usage.get("input_tokens", 0) or 0) + int(usage.get("output_tokens", 0) or 0)
+        if data.get("stop_reason") == "max_tokens":
+            raise _RejectedToolBatch("tool batch truncated (stop_reason=max_tokens)", total_tokens)
         calls = [
             {"name": str(block.get("name") or ""), "arguments": block.get("input") or {}}
             for block in data.get("content", [])
@@ -535,18 +551,13 @@ class LLMClient:
         if not calls and content and not force_tool_choice:
             return LLMToolResponse(
                 tool_calls=[],
-                total_tokens=(
-                    int(data.get("usage", {}).get("input_tokens", 0) or 0)
-                    + int(data.get("usage", {}).get("output_tokens", 0) or 0)
-                ),
+                total_tokens=total_tokens,
                 provider_used=provider.provider_name,
                 native_tools=True,
                 content=content,
             )
         if not calls:
             raise ValueError("供应商未返回强制工具调用")
-        usage = data.get("usage", {})
-        total_tokens = int(usage.get("input_tokens", 0) or 0) + int(usage.get("output_tokens", 0) or 0)
         return LLMToolResponse(calls, total_tokens, provider.provider_name, True, content)
 
     async def call(
@@ -1108,14 +1119,16 @@ def _tool_arguments(value: Any) -> dict[str, Any]:
 
 
 def _normalize_openai_tool_calls(raw_calls: list[Any]) -> list[dict[str, Any]]:
+    if not isinstance(raw_calls, list):
+        raise ValueError("tool_calls must be an array")
     calls: list[dict[str, Any]] = []
     for raw in raw_calls:
         if not isinstance(raw, dict):
-            continue
+            raise ValueError("tool call must be an object")
         function = raw.get("function") if isinstance(raw.get("function"), dict) else raw
         name = str(function.get("name") or "").strip()
         if not name:
-            continue
+            raise ValueError("tool call is missing its name")
         calls.append({"name": name, "arguments": _tool_arguments(function.get("arguments") or {})})
     return calls
 
