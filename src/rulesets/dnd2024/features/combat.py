@@ -63,9 +63,15 @@ class CombatContext:
     action: int = 0
     bonus_action: int = 0
     reaction: int = 0
+    # 当前回合开始时开启的窗口是否属于正在评估的角色。窗口不花经济，所以
+    # 它是一个独立布尔而不是第四种"剩余次数"：跳过之后它由 combat 层关闭，
+    # 而不是被某种动作消耗。
+    turn_start: bool = False
 
     @classmethod
-    def from_economy(cls, economy: Mapping[str, Any] | None) -> CombatContext:
+    def from_economy(
+        cls, economy: Mapping[str, Any] | None, actor_id: str = "",
+    ) -> CombatContext:
         source: Mapping[str, Any] = economy if isinstance(economy, Mapping) else {}
 
         def budget(key: str) -> int:
@@ -74,10 +80,13 @@ class CombatContext:
                 return 0
             return max(0, value)
 
+        window = source.get("turn_start_window")
+        window = window if isinstance(window, Mapping) else {}
         return cls(
             action=budget("action"),
             bonus_action=budget("bonus_action"),
             reaction=budget("reaction"),
+            turn_start=bool(actor_id) and str(window.get("actor_id") or "") == actor_id,
         )
 
     def remaining(self, action: str) -> int:
@@ -95,6 +104,15 @@ def _cost_views(
     definitions: Mapping[str, ResourceDefinition],
 ) -> tuple[CapabilityCostView, ...]:
     views: list[CapabilityCostView] = []
+    if capability.cost.turn_start:
+        # 窗口本身就是这份成本的"剩余":1 表示还没被跳过也没被别的动作关掉。
+        views.append(CapabilityCostView(
+            kind="turn_start",
+            name=catalog.label("turn_start", "turn start"),
+            amount=1,
+            current=1 if context.turn_start else 0,
+            maximum=1,
+        ))
     if capability.cost.action:
         views.append(CapabilityCostView(
             kind=capability.cost.action,
@@ -131,9 +149,23 @@ def _blocked_reason(
                 f"not enough {name}: this capability needs {resource_cost.amount}, "
                 f"the character has {int(definition.current)}"
             )
+    pool_id = capability.pool_resource_id
+    if pool_id:
+        # 池的支出额由意图决定，所以这里只回答"池里还有没有至少一点"：
+        # 空池的能力照样要被列出来带着原因，而不是变成一个可点的按钮。
+        pool = definitions.get(pool_id)
+        name = catalog.label(pool_id, pool_id)
+        if pool is None:
+            return f"{name} is not available to this character"
+        if int(pool.current) < 1:
+            return f"{name} is empty"
     action = capability.cost.action
     if action and context.remaining(action) < 1:
         return f"the {action.replace('_', ' ')} has already been spent"
+    if capability.cost.turn_start and not context.turn_start:
+        # 窗口一旦被动作或跳过关掉，就不能回头再激活：这就是"at the start of
+        # your turn"的可执行含义。
+        return "the start of your turn has already passed"
     return ""
 
 
@@ -168,6 +200,7 @@ def combat_capabilities(
                 blocked_reason=blocked,
                 requires_hostile_target=capability.requires_hostile_target,
                 costs=_cost_views(catalog, capability, context, definitions),
+                target_kind=capability.target_kind,
             ))
     return tuple(result)
 

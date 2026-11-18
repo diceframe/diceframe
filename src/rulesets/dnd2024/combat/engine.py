@@ -27,6 +27,7 @@ from src.rulesets.dnd2024.features import (
     CombatCapabilityView,
     Dnd2024ClassFeatureResolver,
 )
+from src.rulesets.dnd2024.features.resources import resource_state
 from src.rulesets.dnd2024.items.activation import (
     ItemActivationError,
     validate_activation_declaration,
@@ -59,12 +60,20 @@ from .check_windows import (
 )
 from .primitives import (
     INTENT_TYPES,
+    PERSISTENT_RAGE_DURATION,
     RAGE_MAX_ROUNDS,
+    DIVINE_SENSE_DURATION,
+    SMITE_OF_PROTECTION_CONDITION,
+    TURN_UNDEAD_DURATION,
+    TURNS_SCOPED_DURATIONS,
+    TURN_WINDOW_CLOSED_EVENT,
     UNARMED_STRIKE_REF,
+    WORLD_CLOCK_DURATIONS,
     CombatIntentError,
     actor_kind as _actor_kind,
     companion_actor as _companion_actor,
     canonical as _canonical,
+    current_turn_slot as _current_turn_slot,
     enemy_actor as _enemy_actor,
     player_actor as _player_actor,
 )
@@ -1033,6 +1042,18 @@ class Dnd2024CombatEngine(
         if pending is None:
             pending = next(({key: value for key, value in event.items() if key != "type"} for event in events
                             if event.get("type") == "dnd2024.decision.pending"), None)
+        # 回合开始窗口在读事件之前关闭：一旦这个回合干了别的事，"at the start
+        # of your turn" 就已经过去了，不能回头补。窗口属于经济预算，所以它是
+        # 一条事件而不是某个分支里顺手改的状态。
+        events.extend(self._turn_window_closure_events(combat, intent))
+        events.extend(self._incapacitation_cleanup_events(instance, combat, events))
+        events.extend(self._source_incapacitation_events(instance, combat, events))
+        events.extend(self._timed_condition_expiry_events(instance, combat))
+        # 世界时钟驱动的到期：一场在一分钟内结束的战斗会把效果留在身上，
+        # 只要之后还有任何战斗意图或时钟越过那一分钟就会被清掉。end_turn
+        # 由回合推进处统一查两个上限，这里不能重复发同一条移除事件。
+        if intent_type != "end_turn" and combat.get("initiative"):
+            events.extend(self._superior_defense_expiry_events(instance, combat))
         batch = {
             "batch_id": stable_batch_id(intent, expected),
             "intent_id": intent_id,
@@ -1043,6 +1064,192 @@ class Dnd2024CombatEngine(
             "source_ref": "srd-5.2.1:p24-p27:playing-the-game",
         }
         return {"ok": True, "event_batch": batch, "pending_decision": pending}
+
+    def _turn_window_closure_events(
+        self, combat: dict[str, Any], intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Close the turn-start window after anything but a chat message.
+
+        The rule is not "one free action then close": it is that the window
+        belongs to one instant of the turn.  So every intent the engine can
+        settle closes it, including the activation itself and ``end_turn`` --
+        an exclusion list only for messages, readiness pings, the start of the
+        combat (which is the intent that *opens* it) and its end.
+        """
+
+        window = (combat.get("economy") or {}).get("turn_start_window")
+        if not isinstance(window, dict):
+            return []
+        intent_type = str(intent.get("type") or "")
+        if intent_type in {
+            "combat.start", "combat.end", "combat.message",
+            "encounter.ready", "encounter.unready",
+        }:
+            return []
+        return [{
+            "type": TURN_WINDOW_CLOSED_EVENT,
+            "actor_id": str(window.get("actor_id") or ""),
+            "reason": intent_type,
+        }]
+
+    def _incapacitation_cleanup_events(
+        self, instance: Any, combat: dict[str, Any], events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """End effects whose own text says the Incapacitated condition ends them.
+
+        Superior Defense lasts "1 minute or until you have the Incapacitated
+        condition", and the condition can arrive from a Stunning Strike, a spell
+        or the environment.  Resolving it where the condition is *gained* would
+        mean a branch per source; resolving it once per batch from the merged
+        condition set means a new source needs no change here at all.
+
+        The metadata flag is on the effect, not on the class, so nothing in this
+        method names a feature.
+        """
+
+        applied: dict[str, set[str]] = {}
+        for event in events:
+            if event.get("type") != "condition.applied":
+                continue
+            target_id = str(event.get("target_id") or "")
+            if target_id:
+                applied.setdefault(target_id, set()).add(
+                    str(event.get("condition") or "")
+                )
+        cleanup: list[dict[str, Any]] = []
+        for actor_id, gained in applied.items():
+            try:
+                view = self._actor_view(instance, combat, actor_id)
+            except CombatIntentError:  # pragma: no cover - target came from an event
+                continue
+            conditions = dict(view.get("conditions") or {})
+            # 本批的新条件还没落地，必须并进来才看得到"刚刚被失能"这件事。
+            for condition_id in gained:
+                conditions.setdefault(condition_id, {})
+            if not condition_flags(self.catalog.conditions, conditions)["incapacitated"]:
+                continue
+            for condition_id, meta in (view.get("conditions") or {}).items():
+                if condition_id in gained:
+                    continue
+                if not isinstance(meta, dict) or not meta.get("ends_on_incapacitated"):
+                    continue
+                cleanup.append({
+                    "type": "condition.removed", "target_id": actor_id,
+                    "condition": condition_id, "reason": "incapacitated",
+                })
+        return cleanup
+
+    def _source_incapacitation_events(
+        self, instance: Any, combat: dict[str, Any], events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Effects that end when their *source* becomes Incapacitated or dies.
+
+        Turn Undead is written that way: "This effect ends early on the
+        creature if it takes any damage, if you have the Incapacitated
+        condition, or if you die".  The ender is therefore not the bearer's
+        own state but the caster's, and the bearer may be any actor on the
+        table -- so the sweep runs once per batch over every condition that
+        names a source, instead of a branch inside the caster's damage path.
+        """
+
+        lost: set[str] = set()
+        for event in events:
+            if event.get("type") != "condition.applied":
+                continue
+            target_id = str(event.get("target_id") or "")
+            if target_id:
+                lost.add(target_id)
+        cleanup: list[dict[str, Any]] = []
+        for source_id in lost:
+            try:
+                view = self._actor_view(instance, combat, source_id)
+            except CombatIntentError:  # pragma: no cover - source came from an event
+                continue
+            conditions = dict(view.get("conditions") or {})
+            for event in events:
+                if (
+                    event.get("type") == "condition.applied"
+                    and str(event.get("target_id") or "") == source_id
+                ):
+                    conditions.setdefault(str(event.get("condition") or ""), {})
+            flags = condition_flags(self.catalog.conditions, conditions)
+            if not (flags["incapacitated"] or "dead" in conditions):
+                continue
+            for other_id in self._combat_actor_ids(instance, combat):
+                if other_id == source_id:
+                    continue
+                try:
+                    other = self._actor_view(instance, combat, other_id)
+                except CombatIntentError:  # pragma: no cover - actor came from combat
+                    continue
+                for condition_id, meta in (other.get("conditions") or {}).items():
+                    if not isinstance(meta, dict):
+                        continue
+                    if not meta.get("ends_on_source_incapacitated"):
+                        continue
+                    if str(meta.get("source_actor_id") or "") != source_id:
+                        continue
+                    cleanup.append({
+                        "type": "condition.removed", "target_id": other_id,
+                        "condition": condition_id, "reason": "source incapacitated",
+                    })
+        return cleanup
+
+    def _combat_actor_ids(
+        self, instance: Any, combat: dict[str, Any],
+    ) -> list[str]:
+        """Every actor currently on the battlefield, in a stable order."""
+
+        ids = [
+            _player_actor(str(uid))
+            for uid in sorted(getattr(instance, "players", {}) or {})
+        ]
+        party = (
+            ruleset_runtime.state(instance).get("ruleset_state", {}) or {}
+        ).get("party", {}) or {}
+        ids.extend(
+            _companion_actor(str(companion_id))
+            for companion_id in sorted(party.get("companions", {}) or {})
+        )
+        ids.extend(
+            _enemy_actor(str(enemy_id))
+            for enemy_id in sorted((combat.get("enemies") or {}))
+        )
+        return ids
+
+    def _timed_condition_expiry_events(
+        self, instance: Any, combat: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """End effects that run on the world clock rather than on turns.
+
+        Divine Sense and the Sacred Weapon bond both run for ten minutes and
+        are not tied to a fight; a combat that ends before the clock passes
+        must leave them in place, and a clock that passes outside combat must
+        still end them.  Every intent sweeps the same limit, so no second timer
+        exists to disagree with the ledger.
+        """
+
+        now = self._logical_minutes(instance)
+        events: list[dict[str, Any]] = []
+        for actor_id in self._combat_actor_ids(instance, combat):
+            try:
+                view = self._actor_view(instance, combat, actor_id)
+            except CombatIntentError:  # pragma: no cover - actor came from combat
+                continue
+            for condition_id, meta in (view.get("conditions") or {}).items():
+                if not isinstance(meta, dict):
+                    continue
+                if meta.get("duration") not in WORLD_CLOCK_DURATIONS:
+                    continue
+                expires_at = meta.get("expires_at_minute")
+                if isinstance(expires_at, bool) or not isinstance(expires_at, int):
+                    continue
+                if now >= expires_at:
+                    events.append({
+                        "type": "condition.removed", "target_id": actor_id,
+                        "condition": condition_id, "reason": "ten minutes passed",
+                    })
+        return events
 
     def add_player_to_active_combat(self, instance: Any, user_id: str) -> dict[str, Any]:
         """Enroll a newly joined player after the current combat actor.
@@ -1265,11 +1472,11 @@ class Dnd2024CombatEngine(
                 })
         initiative = list(combat.get("initiative") or [])
         turn_index = int(combat.get("turn_index", 0) or 0)
-        current_actor_id = (
-            str(initiative[turn_index])
-            if initiative and 0 <= turn_index < len(initiative)
-            else ""
-        )
+        # ``turn_index`` 是 slot 下标；``initiative`` 是按人去重的列表，二者只在
+        # 没有 Thief's Reflexes 时一一对应。当前行动者必须由 slot 回答，否则
+        # 首轮第二个 slot 会把光标停在前一个行动者身上。
+        current_slot = _current_turn_slot(combat)
+        current_actor_id = str(current_slot["actor_id"]) if current_slot else ""
         return {
             "state_schema_version": int(state.get("state_schema_version", 1) or 1),
             "state_version": int(state.get("version", 0) or 0),
@@ -1278,6 +1485,7 @@ class Dnd2024CombatEngine(
                 "outcome": str(combat.get("outcome") or ""),
                 "round": int(combat.get("round", 0) or 0),
                 "turn_index": turn_index,
+                "turn_slot_id": str(current_slot["slot_id"]) if current_slot else "",
                 "current_actor_id": current_actor_id,
                 "initiative": initiative,
                 "position_mode": str(combat.get("position_mode") or "theater"),
@@ -1293,6 +1501,11 @@ class Dnd2024CombatEngine(
                 "mode": str(combat.get("mode") or ""),
                 "adventure_binding": deepcopy(combat.get("adventure_binding")),
                 "bardic_instances": self._active_bardic_view(instance, combat),
+                # 私有侦测只交给持有者本人：同一条 combat 视图对别人是空的。
+                "private_senses": (
+                    self._divine_sense_projection(instance, combat, viewer_id)
+                    if combat.get("status") == "active" else {}
+                ),
                 "actors": actors,
             },
             "encounter_presets": self.encounter_presets(),
@@ -1437,21 +1650,62 @@ class Dnd2024CombatEngine(
 
     @staticmethod
     def _current_actor(combat: dict[str, Any]) -> str:
-        order = combat.get("initiative")
-        index = int(combat.get("turn_index", 0) or 0)
-        if not isinstance(order, list) or not order or not 0 <= index < len(order):
+        # 当前行动者读的是 slot，不是 initiative 的下标：首轮里同一个角色可能
+        # 占两个 slot（Thief's Reflexes），而 initiative 仍然按人去重。
+        slot = _current_turn_slot(combat)
+        if slot is None:
             raise CombatIntentError("combat initiative state is invalid")
-        return str(order[index])
+        return str(slot["actor_id"])
 
     def _fresh_economy(self, actor: dict[str, Any]) -> dict[str, Any]:
         base = max(0, int(actor.get("speed", 0) or 0))
         # 速度修正来自条件注册表：speed_zero 压倒修正，其余按 speed_modifier 求和。
         speed = effective_speed(self.catalog.conditions, actor.get("conditions") or {}, base)
-        return {
+        economy = {
             "actor_id": actor["actor_id"], "action": 1, "bonus_action": 1,
             "reaction": 1, "movement": speed, "speed": speed,
             "attacks_remaining": 0, "disengaged": False,
         }
+        # 回合开始窗口属于这个回合，因此随经济预算一起生成、一起消失。
+        window = self._turn_start_window(actor)
+        if window is not None:
+            economy["turn_start_window"] = window
+        return economy
+
+    def _turn_start_window(self, actor: dict[str, Any]) -> dict[str, Any] | None:
+        """The turn-start payment window this actor is offered right now.
+
+        A window is opened only for a capability that *costs* the window: the
+        mechanism exists so that "at the start of your turn" can be a price,
+        not so every feature grows a free prompt.  When the resource cannot be
+        paid the window is not opened at all -- an unpayable button is noise,
+        and the capability's own cost check would refuse it anyway.
+
+        A capability with no declared action cost is the whole reason this is a
+        separate object: the window is neither an action nor a resource, so it
+        cannot be read off the economy's remaining budgets.
+        """
+
+        if actor.get("kind") not in {"player", "companion"}:
+            return None
+        character = self._feature_character(actor)
+        for definition in self.features.active_features_for(character):
+            for capability in definition.capabilities:
+                if not capability.cost.turn_start:
+                    continue
+                affordable = all(
+                    int(resource_state(character, cost.resource_id).get("current", 0) or 0)
+                    >= cost.amount
+                    for cost in capability.cost.resources
+                )
+                if not affordable:
+                    continue
+                return {
+                    "actor_id": str(actor["actor_id"]),
+                    "feature_id": definition.id,
+                    "capability_id": capability.id,
+                }
+        return None
 
     def _attacks_per_action(self, actor: dict[str, Any]) -> int:
         # Extra Attack 由职业表决定：progression 表说哪个职业在几级授予哪个
@@ -1695,6 +1949,87 @@ class Dnd2024CombatEngine(
             return {"bonus": 0, "sources": []}
         return {"bonus": best.pop("bonus"), "sources": [best]}
 
+    def _cover_record(
+        self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
+    ) -> dict[str, Any]:
+        """The best cover this creature has right now: Smite of Protection.
+
+        Cover is positional and momentary, so it is answered by a query instead
+        of being written onto anyone.  The condition lives on the Paladin, and
+        the reach comes from their own Aura of Protection -- which means an ally
+        who walks out loses it and one who walks back in (while it is still
+        running) gets it again, without a second copy of the radius.
+
+        Bonuses never stack, with each other or with a higher cover that a
+        future slice may add: the best single source wins, and several Paladins
+        holding the same benefit still give out exactly one +2.
+        """
+
+        empty = {"armor_class_bonus": 0, "dex_save_bonus": 0, "sources": []}
+        target_id = str(target.get("actor_id") or "")
+        if not target_id or str(target.get("side") or "") != "party":
+            return empty
+        best: dict[str, Any] | None = None
+        for row in self._projected_auras(instance, combat):
+            holder_id = str(row["holder_id"])
+            holder = self._actor_view(instance, combat, holder_id)
+            meta = (holder.get("conditions") or {}).get(SMITE_OF_PROTECTION_CONDITION)
+            if not isinstance(meta, dict):
+                continue
+            # 掩蔽借的是条件自己声明的那道灵光：既不复制半径，也不默认套用
+            # 任何一道光环，光环换名或换属性时这里跟着走。
+            source_aura = str(meta.get("cover_source_feature_id") or "aura_of_protection")
+            if str(row["definition"].id) != source_aura:
+                continue
+            if self._distance(combat, holder_id, target_id) > int(row["range_ft"]):
+                continue
+            armor_class_bonus = int(meta.get("cover_armor_class_bonus", 2) or 0)
+            dex_save_bonus = int(meta.get("cover_dex_save_bonus", 2) or 0)
+            if armor_class_bonus < 1 and dex_save_bonus < 1:
+                continue
+            rank = self._initiative_rank(combat, holder_id)
+            if best is None or (armor_class_bonus, dex_save_bonus) > (
+                best["armor_class_bonus"], best["dex_save_bonus"]
+            ) or (
+                (armor_class_bonus, dex_save_bonus)
+                == (best["armor_class_bonus"], best["dex_save_bonus"])
+                and rank < best["_rank"]
+            ):
+                best = {
+                    "armor_class_bonus": armor_class_bonus,
+                    "dex_save_bonus": dex_save_bonus,
+                    "sources": [{
+                        "feature_id": "smite_of_protection",
+                        "source_actor_id": holder_id,
+                        "range_ft": int(row["range_ft"]),
+                        "source_spell_ref": str(meta.get("source_spell_ref") or ""),
+                    }],
+                    "_rank": rank,
+                }
+        if best is None:
+            return empty
+        best.pop("_rank", None)
+        return best
+
+    def _cover_save_bonus(
+        self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
+        ability: str,
+    ) -> dict[str, Any]:
+        """Cover's contribution to one saving throw, which is Dex-only.
+
+        Asked separately from the AC half so a caller never has to remember
+        which ability cover helps: anything but Dexterity answers zero and the
+        event stays shaped like every other save.
+        """
+
+        if str(ability or "") != "dex":
+            return {"bonus": 0, "sources": []}
+        cover = self._cover_record(instance, combat, target)
+        return {
+            "bonus": int(cover["dex_save_bonus"]),
+            "sources": cover["sources"],
+        }
+
     def _passive_condition_immunity(
         self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
         condition_id: str,
@@ -1911,6 +2246,27 @@ class Dnd2024CombatEngine(
             return combat["enemies"][raw_id].setdefault("conditions", {})
         raise EventBatchError("condition target actor is invalid")
 
+    def _wears_heavy_armor(self, snapshot: dict[str, Any], actor_id: str) -> bool:
+        """Whether this actor's canonical equipment includes Heavy armor.
+
+        Read through the equipment catalogue instead of a client flag, so a
+        stale sheet cannot keep Persistent Rage alive by claiming light armor.
+        """
+
+        kind, raw_id = _actor_kind(actor_id)
+        if kind == "player":
+            character = snapshot["characters"].get(raw_id) or {}
+        elif kind == "companion":
+            companions = snapshot["ruleset_state"].get("party", {}).get("companions", {})
+            character = (companions.get(raw_id) or {}).get("ruleset_character") or {}
+        else:
+            return False
+        equipment = self.features.equipment
+        return any(
+            equipment.armor_category(str(ref)) == "heavy"
+            for ref in equipment.equipped_refs(character)
+        )
+
     def _remove_concentration_conditions(
         self, snapshot: dict[str, Any], combat: dict[str, Any], owner: str,
     ) -> None:
@@ -2000,6 +2356,20 @@ class Dnd2024CombatEngine(
                     # turn has just begun, so this instance expires now.
                     target_conditions.pop(condition_id, None)
                     continue
+                if value.get("duration") in TURNS_SCOPED_DURATIONS:
+                    # 1 分钟在回合制里就是十个自己的回合：每到自己回合结束
+                    # 减一，归零移除。计数放在条件上，所以中断、存档、重放
+                    # 都读同一份事实，不需要外部计时器。计时属于**持有着**
+                    # 的回合，而不是施法者的回合，因此这一支在下面的
+                    # ``source_actor_id`` 过滤之前。
+                    if target_id != previous_actor_id:
+                        continue
+                    remaining = int(value.get("turns_remaining", 0) or 0) - 1
+                    if remaining <= 0:
+                        target_conditions.pop(condition_id, None)
+                    else:
+                        value["turns_remaining"] = remaining
+                    continue
                 if value.get("source_actor_id") != previous_actor_id:
                     continue
                 duration = value.get("duration")
@@ -2018,7 +2388,26 @@ class Dnd2024CombatEngine(
             # 续期则消耗剩余轮数，归零即结束。昏迷则无条件结束。
             previous_conditions = self._conditions(snapshot, combat, previous_actor_id)
             rage = previous_conditions.get("rage")
-            if isinstance(rage, dict):
+            if isinstance(rage, dict) and rage.get("duration") == PERSISTENT_RAGE_DURATION:
+                # 持久狂怒：不靠攻击或附赠动作续期，单纯 Incapacitated /
+                # Stunned / Paralyzed 也不结束；只有 Unconscious 或真的穿上
+                # 重甲结束。剩余轮数每轮照常递减，没有旧 Rage 那条"进入的那个
+                # 回合免费"的豁免——10 分钟是从进入那一刻起算的 100 轮。
+                if (
+                    "unconscious" in previous_conditions
+                    or self._wears_heavy_armor(snapshot, previous_actor_id)
+                ):
+                    previous_conditions.pop("rage", None)
+                else:
+                    remaining = int(
+                        rage.get("turns_remaining", RAGE_MAX_ROUNDS) or RAGE_MAX_ROUNDS
+                    ) - 1
+                    if remaining <= 0:
+                        previous_conditions.pop("rage", None)
+                    else:
+                        rage["turns_remaining"] = remaining
+                        rage["sustained_this_turn"] = False
+            elif isinstance(rage, dict):
                 # 失能即结束狂暴：unconscious / incapacitated 以及所有
                 # 蕴含失能的条件（paralyzed / stunned / petrified）。
                 if any(

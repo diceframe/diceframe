@@ -380,6 +380,45 @@ def plan_skill_choices(
 _ARMOR_CATEGORIES = frozenset({"light", "medium", "heavy"})
 
 
+def apply_feature_ability_bonuses(
+    abilities: Mapping[str, int],
+    grants: Mapping[str, tuple[int, int]],
+    applied: Mapping[str, int],
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Give the owned features' ability increases, replacing what they gave before.
+
+    ``grants`` is ``{ability: (bonus, cap)}`` as the feature boundary reports
+    it, and ``applied`` is what this function returned last time.  Replacing
+    instead of adding is what makes the rule survive being run twice: the same
+    call on an unchanged character moves nothing, a feature that is no longer
+    granted hands its points back, and a level-up in between keeps its own
+    increase because only the feature's share is taken off before the new share
+    is added.
+
+    The cap is applied to the score the character would otherwise have, so a
+    Strength of 21 becomes 25 under "+4, to a maximum of 25" while a Strength of
+    12 becomes 16.
+    """
+
+    updated = {
+        ability: int(abilities.get(ability, 0) or 0) for ability in ABILITY_IDS
+    }
+    record: dict[str, int] = {}
+    for ability in ABILITY_IDS:
+        previous = int(applied.get(ability, 0) or 0)
+        base = updated[ability] - previous
+        grant = grants.get(ability)
+        if not grant:
+            # 不再授予时必须把上次给的点收回，否则角色掉等级后仍留着 +4。
+            updated[ability] = base
+            continue
+        bonus, cap = int(grant[0]), int(grant[1])
+        raised = min(cap, base + bonus) if bonus else base
+        record[ability] = raised - base
+        updated[ability] = raised
+    return updated, record
+
+
 def derive_skill_check(
     ability_score: int,
     *,
@@ -662,6 +701,12 @@ class CharacterDerivationMixin:
         # 与职业自带的两个豁免 ref 合并成一个集合，加值仍只按 PB 计一次。
         if features.saving_throw_proficiency_all(feature_proxy):
             save_refs = sorted({*save_refs, *(f"ability:{item}" for item in ABILITY_IDS)})
+        # 单项豁免熟练（Slippery Mind）走同一个集合：合并不是追加，所以职业本来
+        # 已经给的豁免不会因此多拿一次 PB；来源单独记在下面，集合本身看不出谁给的。
+        feature_save_sources = features.saving_throw_proficiency_sources(feature_proxy)
+        feature_save_refs = {f"ability:{ability}" for ability in feature_save_sources}
+        if feature_save_refs:
+            save_refs = sorted({*save_refs, *feature_save_refs})
         saving_throws = {
             ability_id: ability_modifier(abilities[ability_id])
             + (prof if f"ability:{ability_id}" in save_refs else 0)
@@ -749,6 +794,15 @@ class CharacterDerivationMixin:
             *(
                 {"kind": "saving_throw_proficiency", "ref": ref, "source_ref": draft["class_ref"]}
                 for ref in save_refs
+                if ref not in feature_save_refs
+            ),
+            *(
+                {
+                    "kind": "saving_throw_proficiency",
+                    "ref": f"ability:{ability}",
+                    "source_ref": feature_id,
+                }
+                for ability, feature_id in feature_save_sources.items()
             ),
             *(
                 {"kind": "tool_proficiency", "ref": ref, "source_ref": draft["background_ref"]}

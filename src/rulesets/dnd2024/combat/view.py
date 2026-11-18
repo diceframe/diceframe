@@ -19,6 +19,7 @@ from src.rulesets.dnd2024.spells.casting import spell_caster, spellcasting_proje
 from .check_modes import sense_declarations
 from .check_windows import LUCKY_RESOURCE
 from .primitives import (
+    DIVINE_SENSE_CONDITION,
     FEATURE_STATE_KEYS,
     CombatIntentError,
     UNARMED_STRIKE_REF,
@@ -233,6 +234,9 @@ class CombatViewMixin:
             },
             "class_resources": deepcopy(feature_projection["class_resources"]),
             "martial_arts_die": str(feature_projection["unarmed_damage_die"]),
+            # Heroic Inspiration is a character-scoped flag: a turn-start grant
+            # that combat could not read back would be re-granted every round.
+            "heroic_inspiration": deepcopy(character.get("heroic_inspiration")),
             "unarmed_ability_choice": list(feature_projection["unarmed_ability_choice"]),
             "martial_arts_weapon_refs": list(
                 feature_projection["martial_arts_weapon_refs"]
@@ -311,6 +315,65 @@ class CombatViewMixin:
         if unarmed is not None:
             result.append(unarmed)
         return result
+
+    def _divine_sense_projection(
+        self, instance: Any, combat: dict[str, Any], viewer_id: str,
+    ) -> dict[str, Any]:
+        """What Divine Sense shows *its owner*, and nobody else.
+
+        A detection is private information: broadcasting the list of hidden
+        Undead would hand every seat the same knowledge and make the ability
+        pointless.  This projection is therefore built only for the viewer who
+        holds the condition, and it reports position and creature type only --
+        not Hit Points, not equipment.
+
+        ``consecrations_supported`` is deliberately false: the baseline has no
+        consecration/desecration data, and pretending to have searched would
+        be worse than saying the search is not modelled.
+        """
+
+        if not viewer_id:
+            return {}
+        actor_id = _player_actor(str(viewer_id))
+        try:
+            viewer = self._actor_view(instance, combat, actor_id)
+        except CombatIntentError:
+            return {}
+        condition = (viewer.get("conditions") or {}).get(DIVINE_SENSE_CONDITION)
+        if not isinstance(condition, dict):
+            return {}
+        radius = int(condition.get("range_ft", 60) or 60)
+        wanted = [
+            str(kind) for kind in (condition.get("creature_types") or [])
+            if str(kind)
+        ]
+        creatures: list[dict[str, Any]] = []
+        for other_id in self._combat_actor_ids(instance, combat):
+            if other_id == actor_id:
+                continue
+            try:
+                other = self._actor_view(instance, combat, other_id)
+            except CombatIntentError:  # pragma: no cover - actor came from combat
+                continue
+            creature_type = str(other.get("creature_type") or "").lower()
+            if creature_type not in wanted:
+                continue
+            distance = self._distance(combat, actor_id, other_id)
+            if distance > radius:
+                continue
+            creatures.append({
+                "actor_id": other_id,
+                "creature_type": creature_type,
+                "position": self._position(combat, other_id),
+                "distance_ft": distance,
+            })
+        return {
+            "range_ft": radius,
+            "creature_types": wanted,
+            "creatures": creatures,
+            "consecrations": [],
+            "consecrations_supported": False,
+        }
 
     def _spell_statuses(self, instance, actor, economy, trigger=None, *, is_current=True):
         """Known spells remain visible even when no cast is currently legal."""
@@ -442,6 +505,7 @@ class CombatViewMixin:
             "abilities": actor.get("abilities") or {},
             "resources": {"class": class_state},
             "equipment": {"item_refs": list(actor.get("equipment_refs") or [])},
+            "heroic_inspiration": deepcopy(actor.get("heroic_inspiration")),
         }
 
     def _available_class_capabilities(
@@ -456,6 +520,7 @@ class CombatViewMixin:
             self._feature_character(actor),
             economy,
             include_unavailable=include_unavailable,
+            actor_id=str(actor.get("actor_id") or ""),
         )
 
     def _available_spells(

@@ -28,7 +28,8 @@
   },
   "class_resources": {
     "barbarian": [
-      {"id": "rages", "minimum_level": 1, "maximum_track": "rages", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p28:rage"}
+      {"id": "rages", "minimum_level": 1, "maximum_track": "rages", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p28:rage"},
+      {"id": "persistent_rage", "minimum_level": 15, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p30:persistent-rage"}
     ],
     "bard": [
       {"id": "bardic_inspiration", "minimum_level": 1, "maximum_ability_modifier": "cha", "minimum": 1, "short_all_from_level": 5, "long": "all", "source_ref": "srd-5.2.1:p31:bardic-inspiration"}
@@ -47,7 +48,8 @@
     ],
     "monk": [
       {"id": "focus_points", "minimum_level": 2, "maximum_track": "focus_points", "short": "all", "long": "all", "resize_policy": "preserve_current", "source_ref": "srd-5.2.1:p50:monks-focus"},
-      {"id": "uncanny_metabolism", "minimum_level": 2, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p51:uncanny-metabolism"}
+      {"id": "uncanny_metabolism", "minimum_level": 2, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p51:uncanny-metabolism"},
+      {"id": "wholeness_of_body", "minimum_level": 6, "maximum_ability_modifier": "wis", "minimum": 1, "short": "none", "long": "all", "requires_subclass": "subclass:warrior_of_the_open_hand", "source_ref": "srd-5.2.1:p52:wholeness-of-body"}
     ],
     "paladin": [
       {"id": "lay_on_hands", "minimum_level": 1, "maximum_track": "lay_on_hands", "short": "none", "long": "all", "source_ref": "srd-5.2.1:p53:lay-on-hands"},
@@ -55,7 +57,9 @@
       {"id": "paladins_smite", "minimum_level": 2, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p54:paladins-smite"}
     ],
     "ranger": [
-      {"id": "favored_enemy", "minimum_level": 1, "maximum_track": "favored_enemy", "short": "none", "long": "all", "source_ref": "srd-5.2.1:p58:favored-enemy"}
+      {"id": "favored_enemy", "minimum_level": 1, "maximum_track": "favored_enemy", "short": "none", "long": "all", "source_ref": "srd-5.2.1:p58:favored-enemy"},
+      {"id": "tireless", "minimum_level": 10, "maximum_ability_modifier": "wis", "minimum": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p59:tireless"},
+      {"id": "natures_veil", "minimum_level": 14, "maximum_ability_modifier": "wis", "minimum": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p59:natures-veil"}
     ],
     "rogue": [
       {"id": "stroke_of_luck", "minimum_level": 20, "maximum_fixed": 1, "short": "all", "long": "all", "source_ref": "srd-5.2.1:p63:stroke-of-luck"}

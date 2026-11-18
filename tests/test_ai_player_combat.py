@@ -156,7 +156,16 @@ def _start(
 
 def _set_turn(engine: Dnd2024CombatEngine, instance: GameInstance, actor_id: str) -> None:
     combat = ruleset_runtime.state(instance)["combat"]
-    combat["turn_index"] = combat["initiative"].index(actor_id)
+    # S0-F20 之后 ``turn_slots`` 才是回合金本的权威形态（一个行动者可以有
+    # 两个槽）；``initiative`` 只回答"谁在场"。旧写法按 initiative 取下标，
+    # 一旦用例改写了顺序就会指到别人身上。
+    slots = combat.get("turn_slots") or [
+        {"actor_id": actor} for actor in combat["initiative"]
+    ]
+    combat["turn_index"] = next(
+        index for index, slot in enumerate(slots)
+        if str(slot["actor_id"]) == actor_id
+    )
     combat["economy"] = engine._fresh_economy(engine._actor_view(instance, combat, actor_id))
 
 

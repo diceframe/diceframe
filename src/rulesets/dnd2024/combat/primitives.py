@@ -12,6 +12,80 @@ DICE_RE = re.compile(r"^(\d+)d(\d+)([+-]\d+)?$")
 UNARMED_STRIKE_REF = "unarmed_strike"
 # 狂暴至多持续 10 分钟；一轮 6 秒，即 100 轮。
 RAGE_MAX_ROUNDS = 100
+# 掷先攻时可以选择使用的开场能力。声明只能出现在 combat.start 的
+# ``initiative_choices`` 里，且只能表达"用不用"，不能带任何数量或骰值。
+INITIATIVE_CHOICES = frozenset({"uncanny_metabolism", "persistent_rage"})
+# 15 级持久狂怒的狂暴用这个 duration 记账：它不靠每回合续期维持，
+# 只被 Unconscious 与真实穿上重甲提前结束。
+PERSISTENT_RAGE_DURATION = "persistent_rage"
+# 18 级卓越防御：一条自带"除 Force 外全部抗性"的条件。它既不是 ``combat``
+# （战斗结束不等于一分钟到）也不是回合域（它按分钟计时），因此有自己的
+# duration，并靠 duration_minutes + 到期轮数两个上限之一结束。
+SUPERIOR_DEFENSE_CONDITION = "superior_defense"
+SUPERIOR_DEFENSE_DURATION = "superior_defense"
+# 回合开始窗口的关闭事件。窗口本身存在 economy 上（它不消耗任何经济，只是
+# "此刻允许支付"的记号），所以关闭它同样是一条事件，而不是某处直接改状态。
+TURN_WINDOW_CLOSED_EVENT = "dnd2024.turn_window.closed"
+# 驱散亡灵与神圣感知各自的条件域。前者是"每个受影响生物身上的一分钟状态"
+# （目标自己的回合按轮推进），后者是"施法者自己身上的一段侦测"（按分钟计时，
+# 失能即结束），两者都不属于 combat 域，所以各有一个 duration。
+TURN_UNDEAD_DURATION = "turn_undead"
+TURN_UNDEAD_MAX_ROUNDS = 10
+DIVINE_SENSE_CONDITION = "divine_sense"
+DIVINE_SENSE_DURATION = "divine_sense"
+# 神圣武器绑定的是一把具体的武器引用，因此它是"持有者身上 + weapon_ref"的
+# 一段状态，按世界时钟计时（十分钟），也按装备协调结束（不再携带该武器）。
+SACRED_WEAPON_CONDITION = "sacred_weapon"
+SACRED_WEAPON_DURATION = "sacred_weapon"
+# 守护至圣斩给的是"下一次施放至圣斩之后到你下一回合开始"的一段掩蔽。它挂在
+# 圣武士自己身上而不是逐个盟友身上：掩蔽的范围是灵光，离开就失去、回到灵光
+# 且未到期就恢复，逐个复制到盟友身上反而做不到这一点。
+SMITE_OF_PROTECTION_CONDITION = "smite_of_protection"
+SMITE_OF_PROTECTION_DURATION = "actor_turn_start"
+# 斥退敌人给的是"一分钟或直到受伤"的 Frightened，另加一条"每回合只能三选一"
+# 的限制。一分钟在回合制里同样是十个自己的回合，所以和 Turn Undead 共用同一套
+# 计数逻辑，而不是另立一个计时器。
+ABJURE_FOES_DURATION = "abjure_foes"
+TURNS_SCOPED_DURATIONS = frozenset({TURN_UNDEAD_DURATION, ABJURE_FOES_DURATION})
+# 只有世界时钟能结束的效果：它们不参与回合域到期，也不随战斗结束消失。
+WORLD_CLOCK_DURATIONS = frozenset({DIVINE_SENSE_DURATION, SACRED_WEAPON_DURATION})
+
+
+def combat_turn_slots(combat: dict[str, Any]) -> list[dict[str, Any]]:
+    """The authoritative turn schedule: one slot per turn, not per actor.
+
+    A Thief's Reflexes grants a second turn in round one, so "who acts now"
+    cannot be answered from the deduplicated ``initiative`` list.  ``initiative``
+    keeps its meaning ("who is in this combat"); ``turn_slots`` answers the
+    schedule.  Combats started before this slice carry no slots and fall back to
+    one slot per Initiative entry, so their order is unchanged by a read.
+    """
+
+    slots = combat.get("turn_slots")
+    if isinstance(slots, list):
+        rows = [
+            slot for slot in slots
+            if isinstance(slot, dict) and str(slot.get("actor_id") or "")
+        ]
+        if rows:
+            return rows
+    return [
+        {
+            "slot_id": f"{actor_id}#1", "actor_id": str(actor_id),
+            "initiative_total": 0, "kind": "normal",
+        }
+        for actor_id in combat.get("initiative") or []
+    ]
+
+
+def current_turn_slot(combat: dict[str, Any]) -> dict[str, Any] | None:
+    """The slot whose turn it is, or ``None`` when the schedule is inconsistent."""
+
+    slots = combat_turn_slots(combat)
+    index = int(combat.get("turn_index", 0) or 0)
+    if not slots or not 0 <= index < len(slots):
+        return None
+    return slots[index]
 
 
 def rider_attack_kind(weapon: dict[str, Any]) -> str:

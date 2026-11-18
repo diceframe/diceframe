@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any
 
 from src.engine.player_control import is_ai_controlled
+from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.content.contracts import CREATURE_TYPES
 
 from ..character.attunement import (
@@ -45,8 +46,10 @@ from ..spells.font_of_magic import (
 )
 from .primitives import (
     DICE_RE,
+    INITIATIVE_CHOICES,
     INTENT_TYPES,
     RELENTLESS_RAGE_DECISION,
+    SACRED_WEAPON_CONDITION,
     UNARMED_STRIKE_REF,
     CombatIntentError,
     actor_kind as _actor_kind,
@@ -247,6 +250,7 @@ class CombatValidationMixin:
             # with the catalog entry. Enemy data is intentionally optional so
             # clients cannot smuggle a forged stat block into combat.
             self._validate_player_positions(instance, intent.get("player_positions"))
+            self._validate_initiative_choices(instance, intent)
             return
         if combat.get("status") != "active":
             raise CombatIntentError("combat is not active")
@@ -370,6 +374,9 @@ class CombatValidationMixin:
         if flags["speed_zero"] and intent_type == "move":
             raise CombatIntentError("an actor with speed zero cannot move")
         economy = combat.get("economy") or {}
+        self._validate_turn_choice(
+            intent, intent_type, actor, economy, conditions,
+        )
         if intent_type in {"attack", "dash", "dodge", "disengage", "hide", "stabilize"}:
             has_action = int(economy.get("action", 0) or 0) > 0 or int(
                 economy.get("surge_action", 0) or 0
@@ -411,6 +418,128 @@ class CombatValidationMixin:
             if target["kind"] != "player" or target["hp"] > 0:
                 raise CombatIntentError("stabilize requires a player at 0 HP")
             self._require_range(combat, actor_id, target["actor_id"], 5)
+
+    @staticmethod
+    def _choice_spent(choice: str, economy: dict[str, Any]) -> bool:
+        """Whether this turn has already spent one of the three choices.
+
+        Movement is answered from the ``moved`` marker the reducer writes when
+        the current actor actually moves; a forced move of somebody else does
+        not set it.  Action and Bonus Action are answered from the remaining
+        budget.  A surge action is deliberately *not* folded in here: refusing
+        the surge itself is a separate rule in ``_validate_turn_choice``, and
+        counting it as "already acted" would blame the wrong thing.
+        """
+
+        if choice == "move":
+            return bool(economy.get("moved"))
+        if choice == "action":
+            return int(economy.get("action", 0) or 0) < 1
+        if choice == "bonus_action":
+            return int(economy.get("bonus_action", 0) or 0) < 1
+        return False
+
+    def _intent_choice(
+        self, intent: dict[str, Any], intent_type: str, actor: dict[str, Any],
+    ) -> str:
+        """Which of move / action / Bonus Action this intent would spend.
+
+        Empty means "none of the three": a reaction, a decision, or ending the
+        turn is not one of the choices the Abjure Foes Frightened restricts.
+        """
+
+        if intent_type == "move":
+            return "move"
+        if intent_type in {
+            "attack", "dash", "dodge", "disengage", "hide", "stabilize",
+            "activate_item",
+        }:
+            return "action"
+        if intent_type == "cast_spell":
+            spell = self.spells.get(str(intent.get("spell_ref") or ""))
+            if spell is None:
+                return ""
+            casting_time = str(spell["casting_time"])
+            if casting_time.startswith("Bonus Action"):
+                return "bonus_action"
+            # 反应法术不占用三选一里的任何一项：斥退敌人不禁止反应。
+            if casting_time.startswith("Reaction"):
+                return ""
+            return "action"
+        if intent_type == "class_capability":
+            capability = self.features.declared_capability(
+                self._feature_character(actor),
+                str(intent.get("capability_id") or ""),
+            )
+            if capability is None:
+                return ""
+            # ``cost.action`` 是经济槽位的名字本身（action / bonus_action /
+            # reaction），不是一个布尔。
+            if capability.cost.action == "bonus_action":
+                return "bonus_action"
+            return "action" if capability.cost.action == "action" else ""
+        return ""
+
+    def _validate_turn_choice(
+        self, intent: dict[str, Any], intent_type: str, actor: dict[str, Any],
+        economy: dict[str, Any], conditions: dict[str, Any],
+    ) -> None:
+        """Abjure Foes: one of move / action / Bonus Action per turn, no more.
+
+        The restriction is data on the condition, so it applies to whatever
+        the intent actually costs rather than to a list of banned intent types.
+        Repeating the *same* choice is left to the ordinary economy: a second
+        attack of the Attack action, or a second Bonus Action, is refused by
+        the budget, not by this rule.
+
+        One exception stays here rather than in the budget: Action Surge is the
+        only thing that can hand out a second action after the first is spent,
+        and the restriction exists precisely to cap the creature at one of the
+        three for the turn, so a surge action is refused while the limit holds.
+        """
+
+        limit = self._turn_choice_limit(conditions)
+        if not limit:
+            return
+        choice = self._intent_choice(intent, intent_type, actor)
+        if choice not in limit:
+            return
+        if (
+            choice == "action"
+            and int(economy.get("action", 0) or 0) < 1
+            and int(economy.get("surge_action", 0) or 0) > 0
+        ):
+            raise CombatIntentError(
+                "while frightened this way you can only take one action "
+                "on your turn: Action Surge cannot buy another"
+            )
+        spent = {
+            name for name in limit
+            if name != choice and self._choice_spent(name, economy)
+        }
+        if spent:
+            labels = {
+                "move": "move", "action": "take an action",
+                "bonus_action": "take a Bonus Action",
+            }
+            used = ", ".join(sorted(labels.get(name, name) for name in spent))
+            raise CombatIntentError(
+                "while frightened this way you can only move, take an action, "
+                f"or take a Bonus Action on your turn: you already chose to {used}"
+            )
+
+    def _turn_choice_limit(self, conditions: dict[str, Any]) -> list[str]:
+        """The three-way cap this condition set carries, if any."""
+
+        for meta in conditions.values():
+            if not isinstance(meta, dict):
+                continue
+            declared = meta.get("turn_choice_limit")
+            if isinstance(declared, list):
+                limit = [str(item) for item in declared if str(item)]
+                if limit:
+                    return limit
+        return []
 
     def _validate_class_capability(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
@@ -570,12 +699,347 @@ class CombatValidationMixin:
                 )
             except FontOfMagicError as exc:
                 raise CombatIntentError(str(exc)) from exc
+        elif any(action.kind == "divine_spark" for action in capability.actions):
+            self._validate_divine_spark(instance, combat, intent, actor, capability)
+        elif any(action.kind == "turn_undead" for action in capability.actions):
+            self._validate_turn_undead(instance, combat, intent, actor, capability)
+        elif any(action.kind == "preserve_life" for action in capability.actions):
+            self._validate_preserve_life(instance, combat, intent, actor, capability)
+        elif any(action.kind == "lay_on_hands" for action in capability.actions):
+            self._validate_lay_on_hands(instance, combat, intent, actor, capability)
+        elif any(action.kind == "abjure_foes" for action in capability.actions):
+            self._validate_abjure_foes(instance, combat, intent, actor, capability)
         elif capability.requires_hostile_target:
             target = self._actor_view(
                 instance, combat, str(intent.get("target_id") or ""),
             )
             if str(target.get("side") or "") == str(actor.get("side") or "") or target["hp"] <= 0:
                 raise CombatIntentError("this capability requires a living hostile target")
+
+    def _capability_range(
+        self, actor: dict[str, Any], capability: Any, key: str, default: int,
+    ) -> int:
+        """The declared reach of one capability, in feet.
+
+        Range comes from the feature declaration, never from the intent: a
+        client that sends a friendlier number must not be able to widen it.
+        The declaring feature is read (not the capability id) because the
+        Channel Divinity options are capabilities *of* one feature, and their
+        numbers live in that feature's parameters under a prefixed key.
+        """
+
+        range_ft = self.features.feature_value(
+            self._feature_character(actor), capability.feature_id, key, default,
+        )
+        return int(range_ft) if isinstance(range_ft, int) and range_ft > 0 else default
+
+    def _validate_divine_spark(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor: dict[str, Any], capability: Any,
+    ) -> None:
+        """Divine Spark: another living creature, 30 feet, one of two modes."""
+
+        target_id = str(intent.get("target_id") or "")
+        if not target_id:
+            raise CombatIntentError("Divine Spark requires a target")
+        if target_id == str(actor["actor_id"]):
+            raise CombatIntentError("Divine Spark cannot target yourself")
+        target = self._actor_view(instance, combat, target_id)
+        if target["hp"] <= 0:
+            raise CombatIntentError("Divine Spark targets a living creature")
+        self._require_range(
+            combat, str(actor["actor_id"]), target_id,
+            self._capability_range(actor, capability, "spark_target_range_ft", 30),
+        )
+        mode = str(intent.get("spark_mode") or "")
+        if mode not in {"heal", "damage"}:
+            raise CombatIntentError("Divine Spark must be declared as heal or damage")
+        damage_type = str(intent.get("damage_type") or "")
+        allowed = [
+            str(kind) for kind in (
+                self.features.feature_value(
+                    self._feature_character(actor), capability.feature_id,
+                    "spark_damage_types", ["necrotic", "radiant"],
+                ) or []
+            )
+        ]
+        if mode == "damage":
+            if damage_type not in allowed:
+                raise CombatIntentError(
+                    "Divine Spark damage must be one of its declared damage types"
+                )
+        elif damage_type:
+            raise CombatIntentError("Divine Spark healing does not choose a damage type")
+
+    def _validate_turn_undead(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor: dict[str, Any], capability: Any,
+    ) -> None:
+        """Turn Undead: a de-duplicated set of Undead inside the declared reach."""
+
+        raw = intent.get("target_ids")
+        if not isinstance(raw, list) or not raw:
+            raise CombatIntentError("Turn Undead requires at least one Undead target")
+        targets = [str(item) for item in raw]
+        if len(set(targets)) != len(targets):
+            raise CombatIntentError("Turn Undead targets must not repeat")
+        limit = self._capability_range(actor, capability, "turn_target_range_ft", 30)
+        for target_id in targets:
+            target = self._actor_view(instance, combat, target_id)
+            if target["hp"] <= 0:
+                raise CombatIntentError("Turn Undead targets a living Undead")
+            if "undead" not in str(target.get("creature_type") or "").lower():
+                raise CombatIntentError("Turn Undead targets only Undead creatures")
+            self._require_range(combat, str(actor["actor_id"]), target_id, limit)
+        if intent.get("sear_undead") not in (None, False):
+            if intent.get("sear_undead") is not True:
+                raise CombatIntentError("sear_undead must be a boolean")
+            if not self.features.has_feature(
+                self._feature_character(actor), "sear_undead",
+            ):
+                raise CombatIntentError("sear undead is not available to this actor")
+
+    def _validate_abjure_foes(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor: dict[str, Any], capability: Any,
+    ) -> None:
+        """Abjure Foes: exactly Charisma-modifier creatures you can see.
+
+        "Exactly" is the rule, not a convenience: the feature targets *a number
+        of creatures equal to* the modifier, so a shorter list is as illegal as
+        a longer one, and refusing the whole intent is the only rejection that
+        cannot leave a partially-paid Channel use behind.
+        """
+
+        raw = intent.get("target_ids")
+        if not isinstance(raw, list) or not raw:
+            raise CombatIntentError("Abjure Foes requires at least one target")
+        targets = [str(item) for item in raw]
+        if len(set(targets)) != len(targets):
+            raise CombatIntentError("Abjure Foes targets must not repeat")
+        character = self._feature_character(actor)
+        ability = str(self.features.feature_value(
+            character, capability.feature_id, "target_count_ability", "cha",
+        ) or "cha")
+        minimum = int(self.features.feature_value(
+            character, capability.feature_id, "target_count_minimum", 1,
+        ) or 1)
+        count = max(
+            minimum,
+            ability_modifier(int((actor.get("abilities") or {}).get(ability, 10) or 10)),
+        )
+        if len(targets) != count:
+            raise CombatIntentError(
+                f"Abjure Foes must target exactly {count} creatures"
+            )
+        limit = self._capability_range(actor, capability, "target_range_ft", 60)
+        for target_id in targets:
+            if target_id == str(actor["actor_id"]):
+                raise CombatIntentError("Abjure Foes cannot target yourself")
+            target = self._actor_view(instance, combat, target_id)
+            if target["hp"] <= 0:
+                raise CombatIntentError("Abjure Foes targets a living creature")
+            self._require_range(combat, str(actor["actor_id"]), target_id, limit)
+            if not self._spell_target_visible(instance, combat, actor, target):
+                raise CombatIntentError("Abjure Foes targets creatures you can see")
+
+    def _validate_preserve_life(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor: dict[str, Any], capability: Any,
+    ) -> None:
+        """Preserve Life: a split of one budget, capped by each target's half HP.
+
+        Both ceilings are checked here because both are facts the server owns:
+        the budget is 5 x Cleric level for *this* action, and a creature can
+        never be restored above half its Hit Point maximum by this feature.
+        """
+
+        rows = intent.get("allocations")
+        if not isinstance(rows, list) or not rows:
+            raise CombatIntentError("Preserve Life requires at least one allocation")
+        character = self._feature_character(actor)
+        per_level = self.features.feature_value(
+            character, capability.id, "preserve_life_per_level", 5,
+        )
+        state = self.features.class_state(character)
+        level = int(state[1]) if state else 0
+        budget = int(per_level or 5) * level
+        limit = self._capability_range(actor, capability, "target_range_ft", 30)
+        seen: set[str] = set()
+        total = 0
+        for row in rows:
+            if not isinstance(row, dict):
+                raise CombatIntentError("each Preserve Life allocation must name a target")
+            target_id = str(row.get("target_id") or "")
+            amount = row.get("amount")
+            if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+                raise CombatIntentError("a Preserve Life amount must be a non-negative integer")
+            if target_id in seen:
+                raise CombatIntentError("a Preserve Life target may appear only once")
+            seen.add(target_id)
+            target = self._actor_view(instance, combat, target_id)
+            if target["hp"] <= 0:
+                raise CombatIntentError("Preserve Life targets a living creature")
+            self._require_range(combat, str(actor["actor_id"]), target_id, limit)
+            maximum = int(target["max_hp"])
+            if int(target["hp"]) * 2 > maximum:
+                raise CombatIntentError(
+                    "Preserve Life targets only Bloodied creatures"
+                )
+            ceiling = max(0, maximum // 2 - int(target["hp"]))
+            if amount > ceiling:
+                raise CombatIntentError(
+                    "Preserve Life cannot restore a creature above half its Hit Points"
+                )
+            total += amount
+        if total > budget:
+            raise CombatIntentError(
+                "the Preserve Life allocation exceeds this use's budget"
+            )
+        if total <= 0:
+            raise CombatIntentError("Preserve Life requires a positive allocation")
+
+    def _lay_on_hands_conditions(
+        self, actor: dict[str, Any], capability_id: str,
+    ) -> tuple[dict[str, int], int]:
+        """Conditions this Paladin may pay to remove, and the price of each.
+
+        Restoring Touch (level 14) is a second declaration over the same pool,
+        so the allowed set is the union of what each owned feature names.  The
+        base list is never edited in place: a character without the feature
+        simply has the shorter set.
+        """
+
+        character = self._feature_character(actor)
+        cost = int(self.features.feature_value(
+            character, capability_id, "condition_cost", 5,
+        ) or 5)
+        allowed: dict[str, int] = {
+            str(code): cost
+            for code in (self.features.feature_value(
+                character, "lay_on_hands", "removable_conditions", ["poisoned"],
+            ) or [])
+        }
+        for code in self.features.feature_value(
+            character, "restoring_touch", "removable_conditions", [],
+        ) or []:
+            allowed[str(code)] = int(self.features.feature_value(
+                character, "restoring_touch", "condition_cost", 5,
+            ) or 5)
+        return allowed, cost
+
+    def _validate_lay_on_hands(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor: dict[str, Any], capability: Any,
+    ) -> None:
+        """Lay On Hands: one touched creature, a pool that pays, conditions owned."""
+
+        target_id = str(intent.get("target_id") or "")
+        if not target_id:
+            raise CombatIntentError("Lay On Hands requires a target")
+        target = self._actor_view(instance, combat, target_id)
+        if "dead" in (target.get("conditions") or {}):
+            raise CombatIntentError("Lay On Hands cannot restore a dead creature")
+        self._require_range(
+            combat, str(actor["actor_id"]), target_id,
+            self._capability_range(actor, capability, "target_range_ft", 5),
+        )
+        amount = intent.get("healing_amount", 0)
+        if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
+            raise CombatIntentError("healing_amount must be a non-negative integer")
+        raw_conditions = intent.get("remove_conditions") or []
+        if not isinstance(raw_conditions, list):
+            raise CombatIntentError("remove_conditions must be an array")
+        conditions = [str(code) for code in raw_conditions]
+        if len(set(conditions)) != len(conditions):
+            raise CombatIntentError("a condition may be removed only once per use")
+        allowed, _base_cost = self._lay_on_hands_conditions(actor, capability.id)
+        held = target.get("conditions") or {}
+        total = amount
+        for condition_id in conditions:
+            if condition_id not in allowed:
+                raise CombatIntentError(
+                    "this Paladin cannot remove that condition with Lay On Hands"
+                )
+            if condition_id not in held:
+                # 目标身上没有这个状态时拒绝，而不是照扣 5 点却什么也没移除。
+                raise CombatIntentError(
+                    "the target does not have the condition being removed"
+                )
+            total += allowed[condition_id]
+        if total <= 0:
+            raise CombatIntentError(
+                "Lay On Hands needs healing or a condition to remove"
+            )
+        character = self._canonical_actor(instance, actor)
+        pool = resource_state(character, "lay_on_hands")
+        if int(pool.get("current", 0) or 0) < total:
+            raise CombatIntentError("the Lay On Hands pool is too small for that use")
+
+    def _validate_sacred_weapon(
+        self, intent: dict[str, Any], actor: dict[str, Any],
+        weapon: dict[str, Any], combat: dict[str, Any],
+    ) -> None:
+        """Sacred Weapon is declared on an attack, not as its own action.
+
+        Two facts are re-derived here rather than trusted from the panel: that
+        this is the *first* attack of a real Attack action (a Channel use
+        cannot be bolted on to the second swing of a round, nor to an
+        opportunity attack), and that the weapon being imbued is the very
+        weapon this attack uses -- a Melee weapon the actor is carrying.
+        """
+
+        declared = intent.get("activate_sacred_weapon")
+        damage_choice = intent.get("sacred_weapon_damage")
+        if declared in (None, False) and damage_choice is None:
+            return
+        character = self._feature_character(actor)
+        if not self.features.has_feature(character, "sacred_weapon"):
+            raise CombatIntentError("sacred weapon is not available to this actor")
+        weapon_ref = str(weapon.get("weapon_ref") or "")
+        binding = (actor.get("conditions") or {}).get(SACRED_WEAPON_CONDITION)
+        bound_here = (
+            isinstance(binding, dict)
+            and str(binding.get("weapon_ref") or "") == weapon_ref
+        )
+        if declared not in (None, False):
+            if declared is not True:
+                raise CombatIntentError("activate_sacred_weapon must be a boolean")
+            if weapon.get("ranged") or weapon.get("unarmed"):
+                raise CombatIntentError(
+                    "sacred weapon imbues a Melee weapon you are holding"
+                )
+            economy = combat.get("economy") or {}
+            if int(economy.get("attacks_remaining", 0) or 0) > 0:
+                raise CombatIntentError(
+                    "sacred weapon is imbued when you take the Attack action, "
+                    "not after its first attack"
+                )
+            if (
+                int(economy.get("action", 0) or 0) < 1
+                and int(economy.get("surge_action", 0) or 0) < 1
+            ):
+                raise CombatIntentError("sacred weapon requires the Attack action")
+            pool = resource_state(character, "channel_divinity")
+            if int(pool.get("current", 0) or 0) < 1:
+                raise CombatIntentError("channel divinity is already spent")
+        if damage_choice is not None:
+            if not bound_here and declared is not True:
+                raise CombatIntentError(
+                    "this weapon carries no sacred weapon bond"
+                )
+            allowed = [
+                str(value) for value in (
+                    self.features.feature_value(
+                        character, "sacred_weapon", "weapon_damage_type_choices",
+                        ["normal", "radiant"],
+                    ) or []
+                )
+            ]
+            if str(damage_choice) not in allowed:
+                raise CombatIntentError(
+                    "the declared sacred weapon damage type is not available"
+                )
 
     def _validate_two_handed(
         self, actor: dict[str, Any], intent: dict[str, Any], weapon: dict[str, Any],
@@ -705,6 +1169,7 @@ class CombatValidationMixin:
         self._validate_ammunition(instance, actor, weapon)
         self._validate_two_handed(actor, intent, weapon)
         self._validate_lucky_spend(instance, intent, actor)
+        self._validate_sacred_weapon(intent, actor, weapon, combat)
         distance = self._distance(combat, actor["actor_id"], target_id)
         normal_range = int(weapon.get("thrown_range") or weapon.get("range", 5))
         long_range = int(weapon.get("long_range") or normal_range)
@@ -1364,6 +1829,42 @@ class CombatValidationMixin:
                     character, "improved_blessed_strikes", "temp_hp_range_ft", 0,
                 ) or 0),
             )
+
+    def _validate_initiative_choices(self, instance: Any, intent: dict[str, Any]) -> None:
+        """Validate the Initiative-time declarations before any dice are rolled.
+
+        A declaration is a yes/no for an optional feature.  It cannot name
+        another player, cannot spell out an amount, and cannot be made when the
+        feature is missing or its Long Rest charge is already spent -- all three
+        would otherwise turn into a free resource on the next replay.
+        """
+
+        raw = intent.get("initiative_choices")
+        if raw is None:
+            return
+        if not isinstance(raw, dict):
+            raise CombatIntentError("initiative choices must be an object")
+        for actor_id, entry in raw.items():
+            actor = str(actor_id)
+            kind, raw_id = _actor_kind(actor)
+            if kind != "player" or raw_id not in instance.players:
+                raise CombatIntentError("initiative choices can only name a player")
+            if not isinstance(entry, dict):
+                raise CombatIntentError("an initiative choice entry must be an object")
+            unknown = sorted(set(entry) - INITIATIVE_CHOICES)
+            if unknown:
+                raise CombatIntentError(f"unknown initiative choice: {unknown[0]}")
+            for value in entry.values():
+                if value is not True and value is not False:
+                    raise CombatIntentError("initiative choices only accept true or false")
+            character = _canonical(instance.get_character_sheet(raw_id))
+            for choice in sorted(INITIATIVE_CHOICES):
+                if entry.get(choice) is not True:
+                    continue
+                if not self.features.has_feature(character, choice):
+                    raise CombatIntentError(f"this character cannot use {choice}")
+                if int(resource_state(character, choice).get("current", 0) or 0) < 1:
+                    raise CombatIntentError(f"{choice} is already spent")
 
     @staticmethod
     def _validate_player_positions(instance: Any, positions: Any) -> None:

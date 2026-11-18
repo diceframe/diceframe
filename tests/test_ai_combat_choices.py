@@ -156,7 +156,17 @@ async def test_human_submission_enters_same_model_automation_boundary():
     engine = runtime._combat_engine(inst, locale="en")
     _set_turn(engine, inst, "player:gm")
     # GM -> AI -> enemy -> GM in this controlled initiative order.
-    ruleset_runtime.state(inst)["combat"]["initiative"] = ["player:gm", "player:ai1", "enemy:goblin-1"]
+    combat = ruleset_runtime.state(inst)["combat"]
+    combat["initiative"] = ["player:gm", "player:ai1", "enemy:goblin-1"]
+    # 顺序必须同时写进 ``turn_slots``：S0-F20 之后它才是权威（一个行动者可以
+    # 有两个槽），只改 initiative 会让 turn_index 指向另一位行动者。
+    combat["turn_slots"] = [
+        {
+            "slot_id": f"{actor}#1", "actor_id": actor,
+            "initiative_total": 20 - index, "kind": "normal",
+        }
+        for index, actor in enumerate(combat["initiative"])
+    ]
     _set_turn(engine, inst, "player:gm")
     result = await submit_intent(deps, "game", "gm", True, {
         "type": "end_turn", "intent_id": "human-end", "actor_id": "player:gm",

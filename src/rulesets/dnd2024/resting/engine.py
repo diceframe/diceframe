@@ -322,6 +322,7 @@ class Dnd2024RestEngine:
                     "roll": roll,
                     "healed": int(resources["hp"]) - before,
                 })
+        self._apply_tireless_exhaustion(character, events)
         self._recover_class_resources(character, "short", events)
         self._recover_spell_slots(character, "short", events)
         self._recover_free_cast_slots(character, "short", events)
@@ -885,6 +886,39 @@ class Dnd2024RestEngine:
             "after": chosen, "feature_id": "fiendish_resilience",
             "owner": "subclass:fiend_patron",
         }]
+
+    def _apply_tireless_exhaustion(
+        self, character: dict[str, Any], events: list[dict[str, Any]],
+    ) -> None:
+        """Tireless: one level of Exhaustion less whenever a Short Rest ends.
+
+        The rest catalog owns the Long Rest's own reduction; this one belongs to
+        a feature, so it only fires for a character that really owns it.  Both
+        are per rest and never compound -- they are reductions of two different
+        rests, not two sources applying to one -- which is why the amount comes
+        from the declaration instead of being counted per feature.
+        """
+
+        exhaustion = int((character.get("conditions") or {}).get("exhaustion", 0) or 0)
+        if exhaustion <= 0:
+            return
+        resolver = Dnd2024ClassFeatureResolver(self.bundle)
+        if not resolver.has_feature(character, "tireless"):
+            return
+        reduction = resolver.feature_value(
+            character, "tireless", "short_rest_exhaustion_reduction", 1,
+        )
+        amount = int(reduction) if isinstance(reduction, int) and not isinstance(
+            reduction, bool
+        ) else 1
+        conditions = character.setdefault("conditions", {})
+        conditions["exhaustion"] = max(0, exhaustion - max(0, amount))
+        events.append({
+            "type": "reduce_exhaustion",
+            "before": exhaustion,
+            "after": conditions["exhaustion"],
+            "feature_id": "tireless",
+        })
 
     def _reset_relentless_rage_dc(
         self, character: dict[str, Any],

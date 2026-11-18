@@ -10,6 +10,7 @@ from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.attunement import attuned_refs
 from src.rulesets.dnd2024.character.builder import ABILITY_IDS, ability_modifier
 from src.rulesets.dnd2024.character.derivation import (
+    apply_feature_ability_bonuses,
     derive_armor_class,
     derive_armor_training_state,
     derive_movement_profile,
@@ -71,6 +72,30 @@ def _slot_delta(before: dict[str, int], after: dict[str, int]) -> dict[str, int]
         level: after.get(level, 0) - before.get(level, 0)
         for level in sorted(set(before) | set(after), key=int)
         if after.get(level, 0) != before.get(level, 0)
+    }
+
+
+def _applied_ability_bonuses(character: dict[str, Any]) -> dict[str, int]:
+    """What the ability-raising features have already given this character.
+
+    Stored beside the other derived facts, because it *is* one: without it the
+    next level-up could only add the bonus again, and a card that lost the
+    feature could never give the points back.
+    """
+
+    derived = character.get("derived")
+    if not isinstance(derived, dict):
+        return {}
+    applied = derived.get("ability_bonus_applied")
+    if not isinstance(applied, dict):
+        return {}
+    return {
+        ability: int(points)
+        for ability, points in applied.items()
+        if ability in ABILITY_IDS
+        and isinstance(points, int)
+        and not isinstance(points, bool)
+        and points > 0
     }
 
 
@@ -679,6 +704,25 @@ class Dnd2024AdvancementEngine:
         new_abilities = {ability: int(old_abilities.get(ability, 0) or 0) for ability in ABILITY_IDS}
         for ability, increase in ability_increases.items():
             new_abilities[ability] += increase
+        # 属性提升型特性（Primal Champion / Body and Mind）在这一级发放：
+        # 用"目标等级"的特性状态取授予，再把上一次已发放的点数换成这一次的，
+        # 所以同一张卡反复升级不会叠加 +4，ASI 自己的增长也不会被吞掉。
+        # 必须在 Con 参与 HP 之前完成——否则 +4 体质会漏掉回溯的生命值。
+        current_subclass_ref = str(feature_state.get("subclass_ref") or "")
+        next_subclass_ref = (
+            selected_subclass_ref
+            if selected_subclass_ref == expected_subclass_ref
+            else current_subclass_ref
+        )
+        next_feature_state = _feature_state(class_ref, target_level, next_subclass_ref)
+        feature_ability_grants = self._feature_resolver.ability_bonuses(next_feature_state)
+        applied_bonuses = _applied_ability_bonuses(character)
+        if feature_ability_grants or applied_bonuses:
+            new_abilities, ability_bonus_applied = apply_feature_ability_bonuses(
+                new_abilities, feature_ability_grants, applied_bonuses,
+            )
+        else:
+            ability_bonus_applied = {}
         old_con = ability_modifier(int(old_abilities.get("con", 0) or 0))
         new_con = ability_modifier(new_abilities["con"])
         species = self.bundle.get(
@@ -690,12 +734,6 @@ class Dnd2024AdvancementEngine:
         # 防御类特性的生命值上限加成只按等级增量发放：2→3 得 +3，之后每级 +1。
         # 用与建卡相同的 resolver 公式，不回溯 from_level 之前的等级。
         features = self._feature_resolver
-        current_subclass_ref = str(feature_state.get("subclass_ref") or "")
-        next_subclass_ref = (
-            selected_subclass_ref
-            if selected_subclass_ref == expected_subclass_ref
-            else current_subclass_ref
-        )
         feature_hp_before = features.feature_max_hp_bonus(
             _feature_state(class_ref, current_level, current_subclass_ref)
         )
@@ -751,6 +789,7 @@ class Dnd2024AdvancementEngine:
                     ref for record in choice_records for ref in record["selected_refs"]
                 ],
                 "abilities": new_abilities,
+                "ability_bonus_applied": ability_bonus_applied,
                 "class_spell_choices": spell_choices,
                 "hp": {
                     "method": hp_method,
@@ -785,6 +824,14 @@ class Dnd2024AdvancementEngine:
         build["level"] = target_level
         build["class_levels"][0]["level"] = target_level
         character["abilities"] = deepcopy(preview["diff"]["abilities"])
+        # 记录"这几点是特性给的"，下一次升级据此净替换而不是再加一次。
+        derived = character.setdefault("derived", {})
+        if isinstance(derived, dict):
+            applied = preview["diff"].get("ability_bonus_applied") or {}
+            if applied:
+                derived["ability_bonus_applied"] = deepcopy(applied)
+            else:
+                derived.pop("ability_bonus_applied", None)
 
         hp_gain = int(preview["diff"]["hp"]["gain"])
         resources = character.setdefault("resources", {})
@@ -1746,6 +1793,18 @@ class Dnd2024AdvancementEngine:
             # 升级前后只走同一个加值公式，集合语义顺带保证了不重复叠加。
             saving_refs |= {f"ability:{ability}" for ability in ABILITY_IDS}
             proficiencies["saving_throw_refs"] = sorted(saving_refs)
+        # 单项豁免熟练（Slippery Mind）合并进同一个集合：已经有这条 ref 时
+        # 什么都不会变，所以职业自带熟练与特性授予的熟练都只加一次 PB。
+        specific_saves = self._feature_resolver.saving_throw_proficiency_sources(
+            character
+        )
+        if specific_saves:
+            saving_refs |= {f"ability:{ability}" for ability in specific_saves}
+            proficiencies["saving_throw_refs"] = sorted(saving_refs)
+            derived = character.setdefault("derived", {})
+            if isinstance(derived, dict):
+                # 来源单独记一笔：集合本身只说明"有这个熟练"，看不出谁给的。
+                derived["saving_throw_proficiency_sources"] = dict(specific_saves)
         skill_refs = set(proficiencies.get("skill_refs") or [])
         saving_throws = {
             ability: ability_modifier(abilities[ability])

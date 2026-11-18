@@ -75,6 +75,9 @@
     "bonus_proficiencies": "Bonus Proficiencies",
     "brutal_strike": "Brutal Strike",
     "channel_divinity": "Channel Divinity",
+    "divine_spark": "Divine Spark",
+    "turn_undead": "Turn Undead",
+    "divine_sense": "Divine Sense",
     "circle_of_the_land_spells": "Circle of the Land Spells",
     "cleric_subclass": "Cleric Subclass",
     "contact_patron": "Contact Patron",
@@ -288,6 +291,17 @@
           "resource_id": "focus_points"
         },
         {
+          "id": "uncanny_metabolism",
+          "minimum_level": 2,
+          "resource_id": "uncanny_metabolism",
+          "source_ref": "srd-5.2.1:p51:uncanny-metabolism",
+          "summary": "When you roll Initiative, you can regain all expended Focus Points and roll your Martial Arts die, regaining Hit Points equal to your Monk level plus the roll. Once you use this feature, you can't use it again until you finish a Long Rest.",
+          "parameters": {
+            "initiative_focus_refill": "all",
+            "initiative_heal_die": "martial_arts"
+          }
+        },
+        {
           "id": "flurry_of_blows",
           "minimum_level": 2,
           "option_of": "monks_focus",
@@ -341,6 +355,13 @@
           ]
         },
         {
+          "id": "perfect_focus",
+          "minimum_level": 15,
+          "source_ref": "srd-5.2.1:p51:perfect-focus",
+          "summary": "When you roll Initiative and don't use Uncanny Metabolism, you regain expended Focus Points until you have 4 if you have 3 or fewer.",
+          "parameters": {"initiative_focus_floor": 4}
+        },
+        {
           "id": "disciplined_survivor",
           "minimum_level": 14,
           "resource_id": "focus_points",
@@ -353,6 +374,27 @@
             "reroll_cost_resource": "focus_points",
             "reroll_cost": 1
           }
+        },
+        {
+          "id": "superior_defense",
+          "minimum_level": 18,
+          "resource_id": "focus_points",
+          "source_ref": "srd-5.2.1:p52:superior-defense",
+          "summary": "At the start of your turn, you can expend 3 Focus Points to bolster yourself against harm for 1 minute or until you have the Incapacitated condition. During that time, you have Resistance to all damage except Force damage.",
+          "parameters": {
+            "focus_cost": 3,
+            "duration_minutes": 1,
+            "duration_rounds": 10,
+            "resist_all_except": ["force"],
+            "ends_on_incapacitated": true
+          },
+          "capabilities": [
+            {
+              "id": "superior_defense",
+              "cost": {"turn_start": true, "resources": [{"id": "focus_points", "amount": 3}]},
+              "actions": [{"kind": "resistance_all", "count": 1}]
+            }
+          ]
         },
         {
           "id": "self_restoration",
@@ -411,12 +453,99 @@
             "topple_save_ability": "dex",
             "topple_condition": "prone"
           }
+        },
+        {
+          "id": "wholeness_of_body",
+          "owner": "subclass:warrior_of_the_open_hand",
+          "minimum_level": 6,
+          "resource_id": "wholeness_of_body",
+          "source_ref": "srd-5.2.1:p52:wholeness-of-body",
+          "summary": "As a Bonus Action, you can roll your Martial Arts die. You regain a number of Hit Points equal to the number rolled plus your Wisdom modifier (minimum of 1 Hit Point regained). You can use this feature a number of times equal to your Wisdom modifier (minimum of once), and you regain all expended uses when you finish a Long Rest.",
+          "parameters": {
+            "heal_dice": "martial_arts",
+            "heal_ability": "wis",
+            "heal_minimum": 1
+          },
+          "capabilities": [
+            {
+              "id": "wholeness_of_body",
+              "cost": {"bonus_action": 1, "resources": [{"id": "wholeness_of_body", "amount": 1}]},
+              "actions": [{"kind": "heal", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "body_and_mind",
+          "minimum_level": 20,
+          "source_ref": "srd-5.2.1:p52:body-and-mind",
+          "summary": "Your Dexterity and Wisdom scores increase by 4, to a maximum of 25.",
+          "parameters": {
+            "ability_bonus_dex": 4,
+            "ability_bonus_wis": 4,
+            "ability_score_cap": 25
+          }
         }
       ]
     },
     "paladin": {
       "source_ref": "srd-5.2.1:p54:paladins-smite",
       "features": [
+        {
+          "id": "lay_on_hands",
+          "minimum_level": 1,
+          "resource_id": "lay_on_hands",
+          "source_ref": "srd-5.2.1:p53:lay-on-hands",
+          "summary": "You have a pool of healing power that replenishes on a Long Rest. As a Bonus Action, you can touch a creature and restore a number of Hit Points from that pool, or expend 5 Hit Points from the pool to remove the Poisoned condition.",
+          "parameters": {
+            "target_range_ft": 5,
+            "pool_per_level": 5,
+            "condition_cost": 5,
+            "removable_conditions": ["poisoned"]
+          },
+          "capabilities": [
+            {
+              "id": "lay_on_hands",
+              "target_kind": "creature",
+              "pool_resource_id": "lay_on_hands",
+              "cost": {"bonus_action": 1},
+              "actions": [{"kind": "lay_on_hands", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "channel_divinity",
+          "minimum_level": 3,
+          "resource_id": "channel_divinity",
+          "source_ref": "srd-5.2.1:p55:channel-divinity",
+          "summary": "You can use this class's Channel Divinity twice. You regain one of its expended uses when you finish a Short Rest, and you regain all expended uses when you finish a Long Rest. Divine Sense is a Bonus Action of this class.",
+          "parameters": {
+            "channel_effects": ["divine_sense"],
+            "sense_range_ft": 60,
+            "sense_duration_minutes": 10,
+            "sense_creature_types": ["celestial", "fiend", "undead"],
+            "ends_on_incapacitated": true
+          },
+          "capabilities": [
+            {
+              "id": "divine_sense",
+              "target_kind": "none",
+              "cost": {"bonus_action": 1},
+              "actions": [{"kind": "divine_sense", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "restoring_touch",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p54:restoring-touch",
+          "summary": "When you use Lay On Hands, you can also remove one or more of these conditions from the target: Blinded, Charmed, Deafened, Frightened, Paralyzed, or Stunned. You expend 5 Hit Points from the pool for each condition removed.",
+          "parameters": {
+            "condition_cost": 5,
+            "removable_conditions": [
+              "blinded", "charmed", "deafened", "frightened", "paralyzed", "stunned"
+            ]
+          }
+        },
         {
           "id": "oath_of_devotion_spells",
           "owner": "subclass:oath_of_devotion",
@@ -436,6 +565,23 @@
               "17:spell:commune",
               "17:spell:flame_strike"
             ]
+          }
+        },
+        {
+          "id": "sacred_weapon",
+          "owner": "subclass:oath_of_devotion",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p56:sacred-weapon",
+          "summary": "When you take the Attack action, you can expend one use of your Channel Divinity to imbue one Melee weapon you are holding: for 10 minutes you add your Charisma modifier (minimum +1) to attack rolls with it, each hit deals its normal damage type or Radiant, and it sheds Bright Light in a 20-foot radius and Dim Light 20 feet beyond. The effect ends early if you are not carrying the weapon.",
+          "parameters": {
+            "channel_resource_id": "channel_divinity",
+            "weapon_attack_bonus_ability": "cha",
+            "weapon_attack_bonus_minimum": 1,
+            "weapon_binding_minutes": 10,
+            "weapon_damage_type_choices": ["normal", "radiant"],
+            "bright_light_radius": 20,
+            "dim_light_beyond": 20,
+            "light_automation": "guided"
           }
         },
         {
@@ -490,6 +636,48 @@
           "parameters": {
             "aura_expands_feature_id": "aura_of_protection",
             "aura_range_override_ft": 30
+          }
+        },
+        {
+          "id": "abjure_foes",
+          "owner": "class:paladin",
+          "minimum_level": 9,
+          "source_ref": "srd-5.2.1:p55:abjure-foes",
+          "summary": "Magic action, one Channel Divinity: up to your Charisma modifier (minimum one) creatures you can see within 60 feet make a Wisdom save or are Frightened for 1 minute or until they take damage. While Frightened this way a creature can move, take an action, or take a Bonus Action on its turn -- only one of the three.",
+          "resource_id": "channel_divinity",
+          "parameters": {
+            "target_range_ft": 60,
+            "target_count_ability": "cha",
+            "target_count_minimum": 1,
+            "save_ability": "wis",
+            "condition": "frightened",
+            "condition_minutes": 1,
+            "turn_choice_limit": ["move", "action", "bonus_action"],
+            "ends_on_damage": true
+          },
+          "capabilities": [
+            {
+              "id": "abjure_foes",
+              "target_kind": "creature",
+              "cost": {
+                "action": 1,
+                "resources": [{"id": "channel_divinity", "amount": 1}]
+              },
+              "actions": [{"kind": "abjure_foes", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "smite_of_protection",
+          "owner": "subclass:oath_of_devotion",
+          "minimum_level": 15,
+          "source_ref": "srd-5.2.1:p57:smite-of-protection",
+          "summary": "Whenever you cast Divine Smite, you and your allies have Half Cover while in your Aura of Protection. The benefit lasts until the start of your next turn.",
+          "parameters": {
+            "cover_source_feature_id": "aura_of_protection",
+            "cover_armor_class_bonus": 2,
+            "cover_dex_save_bonus": 2,
+            "cover_trigger_spell_id": "divine_smite"
           }
         },
         {
@@ -604,6 +792,14 @@
           }
         },
         {
+          "id": "heroic_warrior",
+          "owner": "subclass:champion",
+          "minimum_level": 10,
+          "source_ref": "srd-5.2.1:p49:heroic-warrior",
+          "summary": "During combat, you can give yourself Heroic Inspiration whenever you start your turn without it.",
+          "parameters": {"turn_start_heroic_inspiration": true}
+        },
+        {
           "id": "two_extra_attacks",
           "minimum_level": 11,
           "summary": "When you take the Attack action, you can attack three times instead of once.",
@@ -688,6 +884,13 @@
           "parameters": {"save_advantage_abilities": ["dex"]}
         },
         {
+          "id": "feral_instinct",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p29:feral-instinct",
+          "summary": "You have Advantage on Initiative rolls.",
+          "parameters": {"initiative_advantage": true}
+        },
+        {
           "id": "rage",
           "minimum_level": 1,
           "source_ref": "srd-5.2.1:p28:rage",
@@ -744,6 +947,18 @@
             "base_dc": 10,
             "dc_step": 5,
             "hp_multiplier": 2
+          }
+        },
+        {
+          "id": "persistent_rage",
+          "minimum_level": 15,
+          "resource_id": "persistent_rage",
+          "source_ref": "srd-5.2.1:p30:persistent-rage",
+          "summary": "When you roll Initiative, you can regain all expended uses of Rage; once you do so, you can't do it again until you finish a Long Rest. Your Rage also lasts 10 minutes without needing to extend it from round to round, and it ends early only if you have the Unconscious condition or don Heavy armor.",
+          "parameters": {
+            "initiative_rage_refill": true,
+            "rage_duration": "persistent_rage",
+            "rage_max_rounds": 100
           }
         },
         {
@@ -808,6 +1023,26 @@
             "sundering_condition": "sundered",
             "sundering_attack_bonus": 5,
             "sundering_duration": "attacker_next_turn_start"
+          }
+        },
+        {
+          "id": "indomitable_might",
+          "minimum_level": 18,
+          "source_ref": "srd-5.2.1:p30:indomitable-might",
+          "summary": "If your total for a Strength check or Strength saving throw is less than your Strength score, you can use that score in place of the total.",
+          "parameters": {
+            "strength_total_replacement": true
+          }
+        },
+        {
+          "id": "primal_champion",
+          "minimum_level": 20,
+          "source_ref": "srd-5.2.1:p30:primal-champion",
+          "summary": "Your Strength and Constitution scores increase by 4, to a maximum of 25.",
+          "parameters": {
+            "ability_bonus_str": 4,
+            "ability_bonus_con": 4,
+            "ability_score_cap": 25
           }
         }
       ]
@@ -899,6 +1134,14 @@
           }
         },
         {
+          "id": "thiefs_reflexes",
+          "owner": "subclass:thief",
+          "minimum_level": 17,
+          "source_ref": "srd-5.2.1:p64:thiefs-reflexes",
+          "summary": "You can take two turns during the first round of any combat: your first turn at your normal Initiative and your second turn at your Initiative minus 10.",
+          "parameters": {"first_round_extra_turn_offset": 10}
+        },
+        {
           "id": "stroke_of_luck",
           "minimum_level": 20,
           "resource_id": "stroke_of_luck",
@@ -907,6 +1150,15 @@
           "parameters": {
             "replace_natural_with": 20,
             "trigger": "own_check_failure"
+          }
+        },
+        {
+          "id": "slippery_mind",
+          "minimum_level": 15,
+          "source_ref": "srd-5.2.1:p63:slippery-mind",
+          "summary": "You gain proficiency in Wisdom and Charisma saving throws.",
+          "parameters": {
+            "saving_throw_proficiencies": ["wis", "cha"]
           }
         }
       ]
@@ -938,6 +1190,26 @@
           }
         },
         {
+          "id": "tireless",
+          "minimum_level": 10,
+          "resource_id": "tireless",
+          "source_ref": "srd-5.2.1:p59:tireless",
+          "summary": "As a Magic action, you can give yourself Temporary Hit Points equal to 1d8 plus your Wisdom modifier (minimum of 1). You can use this action a number of times equal to your Wisdom modifier (minimum of once), and you regain all expended uses when you finish a Long Rest. Whenever you finish a Short Rest, your Exhaustion level, if any, decreases by 1.",
+          "parameters": {
+            "temp_hp_dice": "1d8",
+            "temp_hp_dice_ability": "wis",
+            "temp_hp_dice_minimum": 1,
+            "short_rest_exhaustion_reduction": 1
+          },
+          "capabilities": [
+            {
+              "id": "tireless",
+              "cost": {"action": 1, "resources": [{"id": "tireless", "amount": 1}]},
+              "actions": [{"kind": "temp_hp", "count": 1}]
+            }
+          ]
+        },
+        {
           "id": "roving",
           "minimum_level": 6,
           "source_ref": "srd-5.2.1:p59:roving",
@@ -955,6 +1227,25 @@
           "source_ref": "srd-5.2.1:p59:relentless-hunter",
           "summary": "Taking damage can't break your Concentration on Hunter's Mark.",
           "parameters": {"concentration_damage_exempt_spell_id": "hunter_s_mark"}
+        },
+        {
+          "id": "natures_veil",
+          "minimum_level": 14,
+          "resource_id": "natures_veil",
+          "source_ref": "srd-5.2.1:p59:natures-veil",
+          "summary": "As a Bonus Action, you can give yourself the Invisible condition until the end of your next turn. You can use this feature a number of times equal to your Wisdom modifier (minimum of once), and you regain all expended uses when you finish a Long Rest.",
+          "parameters": {
+            "condition": "invisible",
+            "condition_duration": "caster_next_turn_end",
+            "condition_turns": 2
+          },
+          "capabilities": [
+            {
+              "id": "natures_veil",
+              "cost": {"bonus_action": 1, "resources": [{"id": "natures_veil", "amount": 1}]},
+              "actions": [{"kind": "invisible", "count": 1}]
+            }
+          ]
         },
         {
           "id": "precise_hunter",
@@ -1355,6 +1646,111 @@
     "cleric": {
       "source_ref": "srd-5.2.1:p40:cleric-features",
       "features": [
+        {
+          "id": "channel_divinity",
+          "minimum_level": 2,
+          "resource_id": "channel_divinity",
+          "source_ref": "srd-5.2.1:p37:channel-divinity",
+          "summary": "You can use this class's Channel Divinity twice. Each time you use it, choose which Channel Divinity effect to create: Divine Spark or Turn Undead. You regain one expended use when you finish a Short Rest, and all expended uses when you finish a Long Rest.",
+          "parameters": {
+            "channel_effects": ["divine_spark", "turn_undead"],
+            "spark_target_range_ft": 30,
+            "spark_die": "d8",
+            "spark_tier_levels": [1, 7, 13, 18],
+            "spark_tier_counts": [1, 2, 3, 4],
+            "spark_ability": "wis",
+            "spark_minimum": 1,
+            "spark_damage_types": ["necrotic", "radiant"],
+            "spark_save_ability": "con",
+            "turn_target_range_ft": 30,
+            "turn_save_ability": "wis",
+            "turn_duration": "turn_undead",
+            "turn_turns": 10,
+            "turn_conditions": ["frightened", "incapacitated"],
+            "turn_ends_on_damage": true
+          },
+          "capabilities": [
+            {
+              "id": "divine_spark",
+              "target_kind": "creature",
+              "cost": {
+                "action": 1,
+                "resources": [{"id": "channel_divinity", "amount": 1}]
+              },
+              "actions": [{"kind": "divine_spark", "count": 1}]
+            },
+            {
+              "id": "turn_undead",
+              "target_kind": "undead",
+              "cost": {
+                "action": 1,
+                "resources": [{"id": "channel_divinity", "amount": 1}]
+              },
+              "actions": [{"kind": "turn_undead", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "sear_undead",
+          "owner": "class:cleric",
+          "minimum_level": 5,
+          "source_ref": "srd-5.2.1:p37:sear-undead",
+          "summary": "Whenever you use Turn Undead, you can roll a number of d8s equal to your Wisdom modifier (minimum 1) and add them together. Each Undead that fails its save against that use takes Radiant damage equal to the total. This damage does not end the turn effect.",
+          "parameters": {
+            "sear_die": "d8",
+            "sear_ability": "wis",
+            "sear_minimum": 1,
+            "sear_damage_type": "radiant",
+            "sear_applies_to_feature_id": "channel_divinity",
+            "sear_preserves_turn_effect": true
+          }
+        },
+        {
+          "id": "preserve_life",
+          "owner": "subclass:life_domain",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p40:preserve-life",
+          "summary": "As a Magic action, expend a use of Channel Divinity to restore a number of Hit Points equal to five times your Cleric level, divided among Bloodied creatures within 30 feet of yourself.",
+          "parameters": {
+            "target_range_ft": 30,
+            "preserve_life_per_level": 5,
+            "requires_bloodied": true,
+            "half_hp_cap": true
+          },
+          "capabilities": [
+            {
+              "id": "preserve_life",
+              "target_kind": "bloodied_creature",
+              "cost": {
+                "action": 1,
+                "resources": [{"id": "channel_divinity", "amount": 1}]
+              },
+              "actions": [{"kind": "preserve_life", "count": 1}]
+            }
+          ]
+        },
+        {
+          "id": "disciple_of_life",
+          "owner": "subclass:life_domain",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p40:disciple-of-life",
+          "summary": "When a spell you cast with a spell slot restores Hit Points to a creature, that creature regains additional Hit Points equal to 2 plus the spell slot's level.",
+          "parameters": {
+            "rider_flat": 2,
+            "rider_per_slot_level": 1
+          }
+        },
+        {
+          "id": "blessed_healer",
+          "owner": "subclass:life_domain",
+          "minimum_level": 6,
+          "source_ref": "srd-5.2.1:p40:blessed-healer",
+          "summary": "Immediately after you cast a spell with a spell slot that restores Hit Points to one or more creatures other than yourself, you regain Hit Points equal to 2 plus the spell slot's level.",
+          "parameters": {
+            "rider_flat": 2,
+            "rider_per_slot_level": 1
+          }
+        },
         {
           "id": "life_domain_spells",
           "owner": "subclass:life_domain",

@@ -1393,10 +1393,24 @@ class Dnd2024Runtime:
             "blocked_by_feature",
             "distance", "round", "turn_index", "previous_actor_id", "condition", "reason",
             "spell_ref", "resource", "roll", "successes", "failures", "stable", "dead", "hp",
-            "item_ref",
+            "item_ref", "granted", "feature_id",
             # 目标列表与标记对象：``spell.cast`` 只带 ``target_ids``（复数），
             # 转移只带 ``target_id``；两者都是"打的是谁"这一事实的写法。
             "target_ids", "mark_target_id", "mark_expires_hours",
+            # 引导神力的效果名、治疗的最大化标记与固定预算的分配额：公共 feed
+            # 需要能讲清"这一条事件是哪个效果、分给谁多少"，但不能带出目标
+            # 之外的私有信息（Divine Sense 的位置只走私有投影）。
+            "channel_effect", "maximized", "rider", "rider_target_id",
+            "pool_total", "allocated_amount", "slot_level", "source_spell_ref",
+            "turn_effect_preserved",
+            # 神圣武器的绑定对象与攻击加值、以及它"只报事实不参与判定"的
+            # 光照字段；掩蔽加值与来源同理。
+            "weapon_ref", "sacred_weapon_bonus", "bright_light_radius",
+            "dim_light_beyond", "light_automation",
+            "cover_bonus", "cover_sources",
+            # 不屈之力只改写总值：公开 feed 需要能说明"这个 18 来自属性而非骰面"，
+            # 所以三个审计数字与原天然骰并存，任何一方都不覆盖另一方。
+            "ordinary_total", "replacement_score", "total_replaced",
         }
         combat = (
             ruleset_runtime.state(instance).get("combat")

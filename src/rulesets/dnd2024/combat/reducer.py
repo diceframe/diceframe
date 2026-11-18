@@ -25,7 +25,7 @@ from src.rulesets.dnd2024.spells.font_of_magic import MAX_CREATED_SLOT_LEVEL
 from src.rulesets.dnd2024.spells.casting import apply_free_cast_cost
 from src.rulesets.events import EventBatchError
 from .primitives import actor_kind as _actor_kind
-from .primitives import FEATURE_STATE_KEYS, RELENTLESS_RAGE_DECISION
+from .primitives import FEATURE_STATE_KEYS, PERSISTENT_RAGE_DURATION, RELENTLESS_RAGE_DECISION
 
 
 _ITEM_EVENT_FIELDS = {
@@ -103,6 +103,17 @@ class CombatReducerMixin:
             })
             combat.setdefault("positions", {})[actor_id] = int(event.get("position", 0) or 0)
             combat.setdefault("reactions", {})[actor_id] = 1
+            # slot 才是回合表：只往 initiative 里插人会让新加入者永远轮不到。
+            # 插入点在"当前回合之后"，当前 slot 的下标因此保持不变，已结算的
+            # 先攻顺序也不会被重排。
+            slots = combat.get("turn_slots")
+            if isinstance(slots, list):
+                index = max(0, min(len(slots), int(combat.get("turn_index", 0) or 0) + 1))
+                slots.insert(index, {
+                    "slot_id": f"{actor_id}#1", "actor_id": actor_id,
+                    "initiative_total": int(event.get("total", 0) or 0),
+                    "kind": "normal",
+                })
             return
         if event_type == "dnd2024.character.revived":
             kind, raw_id = _actor_kind(str(event["actor_id"]))
@@ -123,6 +134,10 @@ class CombatReducerMixin:
             state["combat"] = {
                 "status": "active", "round": event["round"], "turn_index": 0,
                 "initiative": deepcopy(event["initiative"]),
+                # 首轮 turn 顺序的权威形态：一个角色可以有两个 slot（Thief's
+                # Reflexes），``initiative`` 仍保持去重，因为其他读者只问
+                # "谁在场"。旧事件没有这个字段时退回单 slot 语义。
+                "turn_slots": deepcopy(event.get("turn_slots") or []),
                 "initiative_rolls": deepcopy(event["initiative_rolls"]),
                 "enemies": deepcopy(event["enemies"]),
                 "positions": deepcopy(event["positions"]),
@@ -148,6 +163,18 @@ class CombatReducerMixin:
                 raise EventBatchError("reaction is already spent")
             reactions[actor_id] = 0
             return
+        if event_type == "dnd2024.heroic_inspiration.changed":
+            # Heroic Inspiration 是角色级布尔状态：持有则"再获得即丢失"，
+            # 因此重复授予写成幂等，不叠层也不报错。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind != "player" or raw_id not in snapshot["characters"]:
+                raise EventBatchError("only an existing player can hold Heroic Inspiration")
+            if event.get("granted") is not True:
+                raise EventBatchError("heroic inspiration events only grant")
+            snapshot["characters"][raw_id]["heroic_inspiration"] = {
+                "granted": True, "source": str(event.get("feature_id") or ""),
+            }
+            return
         if event_type == "dnd2024.combat.ended":
             combat["status"] = "ended"
             combat["outcome"] = str(event.get("reason") or "ended")
@@ -165,10 +192,18 @@ class CombatReducerMixin:
                 conditions = character.get("conditions") or {}
                 for condition_id in [
                     key for key, value in conditions.items()
-                    if key == "rage" or (
-                        isinstance(value, dict) and (
-                            value.get("duration") in _TURN_SCOPED_DURATIONS
-                            or value.get("duration") == "combat"
+                    # 持久狂怒是"10 分钟"而不是"到战斗结束"：结束一场战斗
+                    # 不在官方提前结束条件里，仍在期限内的它必须留下来。
+                    if not (
+                        isinstance(value, dict)
+                        and value.get("duration") == PERSISTENT_RAGE_DURATION
+                    )
+                    and (
+                        key == "rage" or (
+                            isinstance(value, dict) and (
+                                value.get("duration") in _TURN_SCOPED_DURATIONS
+                                or value.get("duration") == "combat"
+                            )
                         )
                     )
                 ]:
@@ -284,6 +319,16 @@ class CombatReducerMixin:
                 if str(key) not in _GRANTABLE_FLAGS:
                     raise EventBatchError(f"economy grant flag is unknown: {key}")
                 economy[str(key)] = value
+            return
+        if event_type == "dnd2024.turn_window.closed":
+            # 窗口是"此刻允许支付"的记号，关掉它是幂等的：重复关闭、或在
+            # 已经换了行动者的经济上关闭，都不能顺手改别的字段。
+            economy = combat.get("economy") or {}
+            window = economy.get("turn_start_window")
+            if isinstance(window, dict) and str(window.get("actor_id") or "") == str(
+                event.get("actor_id") or ""
+            ):
+                economy.pop("turn_start_window", None)
             return
         if event_type == "dnd2024.feature.used":
             # 「每回合一次」按真实攻击者 + 具体回合（round + turn_index）记账。
@@ -547,6 +592,11 @@ class CombatReducerMixin:
                 if remaining < cost:
                     raise EventBatchError("movement resource is already spent")
                 combat["economy"]["movement"] = remaining - cost
+                if str(combat["economy"].get("actor_id") or "") == actor_id:
+                    # "这次移动用掉了本回合的移动选择"只对当前行动者成立：
+                    # 被推开的第三方不消耗任何人的选择权。Abjure Foes 的三选一
+                    # 靠这个标记区分"选了移动"与"还没选"。
+                    combat["economy"]["moved"] = True
             if event.get("crit_move"):
                 # 额度只覆盖它自己这一次移动；消费后即失效，其他移动要按
                 # 常规规则判定借机攻击。
@@ -829,6 +879,7 @@ class CombatReducerMixin:
                 return
             resources["hp"] = next_hp
             conditions = character.setdefault("conditions", {})
+            self._end_damage_conditions(conditions, before, next_hp, event)
             if resources["hp"] <= 0:
                 conditions["unconscious"] = {"source": "zero_hp"}
                 # 昏迷即失能：狂暴立即结束。
@@ -848,11 +899,39 @@ class CombatReducerMixin:
                 conditions["death_saves"] = {"successes": 0, "failures": 0}
         elif kind == "enemy":
             enemy = snapshot["ruleset_state"]["combat"]["enemies"][raw_id]
-            enemy["hp"] = max(0, min(int(enemy["max_hp"]), int(enemy["hp"]) + delta))
+            before_hp = int(enemy["hp"])
+            enemy["hp"] = max(0, min(int(enemy["max_hp"]), before_hp + delta))
+            self._end_damage_conditions(
+                enemy.setdefault("conditions", {}), before_hp, int(enemy["hp"]), event,
+            )
             if enemy["hp"] <= 0:
                 enemy.setdefault("conditions", {})["defeated"] = {"source": "zero_hp"}
         else:
             raise EventBatchError("HP target actor is invalid")
+
+    @staticmethod
+    def _end_damage_conditions(
+        conditions: dict[str, Any], before_hp: int, after_hp: int,
+        event: dict[str, Any],
+    ) -> None:
+        """Remove the conditions whose own text says damage ends them.
+
+        Turn Undead is the first such effect: "this effect ends early on the
+        creature if it takes any damage".  The flag lives on the condition, so
+        a later effect with the same wording needs no branch here.
+
+        ``turn_effect_preserved`` is how one *specific* damage source opts out:
+        Sear Undead damages the turned Undead without ending the turn, and that
+        sentence belongs to the damage event, not to this sweep.  Protection
+        from Pose is not required either -- only a *reduction in Hit Points*
+        ends an effect, so a fully resisted hit leaves it in place.
+        """
+
+        if after_hp >= before_hp or event.get("turn_effect_preserved"):
+            return
+        for condition_id, meta in list(conditions.items()):
+            if isinstance(meta, dict) and meta.get("ends_on_damage"):
+                conditions.pop(condition_id, None)
 
     def _open_relentless_rage(
         self, snapshot: dict[str, Any], target_id: str, before: int,

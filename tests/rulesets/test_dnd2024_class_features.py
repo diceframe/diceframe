@@ -24,7 +24,7 @@ from dnd2024_monk_common import advance, monk_sheet
 
 MONK_FEATURES_AT_TWO = (
     "unarmored_defense", "unarmored_movement", "martial_arts", "monks_focus",
-    "flurry_of_blows", "patient_defense", "step_of_the_wind",
+    "uncanny_metabolism", "flurry_of_blows", "patient_defense", "step_of_the_wind",
 )
 MONK_FEATURE_IDS = frozenset({"martial_arts", *MONK_FEATURES_AT_TWO})
 MONK_CAPABILITY_IDS = frozenset({
@@ -184,6 +184,7 @@ def test_feature_labels_follow_the_bundle_locale() -> None:
         "unarmored_movement": "无甲移动",
         "martial_arts": "武艺",
         "monks_focus": "武僧专注",
+        "uncanny_metabolism": "奇异代谢",
         "flurry_of_blows": "疾风连击",
         "patient_defense": "坚守防御",
         "step_of_the_wind": "疾风步",
