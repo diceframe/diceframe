@@ -1303,3 +1303,68 @@ def test_matrix_24_the_neighbouring_chains_still_work() -> None:
     assert _check(plain, "attack")["advantage_mode"] == ""
     assert _damage(plain, "piercing")[0]["rolls"] == [5]
     assert _damage(plain, "force") == []
+
+
+# --------------------------------------------------------------------------
+# Review round (2026-11-18): the two fail-closed holes the audit found
+# --------------------------------------------------------------------------
+
+def test_a_negative_resource_amount_is_refused() -> None:
+    """The reducer is the trust boundary: a negative amount must not add uses.
+
+    ``current < amount`` is false for every negative number, and
+    ``current - (-5)`` adds five: a forged ``class_resource.spent`` used to
+    refill the Favored Enemy pool (S0-F18 §4.1.3).  The batch is refused whole
+    and the ledger does not move.
+    """
+
+    from src.rulesets.events import stable_batch_id
+
+    engine, instance = _combat({"gm": ranger(1)}, {"gm": 20})
+    _cast_mark(engine, instance)
+    before = _resource(instance)["current"]
+    assert before == 1
+
+    version = int(ruleset_runtime.state(instance).get("version", 0) or 0)
+    intent = {"intent_id": f"forged-{version}", "type": "combat.message",
+              "expected_version": version}
+    batch = {
+        "batch_id": stable_batch_id(intent, version),
+        "intent_id": intent["intent_id"], "intent_type": "combat.message",
+        "expected_version": version, "result_version": version + 1,
+        "source_ref": "srd-5.2.1:p58:favored-enemy",
+        "events": [{
+            "type": "dnd2024.class_resource.spent", "actor_id": "player:gm",
+            "resource_id": "favored_enemy", "amount": -5,
+        }],
+    }
+    from src.rulesets.events import EventBatchError
+
+    with pytest.raises(EventBatchError):
+        engine.apply_batch(instance, batch)
+    assert _resource(instance)["current"] == before
+
+
+def test_a_find_check_without_a_mark_gets_no_advantage() -> None:
+    """Empty target id and no mark are equal as strings -- not as a rule.
+
+    ``mark_find_sources`` compared ``marked_target_id(actor) != target_id``
+    without the ``not wanted`` guard its sibling ``mark_attack_sources`` has,
+    so a Ranger who never cast the spell got a ``hunter_s_mark`` Advantage
+    source on any Perception/Survival check that carried no target
+    (S0-F18 §4.1.6).
+    """
+
+    from src.rulesets.dnd2024.combat.check_modes import mark_find_sources
+
+    engine, instance = _combat({"gm": ranger(1)}, {"gm": 20})
+    actor = engine._actor_view(instance, _combat_state(instance), "player:gm")
+
+    assert mark_find_sources(engine, actor, "perception", "") == []
+    # 有标记但问的是别的目标，同样不给。
+    _cast_mark(engine, instance)
+    actor = engine._actor_view(instance, _combat_state(instance), "player:gm")
+    assert mark_find_sources(engine, actor, "perception", SECOND) == []
+    assert mark_find_sources(
+        engine, actor, "perception", "enemy:goblin-1",
+    ) == [{"code": "hunter_s_mark", "mode": "advantage"}]

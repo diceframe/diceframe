@@ -1289,6 +1289,9 @@ class CombatCheckWindowsMixin:
             + int(check.get("window_bonus", 0) or 0)
             - int(check.get("check_penalty", 0) or 0)
             + int(check.get("reroll_bonus", 0) or 0)
+            # 破甲一击的 +5 不是 modifier 的一部分（事件里单独成项），所以重掷
+            # 或改骰重算总额时必须自己把它加回来；漏掉会让同一份事件前后差 5。
+            + int(check.get("sundering_bonus", 0) or 0)
         )
 
     def _replace_natural(

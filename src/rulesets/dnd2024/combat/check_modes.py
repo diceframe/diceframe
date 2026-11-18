@@ -273,7 +273,11 @@ def mark_find_sources(
     allowed = {str(item) for item in effect.get("mark_find_skills") or ()}
     if str(skill_id) not in allowed:
         return []
-    if marked_target_id(actor) != str(target_id):
+    # 没有标记时 `marked_target_id` 与空串相等：不拦，"随便掷个察觉"就会拿到
+    # 一条 hunter_s_mark 优势来源（S0-F18 §4.1.6）。与 mark_attack_sources
+    # 的 `not wanted` 守卫保持同一写法。
+    wanted = marked_target_id(actor)
+    if not wanted or wanted != str(target_id):
         return []
     return [{"code": "hunter_s_mark", "mode": "advantage"}]
 

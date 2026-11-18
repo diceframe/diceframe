@@ -1369,3 +1369,25 @@ def test_the_panel_reports_the_options_the_server_enforces(
             brutal_strike=True, rolls=[12, 3, 5, 5])
     # The choice is spent whether or not it landed, and the panel says so.
     assert _attack_options(engine, instance)["brutal_strike"]["available"] is False
+
+
+# --------------------------------------------------------------------------
+# Review round (2026-11-18): the +5 has to survive a recomputed total
+# --------------------------------------------------------------------------
+
+def test_a_recomputed_total_keeps_the_sundering_bonus(runtime) -> None:
+    """重掷与改骰用 ``_check_total`` 重算总额，破甲一击的 +5 必须跟着走。
+
+    ``resolution`` 把 +5 记成独立字段（不并进 ``modifier``），而共享的总额
+    公式当初只列了 modifier/check_bonus/aura/window/penalty/reroll —— 于是
+    Stroke of Luck 或重掷之后，同一份事件的总值会比原来少 5，日志与判定互相
+    矛盾（S0-F15 §4.3.4）。
+    """
+
+    engine, _instance = _combat(
+        runtime, {"gm": barbarian(9)}, initiative={"gm": 20},
+    )
+    base = {"modifier": 3, "check_bonus": 1, "sundering_bonus": 5}
+    assert engine._check_total(base, 10) == 10 + 3 + 1 + 5
+    # 没有破甲时不多加：字段缺省即 0。
+    assert engine._check_total({"modifier": 3}, 10) == 13
