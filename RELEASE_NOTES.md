@@ -1,3 +1,15 @@
+# Unreleased（下一预览版草拟，发布时并入正式段落）
+
+## 中文
+
+- **dnd2024 内容包破坏性变更（#785）**：武器条目现要求显式 `two_handed` 与 `loading` 键，自带的 dnd2024 模板已全量补齐。缺这两个键的自制或魔改 dnd2024 combat catalog 在升级后会**装载失败**并点名具体武器 id——这是有意的 fail-closed 行为，不会静默跳过。请为自定义武器补齐这两个布尔键后重新装载。
+
+## English
+
+- **Breaking change for dnd2024 content packs (#785)**: weapon entries now require explicit `two_handed` and `loading` keys; the bundled dnd2024 templates are fully updated. Custom or modified dnd2024 combat catalogs missing these keys will **fail to load** after the upgrade, naming the offending weapon ids — intentional fail-closed behavior, nothing is silently skipped. Add both boolean keys to custom weapons and reload.
+
+---
+
 # DiceFrame v3.3.0-beta.3
 
 > 这是 3.3.0 的**预览版（beta）**。默认稳定频道不会收到它；请在「设置 → 预览版更新」开启后检测。重要存档建议先备份。扩展中心、创作工坊与外部规则运行时均为本批实验性能力，欢迎在预览频道反馈。本版重点修复 DF Agent / 创作工坊的预算与上下文问题。
