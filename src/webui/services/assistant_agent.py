@@ -101,7 +101,14 @@ def _merge_memory(session_memory: list, messages: list) -> None:
 
 def _memory_conversation(session_memory: list) -> tuple[list, dict | None]:
     """最近窗口原样送模型；更早的轮次折叠成确定性状态卡。"""
-    window = session_memory[-MEMORY_RECENT:]
+    window = []
+    for turn in session_memory[-MEMORY_RECENT:]:
+        content = turn["content"]
+        if turn["role"] == "assistant" and len(content) > 600:
+            # 头重脚轻预压：改动清单的关键细节几乎都在开头。预先压到 600
+            # 以内，首条消息的结构化压缩（后续更紧的帽）就不再二次截断它。
+            content = content[:500] + "\n…[中略]…\n" + content[-80:]
+        window.append({**turn, "content": content})
     older = session_memory[:-MEMORY_RECENT]
     card = None
     if older:
@@ -584,6 +591,13 @@ class AgentRuntime:
                     "including tool-return observations and retry-prompt corrections. "
                     "payload.memory_card, when present, is a folded summary of older turns — trust it for "
                     "what the user already asked and what was already done; do not ask again. "
+                    "A '…[已截断]'/'…[truncated]' marker inside the payload only means a long catalog or "
+                    "observation string was compacted; the conversation field itself is complete — never "
+                    "claim the history is truncated or ask the user to restate what is already there. "
+                    "The conversation field and memory_card are reliable records of this session's own "
+                    "turns: answering from them — including IDs and file names you previously reported "
+                    "from real tool results — is recall, not guessing; do not re-read, refuse, or demand "
+                    "verification when the record already contains the answer. "
                     "payload.project, when present, is the live Creator project state card (revision, file "
                     "list, content counts): use it to orient before reading any project files, and to pick "
                     "exact ranges when you do read. "
@@ -771,7 +785,10 @@ class AgentRuntime:
                     adapted.requires_approval = tool.mutation
                     return adapted
 
-                catalog = self.registry.search(limit=160)
+                # 索引只做定向：过大目录会把任务对话挤出首条消息的压缩预算
+                # （实测 agent 因此记不起自己刚做的具体改动）。完整目录靠
+                # search_capabilities / describe_capability 分页获取。
+                catalog = self.registry.search(limit=80)
                 catalog['capabilities'] = [{key: item[key] for key in
                     ('name', 'label', 'domain', 'effect', 'version', 'requires_confirmation')}
                     for item in catalog['capabilities']]

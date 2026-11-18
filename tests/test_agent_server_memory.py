@@ -160,3 +160,35 @@ def test_route_context_project_id_validation():
         _context({'route': 'creator', 'project_id': '../evil'})
     with pytest.raises(ValueError):
         _context({'route': 'creator', 'project_id': 'nope'})
+
+
+@pytest.mark.asyncio
+async def test_latest_user_request_is_pinned_to_every_model_request(tmp_path):
+    """工具往返变长后，最新用户指令仍钉在每次请求末尾（模型不得称没看到请求）。"""
+    from src.webui.services.assistant_agent_framework import execute_agent
+
+    class Capturing:
+        def __init__(self):
+            self.users = []
+
+        async def call_tools(self, system, user, **kwargs):
+            self.users.append(user)
+            from src.llm.client import LLMToolResponse
+            return LLMToolResponse([], 5, 'test', content='final: done')
+
+    payload = {"conversation": [
+        {"role": "user", "content": "第一轮的旧指令"},
+        {"role": "assistant", "content": "旧回答"},
+        {"role": "user", "content": "给我加一章 ch9 两个场景，改完直接汇报"},
+    ], "page_context": {"route": "creator"}}
+    import asyncio
+    capturing = Capturing()
+    async def emit(*_args):
+        return None
+
+    out = await execute_agent(capturing, [], "sys", payload, emit, 'zh-CN',
+                              1024, 8, task_max_tokens=4096)
+    assert 'final' in str(out)
+    assert capturing.users, "模型请求未发出"
+    for user in capturing.users:
+        assert '给我加一章 ch9' in user, "最新用户指令未随请求注入"

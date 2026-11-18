@@ -185,6 +185,28 @@ def _walk_bound(node, limit, *, key: str = ""):
     return _bound_text(node, limit)
 
 
+def _latest_user_request(dumped: list) -> str:
+    """从首条任务 payload 的 conversation 里取最新用户指令（截断前的原始文本）。
+
+    payload 首条始终是 {'agent_history': ...} 之外的任务 JSON 字符串；其
+    conversation 字段是服务端会话记忆构建的。解析失败（旧调用方/异构
+    payload）时返回空串，不改变任何既有行为。
+    """
+    try:
+        content = dumped[0]['parts'][0]['content']
+        if not isinstance(content, str) or not content.startswith('{'):
+            return ''
+        conversation = json.loads(content).get('conversation')
+        if not isinstance(conversation, list):
+            return ''
+        for message in reversed(conversation):
+            if (message or {}).get('role') == 'user' and str(message.get('content') or '').strip():
+                return str(message['content'])[:500]
+    except (KeyError, IndexError, TypeError, ValueError):
+        return ''
+    return ''
+
+
 def _bound_history(history: list) -> list:
     """三段固定 + 预算回收：第 0 条任务消息、最近窗口、按预算回收的中间历史。
 
@@ -298,8 +320,8 @@ class DiceFrameModel(Model):
         }} for tool in definitions]
         # Keep the correlated tool observations and retry prompts, bounded:
         # provider failover stays in LLMClient, context size stays in here.
-        history = _bound_history(
-            ModelMessagesTypeAdapter.dump_python(messages, mode="json", exclude_none=True))
+        dumped = ModelMessagesTypeAdapter.dump_python(messages, mode="json", exclude_none=True)
+        history = _bound_history(dumped)
         instructions = "\n\n".join(part.content for message in messages
             for part in message.parts if part.part_kind == "system-prompt")
         if parameters.instruction_parts:
@@ -308,7 +330,12 @@ class DiceFrameModel(Model):
             # Only our fixed protocol explanation enters the next request;
             # never echo malformed provider arguments into instructions.
             instructions += "\n\nCorrection for the previous response: " + self.response_correction
-        user_message = json.dumps({'agent_history': history}, ensure_ascii=False)
+        # 工具往返变长后，任务 payload 会被压到历史头部，部分模型只盯着
+        # 尾部的工具返回、声称「没看到请求」（creator 实测翻车点）。把最新
+        # 用户指令重新钉在每次请求的末尾，随历史增长始终可见。
+        latest = _latest_user_request(dumped)
+        user_message = json.dumps({'agent_history': history, **(
+            {'latest_user_request': latest} if latest else {})}, ensure_ascii=False)
         if usage_logger.isEnabledFor(logging.INFO):
             project_observations = [part.get('content') for message in history for part in message.get('parts', [])
                                     if part.get('part_kind') == 'tool-return'
