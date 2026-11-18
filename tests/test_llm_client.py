@@ -584,6 +584,48 @@ _DICE_TOOL = {
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("api_format,native_payload", [
+    ("openai", {"choices": [{"finish_reason": "length", "message": {"tool_calls": [
+        {"function": {"name": "dice_checks", "arguments": '{"checks":[]}'}},
+    ]}}]}),
+    ("anthropic", {"stop_reason": "max_tokens", "content": [
+        {"type": "tool_use", "name": "dice_checks", "input": {"checks": []}},
+    ]}),
+    ("openai", {"choices": [{"finish_reason": "tool_calls", "message": {"tool_calls": [
+        {"function": {"name": "dice_checks", "arguments": '{"checks":[]}'}}, {},
+    ]}}]}),
+], ids=["truncated-chat", "truncated-anthropic", "malformed-sibling"])
+async def test_incomplete_native_batch_cannot_become_a_no_check_decision(monkeypatch, api_format, native_payload):
+    class NativeResponse(_FakeResponse):
+        async def json(self):
+            usage = {"total_tokens": 7} if api_format == "openai" else {"input_tokens": 4, "output_tokens": 3}
+            return {**native_payload, "usage": usage}
+
+    retried = {"checks": [{"player": "p1", "target": 12}]}
+
+    class FallbackResponse(_FakeResponse):
+        async def json(self):
+            if api_format == "anthropic":
+                # usage ledger 语义：分项不全的 attempt 总量按未知处理、不猜数，
+                # 这里给出完整分项使聚合总额可断言（原生 7 + 回退 2）。
+                return {"content": [{"type": "text", "text": json.dumps(retried)}],
+                        "usage": {"input_tokens": 0, "output_tokens": 2}}
+            return {"choices": [{"message": {"content": json.dumps(retried)}}], "usage": {"total_tokens": 2}}
+
+    provider = ProviderConfig("provider", "https://example.invalid", "test", "model", api_format=api_format)
+    client = LLMClient([provider], "provider")
+    session = _SequentialSession([NativeResponse(), FallbackResponse()])
+    async def fake_session():
+        return session
+    monkeypatch.setattr(client, "_get_session", fake_session)
+    result = await client.call_tools("system", "actions", tools=[_DICE_TOOL])
+    assert result.tool_calls == [{"name": "dice_checks", "arguments": retried}]
+    assert result.total_tokens == 9
+    assert result.attempted_requests == 2
+    assert result.native_tools is False
+
+
+@pytest.mark.asyncio
 async def test_call_tools_retries_with_auto_tool_choice_when_forced_rejected(monkeypatch):
     """思考模式模型拒绝强制 tool_choice 时，应改用 auto 重试原生调用而非直接回退。"""
     session = _SequentialSession([

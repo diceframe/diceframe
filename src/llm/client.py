@@ -1116,14 +1116,18 @@ def _tool_arguments(value: Any) -> dict[str, Any]:
 
 
 def _normalize_openai_tool_calls(raw_calls: list[Any]) -> list[dict[str, Any]]:
+    # #786：畸形条目整批拒绝（ValueError → 原生失败 → JSON 回退重试），
+    # 不再静默丢弃幸存条目——半解析的 checks 可能伪装成「本轮无需检定」。
+    if not isinstance(raw_calls, list):
+        raise ValueError("tool_calls must be an array")
     calls: list[dict[str, Any]] = []
     for raw in raw_calls:
         if not isinstance(raw, dict):
-            continue
+            raise ValueError("tool call must be an object")
         function = raw.get("function") if isinstance(raw.get("function"), dict) else raw
         name = str(function.get("name") or "").strip()
         if not name:
-            continue
+            raise ValueError("tool call is missing its name")
         calls.append({"name": name, "arguments": _tool_arguments(function.get("arguments") or {})})
     return calls
 

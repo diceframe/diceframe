@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any, Protocol, TypedDict
 
 from src.commands.round_processor import (
     CheckModelNotConfigured,
+    CheckPreparationError,
+    InvalidCheckPlan,
     RoundNotProcessed,
     RoundProcessingFailure,
 )
@@ -412,7 +414,7 @@ async def _process_round(
             _round_failure_result(instance, rolled_back=exc.rolled_back),
             rolled_back=exc.rolled_back,
         ) from exc
-    except CheckModelNotConfigured as exc:
+    except CheckPreparationError as exc:
         # ``RoundProcessor.process_round`` owns recovery for direct callers;
         # older/injected processors may still raise before doing so.  Preserve
         # the typed configuration response and never report a retryable 409 if
@@ -423,7 +425,7 @@ async def _process_round(
             ) from exc
         if getattr(exc, "rolled_back", None) is True:
             raise RoundProcessingError(
-                _check_model_config_result(instance), rolled_back=True,
+                _check_model_result(instance, exc), rolled_back=True,
             ) from exc
         rolled_back = await _rollback_failed_round(
             dependencies, instance, game_key, on_reset=on_reset,
@@ -433,7 +435,7 @@ async def _process_round(
                 _round_rollback_failed_result(instance), rolled_back=False,
             ) from exc
         raise RoundProcessingError(
-            _check_model_config_result(instance), rolled_back=True,
+            _check_model_result(instance, exc), rolled_back=True,
         ) from exc
     except Exception as exc:
         if run_changed is not None and run_changed():
@@ -647,12 +649,20 @@ async def _rollback_failed_round(
     return rolled_back
 
 
-def _check_model_config_result(instance: "GameInstance") -> TurnResult:
-    """独立检定模型配置无效：统一 409 + 稳定错误码，绝不让配置问题伪装成成功。
-
-    ``advanced=False`` 配合推进入口的事先回滚：行动保留在队列里，修复配置后
-    同一对局可直接重试，不需要重建存档或重新提交行动。
-    """
+def _check_model_result(instance: "GameInstance", exc: CheckPreparationError) -> TurnResult:
+    """Translate the failure after the action queue has been restored."""
+    if isinstance(exc, InvalidCheckPlan):
+        return _result({
+            "ok": False,
+            "error_code": "ROUND_PROCESSING_FAILED",
+            "error": _round_message(instance, {
+                "zh-CN": "独立检定模型未返回有效检定方案，本轮已退回行动阶段，可以重试。",
+                "en": "The dedicated check model returned an invalid plan. The round was rolled back; try again.",
+            }),
+            "advanced": False,
+            "rolled_back": True,
+            "phase": "error",
+        }, 502)
     return _result({
         "ok": False,
         "error_code": CheckModelNotConfigured.error_code,
@@ -815,12 +825,12 @@ async def _advance_progression(
         return None
     try:
         await _prepare_checks(dependencies, instance)
-    except CheckModelNotConfigured:
+    except CheckPreparationError as exc:
         # The instance just entered judgment.  Roll it back before reporting a
         # retryable configuration error so the same action queue can be reused.
         if not await _rollback_unprocessed_advance(dependencies, instance, game_key):
             return _round_rollback_failed_result(instance)
-        return _check_model_config_result(instance)
+        return _check_model_result(instance, exc)
     if run_changed is not None and run_changed():
         return _gate_rejection(instance, viewer_uid, RUN_CHANGED)
     if check_decisions.pending_any(instance):
@@ -1251,7 +1261,7 @@ async def advance_round(
     if instance.state == GameState.ACTIVE_JUDGMENT and instance.action_queue:
         try:
             await _prepare_checks(dependencies, instance)
-        except CheckModelNotConfigured:
+        except CheckPreparationError as exc:
             # A legacy RuntimeError could leave the instance in judgment before
             # check preparation completed.  That state is safe to abort and
             # must not remain a permanent "stuck" round.  Once checks were
@@ -1259,7 +1269,7 @@ async def advance_round(
             if not checks.round_checks_prepared(instance):
                 if not await _rollback_unprocessed_advance(dependencies, instance, game_key):
                     return _round_rollback_failed_result(instance)
-            return _check_model_config_result(instance)
+            return _check_model_result(instance, exc)
         pending_luck = check_decisions.pending_any(instance)
         if pending_luck and not force:
             _arm_decision_timeouts(dependencies, instance)
@@ -1315,10 +1325,10 @@ async def advance_round(
     if advanced:
         try:
             await _prepare_checks(dependencies, instance)
-        except CheckModelNotConfigured:
+        except CheckPreparationError as exc:
             if not await _rollback_unprocessed_advance(dependencies, instance, game_key):
                 return _round_rollback_failed_result(instance)
-            return _check_model_config_result(instance)
+            return _check_model_result(instance, exc)
         pending_luck = check_decisions.pending_any(instance)
         if pending_luck and not force:
             await dependencies.save_instance(instance)
