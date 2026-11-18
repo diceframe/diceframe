@@ -1131,6 +1131,7 @@ class WebAPI:
             answer=assistant.offline_answer, knowledge=assistant.agent_knowledge,
             review_content=agent_content.review, max_tokens=assistant_agent_max_tokens,
             task_max_tokens=assistant_agent_task_max_tokens,
+            creator_projects=self._creator_projects,
         ))
 
     def register_application_actions(self, actions):

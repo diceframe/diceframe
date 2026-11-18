@@ -187,7 +187,8 @@ export function useCreatorAssistant(scope: Ref<string | undefined>) {
           if (event === 'approval') pendingApproval.value = normaliseApproval(payload)
           if (event === 'task') task.value = payload as unknown as AgentSession['task']
         },
-      }, controller.signal, sessionId.value || undefined, { route: 'creator' })
+      }, controller.signal, sessionId.value || undefined, { route: 'creator',
+        ...(activeScope.startsWith('project-') ? { project_id: activeScope } : {}) })
     } catch (error: unknown) {
       assistant.error = error instanceof Error ? error.message : 'Assistant request failed.'
     } finally {

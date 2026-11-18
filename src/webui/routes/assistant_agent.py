@@ -39,12 +39,14 @@ def _id(value, optional=False):
 
 
 def _context(value):
-    if not isinstance(value, dict) or set(value) - {"route", "game_key", "world_id", "adventure_id", "book_id"}:
+    if not isinstance(value, dict) or set(value) - {"route", "game_key", "world_id", "adventure_id", "book_id", "project_id"}:
         raise ValueError("Invalid page context")
     if any(not isinstance(v, str) or len(v) > 500 for v in value.values()):
         raise ValueError("Invalid page context value")
     if value.get("route") and value["route"] not in ROUTES:
         raise ValueError("Unknown page context")
+    if value.get("project_id") and not re.fullmatch(r"project-[A-Za-z0-9_-]{1,60}", value["project_id"]):
+        raise ValueError("Invalid page context project")
     return value
 
 
