@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
 from src.generation import creator
+from src.llm.openai_responses import OpenAIResponsesTransport, responses_url
 from src.llm.openai_transport import OpenAIChatTransport
 from src.rules.rule_system import RuleSystem
 from src.webui.config_update import connection_test_timeout
@@ -44,6 +45,8 @@ class GenerationDependencies:
 
 def _model_list_url(base_url: str, api_format: str = "openai") -> str:
     url = base_url.rstrip("/")
+    if url.endswith("/v1/responses"):
+        return f"{url[:-len('/responses')]}/models"
     if url.endswith("/chat/completions"):
         return f"{url[:-len('/chat/completions')]}/models"
     if url.endswith("/messages"):
@@ -173,12 +176,25 @@ async def _test_openai_connection(
             return {"ok": False, "error": t("webui.services.generation.llm_client_uninitialized"), "elapsed": 0}
         session = await dependencies.llm_client._get_session()
         active_proxy = proxy_url or dependencies.llm_client.proxy_url
+        timeout = aiohttp.ClientTimeout(total=connection_test_timeout(dependencies.config_state()))
+        selected_url = responses_url(base_url, model)
+        if selected_url:
+            # P2（review）：探针必须用应用的实际 generation options——否则用户
+            # 全局配置了 Responses 不支持的采样项时，设置页显示 OK 而真实调用报错。
+            transport = OpenAIResponsesTransport(
+                getattr(dependencies.llm_client, "generation_options", None))
+            result = await transport.call(
+                session, selected_url, api_key, transport.body(model, "", "回复：OK", 4096),
+                timeout=timeout, proxy=active_proxy,
+            )
+            if not result.content:
+                raise ValueError("OpenAI Responses returned no final text")
+            return {"ok": True, "elapsed": round(time.time() - start, 2), "response": result.content,
+                    "tokens": result.total_tokens}
         request_kwargs = {"proxy": active_proxy} if active_proxy else {}
         async with OpenAIChatTransport().post(
             session, url, json=body, headers=headers,
-            timeout=aiohttp.ClientTimeout(
-                total=connection_test_timeout(dependencies.config_state())
-            ),
+            timeout=timeout,
             **request_kwargs,
         ) as resp:
             return await _parse_connection_test_response(resp, start)

@@ -2232,6 +2232,8 @@ src/llm/
 
 `LLMClient` owns provider-facing capabilities.
 
+For GPT-6.2 Astra and Sol on the official OpenAI endpoint, `src/llm/openai_responses.py` translates messages, functions and streaming events for the Responses API. DF owns conversation history and tool execution.
+
 Prompt / turn orchestration primarily lives in:
 
 ```text

@@ -2247,6 +2247,8 @@ src/llm/
 
 LLMClient 负责 provider-facing 能力。
 
+官方 OpenAI 的 GPT-6.2 Astra 和 Sol 通过 `src/llm/openai_responses.py` 请求 Responses API。这个适配器转换消息、工具和流式事件。回合历史和工具执行仍由 DF 管理。
+
 Prompt / turn orchestration 则主要在：
 
 ```text

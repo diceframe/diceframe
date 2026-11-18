@@ -31,6 +31,10 @@ Navigation and the editor have separate surfaces with space between them; on
 phones the section list can fold beneath search. Manage's log menu follows
 the same vertical layout, with processing logs and export reachable in short windows.
 
+## OpenAI GPT-6.2
+
+Select the OpenAI format and `https://api.openai.com/v1` in the shared provider catalog, then select `gpt-6.2-astra` or `gpt-6.2-sol`. Connection tests, narration and native function calls automatically use the Responses API. Leave Temperature empty or set it to 1. Other explicit sampling overrides raise an error. DF supplies the context for each request and sets `store: false`.
+
 ## Providers and check planning
 
 Save providers in the shared directory, then assign each capability a provider
