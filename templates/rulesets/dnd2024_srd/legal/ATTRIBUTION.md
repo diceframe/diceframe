@@ -13,3 +13,12 @@ under the same CC-BY-4.0 terms as the SRD itself; the file carries the
 attribution and license identifiers in its own header, so a consumer that loads
 only this catalog still knows where the prose came from. Regenerate it with
 `scripts/rulesets/import_srd_spell_descriptions.py` — never hand-edit prose.
+
+## Adventuring Gear text
+
+`content/equipment_catalogs/srd_adventuring_gear.json` reproduces the
+Adventuring Gear entries of SRD 5.2.1 -- the subsection that list, not the
+equipment chapter as a whole. Membership, text, price, weight and the pack
+contents all come from dnd5eapi's 2024 `adventuring-gear` category and are
+redistributed under the same CC-BY-4.0 terms as the SRD. Regenerate with
+`scripts/rulesets/import_srd_adventuring_gear.py`.
