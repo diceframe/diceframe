@@ -11,6 +11,7 @@
   "description": "基于 SRD 5.2.1 的独立高级体验：引导式车卡、版本化角色、权威动作与服务端战斗结算。与 D&D 5e 轻量规则相互独立。",
   "mechanics": "dnd2024_srd_authoritative",
   "ruleset_level": "authoritative",
+  "max_check_dc": 30,
   "attributes": [
     {"key": "str", "name": "力量", "min": 3, "max": 20},
     {"key": "dex", "name": "敏捷", "min": 3, "max": 20},
