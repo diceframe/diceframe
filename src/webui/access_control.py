@@ -169,8 +169,13 @@ class WebAccessControl:
             viewer_uid = request.get("user_id", "")
             request["viewer_user_id"] = viewer_uid
             request["user_id"] = share_uid
+            # 持有该席位凭证（X-Seat-Token 已验证）的请求就是以座位玩家身份
+            # 行动，不是房主预览：受邀玩家常用同一实例访问密码登录，若仅凭
+            # owner_authenticated 判定，整桌玩家都会被迫先点「允许代操作」。
             request["player_preview"] = bool(
-                owner_authenticated and viewer_uid != share_uid
+                owner_authenticated
+                and viewer_uid != share_uid
+                and not request.get("seat_token_uid")
             )
             request["player_delegate"] = request.query.get("delegate", "") in {
                 "1",

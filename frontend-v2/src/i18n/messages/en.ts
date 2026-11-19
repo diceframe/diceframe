@@ -1066,6 +1066,8 @@ export const en = {
   progress: 'Progress',
   save: 'Save',
   hostPreview: 'Host preview',
+  hostPreviewHint: 'Host preview: enable delegated actions before sending actions',
+  hostPreviewDelegating: 'Delegated actions are on — actions are submitted as this player',
   disableDelegate: 'Disable delegation',
   enableDelegate: 'Allow delegation',
   updating: 'Updating',

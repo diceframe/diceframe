@@ -93,14 +93,16 @@ export function authHeaders(initHeaders?: HeadersInit, contentType = true): Head
 
 /**
  * Share-link players prove their seat with the per-seat token for the game the
- * request targets. The owner never sends one implicitly: its own requests act
- * as GM (or name a previewed seat explicitly).
+ * request targets. A stored seat token is attached on player pages even when
+ * the browser also holds the instance access password: invited players often
+ * log in with that same password, and without the token the server can only
+ * treat them as the host previewing a seat (they would have to enable
+ * 'delegate actions' before playing at all).
  */
 export function applySeatTokenHeader(headers: Headers, path: string): void {
-  if (headers.has(SEAT_TOKEN_HEADER) || hasAccessToken()) return
+  if (headers.has(SEAT_TOKEN_HEADER)) return
   // Only a player's own share page speaks for a seat. The GM's page and P2P
-  // host delegation (which names the bridged seat itself) never attach one,
-  // even on a host without an access password.
+  // host delegation (which names the bridged seat itself) never attach one.
   if (!isPlayerShareLocation() || /[?&]delegate=(?:1|true|yes)(?:&|$)/u.test(path)) return
   const token = readSeatToken(gameKeyOfApiPath(path))
   if (token) headers.set(SEAT_TOKEN_HEADER, token)
@@ -112,10 +114,11 @@ export function applySeatTokenHeader(headers: Headers, path: string): void {
  * player to the join page, which explains that a new GM link is needed.
  */
 function handleRejectedSeatToken(path: string, status: number, code?: string): void {
-  if (status !== 401 || code !== 'SEAT_TOKEN_INVALID' || hasAccessToken()) return
+  if (status !== 401 || code !== 'SEAT_TOKEN_INVALID') return
   const gk = gameKeyOfApiPath(path)
   if (!gk) return
   clearSeatToken(gk)
+  if (hasAccessToken()) return  // 房主会话清掉过期座位令牌后，退回房主身份即可
   localStorage.removeItem('trpg_play_user_' + gk)
   const params = new URLSearchParams({ game: gk, share: '1', notice: 'seat' })
   if (!location.hash.startsWith('#/join')) location.hash = `/join?${params.toString()}`

@@ -276,6 +276,8 @@ onUnmounted(() => {
         @focus="focusComposer"
       />
     </div>
+    <!-- 宿主级提示条（如房主预览模式）；紧贴输入框，而不是藏在顶部工具栏。 -->
+    <slot name="before-input" />
     <div class="composer-row" :class="{ 'has-dictation': micAvailable, 'has-skill': skills.length > 0 }">
       <div class="composer-input" data-testid="composer-input">
         <div class="composer-description">

@@ -835,6 +835,8 @@ export const ja = {
   progress: '進行',
   save: 'セーブ',
   hostPreview: 'ホストプレビュー',
+  hostPreviewHint: 'Host preview: enable delegated actions before sending actions',
+  hostPreviewDelegating: 'Delegated actions are on — actions are submitted as this player',
   disableDelegate: '代行操作を無効化',
   enableDelegate: '代行操作を許可',
   updating: '更新中',

@@ -1066,6 +1066,8 @@ export const zhCN = {
   progress: '进度',
   save: '存档',
   hostPreview: '房主预览',
+  hostPreviewHint: '房主预览模式：开启允许代操作后才能发送行动',
+  hostPreviewDelegating: '代操作已开启：行动会以该玩家身份提交',
   disableDelegate: '关闭代操作',
   enableDelegate: '允许代操作',
   updating: '更新中',

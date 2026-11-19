@@ -811,6 +811,8 @@ export const ru = {
   progress: 'Прогресс',
   save: 'Сохранить',
   hostPreview: 'Предпросмотр хоста',
+  hostPreviewHint: 'Host preview: enable delegated actions before sending actions',
+  hostPreviewDelegating: 'Delegated actions are on — actions are submitted as this player',
   disableDelegate: 'Выключить делегирование',
   enableDelegate: 'Разрешить делегирование',
   updating: 'Обновление',

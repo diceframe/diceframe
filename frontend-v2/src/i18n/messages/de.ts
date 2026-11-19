@@ -835,6 +835,8 @@ export const de = {
   progress: 'Fortschritt',
   save: 'Speichern',
   hostPreview: 'Gastgeber-Vorschau',
+  hostPreviewHint: 'Host preview: enable delegated actions before sending actions',
+  hostPreviewDelegating: 'Delegated actions are on — actions are submitted as this player',
   disableDelegate: 'Delegation deaktivieren',
   enableDelegate: 'Delegation erlauben',
   updating: 'Wird aktualisiert',
