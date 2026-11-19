@@ -74,7 +74,7 @@ def test_cost_and_weight_come_from_the_source() -> None:
 def test_packs_carry_their_contents_as_structure_not_only_as_prose() -> None:
     """买一个包等于拿到清单里的物品；这条关系必须能读，不能只写在正文里。"""
 
-    pack = _catalog()["items"]["burglars_pack"]
+    pack = _catalog()["items"]["burglar_pack"]
     assert pack["cost_gp"] == 16
     assert pack["contents"], "pack lost its contents"
     by_item = {row["item"]: row["quantity"] for row in pack["contents"]}
@@ -83,7 +83,7 @@ def test_packs_carry_their_contents_as_structure_not_only_as_prose() -> None:
     assert by_item["candle"] == 10 and by_item["rations"] == 5
     assert all(row["quantity"] >= 1 for row in pack["contents"])
     # 容器身份同样是结构化事实。
-    assert _catalog()["items"]["scholars_pack"]["container"] == "backpack"
+    assert _catalog()["items"]["scholar_pack"]["container"] == "backpack"
 
 
 def test_the_file_states_its_own_scope_license_and_source() -> None:

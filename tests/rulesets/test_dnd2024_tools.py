@@ -40,7 +40,7 @@ def test_the_catalog_is_the_tools_table() -> None:
         assert outside not in items
 
 
-def test_ids_are_stable_and_the_apostrophe_folds_to_s() -> None:
+def test_ids_are_stable_and_apostrophes_are_dropped() -> None:
     for item_id in _catalog()["items"]:
         assert re.fullmatch(r"[a-z0-9][a-z0-9_]*", item_id), item_id
     assert "poisoners_kit" in _catalog()["items"]

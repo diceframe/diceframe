@@ -73,14 +73,11 @@ def test_the_poisoners_kit_is_carriable() -> None:
 
 def test_the_bundle_loads_all_of_them_as_items() -> None:
     bundle = Dnd2024Runtime().load_bundle(LOCALE)
-    catalog = bundle.get("item_catalog", "srd_items")
-    loaded = set((catalog or {}).get("items") or {})
-    if catalog is None:
-        # 目录形状由 bundle 决定；退回逐个实体检查，避免把测试绑在装载细节上。
-        for item_id in sorted(TOOLS)[:5]:
-            assert _entity(item_id)
-        return
-    assert TOOLS & loaded, "no tool entity reached the item catalog"
+    # 逐个实体断言真实装载（此前查询的 item_catalog/srd_items kind 不存在，
+    # 永远走 None 软分支——只查磁盘文件、从未验证 bundle）。
+    for item_id in sorted(TOOLS):
+        entry = bundle.get("item", item_id)
+        assert entry is not None, item_id
 
 
 @pytest.mark.parametrize("item_id", ["poisoners_kit", "disguise_kit", "dice"])

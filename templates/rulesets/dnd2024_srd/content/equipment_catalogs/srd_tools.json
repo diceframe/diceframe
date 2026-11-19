@@ -31,7 +31,7 @@
       ],
       "craft": [
         "acid",
-        "alchemist_s_fire",
+        "alchemists_fire",
         "component_pouch",
         "oil",
         "paper",
@@ -154,7 +154,7 @@
         }
       ],
       "craft": [
-        "climber_s_kit"
+        "climbers_kit"
       ]
     },
     "cooks_utensils": {
@@ -319,7 +319,7 @@
       "craft": [
         "antitoxin",
         "candle",
-        "healer_s_kit",
+        "healers_kit",
         "potion_of_healing"
       ]
     },
@@ -752,7 +752,7 @@
         "sack",
         "string",
         "tent",
-        "clothes_traveler_s"
+        "clothes_travelers"
       ]
     },
     "woodcarvers_tools": {
