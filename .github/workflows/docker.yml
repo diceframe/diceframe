@@ -27,7 +27,7 @@ jobs:
         run: |
           owner="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
           version="${{ inputs.version }}"
-          update_latest="false"
+          update_latest="true"
           version="${version#v}"
           if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid image version: ${version}" >&2
