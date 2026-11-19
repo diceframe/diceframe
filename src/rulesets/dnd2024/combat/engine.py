@@ -1071,6 +1071,8 @@ class Dnd2024CombatEngine(
         # 由回合推进处统一查两个上限，这里不能重复发同一条移除事件。
         if intent_type != "end_turn" and combat.get("initiative"):
             events.extend(self._superior_defense_expiry_events(instance, combat))
+        # S0-MM1：条件免疫是 stat block 事实，拦在"产出侧"一处，覆盖所有生产者。
+        events = self._statblock_immunity_events(combat, events)
         batch = {
             "batch_id": stable_batch_id(intent, expected),
             "intent_id": intent_id,
@@ -1081,6 +1083,41 @@ class Dnd2024CombatEngine(
             "source_ref": "srd-5.2.1:p24-p27:playing-the-game",
         }
         return {"ok": True, "event_batch": batch, "pending_decision": pending}
+
+    def _statblock_immunity_events(
+        self, combat: dict[str, Any], events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Turn an immune ``condition.applied`` into an auditable block.
+
+        The check sits at the end of one intent rather than at each of the five
+        places that apply conditions: immunity is a property of the *target*,
+        so every producer gets the same answer for free.  The block is a
+        separate, state-free event -- dropping the event silently would leave
+        the ledger claiming a condition the state never took.
+        """
+
+        immunities: dict[str, set[str]] = {}
+        for enemy_id, enemy in (combat.get("enemies") or {}).items():
+            codes = enemy.get("condition_immunities") or ()
+            if codes:
+                immunities[f"enemy:{enemy_id}"] = {str(code) for code in codes}
+        if not immunities:
+            return events
+        filtered: list[dict[str, Any]] = []
+        for event in events:
+            if event.get("type") == "condition.applied":
+                blocked = immunities.get(str(event.get("target_id") or ""))
+                if blocked and str(event.get("condition") or "") in blocked:
+                    filtered.append({
+                        "type": "condition.blocked",
+                        "target_id": str(event["target_id"]),
+                        "condition": str(event["condition"]),
+                        "reason": "immune",
+                        "source_actor_id": str(event.get("source_actor_id") or ""),
+                    })
+                    continue
+            filtered.append(event)
+        return filtered
 
     def _turn_window_closure_events(
         self, combat: dict[str, Any], intent: dict[str, Any],

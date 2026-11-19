@@ -296,6 +296,21 @@ class CombatResolutionMixin:
                 "attacks": deepcopy(raw["attacks"]), "conditions": {},
                 "creature_type": str(raw.get("creature_type") or ""),
                 "counterspell_dc": int(raw.get("counterspell_dc", 0) or 0),
+                # S0-MM1：stat block 的事实必须在开局时一次性落账，否则校验
+                # 通过了、视图读不到——"看起来进去了，实际没生效"。
+                "size": str(raw.get("size") or ""),
+                "speeds": deepcopy(
+                    raw.get("speeds") or {"walk": int(raw.get("speed", 30) or 30)}
+                ),
+                "senses": deepcopy(raw.get("senses") or {}),
+                "resist_damage_types": list(raw.get("resist_damage_types") or []),
+                "immune_damage_types": list(raw.get("immune_damage_types") or []),
+                "vulnerable_damage_types": list(
+                    raw.get("vulnerable_damage_types") or []
+                ),
+                "condition_immunities": list(raw.get("condition_immunities") or []),
+                "cr": str(raw.get("cr") or ""),
+                "xp": int(raw.get("xp", 0) or 0),
             }
             enemies[enemy_id] = enemy
             initiatives.append({
@@ -849,6 +864,15 @@ class CombatResolutionMixin:
 
         if amount <= 0 or not damage_type:
             return amount, ""
+        # S0-MM1：怪物 stat block 自带的三档防御先于一切条件来源结算。校验层
+        # 已保证同一类型不会同时出现在三组里，所以这里按"免疫 → 易伤 → 抗性"
+        # 取一条就返回，仍然只有一次结算。
+        if damage_type in (target.get("immune_damage_types") or ()):
+            return 0, "statblock:immune"
+        if damage_type in (target.get("vulnerable_damage_types") or ()):
+            return amount * 2, "statblock:vulnerable"
+        if damage_type in (target.get("resist_damage_types") or ()):
+            return max(0, amount // 2), "statblock:resist"
         for condition_id, meta in (target.get("conditions") or {}).items():
             types = set((self.catalog.conditions.get(condition_id) or {}).get(
                 "resist_damage_types"

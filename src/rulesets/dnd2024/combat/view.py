@@ -105,6 +105,22 @@ class CombatViewMixin:
                 "weapon_category_refs": [], "proficiency_bonus": 0,
                 "creature_type": str(enemy.get("creature_type") or ""),
                 "counterspell_dc": int(enemy.get("counterspell_dc", 0) or 0),
+                # S0-MM1：stat block 的事实必须能被读回。缺省一律"未知/空"，
+                # 不猜一个 medium 或 30 尺——消费方对未知 fail closed。
+                "size": str(enemy.get("size") or ""),
+                "speeds": deepcopy(
+                    enemy.get("speeds")
+                    or {"walk": int(enemy.get("speed", 30) or 30)}
+                ),
+                "senses": deepcopy(enemy.get("senses") or {}),
+                "resist_damage_types": list(enemy.get("resist_damage_types") or []),
+                "immune_damage_types": list(enemy.get("immune_damage_types") or []),
+                "vulnerable_damage_types": list(
+                    enemy.get("vulnerable_damage_types") or []
+                ),
+                "condition_immunities": list(enemy.get("condition_immunities") or []),
+                "cr": str(enemy.get("cr") or ""),
+                "xp": int(enemy.get("xp", 0) or 0),
                 "skill_values": {}, "skill_refs": [], "concentration": None,
             }
         raise CombatIntentError("actor_id is invalid")

@@ -12,6 +12,8 @@
         {
           "id": "goblin-warrior-1",
           "profile_id": "goblin_warrior",
+          "size": "small",
+          "cr": "1/4",
           "hp": 10,
           "armor_class": 15,
           "speed": 30,
@@ -33,6 +35,8 @@
         {
           "id": "skeleton-1",
           "profile_id": "skeleton",
+          "size": "medium",
+          "cr": "1/4",
           "hp": 13,
           "armor_class": 14,
           "speed": 30,
@@ -48,6 +52,8 @@
         {
           "id": "wolf-1",
           "profile_id": "wolf",
+          "size": "medium",
+          "cr": "1/4",
           "hp": 11,
           "armor_class": 12,
           "speed": 40,
