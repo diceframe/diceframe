@@ -469,7 +469,9 @@ class WebAccessControl:
                 room_access.verify_seat_token(instance, seat_token) or ""
                 if instance is not None else ""
             )
-            if not token_uid and not owner_authenticated and access_password_configured:
+            # 带了座位令牌但验证失败（轮换/撤销）：一律 401 让客户端清掉过期
+            # 令牌——房主会话也不例外，否则过期令牌会把玩家永远卡在预览态。
+            if not token_uid and access_password_configured:
                 return "", web.json_response(
                     {"ok": False, "error_code": "SEAT_TOKEN_INVALID", "error": t("webui.access_control.seat_credential_invalid")},
                     status=401,
@@ -478,7 +480,10 @@ class WebAccessControl:
         if token_uid:
             request["seat_token_uid"] = token_uid
         if owner_authenticated:
-            return query_uid or token_uid or session_uid, None
+            # 有效座位令牌是身份的权威来源：即便 URL 同时带了 ?user=（可能是
+            # 陈旧分享页残留的别的座位），也以令牌对应的座位行动，绝不静默
+            # 以别的座位写入。无令牌时保留 ?user=（房主预览 / P2P 委派）。
+            return token_uid or query_uid or session_uid, None
         if not access_password_configured:
             return token_uid or query_uid or session_uid, None
         if token_uid:

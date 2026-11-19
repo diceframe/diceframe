@@ -109,3 +109,37 @@ async def test_password_logged_in_player_with_seat_token_is_not_host_preview(pla
         assert allowed.status == 200, await allowed.text()
         submit.assert_called_once()
         assert submit.call_args.args[1] == "p1"
+
+        # 复审 P1-1 回归矩阵：token 是身份权威，?user= 指向别的座位时以令牌为准
+        rotated = room_access.issue_seat_token(instance, "p1")  # 轮换：旧令牌作废
+        submit.reset_mock()
+        mismatched = await client.post(
+            f"/api/games/{key}/action?user=p2&share=1",
+            headers={**owner, "X-Seat-Token": rotated},
+            json={"text": "look around"},
+        )
+        assert mismatched.status == 200, await mismatched.text()
+        submit.assert_called_once()
+        assert submit.call_args.args[1] == "p1", "不得以 ?user=p2 身份写入"
+
+        # 复审 P1-2 回归：轮换后的旧令牌对房主会话也返回 401（客户端据此清缓存）
+        submit.reset_mock()
+        stale = await client.post(
+            f"/api/games/{key}/action?user=p1&share=1",
+            headers={**owner, "X-Seat-Token": seat_token},
+            json={"text": "look around"},
+        )
+        assert stale.status == 401
+        assert (await stale.json())["error_code"] == "SEAT_TOKEN_INVALID"
+        submit.assert_not_called()
+
+        # 复审补充：非房主访客伪造 ?user=p2 也只能以令牌座位 p1 行动
+        submit.reset_mock()
+        forged = await client.post(
+            f"/api/games/{key}/action?user=p2&share=1",
+            headers={**ROOM_HEADER, "X-Seat-Token": rotated},
+            json={"text": "look around"},
+        )
+        assert forged.status == 200, await forged.text()
+        submit.assert_called_once()
+        assert submit.call_args.args[1] == "p1"
