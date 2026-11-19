@@ -1,0 +1,798 @@
+{
+  "schema_version": 1,
+  "kind": "equipment_text_catalog",
+  "id": "srd_tools",
+  "source_ref": "srd-5.2.1:p93-p95:tools",
+  "automation_level": "reference",
+  "scope": "tools",
+  "license": {
+    "id": "CC-BY-4.0",
+    "attribution": "legal/ATTRIBUTION.md",
+    "transcription": "dnd5eapi.co (SRD 5.2.1, tools category)"
+  },
+  "items": {
+    "alchemist_s_supplies": {
+      "name": "Alchemist's Supplies",
+      "desc": [],
+      "cost_gp": 50.0,
+      "weight_lb": 8.0,
+      "ability": "int",
+      "utilize": [
+        {
+          "task": "Identify a substance",
+          "dc": 15,
+          "success": "none"
+        },
+        {
+          "task": "Start a fire",
+          "dc": 15,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "acid",
+        "alchemist_s_fire",
+        "component_pouch",
+        "oil",
+        "paper",
+        "perfume"
+      ]
+    },
+    "bagpipes": {
+      "name": "Bagpipes",
+      "desc": [],
+      "cost_gp": 30.0,
+      "weight_lb": 6.0,
+      "ability": "cha",
+      "utilize": [
+        {
+          "task": "Play a known tune",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Improvise a song",
+          "dc": 15,
+          "success": "none"
+        }
+      ]
+    },
+    "brewer_s_supplies": {
+      "name": "Brewer's Supplies",
+      "desc": [],
+      "cost_gp": 20.0,
+      "weight_lb": 9.0,
+      "ability": "int",
+      "utilize": [
+        {
+          "task": "Detect poisoned drink",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Identify alcohol",
+          "dc": 10,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "antitoxin"
+      ]
+    },
+    "calligrapher_s_supplies": {
+      "name": "Calligrapher's Supplies",
+      "desc": [],
+      "cost_gp": 10.0,
+      "weight_lb": 5.0,
+      "ability": "dex",
+      "utilize": [
+        {
+          "task": "Write text with impressive flourishes that guard against forgery",
+          "dc": 15,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "ink",
+        "spell_scroll_cantrip",
+        "spell_scroll_level_1"
+      ]
+    },
+    "carpenter_s_tools": {
+      "name": "Carpenter's Tools",
+      "desc": [],
+      "cost_gp": 8.0,
+      "weight_lb": 6.0,
+      "ability": "str",
+      "utilize": [
+        {
+          "task": ": Seal or pry open a door or container",
+          "dc": 20,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "club",
+        "greatclub",
+        "quarterstaff",
+        "barrel",
+        "chest",
+        "ladder",
+        "pole",
+        "ram_portable",
+        "torch"
+      ]
+    },
+    "cartographer_s_tools": {
+      "name": "Cartographer's Tools",
+      "desc": [],
+      "cost_gp": 15.0,
+      "weight_lb": 6.0,
+      "ability": "wis",
+      "utilize": [
+        {
+          "task": "Draft a map of a small area",
+          "dc": 15,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "map"
+      ]
+    },
+    "cobbler_s_tools": {
+      "name": "Cobbler's Tools",
+      "desc": [],
+      "cost_gp": 5.0,
+      "weight_lb": 5.0,
+      "ability": "dex",
+      "utilize": [
+        {
+          "task": "Modify footwear to give Advantage on the wearer's next Dexterity (Acrobatics) check",
+          "dc": 10,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "climber_s_kit"
+      ]
+    },
+    "cook_s_utensils": {
+      "name": "Cook's Utensils",
+      "desc": [],
+      "cost_gp": 1.0,
+      "weight_lb": 8.0,
+      "ability": "wis",
+      "utilize": [
+        {
+          "task": "Improve food's flavor",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Detect spoiled or poisoned food",
+          "dc": 15,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "rations"
+      ]
+    },
+    "dice": {
+      "name": "Dice",
+      "desc": [],
+      "weight_lb": 0.0,
+      "ability": "wis",
+      "utilize": [
+        {
+          "task": "Discern whether someone is cheating",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Win the game",
+          "dc": 20,
+          "success": "none"
+        }
+      ]
+    },
+    "disguise_kit": {
+      "name": "Disguise Kit",
+      "desc": [],
+      "cost_gp": 25.0,
+      "weight_lb": 3.0,
+      "ability": "cha",
+      "utilize": [
+        {
+          "task": "Apply makeup",
+          "dc": 10,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "costume"
+      ]
+    },
+    "dragonchess": {
+      "name": "Dragonchess",
+      "desc": [],
+      "cost_gp": 1.0,
+      "weight_lb": 0.0,
+      "ability": "wis",
+      "utilize": [
+        {
+          "task": "Discern whether someone is cheating",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Win the game",
+          "dc": 20,
+          "success": "none"
+        }
+      ]
+    },
+    "drum": {
+      "name": "Drum",
+      "desc": [],
+      "cost_gp": 6.0,
+      "weight_lb": 3.0,
+      "ability": "cha",
+      "utilize": [
+        {
+          "task": "Play a known tune",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Improvise a song",
+          "dc": 15,
+          "success": "none"
+        }
+      ]
+    },
+    "dulcimer": {
+      "name": "Dulcimer",
+      "desc": [],
+      "cost_gp": 25.0,
+      "weight_lb": 10.0,
+      "ability": "cha",
+      "utilize": [
+        {
+          "task": "Play a known tune",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Improvise a song",
+          "dc": 15,
+          "success": "none"
+        }
+      ]
+    },
+    "flute": {
+      "name": "Flute",
+      "desc": [],
+      "cost_gp": 2.0,
+      "weight_lb": 1.0,
+      "ability": "cha",
+      "utilize": [
+        {
+          "task": "Play a known tune",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Improvise a song",
+          "dc": 15,
+          "success": "none"
+        }
+      ]
+    },
+    "glassblower_s_tools": {
+      "name": "Glassblower's Tools",
+      "desc": [],
+      "cost_gp": 30.0,
+      "weight_lb": 5.0,
+      "ability": "int",
+      "craft": [
+        "bottle_glass",
+        "magnifying_glass",
+        "spyglass",
+        "vial"
+      ]
+    },
+    "herbalism_kit": {
+      "name": "Herbalism Kit",
+      "desc": [],
+      "cost_gp": 5.0,
+      "weight_lb": 3.0,
+      "ability": "int",
+      "utilize": [
+        {
+          "task": "Identify a plant",
+          "dc": 10,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "antitoxin",
+        "candle",
+        "healer_s_kit",
+        "potion_of_healing"
+      ]
+    },
+    "horn": {
+      "name": "Horn",
+      "desc": [],
+      "cost_gp": 3.0,
+      "weight_lb": 2.0,
+      "ability": "cha",
+      "utilize": [
+        {
+          "task": "Play a known tune",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Improvise a song",
+          "dc": 15,
+          "success": "none"
+        }
+      ]
+    },
+    "jeweler_s_tools": {
+      "name": "Jeweler's Tools",
+      "desc": [],
+      "cost_gp": 25.0,
+      "weight_lb": 2.0,
+      "ability": "int",
+      "utilize": [
+        {
+          "task": " Discern a gem's value",
+          "dc": 15,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "crystal",
+        "orb",
+        "quarterstaff",
+        "rod",
+        "staff",
+        "wand",
+        "amulet",
+        "emblem",
+        "reliquary"
+      ]
+    },
+    "leatherworker_s_tools": {
+      "name": "Leatherworker's Tools",
+      "desc": [],
+      "cost_gp": 5.0,
+      "weight_lb": 5.0,
+      "ability": "dex",
+      "utilize": [
+        {
+          "task": "Add a design to a leather item",
+          "dc": 10,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "sling",
+        "whip",
+        "hide_armor",
+        "leather_armor",
+        "studded_leather_armor",
+        "backpack",
+        "case_crossbow_bolt",
+        "case_map_or_scroll",
+        "parchment",
+        "pouch",
+        "quiver",
+        "waterskin"
+      ]
+    },
+    "lute": {
+      "name": "Lute",
+      "desc": [],
+      "cost_gp": 35.0,
+      "weight_lb": 2.0,
+      "ability": "cha",
+      "utilize": [
+        {
+          "task": "Play a known tune",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Improvise a song",
+          "dc": 15,
+          "success": "none"
+        }
+      ]
+    },
+    "lyre": {
+      "name": "Lyre",
+      "desc": [],
+      "cost_gp": 30.0,
+      "weight_lb": 2.0,
+      "ability": "cha",
+      "utilize": [
+        {
+          "task": "Play a known tune",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Improvise a song",
+          "dc": 15,
+          "success": "none"
+        }
+      ]
+    },
+    "mason_s_tools": {
+      "name": "Mason's Tools",
+      "desc": [],
+      "cost_gp": 10.0,
+      "weight_lb": 8.0,
+      "ability": "str",
+      "utilize": [
+        {
+          "task": ": Chisel a symbol or hole in stone",
+          "dc": 10,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "block_and_tackle"
+      ]
+    },
+    "navigator_s_tools": {
+      "name": "Navigator's Tools",
+      "desc": [],
+      "cost_gp": 25.0,
+      "weight_lb": 2.0,
+      "ability": "wis",
+      "utilize": [
+        {
+          "task": "Plot a course",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Determine position by stargazing",
+          "dc": 15,
+          "success": "none"
+        }
+      ]
+    },
+    "painter_s_supplies": {
+      "name": "Painter's Supplies",
+      "desc": [],
+      "cost_gp": 10.0,
+      "weight_lb": 5.0,
+      "ability": "wis",
+      "utilize": [
+        {
+          "task": "Paint a recognizable image of something you've seen",
+          "dc": 10,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "quarterstaff",
+        "sprig_of_mistletoe",
+        "staff",
+        "yew_wand",
+        "amulet",
+        "emblem",
+        "reliquary"
+      ]
+    },
+    "pan_flute": {
+      "name": "Pan flute",
+      "desc": [],
+      "cost_gp": 12.0,
+      "weight_lb": 2.0,
+      "ability": "cha",
+      "utilize": [
+        {
+          "task": "Play a known tune",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Improvise a song",
+          "dc": 15,
+          "success": "none"
+        }
+      ]
+    },
+    "playing_cards": {
+      "name": "Playing Cards",
+      "desc": [],
+      "weight_lb": 0.0,
+      "ability": "wis",
+      "utilize": [
+        {
+          "task": "Discern whether someone is cheating",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Win the game",
+          "dc": 20,
+          "success": "none"
+        }
+      ]
+    },
+    "poisoner_s_kit": {
+      "name": "Poisoner's Kit",
+      "desc": [],
+      "cost_gp": 5.0,
+      "weight_lb": 2.0,
+      "ability": "int",
+      "utilize": [
+        {
+          "task": "Detect a poisoned object",
+          "dc": 10,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "poison_basic"
+      ]
+    },
+    "potter_s_tools": {
+      "name": "Potter's Tools",
+      "desc": [],
+      "cost_gp": 10.0,
+      "weight_lb": 3.0,
+      "ability": "int",
+      "utilize": [
+        {
+          "task": "Discern what a ceramic object held in the past 24 hours",
+          "dc": 15,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "jug",
+        "lamp"
+      ]
+    },
+    "shawm": {
+      "name": "Shawm",
+      "desc": [],
+      "cost_gp": 2.0,
+      "weight_lb": 1.0,
+      "ability": "cha",
+      "utilize": [
+        {
+          "task": "Play a known tune",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Improvise a song",
+          "dc": 15,
+          "success": "none"
+        }
+      ]
+    },
+    "smith_s_tools": {
+      "name": "Smith's Tools",
+      "desc": [],
+      "cost_gp": 20.0,
+      "weight_lb": 8.0,
+      "ability": "str",
+      "utilize": [
+        {
+          "task": "Pry open a door or container",
+          "dc": 20,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "battleaxe",
+        "dagger",
+        "flail",
+        "glaive",
+        "greataxe",
+        "greatsword",
+        "halberd",
+        "handaxe",
+        "javelin",
+        "lance",
+        "light_hammer",
+        "longsword",
+        "mace",
+        "maul",
+        "sickle",
+        "spear",
+        "trident",
+        "warhammer",
+        "war_pick",
+        "breastplate",
+        "chain_shirt",
+        "half_plate_armor",
+        "scale_mail",
+        "chain_mail",
+        "plate_armor",
+        "ring_mail",
+        "splint_armor",
+        "ball_bearings",
+        "bucket",
+        "caltrops",
+        "chain",
+        "crowbar",
+        "bullets_firearm",
+        "grappling_hook",
+        "pot_iron",
+        "spikes_iron",
+        "bullets_sling"
+      ]
+    },
+    "thieves_tools": {
+      "name": "Thieves' Tools",
+      "desc": [],
+      "cost_gp": 25.0,
+      "weight_lb": 1.0,
+      "ability": "dex",
+      "utilize": [
+        {
+          "task": "Pick a lock",
+          "dc": 15,
+          "success": "none"
+        },
+        {
+          "task": "Disarm a trap",
+          "dc": 15,
+          "success": "none"
+        }
+      ]
+    },
+    "three_dragon_ante": {
+      "name": "Three-Dragon Ante",
+      "desc": [],
+      "cost_gp": 1.0,
+      "weight_lb": 0.0,
+      "ability": "wis",
+      "utilize": [
+        {
+          "task": "Discern whether someone is cheating",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Win the game",
+          "dc": 20,
+          "success": "none"
+        }
+      ]
+    },
+    "tinker_s_tools": {
+      "name": "Tinker's Tools",
+      "desc": [],
+      "cost_gp": 50.0,
+      "weight_lb": 10.0,
+      "ability": "dex",
+      "utilize": [
+        {
+          "task": "Assemble a Tiny item composed of scrap, which falls apart in 1 minute",
+          "dc": 10,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "musket",
+        "pistol",
+        "bell",
+        "lantern_bullseye",
+        "flask",
+        "lantern_hooded",
+        "hunting_trap",
+        "lock",
+        "manacles",
+        "mirror",
+        "shovel",
+        "signal_whistle",
+        "tinderbox"
+      ]
+    },
+    "viol": {
+      "name": "Viol",
+      "desc": [],
+      "cost_gp": 30.0,
+      "weight_lb": 2.0,
+      "ability": "cha",
+      "utilize": [
+        {
+          "task": "Play a known tune",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "Improvise a song",
+          "dc": 15,
+          "success": "none"
+        }
+      ]
+    },
+    "weaver_s_tools": {
+      "name": "Weaver's Tools",
+      "desc": [],
+      "cost_gp": 1.0,
+      "weight_lb": 5.0,
+      "ability": "dex",
+      "utilize": [
+        {
+          "task": "Mend a tear in clothing",
+          "dc": 10,
+          "success": "none"
+        },
+        {
+          "task": "sew a Tiny design",
+          "dc": 10,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "padded_armor",
+        "basket",
+        "bedroll",
+        "blanket",
+        "clothes_fine",
+        "net",
+        "robe",
+        "rope",
+        "sack",
+        "string",
+        "tent",
+        "clothes_traveler_s"
+      ]
+    },
+    "woodcarver_s_tools": {
+      "name": "Woodcarver's Tools",
+      "desc": [],
+      "cost_gp": 1.0,
+      "weight_lb": 5.0,
+      "ability": "dex",
+      "utilize": [
+        {
+          "task": "Carve a pattern in wood",
+          "dc": 10,
+          "success": "none"
+        }
+      ],
+      "craft": [
+        "club",
+        "greatclub",
+        "quarterstaff",
+        "blowgun",
+        "dart",
+        "hand_crossbow",
+        "heavy_crossbow",
+        "light_crossbow",
+        "longbow",
+        "shortbow",
+        "crystal",
+        "orb",
+        "quarterstaff",
+        "rod",
+        "staff",
+        "wand",
+        "arrows",
+        "bolts",
+        "sprig_of_mistletoe",
+        "staff",
+        "yew_wand",
+        "ink_pen",
+        "needles"
+      ]
+    }
+  }
+}
