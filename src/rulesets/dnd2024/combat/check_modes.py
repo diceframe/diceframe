@@ -194,6 +194,16 @@ def sense_declarations(engine: Any, observer: dict) -> list[dict[str, Any]]:
     """
 
     rows: list[dict[str, Any]] = []
+    statblock = observer.get("senses")
+    if isinstance(statblock, dict):
+        # 怪物的感官来自 stat block，不来自特性声明；两者同一条链、同一条
+        # 距离边界，谁先谁后都只影响来源标注，不影响结论。
+        for code in ("blindsight", "truesight"):
+            range_ft = int(statblock.get(code, 0) or 0)
+            if range_ft > 0:
+                rows.append({
+                    "code": code, "range_ft": range_ft, "source": "statblock",
+                })
     character = engine._feature_character(observer)
     range_ft = int(engine.features.feature_value(
         character, "feral_senses", "blindsight_range_ft", 0,

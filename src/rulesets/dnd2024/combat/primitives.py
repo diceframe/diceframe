@@ -18,6 +18,22 @@ INITIATIVE_CHOICES = frozenset({"uncanny_metabolism", "persistent_rage"})
 # 15 级持久狂怒的狂暴用这个 duration 记账：它不靠每回合续期维持，
 # 只被 Unconscious 与真实穿上重甲提前结束。
 PERSISTENT_RAGE_DURATION = "persistent_rage"
+
+# 怪物尺寸（S0-MM1）。顺序即大小序：比较只能走 ``size_at_most``，不要在
+# 各处自己比较字符串——"large 比 medium 大"这种事实只应该写一次。
+SIZE_CODES = ("tiny", "small", "medium", "large", "huge", "gargantuan")
+
+
+def size_at_most(size: str, limit: str) -> bool:
+    """Whether ``size`` is no larger than ``limit``; unknown is always False.
+
+    尺寸未知时一律不满足上限（fail closed）：Trip 只对 Large 或更小生效，
+    Repelling Blast 只推 Large 或更小的目标——"不知道多大"不是"够小"。
+    """
+
+    if size not in SIZE_CODES or limit not in SIZE_CODES:
+        return False
+    return SIZE_CODES.index(size) <= SIZE_CODES.index(limit)
 # 18 级卓越防御：一条自带"除 Force 外全部抗性"的条件。它既不是 ``combat``
 # （战斗结束不等于一分钟到）也不是回合域（它按分钟计时），因此有自己的
 # duration，并靠 duration_minutes + 到期轮数两个上限之一结束。
