@@ -164,6 +164,9 @@ def test_builtin_dnd5e_uses_default_dc_cap_twenty() -> None:
     assert d20_dc_cap(rule) == 30
     base = RuleSystem.load(Path("templates/rules/base_d20.json"))
     assert d20_dc_cap(base) == 20
+    # dnd2024_srd 同样显式声明 30：extreme 25 不再被默认 20 钳掉。
+    dnd2024 = RuleSystem.load(Path("templates/rules/dnd2024_srd.json"))
+    assert dnd2024.dc_table["extreme"] == 25 and d20_dc_cap(dnd2024) == 30
 
 
 def test_custom_d20_rule_can_raise_dc_cap_explicitly() -> None:
