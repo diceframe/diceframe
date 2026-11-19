@@ -348,6 +348,28 @@ def _assign_unique_ids(enemies: list[dict[str, Any]]) -> None:
             attack_seen.add(candidate)
 
 
+def _passthrough_statblock_facts(raw: dict[str, Any], target: dict[str, Any]) -> None:
+    """模型给得出的 stat block 事实，原样转交给 combat.start 的权威校验。
+
+    S0-MM1 之后敌人契约认识 ``size`` / ``cr`` / ``senses``；模型偶尔会给出它们
+    （"large ogre, CR 2"），过去会在这一层被白名单丢掉，于是 AI 草稿永远没有
+    尺寸与挑战等级。这里只搬不改：形状合不合法由 ``validate_enemy_profiles``
+    决定，本函数不做第二份判断。
+    """
+
+    if isinstance(raw.get("size"), str):
+        target["size"] = raw["size"]
+    cr = raw.get("cr")
+    if isinstance(cr, (str, int)) and not isinstance(cr, bool):
+        target["cr"] = cr
+    senses = raw.get("senses")
+    if isinstance(senses, dict):
+        target["senses"] = {
+            str(kind): value for kind, value in senses.items()
+            if isinstance(value, int) and not isinstance(value, bool)
+        }
+
+
 def validate_final_temporary_enemies(instance: Any, enemies: Any) -> None:
     """combat.start 确认入口：对 GM 编辑并展开后的最终敌人重走临时遭遇边界。
 
@@ -395,6 +417,7 @@ def validate_final_temporary_enemies(instance: Any, enemies: Any) -> None:
             )
             attacks.append(attack)
         profile["attacks"] = attacks
+        _passthrough_statblock_facts(enemy, profile)
         checked.append(profile)
     # 队伍安全上限与生成期完全同一份实现。
     validate_temporary_encounter_balance(instance, {"enemies": checked})
@@ -447,6 +470,7 @@ def normalize_temporary_encounter(payload: Any) -> dict[str, Any]:
                 attack["long_range"] = attack["range"]
             attacks.append(attack)
         enemy["attacks"] = attacks
+        _passthrough_statblock_facts(raw, enemy)
         enemies.append(enemy)
     _assign_unique_ids(enemies)
     # 与 combat.start / preset loading 完全同一份底层安全边界。

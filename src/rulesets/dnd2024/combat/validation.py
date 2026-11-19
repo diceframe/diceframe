@@ -44,6 +44,7 @@ from ..spells.font_of_magic import (
     parse_created_slot_costs,
     slot_to_points_plan,
 )
+from .cover import COVER_LEVELS
 from .primitives import (
     DICE_RE,
     INITIATIVE_CHOICES,
@@ -51,6 +52,7 @@ from .primitives import (
     RELENTLESS_RAGE_DECISION,
     SACRED_WEAPON_CONDITION,
     UNARMED_STRIKE_REF,
+    SIZE_CODES,
     CombatIntentError,
     actor_kind as _actor_kind,
     canonical as _canonical,
@@ -66,6 +68,171 @@ from .check_windows import (
 from .readiness import required_encounter_player_ids
 from .reaction_spells import COUNTER_SPELL_DECISION, HIT_REACTION_DECISION
 from .triggered_spells import HIT_SPELL_DECISION, free_cast_resource, hit_spell_decision
+
+
+# S0-MM1：敌人契约的已知字段。未知字段一律拒绝——它过去被静默忽略，
+# 于是 GM 或导入器带来的 MM 字段"看起来进去了"，实际从没生效。
+_ENEMY_KEYS = frozenset({
+    "id", "name", "description", "profile_id", "source_ref", "creature_type",
+    "hp", "max_hp", "armor_class", "speed", "speeds", "size", "position",
+    "initiative_modifier", "counterspell_dc", "abilities", "saving_throws",
+    "attacks", "senses", "resist_damage_types", "immune_damage_types",
+    "vulnerable_damage_types", "condition_immunities", "cr", "xp",
+})
+# 速度档位：walk 是唯一被移动预算读的一档，其余四档本切片只投影（阶段三接）。
+_SPEED_MODES = ("walk", "fly", "swim", "climb", "burrow")
+# 感官档位：blindsight 已接入观察链；truesight/darkvision/tremorsense 只存不接。
+_SENSE_MODES = ("darkvision", "blindsight", "tremorsense", "truesight")
+# CR 闭集。分数只写到 1/2：MM 里没有比 1/8 更细的档。
+_CHALLENGE_RATINGS = (
+    ("0",), ("1/8",), ("1/4",), ("1/2",),
+) + tuple((str(value),) for value in range(1, 31))
+_CR_CODES = frozenset(code for group in _CHALLENGE_RATINGS for code in group)
+
+
+def _normalize_speeds(enemy: dict[str, Any], label: str) -> dict[str, int | bool]:
+    """Accept the old scalar and the structured form; return the structured one.
+
+    旧形状 ``speed: 30`` 等价于 ``{"walk": 30}``。归一化放在装载期，是为了让
+    事件与投影只有一种形状，而旧 intent / 旧存档继续可读。
+    """
+
+    raw = enemy.get("speeds")
+    if raw is None:
+        walk = enemy.get("speed", 30)
+        if isinstance(walk, bool) or not isinstance(walk, int) or not 0 <= walk <= 200:
+            raise CombatIntentError(f"{label} speed is invalid")
+        return {"walk": walk}
+    if not isinstance(raw, dict):
+        raise CombatIntentError(f"{label} speeds must be an object")
+    extra = sorted(set(raw) - set(_SPEED_MODES) - {"hover"})
+    if extra:
+        raise CombatIntentError(f"{label} speeds has unknown mode: {extra[0]!r}")
+    speeds: dict[str, int | bool] = {}
+    for mode in _SPEED_MODES:
+        value = raw.get(mode, 0)
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 200:
+            raise CombatIntentError(f"{label} speeds.{mode} is invalid")
+        if value:
+            speeds[mode] = value
+    hover = raw.get("hover", False)
+    if not isinstance(hover, bool):
+        raise CombatIntentError(f"{label} speeds.hover must be a boolean")
+    if hover and "fly" not in speeds:
+        raise CombatIntentError(f"{label} speeds.hover requires a fly speed")
+    if hover:
+        speeds["hover"] = True
+    if not any(mode in speeds for mode in _SPEED_MODES):
+        raise CombatIntentError(f"{label} speeds must have at least one mode")
+    return speeds
+
+
+def _validate_size(enemy: dict[str, Any], label: str) -> None:
+    if "size" not in enemy:
+        # 旧数据没有这一栏：装载成功但记为未知，消费方一律 fail closed。
+        return
+    size = enemy.get("size")
+    if not isinstance(size, str) or size not in SIZE_CODES:
+        raise CombatIntentError(
+            f"{label} size must be one of {list(SIZE_CODES)}"
+        )
+
+
+def _damage_type_list(enemy: dict[str, Any], key: str, label: str) -> set[str]:
+    # 局部导入：catalog 反过来依赖 validation 的常量，模块级导入会成环。
+    from .catalog import DAMAGE_TYPES
+
+    raw = enemy.get(key)
+    if raw is None:
+        return set()
+    if not isinstance(raw, list) or len(raw) > 20:
+        raise CombatIntentError(f"{label} {key} must be a list of damage types")
+    values: list[str] = []
+    for value in raw:
+        if not isinstance(value, str) or value not in DAMAGE_TYPES:
+            raise CombatIntentError(f"{label} {key} has an unknown damage type")
+        if value in values:
+            raise CombatIntentError(f"{label} {key} repeats {value}")
+        values.append(value)
+    return set(values)
+
+
+def _validate_defenses(enemy: dict[str, Any], label: str) -> None:
+    resist = _damage_type_list(enemy, "resist_damage_types", label)
+    immune = _damage_type_list(enemy, "immune_damage_types", label)
+    vulnerable = _damage_type_list(enemy, "vulnerable_damage_types", label)
+    # 同一类型不可能既是抗性又是免疫（也不是"既是抗性又是易伤"）：那两种写法
+    # 只会让结算顺序决定结果，而顺序不该由内容作者决定。
+    for first, second, left, right in (
+        (resist, immune, "resist", "immune"),
+        (resist, vulnerable, "resist", "vulnerable"),
+        (immune, vulnerable, "immune", "vulnerable"),
+    ):
+        overlap = sorted(first & second)
+        if overlap:
+            raise CombatIntentError(
+                f"{label} lists {overlap[0]!r} as both {left} and {right}"
+            )
+
+
+def _validate_senses(enemy: dict[str, Any], label: str) -> None:
+    raw = enemy.get("senses")
+    if raw is None:
+        return
+    if not isinstance(raw, dict):
+        raise CombatIntentError(f"{label} senses must be an object")
+    extra = sorted(set(raw) - set(_SENSE_MODES))
+    if extra:
+        raise CombatIntentError(f"{label} senses has unknown kind: {extra[0]!r}")
+    for kind, value in raw.items():
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 300:
+            raise CombatIntentError(f"{label} senses.{kind} must be an integer range")
+
+
+def _validate_challenge(enemy: dict[str, Any], label: str) -> None:
+    if "cr" in enemy:
+        cr = enemy.get("cr")
+        if isinstance(cr, int) and not isinstance(cr, bool):
+            cr = str(cr)
+        if not isinstance(cr, str) or cr not in _CR_CODES:
+            raise CombatIntentError(f"{label} cr must be one of the SRD challenge ratings")
+    # XP 是 stat block 自带的事实（"Challenge 3 (700 XP)"），由内容提供；
+    # 这里只约束形状，不推导：推导需要 DMG 的 CR→XP 表，而 SRD 不含该表。
+    # 上界是 CR 30 = 155,000 XP（DMG 表）。
+    if "xp" in enemy:
+        xp = enemy.get("xp")
+        if isinstance(xp, bool) or not isinstance(xp, int) or not 0 <= xp <= 155000:
+            raise CombatIntentError(f"{label} xp must be a non-negative integer")
+        if "cr" not in enemy:
+            raise CombatIntentError(f"{label} xp requires a cr")
+
+
+def _validate_condition_immunities(enemy: dict[str, Any], label: str) -> None:
+    """条件免疫必须是良构的条件 id 列表（review #809 P2）。
+
+    条件目录按需装载且不构成全局闭集，这里守住的是会写脏战斗状态的
+    形状漏洞：裸字符串会在消费端被 ``set(str(code))`` 炸成单字符集合，
+    dict/int 则直接进不了集合语义。未知但良构的 id 只是永远匹配不上
+    的惰性条目，不构成状态污染。
+    """
+    raw = enemy.get("condition_immunities")
+    if raw is None:
+        return
+    if not isinstance(raw, list):
+        raise CombatIntentError(f"{label} condition_immunities must be an array")
+    if not 0 <= len(raw) <= 40:
+        raise CombatIntentError(f"{label} condition_immunities must list 0 to 40 codes")
+    seen: set[str] = set()
+    for code in raw:
+        if not isinstance(code, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", code):
+            raise CombatIntentError(
+                f"{label} condition_immunities has an invalid condition id"
+            )
+        if code in seen:
+            raise CombatIntentError(
+                f"{label} condition_immunities lists {code!r} twice"
+            )
+        seen.add(code)
 
 
 def validate_enemy_profiles(enemies: Any) -> None:
@@ -86,13 +253,27 @@ def validate_enemy_profiles(enemies: Any) -> None:
         if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", enemy_id) or enemy_id in seen:
             raise CombatIntentError("enemy id is invalid or duplicated")
         seen.add(enemy_id)
+        unknown = sorted(set(enemy) - _ENEMY_KEYS)
+        if unknown:
+            raise CombatIntentError(
+                f"enemy {enemy_id} has unknown field(s): {', '.join(unknown)}"
+            )
         if len(str(enemy.get("name") or enemy_id)) > 120:
             raise CombatIntentError("enemy name is too long")
+        _validate_size(enemy, f"enemy {enemy_id}")
+        _validate_defenses(enemy, f"enemy {enemy_id}")
+        _validate_senses(enemy, f"enemy {enemy_id}")
+        _validate_challenge(enemy, f"enemy {enemy_id}")
+        _validate_condition_immunities(enemy, f"enemy {enemy_id}")
+        _normalize_speeds(enemy, f"enemy {enemy_id}")
         if not isinstance(enemy.get("creature_type", ""), str) or (enemy.get("creature_type") and enemy["creature_type"] not in CREATURE_TYPES):
             raise CombatIntentError("enemy creature_type must be a canonical creature type")
+        # ``speeds`` 在场时旧标量 ``speed`` 不再参与校验：结构形式才是权威，
+        # 两者都校验会让"给了 speeds 就必须同时给 speed"变成隐式必填。
+        legacy_speed = () if "speeds" in enemy else (("speed", 0, 200),)
         for field_name, minimum, maximum in (
             ("hp", 1, 10000), ("armor_class", 1, 40),
-            ("speed", 0, 200), ("position", -10000, 10000),
+            *legacy_speed, ("position", -10000, 10000),
             ("initiative_modifier", -20, 30),
             # 反击法术能力：0 表示没有该项能力，缺省即 0。
             ("counterspell_dc", 0, 30),
@@ -272,6 +453,27 @@ class CombatValidationMixin:
             for row in combat.get("pending_decisions", [])
         ) and intent_type not in {"decision.resolve", "combat.message"}:
             raise CombatIntentError("resolve the relentless rage decision first")
+        if intent_type == "combat.set_cover":
+            # 掩护是桌子上的判断（"他躲在箱子后面"），所以只有 GM 能声明；
+            # 客户端提交的是等级枚举，永远不是加值。
+            if submitted_by != gm_uid:
+                raise CombatIntentError("only the GM can declare cover")
+            target_id = str(intent.get("target_id") or "")
+            level = str(intent.get("level") or "")
+            if level not in COVER_LEVELS:
+                raise CombatIntentError(
+                    f"cover level must be one of {list(COVER_LEVELS)}"
+                )
+            kind, raw_id = _actor_kind(target_id)
+            if kind == "player":
+                if raw_id not in instance.players:
+                    raise CombatIntentError("cover target actor does not exist")
+            elif kind == "enemy":
+                if raw_id not in (combat.get("enemies") or {}):
+                    raise CombatIntentError("cover target actor does not exist")
+            else:
+                raise CombatIntentError("cover target must be a combat actor")
+            return
         if intent_type == "combat.message":
             if submitted_by not in instance.players:
                 raise CombatIntentError("only a party member can send a combat message")

@@ -74,11 +74,18 @@ class CombatViewMixin:
 
     def _actor_view(self, instance: Any, combat: dict[str, Any], actor_id: str) -> dict[str, Any]:
         kind, raw_id = _actor_kind(actor_id)
+        # S0-C2A 投影：任何 actor 视图都能读到自己的当前掩护等级（声明与
+        # 灵光取最好），消费方不必再各自查询。掩护计算内部（depth>0）重建
+        # 的视图不再嵌套查询，环在 cover_level 处断开。
+        cover = ("none" if getattr(self, "_cover_depth", 0) > 0
+                 else self.cover_level(instance, combat, actor_id))
         if kind == "player":
             if raw_id not in instance.players:
                 raise CombatIntentError("player actor does not exist")
             character = _canonical(instance.get_character_sheet(raw_id))
-            return self._with_hands(combat, self._player_view(raw_id, character))
+            view = self._with_hands(combat, self._player_view(raw_id, character))
+            view["cover"] = cover
+            return view
         if kind == "companion":
             # Companion 是"己方角色"：复用 player canonical 视图结构与装备/法术
             # 目录，不走 enemy attack profile。
@@ -86,7 +93,9 @@ class CombatViewMixin:
             view = self._player_view(raw_id, character)
             view["actor_id"] = _companion_actor(raw_id)
             view["kind"] = "companion"
-            return self._with_hands(combat, view)
+            view = self._with_hands(combat, view)
+            view["cover"] = cover
+            return view
         if kind == "enemy":
             enemy = combat.get("enemies", {}).get(raw_id)
             if not isinstance(enemy, dict):
@@ -105,7 +114,25 @@ class CombatViewMixin:
                 "weapon_category_refs": [], "proficiency_bonus": 0,
                 "creature_type": str(enemy.get("creature_type") or ""),
                 "counterspell_dc": int(enemy.get("counterspell_dc", 0) or 0),
+                # S0-MM1：stat block 的事实必须能被读回。缺省一律"未知/空"，
+                # 不猜一个 medium 或 30 尺——消费方对未知 fail closed。
+                "size": str(enemy.get("size") or ""),
+                "speeds": deepcopy(
+                    enemy.get("speeds")
+                    or {"walk": int(enemy.get("speed", 30) or 30)}
+                ),
+                "senses": deepcopy(enemy.get("senses") or {}),
+                "resist_damage_types": list(enemy.get("resist_damage_types") or []),
+                "immune_damage_types": list(enemy.get("immune_damage_types") or []),
+                "vulnerable_damage_types": list(
+                    enemy.get("vulnerable_damage_types") or []
+                ),
+                "condition_immunities": list(enemy.get("condition_immunities") or []),
+                "cr": str(enemy.get("cr") or ""),
+                "xp": int(enemy.get("xp", 0) or 0),
                 "skill_values": {}, "skill_refs": [], "concentration": None,
+                # S0-C2A 投影：敌人同样有掩护等级。
+                "cover": cover,
             }
         raise CombatIntentError("actor_id is invalid")
 

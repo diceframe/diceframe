@@ -895,7 +895,9 @@ def test_half_cover_follows_the_aura_not_a_snapshot(sheets) -> None:
     outside = engine._cover_record(
         instance, combat, engine._actor_view(instance, combat, "player:ally"),
     )
-    assert outside == {"armor_class_bonus": 0, "dex_save_bonus": 0, "sources": []}
+    assert outside == {
+        "level": "none", "armor_class_bonus": 0, "dex_save_bonus": 0, "sources": [],
+    }
 
     # 走进灵光、且效果未到期：掩蔽恢复。走出去又失去，因为灵光是唯一来源。
     _positions(instance, **{"player:ally": 5})
@@ -920,7 +922,9 @@ def test_an_incapacitated_paladin_grants_no_cover(sheets) -> None:
     cover = engine._cover_record(instance, _combat(instance), engine._actor_view(
         instance, _combat(instance), "player:gm",
     ))
-    assert cover == {"armor_class_bonus": 0, "dex_save_bonus": 0, "sources": []}
+    assert cover == {
+        "level": "none", "armor_class_bonus": 0, "dex_save_bonus": 0, "sources": [],
+    }
 
 
 def test_half_cover_ends_at_the_start_of_the_next_turn(sheets) -> None:

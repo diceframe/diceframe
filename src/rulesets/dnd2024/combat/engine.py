@@ -116,6 +116,16 @@ def _death_attunement_events(
     return events, dead_uids
 
 
+def _level_for_bonus(bonus: int) -> str:
+    """The ladder level a declared bonus corresponds to."""
+
+    if bonus >= 5:
+        return "three_quarters"
+    if bonus >= 2:
+        return "half"
+    return "none"
+
+
 @dataclass(slots=True)
 class Dnd2024CombatEngine(
     CombatValidationMixin, CombatResolutionMixin, CombatReducerMixin, CombatViewMixin, CombatTriggeredSpellsMixin,
@@ -136,6 +146,9 @@ class Dnd2024CombatEngine(
     # 避免引擎自己猜测 bundle 目录。
     locale_loader: Any | None = None
     supported_locales: tuple[str, ...] = ()
+    # 掩护等级查询的调用深度（同步方法内使用）：灵光投影内部重建 actor
+    # 视图时视图不再嵌套查询掩护，环在此断开。0 = 不在掩护计算中。
+    _cover_depth: int = 0
     catalog: Dnd2024CombatCatalog = field(init=False)
     spells: Dnd2024SpellCatalog = field(init=False)
     features: Dnd2024ClassFeatureResolver = field(init=False)
@@ -1005,6 +1018,13 @@ class Dnd2024CombatEngine(
             events.extend(self._start_combat_event(instance, resolved_intent, rng))
         elif intent_type == "combat.end":
             events.append({"type": "dnd2024.combat.ended", "reason": "gm"})
+        elif intent_type == "combat.set_cover":
+            events.append({
+                "type": "dnd2024.cover.declared",
+                "target_id": str(intent["target_id"]),
+                "level": str(intent["level"]),
+                "source": "gm",
+            })
         elif intent_type == "combat.message":
             events.append({
                 "type": "dnd2024.combat.message",
@@ -1071,6 +1091,8 @@ class Dnd2024CombatEngine(
         # 由回合推进处统一查两个上限，这里不能重复发同一条移除事件。
         if intent_type != "end_turn" and combat.get("initiative"):
             events.extend(self._superior_defense_expiry_events(instance, combat))
+        # S0-MM1：条件免疫是 stat block 事实，拦在"产出侧"一处，覆盖所有生产者。
+        events = self._statblock_immunity_events(combat, events)
         batch = {
             "batch_id": stable_batch_id(intent, expected),
             "intent_id": intent_id,
@@ -1081,6 +1103,41 @@ class Dnd2024CombatEngine(
             "source_ref": "srd-5.2.1:p24-p27:playing-the-game",
         }
         return {"ok": True, "event_batch": batch, "pending_decision": pending}
+
+    def _statblock_immunity_events(
+        self, combat: dict[str, Any], events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Turn an immune ``condition.applied`` into an auditable block.
+
+        The check sits at the end of one intent rather than at each of the five
+        places that apply conditions: immunity is a property of the *target*,
+        so every producer gets the same answer for free.  The block is a
+        separate, state-free event -- dropping the event silently would leave
+        the ledger claiming a condition the state never took.
+        """
+
+        immunities: dict[str, set[str]] = {}
+        for enemy_id, enemy in (combat.get("enemies") or {}).items():
+            codes = enemy.get("condition_immunities") or ()
+            if codes:
+                immunities[f"enemy:{enemy_id}"] = {str(code) for code in codes}
+        if not immunities:
+            return events
+        filtered: list[dict[str, Any]] = []
+        for event in events:
+            if event.get("type") == "condition.applied":
+                blocked = immunities.get(str(event.get("target_id") or ""))
+                if blocked and str(event.get("condition") or "") in blocked:
+                    filtered.append({
+                        "type": "condition.blocked",
+                        "target_id": str(event["target_id"]),
+                        "condition": str(event["condition"]),
+                        "reason": "immune",
+                        "source_actor_id": str(event.get("source_actor_id") or ""),
+                    })
+                    continue
+            filtered.append(event)
+        return filtered
 
     def _turn_window_closure_events(
         self, combat: dict[str, Any], intent: dict[str, Any],
@@ -1972,6 +2029,25 @@ class Dnd2024CombatEngine(
             return {"bonus": 0, "sources": []}
         return {"bonus": best.pop("bonus"), "sources": [best]}
 
+    def cover_level(
+        self, instance: Any, combat: dict[str, Any], actor_id: str,
+    ) -> str:
+        """Just the level: what "behind three-quarters cover" rules ask about.
+
+        深度计数：灵光投影内部会经 ``_all_targets`` 重建 actor 视图，视图又
+        回头查询掩护等级——内层（depth>0）一律答 ``none``，环在此断开。
+        """
+
+        self._cover_depth += 1
+        try:
+            side = "enemy" if str(actor_id).startswith("enemy:") else "party"
+            row = self._cover_record(
+                instance, combat, {"actor_id": str(actor_id), "side": side},
+            )
+            return str(row.get("level") or "none")
+        finally:
+            self._cover_depth -= 1
+
     def _cover_record(
         self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
     ) -> dict[str, Any]:
@@ -1988,8 +2064,15 @@ class Dnd2024CombatEngine(
         holding the same benefit still give out exactly one +2.
         """
 
-        empty = {"armor_class_bonus": 0, "dex_save_bonus": 0, "sources": []}
+        from .cover import cover_row
+
         target_id = str(target.get("actor_id") or "")
+        declared = (combat.get("cover") or {}).get(target_id)
+        if isinstance(declared, dict):
+            # 声明优先：桌子说了"他躲在箱子后面"，任何派生来源都不该悄悄反对。
+            source = str(declared.get("source") or "gm")
+            return cover_row(str(declared.get("level") or "none"), [f"gm:{source}"])
+        empty = cover_row("none")
         if not target_id or str(target.get("side") or "") != "party":
             return empty
         best: dict[str, Any] | None = None
@@ -2032,25 +2115,31 @@ class Dnd2024CombatEngine(
         if best is None:
             return empty
         best.pop("_rank", None)
+        # 灵光给的是 +2/+5，等级由加值反推：数字仍是它声明的那个，
+        # 但下游问"是否处于 ¾ 掩护"时要有等级可答。
+        best["level"] = _level_for_bonus(int(best["armor_class_bonus"]))
         return best
 
     def _cover_save_bonus(
         self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
-        ability: str,
+        ability: str, *, axis: tuple[str, str] = ("horizontal", ""),
     ) -> dict[str, Any]:
         """Cover's contribution to one saving throw, which is Dex-only.
 
         Asked separately from the AC half so a caller never has to remember
         which ability cover helps: anything but Dexterity answers zero and the
-        event stays shaped like every other save.
+        event stays shaped like every other save.  ``axis`` is the effect's
+        business: an effect that arrives from above or erupts from the ground
+        declares ``ignored`` and never asks about horizontal cover.
         """
 
-        if str(ability or "") != "dex":
-            return {"bonus": 0, "sources": []}
+        if str(ability or "") != "dex" or axis[0] == "ignored":
+            return {"bonus": 0, "sources": [], "level": "none"}
         cover = self._cover_record(instance, combat, target)
         return {
             "bonus": int(cover["dex_save_bonus"]),
             "sources": cover["sources"],
+            "level": str(cover.get("level") or "none"),
         }
 
     def _passive_condition_immunity(

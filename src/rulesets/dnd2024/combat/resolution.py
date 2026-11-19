@@ -85,6 +85,7 @@ from .check_modes import (
 )
 from src.rulesets.dnd2024.features.resources import resource_state
 from .check_windows import CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION
+from .cover import cover_axis
 from .reaction_spells import COUNTER_SPELL_DECISION, HIT_REACTION_DECISION, effective_armor_class
 from .triggered_spells import HIT_SPELL_DECISION
 from .weapon_masteries import WEAPON_MASTERY_EFFECTS, WEAPON_MASTERY_FEATURE_ID
@@ -296,6 +297,21 @@ class CombatResolutionMixin:
                 "attacks": deepcopy(raw["attacks"]), "conditions": {},
                 "creature_type": str(raw.get("creature_type") or ""),
                 "counterspell_dc": int(raw.get("counterspell_dc", 0) or 0),
+                # S0-MM1：stat block 的事实必须在开局时一次性落账，否则校验
+                # 通过了、视图读不到——"看起来进去了，实际没生效"。
+                "size": str(raw.get("size") or ""),
+                "speeds": deepcopy(
+                    raw.get("speeds") or {"walk": int(raw.get("speed", 30) or 30)}
+                ),
+                "senses": deepcopy(raw.get("senses") or {}),
+                "resist_damage_types": list(raw.get("resist_damage_types") or []),
+                "immune_damage_types": list(raw.get("immune_damage_types") or []),
+                "vulnerable_damage_types": list(
+                    raw.get("vulnerable_damage_types") or []
+                ),
+                "condition_immunities": list(raw.get("condition_immunities") or []),
+                "cr": str(raw.get("cr") or ""),
+                "xp": int(raw.get("xp", 0) or 0),
             }
             enemies[enemy_id] = enemy
             initiatives.append({
@@ -849,6 +865,15 @@ class CombatResolutionMixin:
 
         if amount <= 0 or not damage_type:
             return amount, ""
+        # S0-MM1：怪物 stat block 自带的三档防御先于一切条件来源结算。校验层
+        # 已保证同一类型不会同时出现在三组里，所以这里按"免疫 → 易伤 → 抗性"
+        # 取一条就返回，仍然只有一次结算。
+        if damage_type in (target.get("immune_damage_types") or ()):
+            return 0, "statblock:immune"
+        if damage_type in (target.get("vulnerable_damage_types") or ()):
+            return amount * 2, "statblock:vulnerable"
+        if damage_type in (target.get("resist_damage_types") or ()):
+            return max(0, amount // 2), "statblock:resist"
         for condition_id, meta in (target.get("conditions") or {}).items():
             types = set((self.catalog.conditions.get(condition_id) or {}).get(
                 "resist_damage_types"
@@ -2951,6 +2976,8 @@ class CombatResolutionMixin:
                     # 的豁免没有掷骰，两者都不该凭空给它一个总数。
                     cover = self._cover_save_bonus(
                         instance, combat, target, save_ability,
+                        # 效应自己声明"水平掩体与我无关"时不读等级。
+                        axis=cover_axis(effect),
                     )
                     total = int(check_event["total"]) + int(cover["bonus"])
                     total, replacement = self._strength_total_replacement(
@@ -2959,6 +2986,8 @@ class CombatResolutionMixin:
                     if int(cover["bonus"]):
                         check_event["cover_bonus"] = int(cover["bonus"])
                         check_event["cover_sources"] = cover["sources"]
+                    check_event["cover_level"] = str(cover.get("level") or "none")
+                    check_event["cover_interaction"] = cover_axis(effect)[0]
                     check_event.update(replacement)
                     check_event["total"] = total
                     check_event["success"] = total >= int(actor["spell_save_dc"])
