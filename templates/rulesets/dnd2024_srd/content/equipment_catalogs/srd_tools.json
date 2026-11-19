@@ -532,7 +532,7 @@
     "poisoner_s_kit": {
       "name": "Poisoner's Kit",
       "desc": [],
-      "cost_gp": 5.0,
+      "cost_gp": 50.0,
       "weight_lb": 2.0,
       "ability": "int",
       "utilize": [
