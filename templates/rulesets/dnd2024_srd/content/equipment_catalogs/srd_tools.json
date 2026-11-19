@@ -11,7 +11,7 @@
     "transcription": "dnd5eapi.co (SRD 5.2.1, tools category)"
   },
   "items": {
-    "alchemist_s_supplies": {
+    "alchemists_supplies": {
       "name": "Alchemist's Supplies",
       "desc": [],
       "cost_gp": 50.0,
@@ -57,7 +57,7 @@
         }
       ]
     },
-    "brewer_s_supplies": {
+    "brewers_supplies": {
       "name": "Brewer's Supplies",
       "desc": [],
       "cost_gp": 20.0,
@@ -79,7 +79,7 @@
         "antitoxin"
       ]
     },
-    "calligrapher_s_supplies": {
+    "calligraphers_supplies": {
       "name": "Calligrapher's Supplies",
       "desc": [],
       "cost_gp": 10.0,
@@ -98,7 +98,7 @@
         "spell_scroll_level_1"
       ]
     },
-    "carpenter_s_tools": {
+    "carpenters_tools": {
       "name": "Carpenter's Tools",
       "desc": [],
       "cost_gp": 8.0,
@@ -123,7 +123,7 @@
         "torch"
       ]
     },
-    "cartographer_s_tools": {
+    "cartographers_tools": {
       "name": "Cartographer's Tools",
       "desc": [],
       "cost_gp": 15.0,
@@ -140,7 +140,7 @@
         "map"
       ]
     },
-    "cobbler_s_tools": {
+    "cobblers_tools": {
       "name": "Cobbler's Tools",
       "desc": [],
       "cost_gp": 5.0,
@@ -157,7 +157,7 @@
         "climber_s_kit"
       ]
     },
-    "cook_s_utensils": {
+    "cooks_utensils": {
       "name": "Cook's Utensils",
       "desc": [],
       "cost_gp": 1.0,
@@ -290,7 +290,7 @@
         }
       ]
     },
-    "glassblower_s_tools": {
+    "glassblowers_tools": {
       "name": "Glassblower's Tools",
       "desc": [],
       "cost_gp": 30.0,
@@ -342,7 +342,7 @@
         }
       ]
     },
-    "jeweler_s_tools": {
+    "jewelers_tools": {
       "name": "Jeweler's Tools",
       "desc": [],
       "cost_gp": 25.0,
@@ -367,7 +367,7 @@
         "reliquary"
       ]
     },
-    "leatherworker_s_tools": {
+    "leatherworkers_tools": {
       "name": "Leatherworker's Tools",
       "desc": [],
       "cost_gp": 5.0,
@@ -433,7 +433,7 @@
         }
       ]
     },
-    "mason_s_tools": {
+    "masons_tools": {
       "name": "Mason's Tools",
       "desc": [],
       "cost_gp": 10.0,
@@ -450,7 +450,7 @@
         "block_and_tackle"
       ]
     },
-    "navigator_s_tools": {
+    "navigators_tools": {
       "name": "Navigator's Tools",
       "desc": [],
       "cost_gp": 25.0,
@@ -469,7 +469,7 @@
         }
       ]
     },
-    "painter_s_supplies": {
+    "painters_supplies": {
       "name": "Painter's Supplies",
       "desc": [],
       "cost_gp": 10.0,
@@ -529,7 +529,7 @@
         }
       ]
     },
-    "poisoner_s_kit": {
+    "poisoners_kit": {
       "name": "Poisoner's Kit",
       "desc": [],
       "cost_gp": 50.0,
@@ -546,7 +546,7 @@
         "poison_basic"
       ]
     },
-    "potter_s_tools": {
+    "potters_tools": {
       "name": "Potter's Tools",
       "desc": [],
       "cost_gp": 10.0,
@@ -583,7 +583,7 @@
         }
       ]
     },
-    "smith_s_tools": {
+    "smiths_tools": {
       "name": "Smith's Tools",
       "desc": [],
       "cost_gp": 20.0,
@@ -674,7 +674,7 @@
         }
       ]
     },
-    "tinker_s_tools": {
+    "tinkers_tools": {
       "name": "Tinker's Tools",
       "desc": [],
       "cost_gp": 50.0,
@@ -722,7 +722,7 @@
         }
       ]
     },
-    "weaver_s_tools": {
+    "weavers_tools": {
       "name": "Weaver's Tools",
       "desc": [],
       "cost_gp": 1.0,
@@ -755,7 +755,7 @@
         "clothes_traveler_s"
       ]
     },
-    "woodcarver_s_tools": {
+    "woodcarvers_tools": {
       "name": "Woodcarver's Tools",
       "desc": [],
       "cost_gp": 1.0,
