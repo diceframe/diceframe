@@ -836,3 +836,40 @@ async def test_plugin_readme_cancelled_when_detail_modal_closes():
     with pytest.raises(_ClientDisconnected):
         await _await_hub_read(Request(), asyncio.wait_for(slow_read(), timeout=60))
     assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_accepting_privacy_does_not_wait_for_a_slow_hub_sync(tmp_path):
+    """确认按钮不得被 Hub 遥测同步拖住（网络不通时此前会等满 30s 超时）。"""
+    import asyncio
+    import time
+
+    release = asyncio.Event()
+    synced = []
+
+    class SlowClient:
+        identity_file = tmp_path / "hub-installation.json"
+
+        async def set_telemetry(self, enabled, *, choice_made=True):
+            synced.append((enabled, choice_made))
+            await release.wait()  # 模拟 Hub 挂起
+
+    class Api(_LegalApi):
+        _config_state = {}
+        _hub = SlowClient()
+
+        def _save_config(self):
+            return None
+
+    documents = legal.bundled_documents()
+    Api._legal_documents = documents
+    started = time.monotonic()
+    result = await _hub_service(Api()).update_preferences(
+        False, legal.acceptance_payload(documents, "zh-CN"),
+    )
+    elapsed = time.monotonic() - started
+    assert result["choice_made"] is True
+    assert elapsed < 1.0                     # 响应不被 Hub 阻塞
+    await asyncio.sleep(0)                   # 后台任务已启动
+    assert synced == [(False, True)]
+    release.set()

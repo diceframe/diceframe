@@ -182,3 +182,35 @@ async def test_older_online_manifest_cannot_downgrade_bundled_legal_documents():
     assert documents["privacy"]["version"] == "1.2"
     assert result["source"] == "bundled"
     assert result["version"] == "1.2"
+
+
+@pytest.mark.asyncio
+async def test_startup_preferences_respect_the_content_cache_ttl():
+    """启动/偏好路径不得绕过缓存：断网时靠失败负缓存 + 内置快照秒开。
+
+    旧实现恒 force_refresh=True，每个新会话首次打开都要强刷远端 manifest，
+    网络不通的用户在隐私弹窗前干等 1.5s×源的超时。
+    """
+    calls = []
+
+    class Api:
+        async def fetch_public_content_json(self, path, *, force_refresh=False, allow_cached=True):
+            calls.append((path, force_refresh, allow_cached))
+            return None
+
+        async def fetch_public_content_text(self, path, **kwargs):
+            return ""
+
+    service = _service(Api())
+    documents = await service.current_documents()
+    assert calls == [("manifest.json", False, True)]
+    # 远端不可用 → 内置快照兜底，弹窗仍能立即展示
+    assert documents == legal.bundled_documents()
+
+    # 查看正文才允许强制刷新（allow_cached=False 透传 force_refresh）
+    calls.clear()
+    try:
+        await service.document("privacy", "zh-CN")
+    except Exception:
+        pass
+    assert calls and calls[0] == ("manifest.json", True, False)

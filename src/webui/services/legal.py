@@ -121,10 +121,14 @@ def _valid_remote_documents(manifest: dict[str, Any] | None) -> dict[str, Any] |
 async def _remote_documents(
     dependencies: LegalDependencies, *, allow_cached: bool,
 ) -> dict[str, Any] | None:
+    # 启动/偏好路径（allow_cached=True）必须真正走缓存 TTL 与失败负缓存：
+    # 之前恒 force_refresh=True，每个新会话首次打开都要强刷远端 manifest，
+    # 网络不通的用户在隐私弹窗前干等多个 1.5s/源 的超时。查看正文
+    # （allow_cached=False）才强制刷新。
     return _valid_remote_documents(
         await dependencies.fetch_public_json(
             "manifest.json",
-            force_refresh=True,
+            force_refresh=not allow_cached,
             allow_cached=allow_cached,
         )
     )
