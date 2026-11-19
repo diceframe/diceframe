@@ -129,6 +129,20 @@ internal static partial class DiceFrameLauncher
         }
     }
 
+    // 证书日志只落 origin+path：query/fragment 可能携带 SSE ticket、分享参数或
+    // 访问令牌——诊断信息不值得让它们进入 launcher 日志。
+    private static string CertLogTarget(string requestUri)
+    {
+        try
+        {
+            return new Uri(requestUri).GetLeftPart(UriPartial.Path);
+        }
+        catch
+        {
+            return "(unparsable request uri)";
+        }
+    }
+
     private static bool StageWebView2(string payloadDir)
     {
         try
@@ -316,13 +330,15 @@ internal static partial class DiceFrameLauncher
             if (!pinned)
             {
                 Console.WriteLine(
-                    "Refused a certificate for " + args.RequestUri + " (" + args.ErrorStatus + ")."
+                    "Refused a certificate for " + CertLogTarget(args.RequestUri)
+                    + " (" + args.ErrorStatus + ")."
                 );
             }
             else
             {
-                // 诊断日志：成功放行的请求也记录（定位"服务器 200 但客户端无样式"问题）
-                Console.WriteLine("Certificate pinned OK for " + args.RequestUri);
+                // 诊断日志：成功放行的请求也记录（定位"服务器 200 但客户端无样式"问题）。
+                // 只记 origin+path：query/fragment 可能带 SSE ticket 或分享参数，不进日志。
+                Console.WriteLine("Certificate pinned OK for " + CertLogTarget(args.RequestUri));
             }
             args.Action = pinned
                 ? CoreWebView2ServerCertificateErrorAction.AlwaysAllow
