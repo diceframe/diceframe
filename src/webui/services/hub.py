@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Awaitable, Callable
@@ -12,6 +13,8 @@ import aiohttp
 from src.hub_client import HubUnavailable
 from src.plugin_host.mirrors import parse_github_repository
 from src.localization.messages import t
+
+logger = logging.getLogger("trpg")
 
 # 作者 GitHub 仓库 Raw README 的大小上限（超出视为不可信，直接拒绝）。
 _README_RAW_MAX_BYTES = 256 * 1024
@@ -105,7 +108,16 @@ async def update_preferences(
         raise
     client = dependencies.client
     if client is not None:
-        await client.set_telemetry(bool(telemetry_enabled), choice_made=True)
+        # 本地选择已经落盘；远端同步只是尽力而为。此前同步等待会把
+        # 隐私弹窗的「确认并继续」卡在 Hub 的 30s 超时上（网络不通的
+        # 用户表现为一直转圈），改为后台任务。
+        async def _sync() -> None:
+            try:
+                await client.set_telemetry(bool(telemetry_enabled), choice_made=True)
+            except Exception:
+                logger.debug("Hub 遥测偏好同步失败，已仅在本机生效")
+
+        asyncio.create_task(_sync())
     return await preferences(dependencies, language)
 
 
