@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIR = ROOT / "src" / "launcher"
 # 启动器是一个 partial class，按职责拆在 src/launcher/*.cs 里，一起编译。
 SOURCE = SOURCE_DIR / "DiceFrameLauncher.cs"
+LAUNCHER_MANIFEST = SOURCE_DIR / "DiceFrameLauncher.manifest"
 ICON_SOURCE = ROOT / "frontend-v2" / "public" / "favicon.svg"
 CANDIDATE_CSC = [
     Path(r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"),
@@ -251,6 +252,9 @@ def csc_command(
         "/optimize+",
         "/target:exe",
         "/platform:x64",
+        # WebView2 必须在进程创建时就是 Per-Monitor V2 aware；否则 Windows 在
+        # 显示缩放变化后会位图拉伸客户区，标题栏清晰而网页内容模糊。
+        f"/win32manifest:{LAUNCHER_MANIFEST}",
         # WebRequestHandler.ServerCertificateValidationCallback 需要显式引用。
         "/r:System.Net.Http.dll",
         "/r:System.Net.Http.WebRequest.dll",
@@ -273,6 +277,8 @@ def csc_command(
 def build_launcher(output: Path, icon: Path) -> None:
     if not SOURCE.exists():
         raise RuntimeError(f"Cannot find launcher source: {SOURCE}")
+    if not LAUNCHER_MANIFEST.exists():
+        raise RuntimeError(f"Cannot find launcher manifest: {LAUNCHER_MANIFEST}")
     if not ICON_SOURCE.exists():
         raise RuntimeError(f"Cannot find icon source: {ICON_SOURCE}")
     write_ico(icon)

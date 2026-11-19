@@ -9,6 +9,7 @@ import ssl
 import subprocess
 import threading
 import zipfile
+import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -31,6 +32,28 @@ def test_launcher_build_compiles_every_partial_source():
         "ProcessEnvironment.cs",
         "BackendLink.cs",
     } <= names
+
+
+def test_launcher_embeds_per_monitor_v2_dpi_manifest(monkeypatch, tmp_path):
+    """The host must render WebView2 at each monitor's native scale.
+
+    A system-DPI/unaware launcher is bitmap-scaled after a Windows display-scale
+    change: the OS title bar stays sharp while the WebView client area blurs.
+    """
+    root = ET.parse(build_launcher.LAUNCHER_MANIFEST).getroot()
+    ns = {
+        "asmv3": "urn:schemas-microsoft-com:asm.v3",
+        "ws2016": "http://schemas.microsoft.com/SMI/2016/WindowsSettings",
+        "ws2005": "http://schemas.microsoft.com/SMI/2005/WindowsSettings",
+    }
+    assert root.findtext("asmv3:application/asmv3:windowsSettings/ws2016:dpiAwareness", namespaces=ns) == (
+        "PerMonitorV2,PerMonitor"
+    )
+    assert root.findtext("asmv3:application/asmv3:windowsSettings/ws2005:dpiAware", namespaces=ns) == "true/pm"
+
+    monkeypatch.setattr(build_launcher, "find_csc", lambda: Path("csc.exe"))
+    command = build_launcher.csc_command(tmp_path / "DiceFrame.exe", tmp_path / "sdk")
+    assert f"/win32manifest:{build_launcher.LAUNCHER_MANIFEST}" in command
 
 
 def test_webview2_sdk_rejects_a_tampered_package(tmp_path):
@@ -148,6 +171,65 @@ def _compile_probe(output: Path, source: Path) -> None:
         check=True,
         capture_output=True,
     )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="DPI awareness is a Windows process/window contract")
+def test_launcher_manifest_activates_per_monitor_v2_for_process_and_windows(tmp_path):
+    """Loading the exe via reflection does NOT activate its manifest.
+
+    Run a fresh process built by the real launcher compiler pipeline, with an
+    alternate entrypoint, and query both its UI thread and native window handles.
+    This catches a valid manifest accidentally omitted from the generated exe.
+    """
+    source = tmp_path / "DpiProbe.cs"
+    source.write_text(r'''
+using System;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+
+internal static class DpiProbe
+{
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetThreadDpiAwarenessContext();
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindowDpiAwarenessContext(IntPtr window);
+    [DllImport("user32.dll")]
+    private static extern bool AreDpiAwarenessContextsEqual(IntPtr first, IntPtr second);
+
+    [STAThread]
+    private static int Main()
+    {
+        // The production app window is created on a separate STA thread too.
+        int result = 1;
+        var ui = new System.Threading.Thread(delegate()
+        {
+            Application.EnableVisualStyles();
+            using (var form = new Form())
+            using (var child = new Control())
+            {
+                form.Controls.Add(child);
+                IntPtr pmv2 = new IntPtr(-4);
+                bool thread = AreDpiAwarenessContextsEqual(GetThreadDpiAwarenessContext(), pmv2);
+                bool parent = AreDpiAwarenessContextsEqual(GetWindowDpiAwarenessContext(form.Handle), pmv2);
+                bool client = AreDpiAwarenessContextsEqual(GetWindowDpiAwarenessContext(child.Handle), pmv2);
+                Console.WriteLine("thread=" + thread + ";form=" + parent + ";client=" + client);
+                result = thread && parent && client ? 0 : 1;
+            }
+        });
+        ui.SetApartmentState(System.Threading.ApartmentState.STA);
+        ui.Start();
+        ui.Join();
+        return result;
+    }
+}
+''', encoding="utf-8")
+    sdk = build_launcher.ensure_webview2_sdk()
+    exe = tmp_path / "DpiProbe.exe"
+    command = build_launcher.csc_command(exe, sdk)
+    subprocess.run([*command, "/main:DpiProbe", str(source)], check=True, capture_output=True)
+    result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "thread=True;form=True;client=True"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="启动器只能在 Windows 上用 csc 编译")
