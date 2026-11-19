@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "kind": "item",
+  "id": "leatherworkers_tools",
+  "source_ref": "srd-5.2.1:equipment:tools",
+  "automation_level": "reference",
+  "item_type": "tool"
+}
