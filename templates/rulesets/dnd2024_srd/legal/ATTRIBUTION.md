@@ -22,3 +22,12 @@ equipment chapter as a whole. Membership, text, price, weight and the pack
 contents all come from dnd5eapi's 2024 `adventuring-gear` category and are
 redistributed under the same CC-BY-4.0 terms as the SRD. Regenerate with
 `scripts/rulesets/import_srd_adventuring_gear.py`.
+
+## Tools text
+
+`content/equipment_catalogs/srd_tools.json` reproduces the Tools table of SRD
+5.2.1 (artisan's tools, kits, musical instruments, gaming sets) with the
+ability, utilize, craft and contents entries that table declares. Data comes
+from dnd5eapi's 2024 `tools` category and is redistributed under the same
+CC-BY-4.0 terms as the SRD. Regenerate with
+`scripts/rulesets/import_srd_tools.py`.
