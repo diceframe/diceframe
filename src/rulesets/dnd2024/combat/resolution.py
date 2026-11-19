@@ -85,6 +85,7 @@ from .check_modes import (
 )
 from src.rulesets.dnd2024.features.resources import resource_state
 from .check_windows import CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION
+from .cover import cover_axis
 from .reaction_spells import COUNTER_SPELL_DECISION, HIT_REACTION_DECISION, effective_armor_class
 from .triggered_spells import HIT_SPELL_DECISION
 from .weapon_masteries import WEAPON_MASTERY_EFFECTS, WEAPON_MASTERY_FEATURE_ID
@@ -2975,6 +2976,8 @@ class CombatResolutionMixin:
                     # 的豁免没有掷骰，两者都不该凭空给它一个总数。
                     cover = self._cover_save_bonus(
                         instance, combat, target, save_ability,
+                        # 效应自己声明"水平掩体与我无关"时不读等级。
+                        axis=cover_axis(effect),
                     )
                     total = int(check_event["total"]) + int(cover["bonus"])
                     total, replacement = self._strength_total_replacement(
@@ -2983,6 +2986,8 @@ class CombatResolutionMixin:
                     if int(cover["bonus"]):
                         check_event["cover_bonus"] = int(cover["bonus"])
                         check_event["cover_sources"] = cover["sources"]
+                    check_event["cover_level"] = str(cover.get("level") or "none")
+                    check_event["cover_interaction"] = cover_axis(effect)[0]
                     check_event.update(replacement)
                     check_event["total"] = total
                     check_event["success"] = total >= int(actor["spell_save_dc"])

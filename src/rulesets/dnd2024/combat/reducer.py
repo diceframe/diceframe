@@ -154,6 +154,8 @@ class CombatReducerMixin:
                 "origin_step_id": str(event.get("origin_step_id") or ""),
                 "mode": str(event.get("mode") or "sandbox"),
                 "adventure_binding": deepcopy(event.get("adventure_binding")),
+                # C2A：掩护声明随战斗生灭，不落盘到角色卡。
+                "cover": {},
                 # 遭遇级的持握与骑乘：两者都随这场战斗生灭，不落盘到角色卡。
                 "hands": {},
                 "mounted": deepcopy(event.get("mounted") or {}),
@@ -654,6 +656,19 @@ class CombatReducerMixin:
                 self._apply_temp_hp_change(snapshot, event)
             else:
                 self._apply_hp_change(snapshot, event)
+            return
+        if event_type == "dnd2024.cover.declared":
+            cover = combat.setdefault("cover", {})
+            target_id = str(event["target_id"])
+            level = str(event["level"])
+            if level == "none":
+                # 撤销就是删键：留一个墓碑会让"有没有声明过"有两种答案。
+                cover.pop(target_id, None)
+            else:
+                cover[target_id] = {
+                    "level": level,
+                    "source": str(event.get("source") or "gm"),
+                }
             return
         if event_type == "condition.applied":
             conditions = self._conditions(snapshot, combat, str(event["target_id"]))
