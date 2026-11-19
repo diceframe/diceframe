@@ -44,6 +44,7 @@ from ..spells.font_of_magic import (
     parse_created_slot_costs,
     slot_to_points_plan,
 )
+from .cover import COVER_LEVELS
 from .primitives import (
     DICE_RE,
     INITIATIVE_CHOICES,
@@ -272,6 +273,27 @@ class CombatValidationMixin:
             for row in combat.get("pending_decisions", [])
         ) and intent_type not in {"decision.resolve", "combat.message"}:
             raise CombatIntentError("resolve the relentless rage decision first")
+        if intent_type == "combat.set_cover":
+            # 掩护是桌子上的判断（"他躲在箱子后面"），所以只有 GM 能声明；
+            # 客户端提交的是等级枚举，永远不是加值。
+            if submitted_by != gm_uid:
+                raise CombatIntentError("only the GM can declare cover")
+            target_id = str(intent.get("target_id") or "")
+            level = str(intent.get("level") or "")
+            if level not in COVER_LEVELS:
+                raise CombatIntentError(
+                    f"cover level must be one of {list(COVER_LEVELS)}"
+                )
+            kind, raw_id = _actor_kind(target_id)
+            if kind == "player":
+                if raw_id not in instance.players:
+                    raise CombatIntentError("cover target actor does not exist")
+            elif kind == "enemy":
+                if raw_id not in (combat.get("enemies") or {}):
+                    raise CombatIntentError("cover target actor does not exist")
+            else:
+                raise CombatIntentError("cover target must be a combat actor")
+            return
         if intent_type == "combat.message":
             if submitted_by not in instance.players:
                 raise CombatIntentError("only a party member can send a combat message")
