@@ -32,8 +32,8 @@ def _catalog() -> dict:
 def test_the_catalog_is_the_tools_table() -> None:
     items = _catalog()["items"]
     assert len(items) == 36
-    for inside in ("thieves_tools", "poisoner_s_kit", "herbalism_kit",
-                   "smith_s_tools", "lute", "playing_cards"):
+    for inside in ("thieves_tools", "poisoners_kit", "herbalism_kit",
+                   "smiths_tools", "lute", "playing_cards"):
         assert inside in items
     # 别的表：冒险装备、武器、护甲。
     for outside in ("rope", "torch", "longsword", "leather_armor"):
@@ -43,11 +43,11 @@ def test_the_catalog_is_the_tools_table() -> None:
 def test_ids_are_stable_and_the_apostrophe_folds_to_s() -> None:
     for item_id in _catalog()["items"]:
         assert re.fullmatch(r"[a-z0-9][a-z0-9_]*", item_id), item_id
-    assert "poisoner_s_kit" in _catalog()["items"]
+    assert "poisoners_kit" in _catalog()["items"]
 
 
 def test_the_poisoners_kit_carries_what_cunning_strike_needs() -> None:
-    kit = _catalog()["items"]["poisoner_s_kit"]
+    kit = _catalog()["items"]["poisoners_kit"]
     assert kit["name"] == "Poisoner's Kit"
     assert kit["ability"] == "int"
     assert kit["utilize"] == [
