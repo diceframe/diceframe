@@ -1320,8 +1320,6 @@ function onPlayKeydown(event: KeyboardEvent) {
         <span v-if="gameCode" class="hud-stat"><strong>{{ gameCode }}</strong><small>{{ t('save') }}</small></span>
       </div>
       <div class="toolbar play-toolbar">
-        <span v-if="preview" class="busy">{{ t('hostPreview') }}</span>
-        <button v-if="preview" @click="toggleDelegate">{{ delegate ? t('disableDelegate') : t('enableDelegate') }}</button>
         <span v-if="game.loading.value" class="busy">{{ t('updating') }}</span>
         <button
           v-if="pendingEconomyCount && !pendingPay"
@@ -1595,6 +1593,14 @@ function onPlayKeydown(event: KeyboardEvent) {
           @refresh="refreshRulesetPanels"
           @open-combat="openRulesetTool('combat')"
         >
+          <template #before-input>
+            <div v-if="preview" :class="['host-preview-notice', { 'is-delegating': delegate }]" role="status" data-testid="host-preview-notice">
+              <span class="host-preview-copy">{{ delegate ? t('hostPreviewDelegating') : t('hostPreviewHint') }}</span>
+              <button type="button" class="host-preview-toggle" @click="toggleDelegate">
+                {{ delegate ? t('disableDelegate') : t('enableDelegate') }}
+              </button>
+            </div>
+          </template>
           <template #tools>
             <div v-if="hasComposerTools" class="ruleset-context-tools" :aria-label="rulesetToolCopy.menu">
               <button
@@ -1656,6 +1662,14 @@ function onPlayKeydown(event: KeyboardEvent) {
           @processing="gmThinking = $event"
           @refresh="refreshActionRecovery"
         >
+          <template #before-input>
+            <div v-if="preview" :class="['host-preview-notice', { 'is-delegating': delegate }]" role="status" data-testid="host-preview-notice">
+              <span class="host-preview-copy">{{ delegate ? t('hostPreviewDelegating') : t('hostPreviewHint') }}</span>
+              <button type="button" class="host-preview-toggle" @click="toggleDelegate">
+                {{ delegate ? t('disableDelegate') : t('enableDelegate') }}
+              </button>
+            </div>
+          </template>
           <template #tools>
             <div v-if="hasComposerTools" class="ruleset-context-tools" :aria-label="rulesetToolCopy.menu">
               <button
@@ -2088,4 +2102,23 @@ function onPlayKeydown(event: KeyboardEvent) {
 .purchase-quote-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
 .purchase-quote-body { min-width: 0; }
 .purchase-quote-action { flex-shrink: 0; }
+/* 房主预览提示条：贴在行动输入框上方，替代原先藏在顶部工具栏的入口 */
+.host-preview-notice {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 0 0 8px; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--df-warning, #d9a441) 55%, transparent);
+  background: color-mix(in srgb, var(--df-warning, #d9a441) 12%, transparent);
+  font-size: 13px; line-height: 1.5;
+}
+.host-preview-notice.is-delegating {
+  border-color: color-mix(in srgb, var(--df-interactive, #6fa8dc) 55%, transparent);
+  background: color-mix(in srgb, var(--df-interactive, #6fa8dc) 12%, transparent);
+}
+.host-preview-copy { min-width: 0; }
+.host-preview-toggle {
+  flex-shrink: 0; padding: 4px 12px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--df-interactive, #6fa8dc);
+  background: var(--df-interactive, #6fa8dc); color: #0d1520; font-weight: 600;
+}
+.host-preview-toggle:hover { filter: brightness(1.08); }
 </style>

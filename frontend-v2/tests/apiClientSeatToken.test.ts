@@ -54,16 +54,46 @@ describe('API client seat token', () => {
     expect(sentHeaders(fetchMock).has('X-Seat-Token')).toBe(false)
   })
 
-  it('keeps the owner path unchanged: no seat token, explicit user', async () => {
+  it('a password-logged-in player speaks for its joined seat (token + explicit user)', async () => {
+    // 受邀玩家常用同一实例访问密码登录；此时令牌 + ?user= 并存，服务端以
+    // 令牌座位为准——否则整桌玩家都会被卡在「房主预览」里点代操作。
     localStorage.setItem(accessTokenStorageKey(), 'owner-pass')
     storeSeatToken(GAME, 'tok-p1')
     const fetchMock = okFetch()
 
     await api(`/games/${encodeURIComponent(GAME)}/private-log`)
 
+    expect(sentHeaders(fetchMock).get('X-Seat-Token')).toBe('tok-p1')
+    expect(sentHeaders(fetchMock).get('Authorization')).toBe('Bearer owner-pass')
+    expect(sentUrl(fetchMock).searchParams.get('user')).toBe('p1')
+  })
+
+  it('an owner session without a joined seat stays on the preview path', async () => {
+    localStorage.setItem(accessTokenStorageKey(), 'owner-pass')
+    const fetchMock = okFetch()
+
+    await api(`/games/${encodeURIComponent(GAME)}/private-log?user=p1&share=1`)
+
     expect(sentHeaders(fetchMock).has('X-Seat-Token')).toBe(false)
     expect(sentHeaders(fetchMock).get('Authorization')).toBe('Bearer owner-pass')
     expect(sentUrl(fetchMock).searchParams.get('user')).toBe('p1')
+  })
+
+  it('clears a rotated seat token for an owner session without leaving the page', async () => {
+    localStorage.setItem(accessTokenStorageKey(), 'owner-pass')
+    storeSeatToken(GAME, 'tok-old')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ ok: false, error_code: 'SEAT_TOKEN_INVALID', error: 'invalid' }),
+      { status: 401, headers: { 'Content-Type': 'application/json' } },
+    )))
+
+    await expect(api(`/games/${encodeURIComponent(GAME)}/private-log`)).rejects.toMatchObject({
+      status: 401,
+      code: 'SEAT_TOKEN_INVALID',
+    })
+    expect(readSeatToken(GAME)).toBe('')
+    // 房主会话退回房主身份：不跳加入页（不同于匿名玩家的重定向）。
+    expect(location.hash).not.toContain('#/join')
   })
 
   it('forgets a revoked seat token and sends the player back to join', async () => {

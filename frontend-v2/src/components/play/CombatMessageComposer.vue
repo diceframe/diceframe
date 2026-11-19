@@ -47,6 +47,8 @@ async function submit(): Promise<void> {
       <slot name="tools" />
     </header>
     <p>{{ zh ? '这里可以说话或回复队友，不会触发检定；机械行动请打开战斗工具。' : 'Talk to the party here without triggering checks. Use the combat tool for mechanical actions.' }}</p>
+    <!-- 宿主级提示条（如房主预览模式）；贴在输入行上方。 -->
+    <slot name="before-input" />
     <div class="combat-message-row">
       <textarea
         v-model="text"
