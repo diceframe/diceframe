@@ -114,6 +114,12 @@ def test_declaration_round_trips_into_state_and_view() -> None:
         "level": "three_quarters", "armor_class_bonus": 5,
         "dex_save_bonus": 5, "sources": ["gm:gm"],
     }
+    # S0-C2A 投影：actor 视图带出当前掩护等级（player 无声明时为 none）。
+    enemy_view = engine._actor_view(instance, combat, "enemy:goblin-1")
+    assert enemy_view["cover"] == "three_quarters"
+    player_id = next(iter(instance.players))
+    player_view = engine._actor_view(instance, combat, f"player:{player_id}")
+    assert player_view["cover"] == "none"
 
 
 def test_cancelling_a_declaration_removes_the_key() -> None:

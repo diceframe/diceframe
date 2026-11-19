@@ -198,12 +198,41 @@ def _validate_challenge(enemy: dict[str, Any], label: str) -> None:
             raise CombatIntentError(f"{label} cr must be one of the SRD challenge ratings")
     # XP 是 stat block 自带的事实（"Challenge 3 (700 XP)"），由内容提供；
     # 这里只约束形状，不推导：推导需要 DMG 的 CR→XP 表，而 SRD 不含该表。
+    # 上界是 CR 30 = 155,000 XP（DMG 表）。
     if "xp" in enemy:
         xp = enemy.get("xp")
-        if isinstance(xp, bool) or not isinstance(xp, int) or not 0 <= xp <= 355000:
+        if isinstance(xp, bool) or not isinstance(xp, int) or not 0 <= xp <= 155000:
             raise CombatIntentError(f"{label} xp must be a non-negative integer")
         if "cr" not in enemy:
             raise CombatIntentError(f"{label} xp requires a cr")
+
+
+def _validate_condition_immunities(enemy: dict[str, Any], label: str) -> None:
+    """条件免疫必须是良构的条件 id 列表（review #809 P2）。
+
+    条件目录按需装载且不构成全局闭集，这里守住的是会写脏战斗状态的
+    形状漏洞：裸字符串会在消费端被 ``set(str(code))`` 炸成单字符集合，
+    dict/int 则直接进不了集合语义。未知但良构的 id 只是永远匹配不上
+    的惰性条目，不构成状态污染。
+    """
+    raw = enemy.get("condition_immunities")
+    if raw is None:
+        return
+    if not isinstance(raw, list):
+        raise CombatIntentError(f"{label} condition_immunities must be an array")
+    if not 0 <= len(raw) <= 40:
+        raise CombatIntentError(f"{label} condition_immunities must list 0 to 40 codes")
+    seen: set[str] = set()
+    for code in raw:
+        if not isinstance(code, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", code):
+            raise CombatIntentError(
+                f"{label} condition_immunities has an invalid condition id"
+            )
+        if code in seen:
+            raise CombatIntentError(
+                f"{label} condition_immunities lists {code!r} twice"
+            )
+        seen.add(code)
 
 
 def validate_enemy_profiles(enemies: Any) -> None:
@@ -235,6 +264,7 @@ def validate_enemy_profiles(enemies: Any) -> None:
         _validate_defenses(enemy, f"enemy {enemy_id}")
         _validate_senses(enemy, f"enemy {enemy_id}")
         _validate_challenge(enemy, f"enemy {enemy_id}")
+        _validate_condition_immunities(enemy, f"enemy {enemy_id}")
         _normalize_speeds(enemy, f"enemy {enemy_id}")
         if not isinstance(enemy.get("creature_type", ""), str) or (enemy.get("creature_type") and enemy["creature_type"] not in CREATURE_TYPES):
             raise CombatIntentError("enemy creature_type must be a canonical creature type")

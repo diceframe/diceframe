@@ -294,3 +294,28 @@ def test_a_legacy_enemy_without_the_new_fields_still_fights() -> None:
     assert view["speeds"] == {"walk": 30}
     assert view["senses"] == {}
     assert view["cr"] == "" and view["xp"] == 0
+
+
+@pytest.mark.parametrize("bad", [
+    "poisoned",           # 裸字符串：消费端 set(str) 会炸成单字符集合
+    42,
+    {"condition": "poisoned"},
+    ["NotSnakeCase"],
+    ["poisoned", "poisoned"],
+], ids=["bare-string", "int", "dict", "bad-case", "duplicate"])
+def test_condition_immunities_reject_every_malformed_shape(bad):
+    """review #809 P2：垃圾形状必须在入口被拒绝，而不是写进战斗状态。"""
+    from src.rulesets.dnd2024.combat.validation import CombatIntentError
+    with pytest.raises(CombatIntentError):
+        validate_enemy_profiles([_profile(condition_immunities=bad)])
+
+
+def test_condition_immunities_accept_a_wellformed_list():
+    validate_enemy_profiles([_profile(condition_immunities=["charmed", "frightened"])])
+
+
+def test_xp_is_capped_at_the_cr30_maximum():
+    from src.rulesets.dnd2024.combat.validation import CombatIntentError
+    with pytest.raises(CombatIntentError):
+        validate_enemy_profiles([_profile(cr="30", xp=155001)])
+    validate_enemy_profiles([_profile(cr="30", xp=155000)])

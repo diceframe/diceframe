@@ -146,6 +146,9 @@ class Dnd2024CombatEngine(
     # 避免引擎自己猜测 bundle 目录。
     locale_loader: Any | None = None
     supported_locales: tuple[str, ...] = ()
+    # 掩护等级查询的调用深度（同步方法内使用）：灵光投影内部重建 actor
+    # 视图时视图不再嵌套查询掩护，环在此断开。0 = 不在掩护计算中。
+    _cover_depth: int = 0
     catalog: Dnd2024CombatCatalog = field(init=False)
     spells: Dnd2024SpellCatalog = field(init=False)
     features: Dnd2024ClassFeatureResolver = field(init=False)
@@ -2029,13 +2032,21 @@ class Dnd2024CombatEngine(
     def cover_level(
         self, instance: Any, combat: dict[str, Any], actor_id: str,
     ) -> str:
-        """Just the level: what "behind three-quarters cover" rules ask about."""
+        """Just the level: what "behind three-quarters cover" rules ask about.
 
-        side = "enemy" if str(actor_id).startswith("enemy:") else "party"
-        row = self._cover_record(
-            instance, combat, {"actor_id": str(actor_id), "side": side},
-        )
-        return str(row.get("level") or "none")
+        深度计数：灵光投影内部会经 ``_all_targets`` 重建 actor 视图，视图又
+        回头查询掩护等级——内层（depth>0）一律答 ``none``，环在此断开。
+        """
+
+        self._cover_depth += 1
+        try:
+            side = "enemy" if str(actor_id).startswith("enemy:") else "party"
+            row = self._cover_record(
+                instance, combat, {"actor_id": str(actor_id), "side": side},
+            )
+            return str(row.get("level") or "none")
+        finally:
+            self._cover_depth -= 1
 
     def _cover_record(
         self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
