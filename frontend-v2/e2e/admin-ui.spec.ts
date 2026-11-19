@@ -99,7 +99,9 @@ test('rules page exposes structured editing for copied rules', async ({ page }) 
   await expect(page.getByLabel('规则 ID')).toBeVisible()
   await expect(page.getByLabel('规则名称')).toBeVisible()
   await expect(page.locator('.rule-editor-section').filter({ hasText: '属性' })).toBeVisible()
-  await expect(page.getByText('高级 JSON')).toBeVisible()
+  // 货币编辑器对组合面额会渲染 "组合 · 请在高级 JSON 中编辑"，它包含同一串
+  // 文本；不限定精确匹配时 getByText 会同时命中两个节点，strict mode 直接失败。
+  await expect(page.getByText('高级 JSON', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '取消' }).click()
 })
 test('provider controls and the add action remain usable', async ({ page }) => {
