@@ -14,6 +14,30 @@ export function isStaleRuntimeAssetError(error: unknown): boolean {
   return /(?:Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|ChunkLoadError|Loading chunk .+ failed|Unable to preload CSS)/iu.test(message)
 }
 
+/**
+ * 检测样式表是否实际生效（DiceFrame WebView2 安装版偶发"服务器 200 但客户端无样式"问题）。
+ * 症状：document.styleSheets 存在但所有 link.sheet 为 null（HTTPS 证书回调竞态导致客户端静默拒绝 CSS）。
+ */
+export function detectMissingStyles(): boolean {
+  try {
+    // 必须等 DOM 加载完成后检测
+    if (document.readyState !== 'complete') return false
+
+    const links = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]'))
+    if (links.length === 0) return false // 无样式表声明 = 不是样式丢失问题
+
+    // 所有 <link rel="stylesheet"> 都存在但无一生效 → 样式被客户端拒绝
+    const allRejected = links.length > 0 && links.every(link => link.sheet === null)
+    if (allRejected) {
+      console.error('[DiceFrame] All stylesheets failed to load (client-side rejection suspected)')
+    }
+    return allRejected
+  } catch (error) {
+    console.warn('[DiceFrame] Could not detect stylesheet status:', error)
+    return false
+  }
+}
+
 export function reserveRuntimeReload(
   storage: Pick<Storage, 'getItem' | 'setItem'>,
   now = Date.now(),
@@ -50,6 +74,19 @@ export function installRuntimeRecovery(
   const removeRouterError = router.onError((error) => {
     if (isStaleRuntimeAssetError(error)) recover()
   })
+
+  // WebView2 自愈：DOM 完成后检测样式表是否全部失效（证书回调竞态导致客户端拒绝）
+  const checkStylesOnLoad = () => {
+    if (detectMissingStyles()) {
+      console.warn('[DiceFrame] Attempting recovery for missing stylesheets')
+      recover()
+    }
+  }
+  if (document.readyState === 'complete') {
+    checkStylesOnLoad()
+  } else {
+    window.addEventListener('load', checkStylesOnLoad, { once: true })
+  }
 
   return () => {
     window.removeEventListener('vite:preloadError', onPreloadError)

@@ -54,6 +54,9 @@ internal static partial class DiceFrameLauncher
     private static string launcherLogsDir = "";
     private static string webView2Dir = "";
     private static bool webView2ResolverInstalled;
+    // SetLoaderDllFolderPath 必须且只能在任何其它 WebView2 API 之前调用一次：
+    // 接管场景会在同一进程里二次尝试开窗，第二次的重复调用会直接抛异常。
+    private static bool webView2LoaderPathConfigured;
     // 由窗口线程设置：在窗口线程上导航到给定地址。为 null 表示应用窗口没有打开。
     private static Action<string> appWindowNavigate;
 
@@ -222,7 +225,16 @@ internal static partial class DiceFrameLauncher
         {
             try
             {
-                CoreWebView2Environment.SetLoaderDllFolderPath(webView2Dir);
+                // 幂等：同一进程二次开窗（接管路径）不得重复调用；该 API 要求
+                // 先于任何其它 WebView2 调用，重复调用会直接抛异常并留下半残环境。
+                lock (typeof(DiceFrameLauncher))
+                {
+                    if (!webView2LoaderPathConfigured)
+                    {
+                        CoreWebView2Environment.SetLoaderDllFolderPath(webView2Dir);
+                        webView2LoaderPathConfigured = true;
+                    }
+                }
                 CoreWebView2Environment environment = await CoreWebView2Environment.CreateAsync(
                     null,
                     Path.Combine(launcherDataDir, "_launcher", "webview2-profile"),
@@ -306,6 +318,11 @@ internal static partial class DiceFrameLauncher
                 Console.WriteLine(
                     "Refused a certificate for " + args.RequestUri + " (" + args.ErrorStatus + ")."
                 );
+            }
+            else
+            {
+                // 诊断日志：成功放行的请求也记录（定位"服务器 200 但客户端无样式"问题）
+                Console.WriteLine("Certificate pinned OK for " + args.RequestUri);
             }
             args.Action = pinned
                 ? CoreWebView2ServerCertificateErrorAction.AlwaysAllow
