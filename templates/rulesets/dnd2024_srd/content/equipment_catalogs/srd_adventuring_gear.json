@@ -19,7 +19,7 @@
       "cost_gp": 25.0,
       "weight_lb": 1.0
     },
-    "alchemist_s_fire": {
+    "alchemists_fire": {
       "name": "Alchemist's Fire",
       "desc": [
         "When you take the Attack action, you can replace one of your attacks with throwing a flask of Alchemist's Fire. Target one creature or object you can see within 20 feet of yourself. The target must succeed on a Dexterity saving throw (DC 8 plus your Dexterity modifier and Proficiency Bonus) or take 1d4 Fire damage and start burning (see “Rules Glossary”)."
@@ -130,7 +130,7 @@
       ],
       "weight_lb": 2.0
     },
-    "burglar_s_pack": {
+    "burglar_pack": {
       "name": "Burglar's Pack",
       "desc": [
         "A Burglar's Pack contains the following items: Backpack, Ball Bearings, Bell, 10 Candles, Crowbar, Hooded Lantern, 7 flasks of Oil, 5 days of Rations, Rope, Tinderbox, and Waterskin."
@@ -247,7 +247,7 @@
       "cost_gp": 50.0,
       "weight_lb": 20.0
     },
-    "climber_s_kit": {
+    "climbers_kit": {
       "name": "Climber's Kit",
       "desc": [
         "A Climber's Kit includes boot tips, gloves, pitons, and a harness. As a Utilize action, you can use the Climber's Kit to anchor yourself; when you do, you can't fall more than 25 feet from the anchor point, and you can't move more than 25 feet from there without undoing the anchor as a Bonus Action."
@@ -262,14 +262,6 @@
       ],
       "cost_gp": 15.0,
       "weight_lb": 3.0
-    },
-    "clothes_traveler_s": {
-      "name": "Clothes, Traveler's",
-      "desc": [
-        "Traveler's Clothes are resilient garments designed for travel in various environments."
-      ],
-      "cost_gp": 5.0,
-      "weight_lb": 4.0
     },
     "component_pouch": {
       "name": "Component Pouch",
@@ -301,7 +293,7 @@
       "cost_gp": 10.0,
       "weight_lb": 1.0
     },
-    "diplomat_s_pack": {
+    "diplomats_pack": {
       "name": "Diplomat's Pack",
       "desc": [
         "A Diplomat's Pack contains the following items: Chest, Fine Clothes, Ink, 5 Ink Pens, Lamp, 2 Map or Scroll Cases, 4 flasks of Oil, 5 sheets of Paper, 5 sheets of Parchment, Perfume, and Tinderbox."
@@ -371,7 +363,7 @@
         }
       ]
     },
-    "dungeoneer_s_pack": {
+    "dungeoneer_pack": {
       "name": "Dungeoneer's Pack",
       "desc": [
         "A Dungeoneer's Pack contains the following items: Backpack, Caltrops, Crowbar, 2 flasks of Oil, 10 days of Rations, Rope, Tinderbox, 10 Torches, and Waterskin."
@@ -454,7 +446,7 @@
       "cost_gp": 2.0,
       "weight_lb": 4.0
     },
-    "healer_s_kit": {
+    "healers_kit": {
       "name": "Healer's Kit",
       "desc": [
         "A Healer's Kit has ten uses. As a Utilize action, you can expend one of its uses to stabilize an Unconscious creature that has 0 Hit Points without needing to make a Wisdom (Medicine) check."
@@ -652,7 +644,7 @@
       ],
       "weight_lb": 1.0
     },
-    "priest_s_pack": {
+    "priest_pack": {
       "name": "Priest's Pack",
       "desc": [
         "A Priest's Pack contains the following items: Backpack, Blanket, Holy Water, Lamp, 7 days of Rations, Robe, and Tinderbox."
@@ -757,7 +749,7 @@
       ],
       "weight_lb": 1.0
     },
-    "scholar_s_pack": {
+    "scholar_pack": {
       "name": "Scholar's Pack",
       "desc": [
         "A Scholar's Pack contains the following items: Backpack, Blanket, Book, Ink, Ink Pen, Lamp, 10 flasks of Oil, 10 sheets of Parchment, and Tinderbox."
@@ -900,6 +892,14 @@
         "A Torch burns for 1 hour, casting Bright Light in a 20-foot radius and Dim Light for an additional 20 feet. When you take the Attack action, you can attack with the Torch, using it as a Simple Melee weapon. On a hit, the target takes 1 Fire damage."
       ],
       "weight_lb": 1.0
+    },
+    "travelers_clothes": {
+      "name": "Clothes, Traveler's",
+      "desc": [
+        "Traveler's Clothes are resilient garments designed for travel in various environments."
+      ],
+      "cost_gp": 5.0,
+      "weight_lb": 4.0
     },
     "vial": {
       "name": "Vial",

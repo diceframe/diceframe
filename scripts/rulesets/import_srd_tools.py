@@ -33,7 +33,8 @@ DETAIL_ROOT = "https://www.dnd5eapi.co"
 
 
 def _normalize(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    # 物品 id 的既有约定：撇号直接去掉（thieves_tools / calligraphers_supplies）。
+    return re.sub(r"[^a-z0-9]+", "_", name.replace("'", "").lower()).strip("_")
 
 
 def _open(proxy: str | None):
