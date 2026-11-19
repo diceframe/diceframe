@@ -227,17 +227,7 @@
     "wizard_subclass": "Wizard Subclass",
     "words_of_creation": "Words of Creation",
     "additional_fighting_style": "Additional Fighting Style",
-    "ranger": "Ranger",
-    "favored_enemy": "Favored Enemy",
-    "relentless_hunter": "Relentless Hunter",
-    "precise_hunter": "Precise Hunter",
-    "feral_senses": "Feral Senses",
-    "foe_slayer": "Foe Slayer",
-    "expertise": "Expertise",
-    "jack_of_all_trades": "Jack of All Trades",
-    "reliable_talent": "Reliable Talent",
-    "scholar": "Scholar",
-    "remarkable_athlete": "Remarkable Athlete"
+    "ranger": "Ranger"
   },
   "classes": {
     "monk": {
@@ -248,16 +238,26 @@
           "minimum_level": 1,
           "source_ref": "srd-5.2.1:p50:unarmored-defense",
           "summary": "While you aren't wearing armor or wielding a Shield, your base Armor Class equals 10 plus your Dexterity and Wisdom modifiers.",
-          "parameters": {"unarmored_ac_ability_bonus": "wis"},
-          "equipment_requirement": {"unarmored": true, "no_shield": true}
+          "parameters": {
+            "unarmored_ac_ability_bonus": "wis"
+          },
+          "equipment_requirement": {
+            "unarmored": true,
+            "no_shield": true
+          }
         },
         {
           "id": "unarmored_movement",
           "minimum_level": 2,
           "source_ref": "srd-5.2.1:p50:unarmored-movement",
           "summary": "Your Speed increases while you aren't wearing armor or wielding a Shield, as shown on the Monk Features table.",
-          "parameters": {"speed_bonus_track": "unarmored_movement"},
-          "equipment_requirement": {"unarmored": true, "no_shield": true}
+          "parameters": {
+            "speed_bonus_track": "unarmored_movement"
+          },
+          "equipment_requirement": {
+            "unarmored": true,
+            "no_shield": true
+          }
         },
         {
           "id": "martial_arts",
@@ -267,19 +267,32 @@
           "parameters": {
             "unarmed_damage_die_track": "martial_arts_die",
             "unarmed_damage_die_format": "1d{die}",
-            "unarmed_ability_choice": ["str", "dex"]
+            "unarmed_ability_choice": [
+              "str",
+              "dex"
+            ]
           },
           "equipment_requirement": {
             "unarmored": true,
             "no_shield": true,
-            "weapon_kinds": ["simple_melee", "martial_melee_light"]
+            "weapon_kinds": [
+              "simple_melee",
+              "martial_melee_light"
+            ]
           },
           "capabilities": [
             {
               "id": "bonus_unarmed_strike",
-              "cost": {"bonus_action": 1},
+              "cost": {
+                "bonus_action": 1
+              },
               "requires_hostile_target": true,
-              "actions": [{"kind": "unarmed_strike", "count": 1}]
+              "actions": [
+                {
+                  "kind": "unarmed_strike",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -310,9 +323,22 @@
           "capabilities": [
             {
               "id": "flurry_of_blows",
-              "cost": {"bonus_action": 1, "resources": [{"id": "focus_points", "amount": 1}]},
+              "cost": {
+                "bonus_action": 1,
+                "resources": [
+                  {
+                    "id": "focus_points",
+                    "amount": 1
+                  }
+                ]
+              },
               "requires_hostile_target": true,
-              "actions": [{"kind": "unarmed_strike", "count": 2}]
+              "actions": [
+                {
+                  "kind": "unarmed_strike",
+                  "count": 2
+                }
+              ]
             }
           ]
         },
@@ -325,13 +351,34 @@
           "capabilities": [
             {
               "id": "patient_defense",
-              "cost": {"bonus_action": 1},
-              "actions": [{"kind": "disengage"}]
+              "cost": {
+                "bonus_action": 1
+              },
+              "actions": [
+                {
+                  "kind": "disengage"
+                }
+              ]
             },
             {
               "id": "patient_defense_focus",
-              "cost": {"bonus_action": 1, "resources": [{"id": "focus_points", "amount": 1}]},
-              "actions": [{"kind": "disengage"}, {"kind": "dodge"}]
+              "cost": {
+                "bonus_action": 1,
+                "resources": [
+                  {
+                    "id": "focus_points",
+                    "amount": 1
+                  }
+                ]
+              },
+              "actions": [
+                {
+                  "kind": "disengage"
+                },
+                {
+                  "kind": "dodge"
+                }
+              ]
             }
           ]
         },
@@ -344,13 +391,34 @@
           "capabilities": [
             {
               "id": "step_of_the_wind",
-              "cost": {"bonus_action": 1},
-              "actions": [{"kind": "dash"}]
+              "cost": {
+                "bonus_action": 1
+              },
+              "actions": [
+                {
+                  "kind": "dash"
+                }
+              ]
             },
             {
               "id": "step_of_the_wind_focus",
-              "cost": {"bonus_action": 1, "resources": [{"id": "focus_points", "amount": 1}]},
-              "actions": [{"kind": "dash"}, {"kind": "disengage"}]
+              "cost": {
+                "bonus_action": 1,
+                "resources": [
+                  {
+                    "id": "focus_points",
+                    "amount": 1
+                  }
+                ]
+              },
+              "actions": [
+                {
+                  "kind": "dash"
+                },
+                {
+                  "kind": "disengage"
+                }
+              ]
             }
           ]
         },
@@ -359,7 +427,9 @@
           "minimum_level": 15,
           "source_ref": "srd-5.2.1:p51:perfect-focus",
           "summary": "When you roll Initiative and don't use Uncanny Metabolism, you regain expended Focus Points until you have 4 if you have 3 or fewer.",
-          "parameters": {"initiative_focus_floor": 4}
+          "parameters": {
+            "initiative_focus_floor": 4
+          }
         },
         {
           "id": "disciplined_survivor",
@@ -385,14 +455,29 @@
             "focus_cost": 3,
             "duration_minutes": 1,
             "duration_rounds": 10,
-            "resist_all_except": ["force"],
+            "resist_all_except": [
+              "force"
+            ],
             "ends_on_incapacitated": true
           },
           "capabilities": [
             {
               "id": "superior_defense",
-              "cost": {"turn_start": true, "resources": [{"id": "focus_points", "amount": 3}]},
-              "actions": [{"kind": "resistance_all", "count": 1}]
+              "cost": {
+                "turn_start": true,
+                "resources": [
+                  {
+                    "id": "focus_points",
+                    "amount": 3
+                  }
+                ]
+              },
+              "actions": [
+                {
+                  "kind": "resistance_all",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -402,9 +487,15 @@
           "source_ref": "srd-5.2.1:p52:self-restoration",
           "summary": "At the end of each of your turns, you can remove one of the following conditions from yourself: Charmed, Frightened, or Poisoned. In addition, forgoing food and drink doesn't give you levels of Exhaustion.",
           "parameters": {
-            "removable_conditions": ["charmed", "frightened", "poisoned"],
+            "removable_conditions": [
+              "charmed",
+              "frightened",
+              "poisoned"
+            ],
             "removable_at": "own_turn_end",
-            "exhaustion_sources_ignored": ["food_drink"]
+            "exhaustion_sources_ignored": [
+              "food_drink"
+            ]
           }
         },
         {
@@ -412,7 +503,9 @@
           "minimum_level": 7,
           "source_ref": "srd-5.2.1:p51:evasion",
           "summary": "When you're subjected to an effect that allows you to make a Dexterity saving throw to take only half damage, you instead take no damage on a success and half damage on a failure. You don't benefit from this feature while Incapacitated.",
-          "parameters": {"half_on_success_save": "dex"}
+          "parameters": {
+            "half_on_success_save": "dex"
+          }
         },
         {
           "id": "stunning_strike",
@@ -436,7 +529,9 @@
           "source_ref": "srd-5.2.1:p51:empowered-strikes",
           "summary": "Whenever you deal damage with your Unarmed Strike, it can deal your choice of Force damage or its normal damage type.",
           "parameters": {
-            "unarmed_damage_type_choices": ["force"]
+            "unarmed_damage_type_choices": [
+              "force"
+            ]
           }
         },
         {
@@ -446,7 +541,11 @@
           "source_ref": "srd-5.2.1:p52:open-hand-technique",
           "summary": "Whenever you hit a creature with an attack granted by your Flurry of Blows, you can impose one of the following on that target: Addle (no Opportunity Attacks until the start of its next turn), Push (Strength save or pushed up to 15 feet away), or Topple (Dexterity save or Prone).",
           "parameters": {
-            "flurry_hit_choices": ["addle", "push", "topple"],
+            "flurry_hit_choices": [
+              "addle",
+              "push",
+              "topple"
+            ],
             "addle_condition": "reaction_blocked",
             "push_distance_ft": 15,
             "push_save_ability": "str",
@@ -469,8 +568,21 @@
           "capabilities": [
             {
               "id": "wholeness_of_body",
-              "cost": {"bonus_action": 1, "resources": [{"id": "wholeness_of_body", "amount": 1}]},
-              "actions": [{"kind": "heal", "count": 1}]
+              "cost": {
+                "bonus_action": 1,
+                "resources": [
+                  {
+                    "id": "wholeness_of_body",
+                    "amount": 1
+                  }
+                ]
+              },
+              "actions": [
+                {
+                  "kind": "heal",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -500,15 +612,24 @@
             "target_range_ft": 5,
             "pool_per_level": 5,
             "condition_cost": 5,
-            "removable_conditions": ["poisoned"]
+            "removable_conditions": [
+              "poisoned"
+            ]
           },
           "capabilities": [
             {
               "id": "lay_on_hands",
               "target_kind": "creature",
               "pool_resource_id": "lay_on_hands",
-              "cost": {"bonus_action": 1},
-              "actions": [{"kind": "lay_on_hands", "count": 1}]
+              "cost": {
+                "bonus_action": 1
+              },
+              "actions": [
+                {
+                  "kind": "lay_on_hands",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -519,18 +640,31 @@
           "source_ref": "srd-5.2.1:p55:channel-divinity",
           "summary": "You can use this class's Channel Divinity twice. You regain one of its expended uses when you finish a Short Rest, and you regain all expended uses when you finish a Long Rest. Divine Sense is a Bonus Action of this class.",
           "parameters": {
-            "channel_effects": ["divine_sense"],
+            "channel_effects": [
+              "divine_sense"
+            ],
             "sense_range_ft": 60,
             "sense_duration_minutes": 10,
-            "sense_creature_types": ["celestial", "fiend", "undead"],
+            "sense_creature_types": [
+              "celestial",
+              "fiend",
+              "undead"
+            ],
             "ends_on_incapacitated": true
           },
           "capabilities": [
             {
               "id": "divine_sense",
               "target_kind": "none",
-              "cost": {"bonus_action": 1},
-              "actions": [{"kind": "divine_sense", "count": 1}]
+              "cost": {
+                "bonus_action": 1
+              },
+              "actions": [
+                {
+                  "kind": "divine_sense",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -542,7 +676,12 @@
           "parameters": {
             "condition_cost": 5,
             "removable_conditions": [
-              "blinded", "charmed", "deafened", "frightened", "paralyzed", "stunned"
+              "blinded",
+              "charmed",
+              "deafened",
+              "frightened",
+              "paralyzed",
+              "stunned"
             ]
           }
         },
@@ -578,7 +717,10 @@
             "weapon_attack_bonus_ability": "cha",
             "weapon_attack_bonus_minimum": 1,
             "weapon_binding_minutes": 10,
-            "weapon_damage_type_choices": ["normal", "radiant"],
+            "weapon_damage_type_choices": [
+              "normal",
+              "radiant"
+            ],
             "bright_light_radius": 20,
             "dim_light_beyond": 20,
             "light_automation": "guided"
@@ -613,7 +755,9 @@
           "summary": "You and allies in your Aura of Protection have Immunity to Charmed; an existing Charmed condition has no effect while there.",
           "parameters": {
             "aura_source_feature_id": "aura_of_protection",
-            "aura_condition_immunities": ["charmed"]
+            "aura_condition_immunities": [
+              "charmed"
+            ]
           }
         },
         {
@@ -624,7 +768,9 @@
           "summary": "You and your allies have Immunity to the Frightened condition while in your Aura of Protection. If a Frightened ally enters the aura, that condition has no effect on that ally while there.",
           "parameters": {
             "aura_source_feature_id": "aura_of_protection",
-            "aura_condition_immunities": ["frightened"]
+            "aura_condition_immunities": [
+              "frightened"
+            ]
           }
         },
         {
@@ -652,7 +798,11 @@
             "save_ability": "wis",
             "condition": "frightened",
             "condition_minutes": 1,
-            "turn_choice_limit": ["move", "action", "bonus_action"],
+            "turn_choice_limit": [
+              "move",
+              "action",
+              "bonus_action"
+            ],
             "ends_on_damage": true
           },
           "capabilities": [
@@ -661,9 +811,19 @@
               "target_kind": "creature",
               "cost": {
                 "action": 1,
-                "resources": [{"id": "channel_divinity", "amount": 1}]
+                "resources": [
+                  {
+                    "id": "channel_divinity",
+                    "amount": 1
+                  }
+                ]
               },
-              "actions": [{"kind": "abjure_foes", "count": 1}]
+              "actions": [
+                {
+                  "kind": "abjure_foes",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -689,7 +849,10 @@
           "parameters": {
             "extra_damage": "1d8",
             "extra_damage_type": "radiant",
-            "attack_kinds": ["melee_weapon", "unarmed_strike"]
+            "attack_kinds": [
+              "melee_weapon",
+              "unarmed_strike"
+            ]
           }
         }
       ]
@@ -710,9 +873,22 @@
           "capabilities": [
             {
               "id": "second_wind",
-              "cost": {"bonus_action": 1, "resources": [{"id": "second_wind", "amount": 1}]},
+              "cost": {
+                "bonus_action": 1,
+                "resources": [
+                  {
+                    "id": "second_wind",
+                    "amount": 1
+                  }
+                ]
+              },
               "requires_hostile_target": false,
-              "actions": [{"kind": "heal", "count": 1}]
+              "actions": [
+                {
+                  "kind": "heal",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -732,10 +908,22 @@
           "capabilities": [
             {
               "id": "action_surge",
-              "cost": {"resources": [{"id": "action_surge", "amount": 1}]},
+              "cost": {
+                "resources": [
+                  {
+                    "id": "action_surge",
+                    "amount": 1
+                  }
+                ]
+              },
               "requires_hostile_target": false,
               "once_per_turn": true,
-              "actions": [{"kind": "action_surge", "count": 1}]
+              "actions": [
+                {
+                  "kind": "action_surge",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -755,7 +943,9 @@
           "id": "extra_attack",
           "minimum_level": 5,
           "summary": "When you take the Attack action, you can attack twice instead of once. Extra Attack never stacks: a character that gains it from a second class uses the highest value, not the sum.",
-          "parameters": {"attacks_per_action": 2}
+          "parameters": {
+            "attacks_per_action": 2
+          }
         },
         {
           "id": "improved_critical",
@@ -763,7 +953,9 @@
           "minimum_level": 3,
           "source_ref": "srd-5.2.1:p49:improved-critical",
           "summary": "Your attack rolls with weapons and Unarmed Strikes can score a Critical Hit on a roll of 19 or 20 on the d20.",
-          "parameters": {"crit_threshold": 19}
+          "parameters": {
+            "crit_threshold": 19
+          }
         },
         {
           "id": "remarkable_athlete",
@@ -773,7 +965,9 @@
           "summary": "You have Advantage on Initiative rolls and Strength (Athletics) checks. In addition, immediately after you score a Critical Hit, you can move up to half your Speed without provoking Opportunity Attacks.",
           "parameters": {
             "initiative_advantage": true,
-            "skill_advantage_refs": ["skill:athletics"],
+            "skill_advantage_refs": [
+              "skill:athletics"
+            ],
             "critical_hit_move_speed_divisor": 2
           }
         },
@@ -788,7 +982,10 @@
             "kind": "advancement_feat",
             "category": "fighting_style",
             "count": 1,
-            "enabled_options": ["feat:archery", "feat:defense"]
+            "enabled_options": [
+              "feat:archery",
+              "feat:defense"
+            ]
           }
         },
         {
@@ -797,13 +994,17 @@
           "minimum_level": 10,
           "source_ref": "srd-5.2.1:p49:heroic-warrior",
           "summary": "During combat, you can give yourself Heroic Inspiration whenever you start your turn without it.",
-          "parameters": {"turn_start_heroic_inspiration": true}
+          "parameters": {
+            "turn_start_heroic_inspiration": true
+          }
         },
         {
           "id": "two_extra_attacks",
           "minimum_level": 11,
           "summary": "When you take the Attack action, you can attack three times instead of once.",
-          "parameters": {"attacks_per_action": 3}
+          "parameters": {
+            "attacks_per_action": 3
+          }
         },
         {
           "id": "superior_critical",
@@ -811,7 +1012,9 @@
           "minimum_level": 15,
           "source_ref": "srd-5.2.1:p49:superior-critical",
           "summary": "Your attack rolls with weapons and Unarmed Strikes can now score a Critical Hit on a roll of 18-20 on the d20.",
-          "parameters": {"crit_threshold": 18}
+          "parameters": {
+            "crit_threshold": 18
+          }
         },
         {
           "id": "survivor",
@@ -842,7 +1045,9 @@
           "id": "three_extra_attacks",
           "minimum_level": 20,
           "summary": "When you take the Attack action, you can attack four times instead of once.",
-          "parameters": {"attacks_per_action": 4}
+          "parameters": {
+            "attacks_per_action": 4
+          }
         },
         {
           "id": "studied_attacks",
@@ -865,30 +1070,44 @@
           "minimum_level": 1,
           "source_ref": "srd-5.2.1:p29:unarmored-defense",
           "summary": "While you aren't wearing armor, your base Armor Class equals 10 plus your Dexterity and Constitution modifiers. You can use a Shield and still gain this benefit.",
-          "parameters": {"unarmored_ac_ability_bonus": "con"},
-          "equipment_requirement": {"unarmored": true}
+          "parameters": {
+            "unarmored_ac_ability_bonus": "con"
+          },
+          "equipment_requirement": {
+            "unarmored": true
+          }
         },
         {
           "id": "fast_movement",
           "minimum_level": 5,
           "source_ref": "srd-5.2.1:p29:fast-movement",
           "summary": "Your Speed increases by 10 feet while you aren't wearing Heavy armor. A Shield does not interfere.",
-          "parameters": {"speed_bonus_ft": 10},
-          "equipment_requirement": {"no_heavy_armor": true}
+          "parameters": {
+            "speed_bonus_ft": 10
+          },
+          "equipment_requirement": {
+            "no_heavy_armor": true
+          }
         },
         {
           "id": "danger_sense",
           "minimum_level": 2,
           "source_ref": "srd-5.2.1:p29:danger-sense",
           "summary": "You have Advantage on Dexterity saving throws unless you have the Incapacitated condition.",
-          "parameters": {"save_advantage_abilities": ["dex"]}
+          "parameters": {
+            "save_advantage_abilities": [
+              "dex"
+            ]
+          }
         },
         {
           "id": "feral_instinct",
           "minimum_level": 7,
           "source_ref": "srd-5.2.1:p29:feral-instinct",
           "summary": "You have Advantage on Initiative rolls.",
-          "parameters": {"initiative_advantage": true}
+          "parameters": {
+            "initiative_advantage": true
+          }
         },
         {
           "id": "rage",
@@ -902,17 +1121,37 @@
           "capabilities": [
             {
               "id": "rage",
-              "cost": {"bonus_action": 1, "resources": [{"id": "rages", "amount": 1}]},
+              "cost": {
+                "bonus_action": 1,
+                "resources": [
+                  {
+                    "id": "rages",
+                    "amount": 1
+                  }
+                ]
+              },
               "requires_hostile_target": false,
               "forbidden_condition": "rage",
-              "actions": [{"kind": "rage", "count": 1}]
+              "actions": [
+                {
+                  "kind": "rage",
+                  "count": 1
+                }
+              ]
             },
             {
               "id": "rage_sustain",
-              "cost": {"bonus_action": 1},
+              "cost": {
+                "bonus_action": 1
+              },
               "requires_hostile_target": false,
               "requires_condition": "rage",
-              "actions": [{"kind": "rage_sustain", "count": 1}]
+              "actions": [
+                {
+                  "kind": "rage_sustain",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -923,10 +1162,16 @@
           "source_ref": "srd-5.2.1:p30:mindless-rage",
           "summary": "You have Immunity to the Charmed and Frightened conditions while your Rage is active. If you are Charmed or Frightened when you enter your Rage, the condition ends on you.",
           "parameters": {
-            "immune_conditions": ["charmed", "frightened"],
+            "immune_conditions": [
+              "charmed",
+              "frightened"
+            ],
             "immune_while_condition": "rage",
             "removes_conditions_on_gaining_condition": "rage",
-            "removes_conditions_on_gaining": ["charmed", "frightened"]
+            "removes_conditions_on_gaining": [
+              "charmed",
+              "frightened"
+            ]
           }
         },
         {
@@ -935,7 +1180,9 @@
           "minimum_level": 10,
           "source_ref": "srd-5.2.1:p30:retaliation",
           "summary": "When a creature within 5 feet of you deals damage to you, you can use your Reaction to make one melee attack against it using a weapon or an Unarmed Strike.",
-          "parameters": {"counterattack_range": 5}
+          "parameters": {
+            "counterattack_range": 5
+          }
         },
         {
           "id": "relentless_rage",
@@ -999,7 +1246,10 @@
             "damage_dice": "1d10",
             "damage_dice_upgrade": "2d10",
             "upgrade_level": 17,
-            "effect_options": ["forceful", "hamstring"],
+            "effect_options": [
+              "forceful",
+              "hamstring"
+            ],
             "effects_per_use": 1,
             "effects_per_use_upgrade": 2,
             "once_per_turn": true,
@@ -1016,7 +1266,10 @@
           "source_ref": "srd-5.2.1:p30:improved-brutal-strike",
           "summary": "Staggering Blow: the target has Disadvantage on the next saving throw it makes, and it can't make Opportunity Attacks until the start of your next turn. Sundering Blow: before the start of your next turn, the next attack roll made by another creature against the target gains a +5 bonus to the roll.",
           "parameters": {
-            "additional_effect_options": ["staggering", "sundering"],
+            "additional_effect_options": [
+              "staggering",
+              "sundering"
+            ],
             "staggering_save_condition": "next_save_disadvantage",
             "staggering_reaction_condition": "opportunity_attack_blocked",
             "staggering_duration": "attacker_next_turn_start",
@@ -1081,12 +1334,42 @@
           "source_ref": "srd-5.2.1:p63:cunning-action",
           "summary": "You can take the Dash, Disengage, or Hide action as a Bonus Action.",
           "capabilities": [
-            {"id": "cunning_dash", "cost": {"bonus_action": 1},
-             "requires_hostile_target": false, "actions": [{"kind": "dash"}]},
-            {"id": "cunning_disengage", "cost": {"bonus_action": 1},
-             "requires_hostile_target": false, "actions": [{"kind": "disengage"}]},
-            {"id": "cunning_hide", "cost": {"bonus_action": 1},
-             "requires_hostile_target": false, "actions": [{"kind": "hide"}]}
+            {
+              "id": "cunning_dash",
+              "cost": {
+                "bonus_action": 1
+              },
+              "requires_hostile_target": false,
+              "actions": [
+                {
+                  "kind": "dash"
+                }
+              ]
+            },
+            {
+              "id": "cunning_disengage",
+              "cost": {
+                "bonus_action": 1
+              },
+              "requires_hostile_target": false,
+              "actions": [
+                {
+                  "kind": "disengage"
+                }
+              ]
+            },
+            {
+              "id": "cunning_hide",
+              "cost": {
+                "bonus_action": 1
+              },
+              "requires_hostile_target": false,
+              "actions": [
+                {
+                  "kind": "hide"
+                }
+              ]
+            }
           ]
         },
         {
@@ -1122,7 +1405,9 @@
           "minimum_level": 7,
           "source_ref": "srd-5.2.1:p63:evasion",
           "summary": "When you're subjected to an effect that allows you to make a Dexterity saving throw to take only half damage, you instead take no damage on a success and half damage on a failure. You can't use this feature while Incapacitated.",
-          "parameters": {"half_on_success_save": "dex"}
+          "parameters": {
+            "half_on_success_save": "dex"
+          }
         },
         {
           "id": "reliable_talent",
@@ -1139,7 +1424,9 @@
           "minimum_level": 17,
           "source_ref": "srd-5.2.1:p64:thiefs-reflexes",
           "summary": "You can take two turns during the first round of any combat: your first turn at your normal Initiative and your second turn at your Initiative minus 10.",
-          "parameters": {"first_round_extra_turn_offset": 10}
+          "parameters": {
+            "first_round_extra_turn_offset": 10
+          }
         },
         {
           "id": "stroke_of_luck",
@@ -1158,7 +1445,10 @@
           "source_ref": "srd-5.2.1:p63:slippery-mind",
           "summary": "You gain proficiency in Wisdom and Charisma saving throws.",
           "parameters": {
-            "saving_throw_proficiencies": ["wis", "cha"]
+            "saving_throw_proficiencies": [
+              "wis",
+              "cha"
+            ]
           }
         }
       ]
@@ -1171,7 +1461,9 @@
           "minimum_level": 1,
           "source_ref": "srd-5.2.1:p58:favored-enemy",
           "summary": "You always have the Hunter's Mark spell prepared. You can cast it twice without expending a spell slot, and you regain all expended uses of this ability when you finish a Long Rest. The number of free casts increases at certain Ranger levels.",
-          "parameters": {"granted_spell_id": "hunter_s_mark"},
+          "parameters": {
+            "granted_spell_id": "hunter_s_mark"
+          },
           "resource_id": "favored_enemy"
         },
         {
@@ -1204,8 +1496,21 @@
           "capabilities": [
             {
               "id": "tireless",
-              "cost": {"action": 1, "resources": [{"id": "tireless", "amount": 1}]},
-              "actions": [{"kind": "temp_hp", "count": 1}]
+              "cost": {
+                "action": 1,
+                "resources": [
+                  {
+                    "id": "tireless",
+                    "amount": 1
+                  }
+                ]
+              },
+              "actions": [
+                {
+                  "kind": "temp_hp",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -1219,14 +1524,18 @@
             "climb_speed_from_speed": true,
             "swim_speed_from_speed": true
           },
-          "equipment_requirement": {"no_heavy_armor": true}
+          "equipment_requirement": {
+            "no_heavy_armor": true
+          }
         },
         {
           "id": "relentless_hunter",
           "minimum_level": 13,
           "source_ref": "srd-5.2.1:p59:relentless-hunter",
           "summary": "Taking damage can't break your Concentration on Hunter's Mark.",
-          "parameters": {"concentration_damage_exempt_spell_id": "hunter_s_mark"}
+          "parameters": {
+            "concentration_damage_exempt_spell_id": "hunter_s_mark"
+          }
         },
         {
           "id": "natures_veil",
@@ -1242,8 +1551,21 @@
           "capabilities": [
             {
               "id": "natures_veil",
-              "cost": {"bonus_action": 1, "resources": [{"id": "natures_veil", "amount": 1}]},
-              "actions": [{"kind": "invisible", "count": 1}]
+              "cost": {
+                "bonus_action": 1,
+                "resources": [
+                  {
+                    "id": "natures_veil",
+                    "amount": 1
+                  }
+                ]
+              },
+              "actions": [
+                {
+                  "kind": "invisible",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -1252,21 +1574,141 @@
           "minimum_level": 17,
           "source_ref": "srd-5.2.1:p59:precise-hunter",
           "summary": "You have Advantage on attack rolls against the creature currently marked by your Hunter's Mark.",
-          "parameters": {"marked_target_attack_advantage": true}
+          "parameters": {
+            "marked_target_attack_advantage": true
+          }
         },
         {
           "id": "feral_senses",
           "minimum_level": 18,
           "source_ref": "srd-5.2.1:p59:feral-senses",
           "summary": "Your connection to the forces of nature grants you Blindsight with a range of 30 feet.",
-          "parameters": {"blindsight_range_ft": 30}
+          "parameters": {
+            "blindsight_range_ft": 30
+          }
         },
         {
           "id": "foe_slayer",
           "minimum_level": 20,
           "source_ref": "srd-5.2.1:p59:foe-slayer",
           "summary": "The damage die of your Hunter's Mark is a d10 rather than a d6.",
-          "parameters": {"mark_damage_die": 10}
+          "parameters": {
+            "mark_damage_die": 10
+          }
+        },
+        {
+          "id": "hunters_lore",
+          "owner": "subclass:hunter",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p61:hunters-lore",
+          "summary": "While a creature is marked by your Hunter's Mark, you know whether that creature has any Immunities, Resistances, or Vulnerabilities, and if the creature has any, you know what they are.",
+          "parameters": {
+            "reveals": "statblock_defences"
+          }
+        },
+        {
+          "id": "hunters_prey",
+          "owner": "subclass:hunter",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p61:hunters-prey",
+          "summary": "You gain one of the following feature options of your choice. Whenever you finish a Short or Long Rest, you can replace the chosen option with the other one.",
+          "choice": {
+            "id": "hunters_prey_option",
+            "kind": "feature_option",
+            "category": "feature",
+            "count": 1,
+            "enabled_options": [
+              "feature:colossus_slayer",
+              "feature:horde_breaker"
+            ]
+          }
+        },
+        {
+          "id": "colossus_slayer",
+          "option_of": "hunters_prey",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p61:colossus-slayer",
+          "summary": "When you hit a creature with a weapon, the weapon deals an extra 1d8 damage to the target if it's missing any of its Hit Points. You can deal this extra damage only once per turn.",
+          "parameters": {
+            "bonus_damage": "1d8",
+            "once_per_turn": true,
+            "requires_damaged_target": true
+          },
+          "owner": "subclass:hunter"
+        },
+        {
+          "id": "horde_breaker",
+          "option_of": "hunters_prey",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p61:horde-breaker",
+          "summary": "Once on each of your turns when you make an attack with a weapon, you can make another attack with the same weapon against a different creature that is within 5 feet of the original target, that is within the weapon's range, and that you haven't attacked this turn.",
+          "parameters": {
+            "extra_attacks": 1,
+            "target_within_of_original_ft": 5,
+            "once_per_turn": true
+          },
+          "owner": "subclass:hunter"
+        },
+        {
+          "id": "defensive_tactics",
+          "owner": "subclass:hunter",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p61:defensive-tactics",
+          "summary": "You gain one of the following feature options of your choice. Whenever you finish a Short or Long Rest, you can replace the chosen option with the other one.",
+          "choice": {
+            "id": "defensive_tactics_option",
+            "kind": "feature_option",
+            "category": "feature",
+            "count": 1,
+            "enabled_options": [
+              "feature:escape_the_horde",
+              "feature:multiattack_defense"
+            ]
+          }
+        },
+        {
+          "id": "escape_the_horde",
+          "option_of": "defensive_tactics",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p61:escape-the-horde",
+          "summary": "Opportunity Attacks have Disadvantage against you.",
+          "parameters": {
+            "opportunity_attack_disadvantage": true
+          },
+          "owner": "subclass:hunter"
+        },
+        {
+          "id": "multiattack_defense",
+          "option_of": "defensive_tactics",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p61:multiattack-defense",
+          "summary": "When a creature hits you with an attack roll, that creature has Disadvantage on all other attack rolls against you this turn.",
+          "parameters": {
+            "subsequent_attacks_disadvantage": true
+          },
+          "owner": "subclass:hunter"
+        },
+        {
+          "id": "superior_hunters_prey",
+          "owner": "subclass:hunter",
+          "minimum_level": 11,
+          "source_ref": "srd-5.2.1:p61:superior-hunters-prey",
+          "summary": "Once per turn when you deal damage to a creature marked by your Hunter's Mark, you can also deal that spell's extra damage to a different creature that you can see within 30 feet of the first creature.",
+          "parameters": {
+            "second_target_range_ft": 30,
+            "once_per_turn": true
+          }
+        },
+        {
+          "id": "superior_hunters_defense",
+          "owner": "subclass:hunter",
+          "minimum_level": 15,
+          "source_ref": "srd-5.2.1:p61:superior-hunters-defense",
+          "summary": "When you take damage, you can take a Reaction to give yourself Resistance to that damage and any other damage of the same type until the end of the current turn.",
+          "parameters": {
+            "cost": "reaction",
+            "grants": "damage_resistance"
+          }
         }
       ]
     },
@@ -1287,9 +1729,22 @@
           "capabilities": [
             {
               "id": "bardic_inspiration",
-              "cost": {"bonus_action": 1, "resources": [{"id": "bardic_inspiration", "amount": 1}]},
+              "cost": {
+                "bonus_action": 1,
+                "resources": [
+                  {
+                    "id": "bardic_inspiration",
+                    "amount": 1
+                  }
+                ]
+              },
               "requires_hostile_target": false,
-              "actions": [{"kind": "bardic_grant", "count": 1}]
+              "actions": [
+                {
+                  "kind": "bardic_grant",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -1306,7 +1761,12 @@
               "id": "font_slot_exchange",
               "cost": {},
               "requires_hostile_target": false,
-              "actions": [{"kind": "inspiration_slot_exchange", "count": 1}]
+              "actions": [
+                {
+                  "kind": "inspiration_slot_exchange",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -1356,7 +1816,11 @@
           "parameters": {
             "spell_choice_count": 2,
             "spell_choice_replacement": 1,
-            "spell_choice_lists": ["class:cleric", "class:druid", "class:wizard"]
+            "spell_choice_lists": [
+              "class:cleric",
+              "class:druid",
+              "class:wizard"
+            ]
           }
         },
         {
@@ -1366,7 +1830,10 @@
           "summary": "Whenever you reach a Bard level and the Prepared Spells number increases, you can choose any of your new prepared spells from the Bard, Cleric, Druid, and Wizard lists; those spells count as Bard spells. Whenever you replace a prepared spell, it can come from those lists too. This never changes how many spells you can prepare.",
           "parameters": {
             "prepared_list_expansion": [
-              "class:bard", "class:cleric", "class:druid", "class:wizard"
+              "class:bard",
+              "class:cleric",
+              "class:druid",
+              "class:wizard"
             ]
           }
         },
@@ -1401,7 +1868,10 @@
             "trigger": "save_failure",
             "reroll": true,
             "reroll_mode": "advantage",
-            "applies_conditions": ["charmed", "frightened"]
+            "applies_conditions": [
+              "charmed",
+              "frightened"
+            ]
           }
         }
       ]
@@ -1417,11 +1887,31 @@
           "summary": "You can expend a spell slot to gain Sorcery Points equal to its level (no action required), or spend Sorcery Points as a Bonus Action to create one temporary spell slot of level 1 to 5. A created slot vanishes when you finish a Long Rest.",
           "parameters": {
             "created_slot_costs": [
-              [1, 2, 2],
-              [2, 3, 3],
-              [3, 5, 5],
-              [4, 6, 7],
-              [5, 7, 9]
+              [
+                1,
+                2,
+                2
+              ],
+              [
+                2,
+                3,
+                3
+              ],
+              [
+                3,
+                5,
+                5
+              ],
+              [
+                4,
+                6,
+                7
+              ],
+              [
+                5,
+                7,
+                9
+              ]
             ]
           },
           "capabilities": [
@@ -1429,13 +1919,25 @@
               "id": "font_slot_to_points",
               "cost": {},
               "requires_hostile_target": false,
-              "actions": [{"kind": "font_slot_to_points", "count": 1}]
+              "actions": [
+                {
+                  "kind": "font_slot_to_points",
+                  "count": 1
+                }
+              ]
             },
             {
               "id": "font_create_slot",
-              "cost": {"bonus_action": 1},
+              "cost": {
+                "bonus_action": 1
+              },
               "requires_hostile_target": false,
-              "actions": [{"kind": "font_create_slot", "count": 1}]
+              "actions": [
+                {
+                  "kind": "font_create_slot",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -1536,7 +2038,11 @@
           "minimum_level": 10,
           "source_ref": "srd-5.2.1:p76:fiendish-resilience",
           "summary": "Choose one damage type other than Force whenever you finish a Short or Long Rest. You have Resistance to that damage type until you choose a different one with this feature.",
-          "parameters": {"excluded_damage_types": ["force"]}
+          "parameters": {
+            "excluded_damage_types": [
+              "force"
+            ]
+          }
         },
         {
           "id": "magical_cunning",
@@ -1653,20 +2159,39 @@
           "source_ref": "srd-5.2.1:p37:channel-divinity",
           "summary": "You can use this class's Channel Divinity twice. Each time you use it, choose which Channel Divinity effect to create: Divine Spark or Turn Undead. You regain one expended use when you finish a Short Rest, and all expended uses when you finish a Long Rest.",
           "parameters": {
-            "channel_effects": ["divine_spark", "turn_undead"],
+            "channel_effects": [
+              "divine_spark",
+              "turn_undead"
+            ],
             "spark_target_range_ft": 30,
             "spark_die": "d8",
-            "spark_tier_levels": [1, 7, 13, 18],
-            "spark_tier_counts": [1, 2, 3, 4],
+            "spark_tier_levels": [
+              1,
+              7,
+              13,
+              18
+            ],
+            "spark_tier_counts": [
+              1,
+              2,
+              3,
+              4
+            ],
             "spark_ability": "wis",
             "spark_minimum": 1,
-            "spark_damage_types": ["necrotic", "radiant"],
+            "spark_damage_types": [
+              "necrotic",
+              "radiant"
+            ],
             "spark_save_ability": "con",
             "turn_target_range_ft": 30,
             "turn_save_ability": "wis",
             "turn_duration": "turn_undead",
             "turn_turns": 10,
-            "turn_conditions": ["frightened", "incapacitated"],
+            "turn_conditions": [
+              "frightened",
+              "incapacitated"
+            ],
             "turn_ends_on_damage": true
           },
           "capabilities": [
@@ -1675,18 +2200,38 @@
               "target_kind": "creature",
               "cost": {
                 "action": 1,
-                "resources": [{"id": "channel_divinity", "amount": 1}]
+                "resources": [
+                  {
+                    "id": "channel_divinity",
+                    "amount": 1
+                  }
+                ]
               },
-              "actions": [{"kind": "divine_spark", "count": 1}]
+              "actions": [
+                {
+                  "kind": "divine_spark",
+                  "count": 1
+                }
+              ]
             },
             {
               "id": "turn_undead",
               "target_kind": "undead",
               "cost": {
                 "action": 1,
-                "resources": [{"id": "channel_divinity", "amount": 1}]
+                "resources": [
+                  {
+                    "id": "channel_divinity",
+                    "amount": 1
+                  }
+                ]
               },
-              "actions": [{"kind": "turn_undead", "count": 1}]
+              "actions": [
+                {
+                  "kind": "turn_undead",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -1723,9 +2268,19 @@
               "target_kind": "bloodied_creature",
               "cost": {
                 "action": 1,
-                "resources": [{"id": "channel_divinity", "amount": 1}]
+                "resources": [
+                  {
+                    "id": "channel_divinity",
+                    "amount": 1
+                  }
+                ]
               },
-              "actions": [{"kind": "preserve_life", "count": 1}]
+              "actions": [
+                {
+                  "kind": "preserve_life",
+                  "count": 1
+                }
+              ]
             }
           ]
         },
@@ -1790,7 +2345,10 @@
             "kind": "feature_option",
             "category": "feature",
             "count": 1,
-            "enabled_options": ["feature:divine_strike", "feature:potent_spellcasting"]
+            "enabled_options": [
+              "feature:divine_strike",
+              "feature:potent_spellcasting"
+            ]
           }
         },
         {
@@ -1801,9 +2359,14 @@
           "summary": "Once on each of your turns when you hit a creature with an attack roll using a weapon, you can cause the target to take an extra 1d8 Necrotic or Radiant damage (your choice).",
           "parameters": {
             "damage_dice": "1d8",
-            "damage_types": ["necrotic", "radiant"],
+            "damage_types": [
+              "necrotic",
+              "radiant"
+            ],
             "once_per_turn": true,
-            "attack_kinds": ["weapon"]
+            "attack_kinds": [
+              "weapon"
+            ]
           }
         },
         {
@@ -1849,7 +2412,12 @@
           "source_ref": "srd-5.2.1:p46:circle-of-the-land-spells",
           "summary": "Whenever you finish a Long Rest, choose one type of land: arid, polar, temperate, or tropical; you have the spells listed for your Druid level and lower prepared. The choice replaces the previous land's list rather than adding to it.",
           "parameters": {
-            "terrain_options": ["arid", "polar", "temperate", "tropical"],
+            "terrain_options": [
+              "arid",
+              "polar",
+              "temperate",
+              "tropical"
+            ],
             "always_prepared_terrain": [
               "arid:3:spell:blur",
               "arid:3:spell:burning_hands",
@@ -1888,7 +2456,10 @@
             "kind": "feature_option",
             "category": "feature",
             "count": 1,
-            "enabled_options": ["feature:potent_spellcasting", "feature:primal_strike"]
+            "enabled_options": [
+              "feature:potent_spellcasting",
+              "feature:primal_strike"
+            ]
           }
         },
         {
@@ -1911,9 +2482,17 @@
           "summary": "Once on each of your turns when you hit a creature with an attack roll using a weapon or a Beast form's attack in Wild Shape, you can cause the target to take an extra 1d8 Cold, Fire, Lightning, or Thunder damage (your choice).",
           "parameters": {
             "damage_dice": "1d8",
-            "damage_types": ["cold", "fire", "lightning", "thunder"],
+            "damage_types": [
+              "cold",
+              "fire",
+              "lightning",
+              "thunder"
+            ],
             "once_per_turn": true,
-            "attack_kinds": ["weapon", "beast_form"]
+            "attack_kinds": [
+              "weapon",
+              "beast_form"
+            ]
           }
         },
         {

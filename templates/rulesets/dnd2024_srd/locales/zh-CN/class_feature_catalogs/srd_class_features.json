@@ -121,7 +121,7 @@
       "fighter_subclass": "战士子职",
       "fighting_style": "战斗风格",
       "fleet_step": "迅捷步",
-      "foe_slayer": "屠戮者",
+      "foe_slayer": "宿敌克星",
       "font_of_inspiration": "激励源泉",
       "font_slot_to_points": "法术位换术法点",
       "font_create_slot": "创造法术位",
@@ -172,7 +172,7 @@
       "perfect_focus": "完美专注",
       "persistent_rage": "持久狂怒",
       "potent_cantrip": "强力戏法",
-      "precise_hunter": "精准猎人",
+      "precise_hunter": "精准追猎者",
       "preserve_life": "维护生命",
       "primal_champion": "原初冠军",
       "primal_knowledge": "原初知识",
@@ -181,7 +181,7 @@
       "radiant_strikes": "光耀打击",
       "ranger_subclass": "游侠子职",
       "reckless_attack": "鲁莽攻击",
-      "relentless_hunter": "无情猎手",
+      "relentless_hunter": "不懈追猎者",
       "relentless_rage": "无情狂怒",
       "reliable_talent": "可靠天赋",
       "remarkable_athlete": "卓越运动员",
@@ -232,11 +232,10 @@
       "wizard_subclass": "法师子职",
       "words_of_creation": "创世之言",
       "ranger": "游侠",
-      "favored_enemy": "宿敌",
-      "relentless_hunter": "不懈追猎者",
-      "precise_hunter": "精准追猎者",
-      "feral_senses": "野性感知",
-      "foe_slayer": "宿敌克星"
+      "colossus_slayer": "巨兽杀手",
+      "horde_breaker": "破阵者",
+      "escape_the_horde": "脱离兽群",
+      "multiattack_defense": "多重攻击防御"
     }
   }
 }

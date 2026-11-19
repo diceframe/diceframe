@@ -232,16 +232,10 @@
       "wizard_subclass": "Wizard Subclass",
       "words_of_creation": "Words of Creation",
       "ranger": "Ranger",
-      "favored_enemy": "Favored Enemy",
-      "relentless_hunter": "Relentless Hunter",
-      "precise_hunter": "Precise Hunter",
-      "feral_senses": "Feral Senses",
-      "foe_slayer": "Foe Slayer",
-      "expertise": "Expertise",
-      "jack_of_all_trades": "Jack of All Trades",
-      "reliable_talent": "Reliable Talent",
-      "scholar": "Scholar",
-      "remarkable_athlete": "Remarkable Athlete"
+      "colossus_slayer": "Colossus Slayer",
+      "horde_breaker": "Horde Breaker",
+      "escape_the_horde": "Escape the Horde",
+      "multiattack_defense": "Multiattack Defense"
     }
   }
 }
