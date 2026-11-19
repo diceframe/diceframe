@@ -61,7 +61,15 @@ async def v2_static_file(request: web.Request) -> web.FileResponse:
     path = (static_dir / filename).resolve()
     if static_dir.resolve() not in path.parents:
         raise web.HTTPForbidden(text="invalid static path")
-    return web.FileResponse(path, headers={"Content-Type": _guess_content_type(path), "Cache-Control": "no-cache"})
+    # Vite 构建产物按内容哈希命名（assets/Name-Hash.js）：同一哈希永远对应
+    # 同一内容，升级后 index.html（no-cache）引用的是新哈希，旧缓存条目自然
+    # 作废。对它们发 immutable 长缓存，启动时不再逐 chunk 回源重验证——
+    # 此前全部 no-cache，更新重启窗口里任何一次重验证失败就会渲染出无样式
+    # 页面，且要手动重启才恢复（用户实测复现）。根级非哈希文件仍走 no-cache。
+    assets_dir = (static_dir / "assets").resolve()
+    cache = ("public, max-age=31536000, immutable" if assets_dir in path.parents
+             else "no-cache")
+    return web.FileResponse(path, headers={"Content-Type": _guess_content_type(path), "Cache-Control": cache})
 
 
 _CHARSET_SUFFIXES = (".js", ".mjs", ".css", ".json", ".html", ".htm", ".svg", ".xml", ".txt")
