@@ -330,6 +330,17 @@ def attack_mode(engine: Any, instance: Any, actor: dict, target: dict,
         engine.catalog.conditions, actor, target, range_disadvantage,
         actor_senses=actor_senses, target_senses=target_senses,
     )
+    # 遮蔽只在"看不见"这一层影响攻击：轻度遮蔽只改感知检定，不改攻击。
+    # 两个方向都要算——看不见目标给劣势，自己不被看见给优势，而"看不看得见"
+    # 是成对事实（还要过感官），所以读 effective_obscurement 而不是原始等级。
+    if combat.get("status") == "active":
+        actor_id_ = str(actor.get("actor_id") or "")
+        target_id_ = str(target.get("actor_id") or "")
+        if actor_id_ and target_id_:
+            if engine.effective_obscurement(instance, combat, actor_id_, target_id_)["blocks_sight"]:
+                sources.append({"code": "obscured_target", "mode": "disadvantage"})
+            if engine.effective_obscurement(instance, combat, target_id_, actor_id_)["blocks_sight"]:
+                sources.append({"code": "unseen_attacker", "mode": "advantage"})
     # 意图声明的来源（如 Lucky）只在本次掷骰生效，不写进持续条件注册表：
     # 追加到来源列表后由同一个归一函数处理优劣势抵消。
     sources.extend(extra_sources)

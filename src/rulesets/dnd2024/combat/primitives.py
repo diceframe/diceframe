@@ -122,6 +122,7 @@ INTENT_TYPES = frozenset({
     "encounter.ready", "encounter.unready", "combat.start", "combat.end", "combat.message",
     # C2A：GM 声明某个目标当前处于什么掩护等级（剧场模式）。
     "combat.set_cover",
+    "combat.set_obscurement",
     "attack", "cast_spell", "activate_item", "move", "dash", "dodge", "disengage", "hide", "end_turn",
     "death_save", "stabilize", "decision.resolve",
     # 职业特性提供的战斗能力：Combat 只认 capability id、动作/资源成本与底层

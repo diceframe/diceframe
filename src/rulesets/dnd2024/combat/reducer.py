@@ -186,6 +186,8 @@ class CombatReducerMixin:
                 "adventure_binding": deepcopy(event.get("adventure_binding")),
                 # C2A：掩护声明随战斗生灭，不落盘到角色卡。
                 "cover": {},
+                "obscurement": {},
+                "zones": {},
                 # 遭遇级的持握与骑乘：两者都随这场战斗生灭，不落盘到角色卡。
                 "hands": {},
                 # 本回合谁打过谁：Horde Breaker 与"第二目标未被打过"共用。
@@ -703,6 +705,34 @@ class CombatReducerMixin:
                     "source": str(event.get("source") or "gm"),
                 }
             return
+        if event_type == "dnd2024.zone.created":
+            zones = combat.setdefault("zones", {})
+            zone_id = str(event["zone_id"])
+            zones[zone_id] = {
+                "kind": str(event.get("kind") or "sphere"),
+                "level": str(event.get("level") or "heavily"),
+                "origin": int(event.get("origin", 0) or 0),
+                "radius_ft": int(event.get("radius_ft", 0) or 0),
+                "magical": bool(event.get("magical")),
+                "spell_ref": str(event.get("spell_ref") or ""),
+                "caster_id": str(event.get("caster_id") or ""),
+                "concentration": bool(event.get("concentration")),
+                "rounds_left": int(event.get("rounds_left", 10) or 10),
+            }
+            return
+        if event_type == "dnd2024.obscurement.declared":
+            obscurement = combat.setdefault("obscurement", {})
+            target_id = str(event["target_id"])
+            level = str(event["level"])
+            if level == "none":
+                # 撤销就是删键：与掩护同口径，不留墓碑。
+                obscurement.pop(target_id, None)
+            else:
+                obscurement[target_id] = {
+                    "level": level,
+                    "source": str(event.get("source") or "gm"),
+                }
+            return
         if event_type == "condition.applied":
             conditions = self._conditions(snapshot, combat, str(event["target_id"]))
             conditions[str(event["condition"])] = {
@@ -850,6 +880,11 @@ class CombatReducerMixin:
             return
         if event_type == "dnd2024.concentration.ended":
             owner = str(event["actor_id"])
+            zones = combat.get("zones") or {}
+            for zone_id, zone in list(zones.items()):
+                if str(zone.get("caster_id") or "") == owner and zone.get("concentration"):
+                    zones.pop(zone_id, None)
+                    combat.setdefault("expired_zones", []).append(zone_id)
             kind, raw_id = _actor_kind(owner)
             if kind in {"player", "companion"}:
                 concentration_holder(self._canonical_of(snapshot, kind, raw_id))[
@@ -864,6 +899,14 @@ class CombatReducerMixin:
             )
             combat["round"] = int(event["round"])
             combat["turn_index"] = int(event["turn_index"])
+            zones = combat.get("zones") or {}
+            for zone_id, zone in list(zones.items()):
+                left = int(zone.get("rounds_left", 0) or 0) - 1
+                if left <= 0:
+                    zones.pop(zone_id, None)
+                    combat.setdefault("expired_zones", []).append(zone_id)
+                else:
+                    zone["rounds_left"] = left
             combat["economy"] = deepcopy(event["economy"])
             combat.setdefault("reactions", {})[str(event["actor_id"])] = 1
             return

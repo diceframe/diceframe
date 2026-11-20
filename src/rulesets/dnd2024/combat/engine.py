@@ -58,6 +58,7 @@ from .check_windows import (
     DAMAGE_WINDOW_DECISION,
     LUCKY_RESOURCE,
 )
+from .obscurement import best_obscurement, effective_level, obscurement_row, zone_covers
 from .primitives import (
     INTENT_TYPES,
     PERSISTENT_RAGE_DURATION,
@@ -1021,6 +1022,13 @@ class Dnd2024CombatEngine(
         elif intent_type == "combat.set_cover":
             events.append({
                 "type": "dnd2024.cover.declared",
+                "target_id": str(intent["target_id"]),
+                "level": str(intent["level"]),
+                "source": "gm",
+            })
+        elif intent_type == "combat.set_obscurement":
+            events.append({
+                "type": "dnd2024.obscurement.declared",
                 "target_id": str(intent["target_id"]),
                 "level": str(intent["level"]),
                 "source": "gm",
@@ -2054,6 +2062,72 @@ class Dnd2024CombatEngine(
             return str(row.get("level") or "none")
         finally:
             self._cover_depth -= 1
+
+    def obscurement_level(
+        self, combat: dict[str, Any], actor_id: str,
+    ) -> str:
+        """Just the level: "is he in heavy obscurement?" is the question Hide asks.
+
+        本切片只有 GM 声明一种来源（法术制造的黑暗/浓雾留给对应法术切片），
+        但合并仍然走 ``best_obscurement``：声明优先的语义与掩护一致，来源多起来
+        时不需要改消费者。
+        """
+
+        return str(self.obscurement_row(combat, actor_id)["level"])
+
+    def obscurement_row(
+        self, combat: dict[str, Any], actor_id: str,
+    ) -> dict[str, Any]:
+        """The one answer shape: level, its two effects, and where it came from."""
+
+        levels: list[str] = []
+        sources: list[str] = []
+        declared = (combat.get("obscurement") or {}).get(str(actor_id))
+        if isinstance(declared, dict):
+            level = str(declared.get("level") or "none")
+            if level != "none":
+                levels.append(level)
+                sources.append(str(declared.get("source") or "gm"))
+        position = self._position(combat, str(actor_id))
+        for zone_id, zone in sorted((combat.get("zones") or {}).items()):
+            if not isinstance(zone, dict):
+                continue
+            if not zone_covers(zone, int(zone.get("origin", 0) or 0), position):
+                continue
+            levels.append(str(zone.get("level") or "none"))
+            sources.append(f"zone:{zone_id}")
+        if not levels:
+            return obscurement_row("none")
+        return obscurement_row(best_obscurement(levels), sources)
+
+    def effective_obscurement(
+        self, instance: Any, combat: dict[str, Any], observer_id: str, target_id: str,
+    ) -> dict[str, Any]:
+        """What the observer actually experiences when looking at the target.
+
+        The only place that answers "can he see it": consumers (attack
+        Disadvantage, Perception, the Hide prerequisite) must read this instead
+        of the raw level, because the same ``heavily`` means three different
+        things to normal sight, Darkvision and Blindsight.
+        """
+
+        row = self.obscurement_row(combat, target_id)
+        if row["level"] == "none":
+            return {**row, "bypass": ""}
+        observer = self._actor_view(instance, combat, observer_id)
+        senses = observer.get("senses")
+        magical = any(
+            bool((combat.get("zones") or {}).get(source.removeprefix("zone:"), {}).get("magical"))
+            for source in row["sources"]
+            if source.startswith("zone:")
+        )
+        level, bypass = effective_level(
+            str(row["level"]), magical=magical, senses=senses,
+            distance_ft=self._distance(combat, observer_id, target_id),
+        )
+        resolved = obscurement_row(level, row["sources"])
+        resolved["bypass"] = bypass
+        return resolved
 
     def attacked_this_turn(
         self, combat: dict[str, Any], actor_id: str,

@@ -85,6 +85,7 @@ class CombatViewMixin:
             character = _canonical(instance.get_character_sheet(raw_id))
             view = self._with_hands(combat, self._player_view(raw_id, character))
             view["cover"] = cover
+            view["obscurement"] = self.obscurement_row(combat, actor_id)
             self._attach_hunter_lore(instance, combat, actor_id, view)
             return view
         if kind == "companion":
@@ -96,6 +97,7 @@ class CombatViewMixin:
             view["kind"] = "companion"
             view = self._with_hands(combat, view)
             view["cover"] = cover
+            view["obscurement"] = self.obscurement_row(combat, actor_id)
             self._attach_hunter_lore(instance, combat, view["actor_id"], view)
             return view
         if kind == "enemy":
@@ -135,6 +137,9 @@ class CombatViewMixin:
                 "skill_values": {}, "skill_refs": [], "concentration": None,
                 # S0-C2A 投影：敌人同样有掩护等级。
                 "cover": cover,
+                # S0-C2B 投影：敌人的遮蔽等级同样要能被读回（掩护已在此分支
+                # 投影，遮蔽与它并列，GM 声明才不会只对己方可见）。
+                "obscurement": self.obscurement_row(combat, actor_id),
             }
         raise CombatIntentError("actor_id is invalid")
 
