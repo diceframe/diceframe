@@ -132,6 +132,7 @@
       {"side": "actor", "mode": "advantage", "negated_by": ["see_invisibility", "truesight", "blindsight"]}
     ]},
     "rage": {"resist_damage_types": ["bludgeoning", "piercing", "slashing"]},
+    "hunters_defense": {"attack_modes": []},
     "charmed": {"cannot_attack_source": true},
     "frightened": {"attack_modes": [{"side": "actor", "mode": "disadvantage"}], "cannot_approach_source": true},
     "stoneskinned": {"resist_damage_types": ["bludgeoning", "piercing", "slashing"]},

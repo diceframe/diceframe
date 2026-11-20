@@ -126,6 +126,8 @@ INTENT_TYPES = frozenset({
     # 职业特性提供的战斗能力：Combat 只认 capability id、动作/资源成本与底层
     # canonical action，"哪个职业在第几级授予它" 由 feature boundary 回答。
     "class_capability",
+    # F19：把标记的额外伤害转给 30 尺内的第二个目标。
+    "superior_hunters_prey",
 })
 # 归零前的存活决策（Relentless Rage）：伤害已被掷出并挂起，HP 尚未改变。
 # 它和其它 pending decision 一样由 resolution 结算、reducer 记账，区别只在

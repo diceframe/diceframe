@@ -58,7 +58,7 @@ from .primitives import (
     canonical as _canonical,
     rider_attack_kind,
 )
-from .check_modes import condition_flags, owned_mark, vision_codes
+from .check_modes import condition_flags, marked_target_id, owned_mark, vision_codes
 from .hands import apply_swap
 from .check_windows import (
     CHECK_WINDOW_DECISION,
@@ -586,7 +586,11 @@ class CombatValidationMixin:
                 economy.get("surge_action", 0) or 0
             ) > 0
             if intent_type == "attack":
-                if not has_action and int(
+                # Horde Breaker 的第二击不付动作：它由"本回合已经打过一次"
+                # 这个事实买断，校验里另行证明。
+                if intent.get("second_target_of"):
+                    pass
+                elif not has_action and int(
                     economy.get("attacks_remaining", 0) or 0
                 ) < 1:
                     raise CombatIntentError("the Attack action is no longer available")
@@ -609,6 +613,9 @@ class CombatValidationMixin:
                     )
         if intent_type == "attack":
             self._validate_attack(instance, combat, intent, actor)
+            self._validate_horde_breaker(instance, combat, intent, actor)
+        if intent_type == "superior_hunters_prey":
+            self._validate_superior_prey(instance, combat, intent, actor)
         if intent_type == "end_turn":
             self._validate_self_restoration(actor, intent)
         if intent_type == "class_capability":
@@ -1535,6 +1542,86 @@ class CombatValidationMixin:
             actor, str(weapon.get("weapon_ref") or ""), hands=hands,
         ):
             raise CombatIntentError("a shield in the other hand blocks two-handed use")
+
+    def _validate_horde_breaker(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor: dict[str, Any],
+    ) -> None:
+        """Horde Breaker's second attack, if this intent is one.
+
+        An ordinary attack returns immediately.  A second attack has to prove
+        five things the SRD states in one sentence: the Hunter owns the option,
+        has not used it this turn, the original target was attacked this turn,
+        the new target is a different creature within 5 feet of the original,
+        and that creature has not been attacked this turn.
+        """
+
+        original_id = str(intent.get("second_target_of") or "")
+        if not original_id:
+            return
+        actor_id = str(intent["actor_id"])
+        character = self._feature_character(actor)
+        if not self.features.has_feature(
+            character, "horde_breaker", owner="subclass:hunter",
+        ):
+            raise CombatIntentError("this character has no horde breaker")
+        if self._feature_used_this_turn(combat, actor_id, "horde_breaker"):
+            raise CombatIntentError("horde breaker is already used this turn")
+        attacked = self.attacked_this_turn(combat, actor_id)
+        if original_id not in attacked:
+            raise CombatIntentError(
+                "horde breaker needs an attack against the original target this turn"
+            )
+        target_id = str(intent.get("target_id") or "")
+        if target_id == original_id:
+            raise CombatIntentError("horde breaker must pick a different target")
+        if target_id in attacked:
+            raise CombatIntentError(
+                "horde breaker cannot attack a creature attacked this turn"
+            )
+        limit = int(self.features.feature_value(
+            character, "horde_breaker", "target_within_of_original_ft", 5,
+        ) or 0)
+        if self._distance(combat, target_id, original_id) > limit:
+            raise CombatIntentError(
+                f"horde breaker's target must be within {limit} feet of the original"
+            )
+
+    def _validate_superior_prey(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor: dict[str, Any],
+    ) -> None:
+        """Superior Hunter's Prey: the second target, and why it qualifies."""
+
+        actor_id = str(intent["actor_id"])
+        character = self._feature_character(actor)
+        if not self.features.has_feature(
+            character, "superior_hunters_prey", owner="subclass:hunter",
+        ):
+            raise CombatIntentError("this character has no superior hunter's prey")
+        if self._feature_used_this_turn(combat, actor_id, "superior_hunters_prey"):
+            raise CombatIntentError("superior hunter's prey is already used this turn")
+        original_id = str(intent.get("target_id") or "")
+        second_id = str(intent.get("second_target_id") or "")
+        if not original_id or not second_id:
+            raise CombatIntentError("superior hunter's prey needs both targets")
+        if second_id == original_id:
+            raise CombatIntentError("superior hunter's prey needs a different target")
+        if marked_target_id(actor) != original_id:
+            raise CombatIntentError(
+                "superior hunter's prey needs the creature marked by your Hunter's Mark"
+            )
+        if not self.mark_damage_this_turn(combat, actor_id, original_id):
+            raise CombatIntentError(
+                "superior hunter's prey needs mark damage dealt to the marked creature this turn"
+            )
+        limit = int(self.features.feature_value(
+            character, "superior_hunters_prey", "second_target_range_ft", 30,
+        ) or 0)
+        if self._distance(combat, second_id, original_id) > limit:
+            raise CombatIntentError(
+                f"superior hunter's prey's target must be within {limit} feet of the marked one"
+            )
 
     def _validate_attack(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], actor: dict[str, Any],

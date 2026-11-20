@@ -102,6 +102,8 @@ def test_a_character_without_rest_choices_gets_empty_fields(
     sheet = runtime.finalize_character(None, _fighter_draft(runtime))
     assert engine.rest_options(sheet["ruleset_character"]) == {
         "land_terrain": None, "free_cast": [], "short_recovery": [],
+        # Hunter 的两组选项也在这张表里；没有该子职的坐骑/战士得到空列表。
+        "hunter_options": [],
     }
 
 
