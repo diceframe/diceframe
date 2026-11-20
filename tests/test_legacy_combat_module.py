@@ -333,6 +333,7 @@ def test_old_dnd_save_with_active_stored_combat_reads_view_from_ruleset_state():
     assert module.view(restored) == {
         "combat_state": "active", "combat_active": True,
         "initiative_order": ["player:u9"], "initiative_current": 0,
+        "current_actor_id": "player:u9",
     }
 
 

@@ -240,9 +240,11 @@ class LocalModelManager:
             resolved.append(selected)
         return {"catalog_version": 1, "models": resolved}
 
-    def catalog(self) -> list[dict[str, Any]]:
+    def catalog(self, *, installed_models: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         entries = self._catalog_entries()
-        installed = {item["id"]: item for item in list_installed_models(self.models_dir)}
+        if installed_models is None:
+            installed_models = list_installed_models(self.models_dir)
+        installed = {item["id"]: item for item in installed_models}
         return [
             {
                 "id": entry["id"],

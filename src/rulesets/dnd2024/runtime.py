@@ -41,6 +41,7 @@ from src.rulesets.dnd2024.character.reconciliation import (
 from src.rulesets.dnd2024.campaign import CAMPAIGN_INTENT_TYPES, Dnd2024CampaignEngine
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 import src.rulesets.dnd2024.combat.visibility as combat_visibility
+from src.rulesets.dnd2024.combat.primitives import current_turn_slot
 from src.rulesets.dnd2024.combat.readiness import required_encounter_player_ids
 from src.rulesets.dnd2024.content.catalog import DndContentCatalog
 from src.rulesets.dnd2024.content.provider import (
@@ -1897,12 +1898,16 @@ def project_combat_view(instance: Any) -> dict[str, Any] | None:
         turn_index = int(combat.get("turn_index", 0) or 0)
     except (TypeError, ValueError):
         turn_index = 0
-    return {
+    view = {
         "combat_state": "active" if active else "none",
         "combat_active": active,
         "initiative_order": list(combat.get("initiative") or []),
         "initiative_current": turn_index,
     }
+    if active:
+        slot = current_turn_slot(combat) if type(combat.get("turn_index")) is int else None
+        view["current_actor_id"] = str(slot["actor_id"]) if slot is not None else ""
+    return view
 
 
 # Registered where the runtime is defined: any code path that can hold this

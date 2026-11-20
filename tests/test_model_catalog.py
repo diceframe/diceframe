@@ -203,9 +203,16 @@ def test_catalog_index_expands_repository_shards(tmp_path, monkeypatch):
     resolved = asyncio.run(manager._expand_catalog_index(None, index_url, index))
     assert resolved["models"][0]["id"] == "demo-model"
     assert resolved["models"][0]["files"][0]["path"] == "model.onnx"
-# ---- 模型安装路由鉴权回归 ----
+# ---- 模型管理路由鉴权回归 ----
 
-def _install_request(*, owner: bool):
+_MODEL_WRITE_HANDLERS = (
+    "api_embedding_model_install",
+    "api_embedding_model_uninstall",
+    "api_embedding_catalog_refresh",
+)
+
+
+def _model_write_request(*, owner: bool):
     class FakeRequest:
         def __init__(self):
             self.headers = {"X-TRPG-Confirm": "true"}
@@ -215,23 +222,28 @@ def _install_request(*, owner: bool):
         def get(self, key, default=None):
             return owner if key == "owner_authenticated" else default
 
+        async def json(self):
+            return {}
+
     return FakeRequest()
 
 
 @pytest.mark.asyncio
-async def test_embedding_model_install_requires_owner():
+@pytest.mark.parametrize("handler_name", _MODEL_WRITE_HANDLERS)
+async def test_embedding_model_write_requires_owner(handler_name):
     from src.webui.routes import embedding_models
 
     # 未通过 owner 鉴权时必须 403，且不能继续触达模型存储（否则会是 422）
-    response = await embedding_models.api_embedding_model_install(_install_request(owner=False))
+    response = await getattr(embedding_models, handler_name)(_model_write_request(owner=False))
     assert response.status == 403
     assert json.loads(response.text)["error"] == "owner authentication required"
 
 
 @pytest.mark.asyncio
-async def test_embedding_model_install_proceeds_after_owner_check():
+@pytest.mark.parametrize("handler_name", _MODEL_WRITE_HANDLERS)
+async def test_embedding_model_write_proceeds_after_owner_check(handler_name):
     from src.webui.routes import embedding_models
 
-    # owner 鉴权通过后进入安装流程：存储未就绪 → 422（证明鉴权不是永久挡板）
-    response = await embedding_models.api_embedding_model_install(_install_request(owner=True))
+    # owner 鉴权通过后进入管理流程：存储未就绪 → 422（证明鉴权不是永久挡板）
+    response = await getattr(embedding_models, handler_name)(_model_write_request(owner=True))
     assert response.status == 422

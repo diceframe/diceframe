@@ -44,8 +44,9 @@ _PROJECTORS: dict[str, CombatProjector] = {}
 def register_combat_projector(runtime_id: str, projector: CombatProjector) -> None:
     """Register the combat view projector for one ruleset runtime id.
 
-    ``projector(instance)`` returns a mapping with any of the four view keys,
-    or ``None`` for the neutral view. Re-registering a runtime id replaces it.
+    ``projector(instance)`` returns a mapping with combat view fields, or
+    ``None`` for the neutral view. A runtime may also supply the canonical
+    ``current_actor_id``. Re-registering a runtime id replaces it.
     """
     normalized = str(runtime_id or "").strip()
     if not normalized:
@@ -77,6 +78,9 @@ def view(instance: Any) -> dict[str, Any]:
     result["initiative_order"] = deepcopy(list(order)) if isinstance(order, (list, tuple)) else []
     current = raw.get("initiative_current")
     result["initiative_current"] = current if type(current) is int else 0
+    actor_id = raw.get("current_actor_id")
+    if isinstance(actor_id, str):
+        result["current_actor_id"] = actor_id
     return result
 
 

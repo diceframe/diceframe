@@ -88,18 +88,6 @@ class ConfigController:
                 Path(memory_store.db_path).parent / "models"
                 if memory_store is not None else Path("data") / "models"
             )
-            public["embedding_local_models"] = list_installed_models(models_dir)
-            try:
-                public["embedding_model_catalog"] = LocalModelManager(
-                    models_dir,
-                    proxy_url=effective_proxy_url(
-                        bool(self.dependencies.state.get("proxy_enabled")),
-                        self.dependencies.state.get("proxy_url", ""),
-                    ),
-                ).catalog()
-            except ModelCatalogError as exc:
-                public["embedding_model_catalog"] = []
-                self.logger.warning("本地 embedding 模型目录无效：%s", exc)
             if memory_store is not None:
                 public["embedding_status"] = memory_store.embedding_status(
                     profile=(
@@ -113,6 +101,22 @@ class ConfigController:
                 rebuild_error = request.app.get("_embedding_backfill_error")
                 if rebuild_error:
                     public["embedding_status"]["rebuild_error"] = str(rebuild_error)
+            manager = LocalModelManager(
+                models_dir,
+                proxy_url=effective_proxy_url(
+                    bool(self.dependencies.state.get("proxy_enabled")),
+                    self.dependencies.state.get("proxy_url", ""),
+                ),
+            )
+            installed_models = await asyncio.to_thread(list_installed_models, models_dir)
+            public["embedding_local_models"] = installed_models
+            try:
+                public["embedding_model_catalog"] = await asyncio.to_thread(
+                    manager.catalog, installed_models=installed_models,
+                )
+            except ModelCatalogError as exc:
+                public["embedding_model_catalog"] = []
+                self.logger.warning("本地 embedding 模型目录无效：%s", exc)
         # Defaults can contain private Keeper instructions; anonymous bootstrap
         # clients and invited seats must not receive the owner profile.
         if not request.get("owner_authenticated", False) and request.get(ACCESS_PASSWORD_CONFIGURED_KEY) is not False:

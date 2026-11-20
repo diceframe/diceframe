@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+from threading import get_ident
+from types import SimpleNamespace
 
 import pytest
 
@@ -69,3 +71,33 @@ def test_manifest_path_traversal_is_rejected(tmp_path):
     manifest.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(LocalModelError, match="unsafe file path"):
         verify_local_model(tmp_path / "models", "demo")
+
+
+@pytest.mark.asyncio
+async def test_config_verifies_installed_model_once_off_the_event_loop(tmp_path, monkeypatch):
+    from src.memory import local_embedding
+    from src.webui.config_controller import ConfigController
+
+    model_id = "bge-small-zh-v1.5"
+    _manifest(tmp_path / "models", model_id=model_id)
+    thread_ids = []
+
+    def verify(models_dir, candidate):
+        thread_ids.append(get_ident())
+        return verify_local_model(models_dir, candidate)
+
+    monkeypatch.setattr(local_embedding, "verify_local_model", verify)
+
+    class OwnerRequest(dict):
+        app = {"subsystems": SimpleNamespace(memory_store=SimpleNamespace(
+            db_path=tmp_path / "memory.db", embedding_client=None, embedding_status=lambda **_: {},
+        ))}
+
+    controller = ConfigController(SimpleNamespace(state={}, public_config=dict))
+    response = await controller.get(OwnerRequest(owner_authenticated=True))
+
+    body = json.loads(response.text)
+    assert body["embedding_local_models"][0]["status"] == "installed"
+    assert body["embedding_model_catalog"][0]["status"] == "installed"
+    assert len(thread_ids) == 1
+    assert thread_ids[0] != get_ident()

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.ai_providers import resolve_provider
+from src.engine import module_hooks
 from src.engine.game_instance import GameState
 from src.engine.modules.ai_seats import (
     STYLES, configuration_token, effective_settings, record_outcome, restore_settings, settings_state, update_settings, validate_settings,
@@ -189,8 +190,13 @@ def retry_block(instance: Any, uid: str) -> str:
         return "not_ai_controlled"
     if instance.state != GameState.ACTIVE_ACTION:
         return "phase_not_actionable"
-    combat = ruleset_runtime.state(instance).get("combat") if isinstance(ruleset_runtime.state(instance), dict) else None
+    state = ruleset_runtime.state(instance)
+    combat = state.get("combat") if isinstance(state, dict) else None
     if isinstance(combat, dict) and combat.get("status") == "active":
+        actor_id = module_hooks.combat_view(instance).get("current_actor_id")
+        if actor_id is not None:
+            return "" if actor_id == f"player:{uid}" else "not_this_seat"
+        # Runtimes without a projector retain the previous single-slot contract.
         initiative, index = combat.get("initiative"), combat.get("turn_index")
         if (not isinstance(initiative, list) or type(index) is not int or not 0 <= index < len(initiative)
                 or initiative[index] != f"player:{uid}"):

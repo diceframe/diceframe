@@ -8,7 +8,7 @@ or follows a URL; downloads/imports are a separate, administrator-only step.
 from __future__ import annotations
 
 import asyncio
-from hashlib import sha256
+from hashlib import file_digest, sha256
 import json
 from pathlib import Path
 from typing import Any
@@ -92,12 +92,16 @@ def verify_local_model(models_dir: Path, model_id: str) -> dict[str, Any]:
         if not path.is_file():
             raise LocalModelError(f"local model file is missing: {rel}")
         expected_size = item.get("size")
-        if isinstance(expected_size, int) and path.stat().st_size != expected_size:
-            raise LocalModelError(f"local model file size mismatch: {rel}")
         expected_hash = str(item.get("sha256") or "").lower()
-        if len(expected_hash) != 64:
-            raise LocalModelError(f"local model file hash is missing: {rel}")
-        digest = sha256(path.read_bytes()).hexdigest()
+        try:
+            if isinstance(expected_size, int) and path.stat().st_size != expected_size:
+                raise LocalModelError(f"local model file size mismatch: {rel}")
+            if len(expected_hash) != 64:
+                raise LocalModelError(f"local model file hash is missing: {rel}")
+            with path.open("rb") as model_file:
+                digest = file_digest(model_file, "sha256").hexdigest()
+        except OSError as exc:
+            raise LocalModelError(f"local model file cannot be read: {rel}") from exc
         if digest != expected_hash:
             raise LocalModelError(f"local model file hash mismatch: {rel}")
     return {"root": root, "manifest": manifest}
