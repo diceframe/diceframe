@@ -244,6 +244,18 @@ def test_combat_retry_uses_turn_authority_instead_of_narrative_human_gate(schedu
     assert deps.seat_runtime.project(inst)["seats"]["ai1"]["retry_reason"] == ""
 
 
+def test_combat_retry_rejects_a_missing_authoritative_turn_slot():
+    from src.webui.services.ai_seats import retry_block
+
+    _runtime, inst, _deps, _calls, _clients, _saved = setup()
+    combat = ruleset_runtime.state(inst)["combat"]
+    combat["initiative"] = ["enemy:goblin", "player:ai1"]
+    combat["turn_slots"] = [{"slot_id": "enemy:goblin#1", "actor_id": "enemy:goblin"}]
+    combat["turn_index"] = 1
+
+    assert retry_block(inst, "ai1") == "not_this_seat"
+
+
 @pytest.mark.parametrize("preset", ["kindly_bulwark", "stalwart_guardian"])
 def test_class_and_spell_choices_remain_real_validated_intents(preset):
     runtime, engine, inst = _setup(ai_preset=preset)
