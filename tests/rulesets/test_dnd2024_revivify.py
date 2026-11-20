@@ -352,9 +352,8 @@ def test_out_of_range_dead_ally_is_rejected() -> None:
 def test_dead_ally_intents_restore_after_revive() -> None:
     engine, instance = new_combat()
     set_turn(engine, instance, "player:ally")
-    dead_intents = [item["type"] for item in engine.available_intents(instance, "ally")]
-    assert "death_save" in dead_intents
-    assert "attack" not in dead_intents
+    dead_intents = {item["type"] for item in engine.available_intents(instance, "ally")}
+    assert dead_intents == {"combat.message", "end_turn"}
 
     set_turn(engine, instance, "player:gm")
     resolve(engine, instance, cast_intent(targets=["player:ally"]), NoRollRng())
