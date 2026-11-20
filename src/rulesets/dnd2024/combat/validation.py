@@ -931,6 +931,34 @@ class CombatValidationMixin:
             else:
                 raise CombatIntentError("obscurement target must be a combat actor")
             return
+        if intent_type == "gm_condition":
+            # 状态是规则书事实，所以只有 GM 能裁定；客户端提交的是状态 id
+            # 与动作，永远不是"这个状态会做什么"（那由 catalog 解释器回答）。
+            if submitted_by != gm_uid:
+                raise CombatIntentError("only the GM can apply or remove a condition")
+            target_id = str(intent.get("target_id") or "")
+            condition = str(intent.get("condition") or "")
+            action = str(intent.get("action") or "")
+            if action not in {"apply", "remove"}:
+                raise CombatIntentError("condition action must be apply or remove")
+            if not condition:
+                raise CombatIntentError("condition id is required")
+            # 施加只认规则书状态：法术/特性/物品自己制造的效应不能手工授予，
+            # 否则规则就会凭空多出一个来源。移除则宽松——摘掉什么都是清理动作。
+            if action == "apply" and condition not in self.catalog.gm_appliable_conditions():
+                raise CombatIntentError(
+                    f"{condition} is not a condition the GM can apply"
+                )
+            kind, raw_id = _actor_kind(target_id)
+            if kind == "player":
+                if raw_id not in instance.players:
+                    raise CombatIntentError("condition target actor does not exist")
+            elif kind == "enemy":
+                if raw_id not in (combat.get("enemies") or {}):
+                    raise CombatIntentError("condition target actor does not exist")
+            else:
+                raise CombatIntentError("condition target must be a combat actor")
+            return
         if intent_type == "combat.message":
             if submitted_by not in instance.players:
                 raise CombatIntentError("only a party member can send a combat message")

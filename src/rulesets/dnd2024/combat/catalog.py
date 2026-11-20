@@ -107,6 +107,21 @@ class Dnd2024CombatCatalog:
     conditions: dict[str, dict[str, Any]] = field(default_factory=dict)
     labels: dict[str, str] = field(default_factory=dict)
 
+    def gm_appliable_conditions(self) -> dict[str, dict[str, Any]]:
+        """The states a GM may hand out, i.e. the rulebook conditions.
+
+        ``conditions`` remains the merged runtime registry so every existing
+        reader (``condition_flags`` 等) keeps working; the split between state
+        and source-bound effect is data-level (``kind``).  Effects are produced
+        by a spell / feature / item and are never handed out by hand.
+        """
+
+        return {
+            condition_id: entry
+            for condition_id, entry in self.conditions.items()
+            if str(entry.get("kind") or "") == "condition"
+        }
+
     @classmethod
     def from_bundle(
         cls, bundle: LoadedRulesetBundle, *, validate_items: bool = True,
@@ -299,7 +314,7 @@ class Dnd2024CombatCatalog:
                     f"combat condition must be an object: {condition_id}"
                 )
             if set(entry) - {
-                "attack_modes", "resist_damage_types", "implies_incapacitated",
+                "kind", "attack_modes", "resist_damage_types", "implies_incapacitated",
                 "speed_zero", "auto_fail_saves", "crit_on_hit_within_5",
                 "speed_modifier", "speed_halved", "check_bonus_dice",
                 "initiative_advantage", "cannot_attack_source", "cannot_approach_source",
@@ -308,6 +323,14 @@ class Dnd2024CombatCatalog:
             }:
                 raise CombatCatalogError(
                     f"combat condition has unknown fields: {condition_id}"
+                )
+            # 状态与来源绑定效应共用一个运行时注册表（解释器只按 flag 取值），
+            # 但只有 ``condition`` 是规则书里的公共状态、可以由 GM 直接施加；
+            # ``effect`` 是法术/特性/物品自己制造的产物，一对一绑在来源上。
+            kind = entry.get("kind")
+            if kind is not None and str(kind) not in {"condition", "effect"}:
+                raise CombatCatalogError(
+                    f"combat condition kind is invalid: {condition_id}"
                 )
             for flag in (
                 "implies_incapacitated", "speed_zero", "crit_on_hit_within_5",

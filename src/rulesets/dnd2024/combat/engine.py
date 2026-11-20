@@ -1103,6 +1103,29 @@ class Dnd2024CombatEngine(
                 "level": str(intent["level"]),
                 "source": "gm",
             })
+        elif intent_type == "gm_condition":
+            # GM 裁定原语：事件形状与法术/特性施加条件完全一致，所以 reducer、
+            # 投影与到期逻辑都不需要第二套写法。同一 id 是覆盖写——重复施加
+            # 即刷新来源，不叠加。
+            target_id = str(intent["target_id"])
+            condition_id = str(intent["condition"])
+            if str(intent.get("action") or "") == "apply":
+                event = {
+                    "type": "condition.applied",
+                    "target_id": target_id,
+                    "condition": condition_id,
+                    "source": "gm",
+                }
+                if intent.get("duration"):
+                    event["duration"] = str(intent["duration"])
+                events.append(event)
+            else:
+                events.append({
+                    "type": "condition.removed",
+                    "target_id": target_id,
+                    "condition": condition_id,
+                    "source": "gm",
+                })
         elif intent_type == "combat.message":
             events.append({
                 "type": "dnd2024.combat.message",

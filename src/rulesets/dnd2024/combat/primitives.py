@@ -123,6 +123,9 @@ INTENT_TYPES = frozenset({
     # C2A：GM 声明某个目标当前处于什么掩护等级（剧场模式）。
     "combat.set_cover",
     "combat.set_obscurement",
+    # G16：GM 裁定原语——施加/移除规则书里的状态。法术/特性/物品自己产生的
+    # 效应不在施加范围内，但 GM 可以移除它们（清理动作）。
+    "gm_condition",
     "attack", "cast_spell", "activate_item", "move", "dash", "dodge", "disengage", "hide", "end_turn",
     "death_save", "stabilize", "decision.resolve",
     # 一次裸属性检定。成本由调用方声明（可能是动作、附赠动作或免费）：
