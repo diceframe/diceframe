@@ -2746,6 +2746,36 @@ class CombatResolutionMixin:
             return node
         return maximize_dice_nodes(node)
 
+    def _obscuring_zone_event(
+        self, combat: dict[str, Any], intent: dict[str, Any], effect: dict[str, Any],
+        actor_id: str, spell_ref: str, slot_level: int, target_ids: list[str],
+    ) -> dict[str, Any]:
+        """The zone a cast leaves behind: a fact on the battlefield, no targets.
+
+        ``origin`` is a coordinate on the same one-dimensional axis positions
+        already use, snapshotted at cast time from the first target/caster --
+        that is the whole spatial model this slice gets, and it is enough for
+        "walk in, walk out" without pretending to be a map.
+        """
+
+        anchor_id = target_ids[0] if target_ids else actor_id
+        origin = self._position(combat, anchor_id)
+        zone_id = f"{spell_ref}:{actor_id}:{intent.get('intent_id', '')}"
+        return {
+            "type": "dnd2024.zone.created",
+            "zone_id": zone_id,
+            "kind": "sphere",
+            "level": str(effect.get("level") or "heavily"),
+            "origin": origin,
+            "radius_ft": int(effect.get("radius_ft", 0) or 0),
+            "magical": bool(effect.get("magical")),
+            "spell_ref": spell_ref,
+            "caster_id": actor_id,
+            "concentration": bool(effect.get("concentration")),
+            "slot_level": slot_level,
+            "rounds_left": int(effect.get("duration_rounds", 10) or 10),
+        }
+
     def _spell_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
     ) -> list[dict[str, Any]]:
@@ -2804,6 +2834,13 @@ class CombatResolutionMixin:
         if overchannel:
             cast_event["overchannel"] = True
         events.append(cast_event)
+        if str(effect["mode"]) == "obscuring_zone":
+            # 区域法术没有目标结算：落一个区域事实就结束。区域从"目标所在的
+            # 那一点"展开并在施放瞬间定死，之后不随生物移动。
+            events.append(self._obscuring_zone_event(
+                combat, intent, effect, actor_id, spell_ref, slot_level, target_ids,
+            ))
+            return events
         # Lucky's advantage face declares one extra source for the first
         # spell attack roll of this cast; validation proves the pool.
         spend_luck = bool(intent.get("spend_luck")) and str(effect["mode"]) == "spell_attack"

@@ -77,6 +77,8 @@ def _validate_weapon_hand_properties(weapon_id: str, weapon: dict[str, Any]) -> 
 SPELL_MODES = frozenset({
     "spell_attack", "saving_throw", "healing", "automatic_damage", "buff", "debuff", "triggered_damage",
     "stabilize", "reaction_defense", "temp_hp", "teleport", "dispel", "revive",
+    # 区域遮蔽：法术自己不定目标伤害，只在场上落一个区域事实。
+    "obscuring_zone",
 })
 DAMAGE_TYPES = frozenset({
     "bludgeoning", "slashing", "piercing", "acid", "cold", "fire", "lightning",
