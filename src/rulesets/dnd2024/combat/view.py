@@ -16,7 +16,7 @@ from src.rulesets.dnd2024.features.resources import (
 )
 from src.rulesets.dnd2024.spells.casting import spell_caster, spellcasting_projection
 
-from .check_modes import sense_declarations
+from .check_modes import marked_target_id, sense_declarations
 from .check_windows import LUCKY_RESOURCE
 from .primitives import (
     DIVINE_SENSE_CONDITION,
@@ -86,6 +86,7 @@ class CombatViewMixin:
             view = self._with_hands(combat, self._player_view(raw_id, character))
             view["cover"] = cover
             view["obscurement"] = self.obscurement_row(combat, actor_id)
+            self._attach_hunter_lore(instance, combat, actor_id, view)
             return view
         if kind == "companion":
             # Companion 是"己方角色"：复用 player canonical 视图结构与装备/法术
@@ -97,6 +98,7 @@ class CombatViewMixin:
             view = self._with_hands(combat, view)
             view["cover"] = cover
             view["obscurement"] = self.obscurement_row(combat, actor_id)
+            self._attach_hunter_lore(instance, combat, view["actor_id"], view)
             return view
         if kind == "enemy":
             enemy = combat.get("enemies", {}).get(raw_id)
@@ -158,6 +160,49 @@ class CombatViewMixin:
         return {
             "actor_id": actor_id, "kind": "enemy", "hp": enemy["hp"],
             "speed": enemy["speed"], "conditions": {}, "build": {},
+        }
+
+    HUNTER_LORE_OWNER = "subclass:hunter"
+
+    def _attach_hunter_lore(
+        self, instance: Any, combat: dict[str, Any], actor_id: str,
+        view: dict[str, Any],
+    ) -> None:
+        """Hunter's Lore: the marker learns the target's real defences.
+
+        Projected onto the marker's own view rather than emitted as a feed
+        event: the SRD gives *that character* the knowledge, and a public line
+        would hand the same list to the rest of the table.  The data comes from
+        the enemy stat block, never from the client or the creature's name.
+        """
+
+        if not self.features.has_feature(
+            view, "hunters_lore", owner=self.HUNTER_LORE_OWNER,
+        ):
+            return
+        target_id = marked_target_id(view)
+        if not target_id:
+            return
+        try:
+            target = self._actor_view(instance, combat, target_id)
+        except CombatIntentError:
+            return
+        if str(target.get("kind") or "") != "enemy":
+            return
+        view["hunter_lore"] = {
+            "target_id": target_id,
+            "immunities": {
+                "damage": list(target.get("immune_damage_types") or []),
+                "condition": list(target.get("condition_immunities") or []),
+            },
+            "resistances": {
+                "damage": list(target.get("resist_damage_types") or []),
+                "condition": [],
+            },
+            "vulnerabilities": {
+                "damage": list(target.get("vulnerable_damage_types") or []),
+                "condition": [],
+            },
         }
 
     def _player_view(self, uid: str, character: dict[str, Any]) -> dict[str, Any]:

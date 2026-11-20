@@ -1707,7 +1707,9 @@
           "summary": "When you take damage, you can take a Reaction to give yourself Resistance to that damage and any other damage of the same type until the end of the current turn.",
           "parameters": {
             "cost": "reaction",
-            "grants": "damage_resistance"
+            "damage_multiplier": 0.5,
+            "grants": "damage_resistance",
+            "sustained_condition": "hunters_defense"
           }
         }
       ]

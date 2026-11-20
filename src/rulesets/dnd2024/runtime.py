@@ -132,7 +132,8 @@ class Dnd2024Runtime:
     # 每次长休必须记录的选择；prepared_spells 是长休时的一次准备替换；free_cast
     # 是 Spell Mastery 在长休研究法术书时换掉的那一项；recovery 是短休的恢复预算。
     rest_option_names = frozenset(
-        {"attunement", "prepared_spells", "land_terrain", "free_cast", "recovery"}
+        {"attunement", "prepared_spells", "land_terrain", "free_cast", "recovery",
+         "hunter_options"}
     )
     capabilities = RulesetCapabilities(
         experience_profile="dnd2024",
@@ -895,6 +896,7 @@ class Dnd2024Runtime:
         land_terrain: str | None = None,
         free_cast: dict[str, Any] | None = None,
         recovery: dict[str, Any] | None = None,
+        hunter_options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         del rule
         canonical = character.get("ruleset_character")
@@ -909,6 +911,8 @@ class Dnd2024Runtime:
             raise ValueError("free_cast must be an object keyed by slot id")
         if recovery is not None and not isinstance(recovery, dict):
             raise ValueError("recovery must be an object keyed by feature id")
+        if hunter_options is not None and not isinstance(hunter_options, dict):
+            raise ValueError("hunter_options must be an object keyed by feature id")
         engine = Dnd2024RestEngine(bundle)
         if rest == "short":
             if prepared_spells is not None:
@@ -919,6 +923,7 @@ class Dnd2024Runtime:
                 raise ValueError("free_cast is only valid for a long rest")
             result = engine.complete_short_rest(
                 character, hit_die_rolls, attunement=attunement, recovery=recovery,
+                hunter_options=hunter_options,
             )
         elif rest == "long":
             if hit_die_rolls:
@@ -934,7 +939,7 @@ class Dnd2024Runtime:
             )
             result = engine.complete_long_rest(
                 character, land_terrain=land_terrain, prepared_spells=change,
-                free_cast=free_cast,
+                free_cast=free_cast, hunter_options=hunter_options,
             )
         else:
             raise ValueError("rest must be short or long")
@@ -1023,6 +1028,10 @@ class Dnd2024Runtime:
             raise ValueError("free_cast is only valid for a long rest")
         if "recovery" in options and rest != "short":
             raise ValueError("recovery is only valid for a short rest")
+        # Hunter 的两组选项在短休与长休都可以替换（SRD 原文 "Whenever you finish
+        # a Short or Long Rest"），所以这里只校验形状，不按休息种类拒绝。
+        if "hunter_options" in options and not isinstance(options["hunter_options"], dict):
+            raise ValueError("hunter_options must be an object keyed by feature id")
         checked = self.rest_option_names & set(options)
         if not checked:
             return

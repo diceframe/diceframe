@@ -15,7 +15,7 @@ from typing import Any
 
 from src.engine.player_control import is_ai_controlled
 from .check_modes import condition_check_bonus_rolls, condition_flags
-from .primitives import CombatIntentError, actor_kind, enemy_actor
+from .primitives import CombatIntentError, actor_kind, enemy_actor, player_actor as _player_actor
 from .triggered_spells import free_cast_resource
 
 
@@ -29,6 +29,16 @@ REACTION_FEATURE_EFFECTS: dict[str, dict[str, Any]] = {
         "effect_kind": "damage_multiplier",
         "parameter": "damage_multiplier",
         "requires_sight": True,
+    },
+    # Hunter 15：与 Uncanny Dodge 是同一种运算（把这一次伤害按倍率缩放），
+    # 区别只在它额外买下"同类型伤害直到本回合结束"，那一半由条件承担。
+    "superior_hunters_defense": {
+        "effect_kind": "damage_multiplier",
+        "parameter": "damage_multiplier",
+        "requires_sight": False,
+        # 花掉倍率之后要在自己身上留一个持续抗性；没有这一项的特性和
+        # Uncanny Dodge 一样只影响本次伤害。
+        "sustained_condition": "hunters_defense",
     },
     "retaliation": {
         "effect_kind": "counterattack",
@@ -146,8 +156,8 @@ class CombatReactionSpellsMixin:
             return []
         if not self._reaction_eligible(combat, defender):
             return []
-        character = self._feature_character(defender)
         choices: list[dict[str, Any]] = []
+        character = self._feature_character(defender)
         for feature_id, effect in REACTION_FEATURE_EFFECTS.items():
             if not self.features.has_feature(character, feature_id):
                 continue
@@ -192,6 +202,8 @@ class CombatReactionSpellsMixin:
             }
             if effect["effect_kind"] == "damage_multiplier":
                 choice["damage_multiplier"] = float(value)
+                if effect.get("sustained_condition"):
+                    choice["sustained_condition"] = str(effect["sustained_condition"])
             else:
                 choice["counterattack_range"] = int(value)
             choices.append(choice)
@@ -292,6 +304,19 @@ class CombatReactionSpellsMixin:
             })
             damage_event = deepcopy(decision["damage_event"])
             amount = int(int(damage_event["amount"]) * float(choice["damage_multiplier"]))
+            # 有些倍率特性还买下"同类型伤害直到本回合结束"：那是条件，不是第二条
+            # 结算路径，所以在这里补一次 condition.applied 就够了。
+            sustained = str(choice.get("sustained_condition") or "")
+            if sustained:
+                events.append({
+                    "type": "condition.applied", "target_id": defender_id,
+                    "condition": sustained, "duration": "turn",
+                    "resist_damage_types": [
+                        str(damage_event.get("damage_type") or "")
+                    ] if damage_event.get("damage_type") else [],
+                    "source_actor_id": defender_id,
+                    "feature_id": str(choice["feature_id"]),
+                })
             next_decision = decision.get("next_decision")
             if isinstance(next_decision, dict):
                 next_decision = deepcopy(next_decision)
