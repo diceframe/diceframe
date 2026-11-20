@@ -30,7 +30,8 @@ export function friendlyCombatError(cause: unknown, locale: string): string {
   if (outOfRange) {
     return `目标距离为 ${outOfRange[1]} 尺，这个武器最远只能攻击 ${outOfRange[2]} 尺。请换远程武器，或先移动靠近。`
   }
-  if (/not your turn|requested actor is not the current actor/i.test(message)) return '现在还没轮到这个角色。请等待当前行动者结束回合。'
+  if (/a dead actor cannot act/i.test(message)) return '角色已阵亡，复活后才能行动。'
+  if (/not your turn|not this actor's turn|requested actor is not the current actor/i.test(message)) return '现在还没轮到这个角色。请等待当前行动者结束回合。'
   if (/already been spent|action is not available/i.test(message)) return '这个动作资源本回合已经用掉了。请选择仍可用的动作，或结束回合。'
   if (/state version|stale|expected_version/i.test(message)) return '战斗状态刚刚发生变化，界面已为你刷新。请按最新状态再试一次。'
   if (/resolve the melee hit spell decision first/i.test(message)) return '请先选择是否追加法术，结算这次命中后再继续行动。'

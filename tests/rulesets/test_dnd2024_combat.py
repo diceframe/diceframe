@@ -341,6 +341,107 @@ def test_natural_twenty_death_save_restores_one_hp() -> None:
     assert updated["conditions"]["death_saves"] == {"successes": 0, "failures": 0}
 
 
+@pytest.mark.parametrize("has_living_ally", [False, True])
+@pytest.mark.parametrize(("condition", "roll", "prior_saves", "outcome"), [
+    ("dead", 5, {"successes": 0, "failures": 2}, "party_defeated"),
+    ("stable", 10, {"successes": 2, "failures": 0}, "party_incapacitated"),
+])
+def test_final_death_save_passes_turn_or_ends_combat(
+    has_living_ally: bool, condition: str, roll: int, prior_saves: dict, outcome: str,
+) -> None:
+    engine, instance = _instance()
+    if has_living_ally:
+        ally = _character(Dnd2024Runtime(), "stalwart_guardian", "Mira")
+        instance.players["ally"] = {"character_name": "Mira", "character_sheet": ally}
+    start = engine.resolve_intent(instance, {
+        "intent_id": "start", "type": "combat.start", "expected_version": 0,
+        "submitted_by": "gm", "enemies": [_goblin()],
+    }, SequenceRng([10, 20, 1] if has_living_ally else [20, 1]))
+    assert engine.apply_batch(instance, start["event_batch"])["applied"]
+    canonical = instance.get_character_sheet("gm")["ruleset_character"]
+    canonical["resources"]["hp"] = 0
+    canonical["conditions"] = {
+        "unconscious": {"source": "zero_hp"},
+        "death_saves": prior_saves.copy(),
+    }
+    result = engine.resolve_intent(instance, {
+        "intent_id": "fatal-save", "type": "death_save", "expected_version": 1,
+        "submitted_by": "gm", "actor_id": "player:gm",
+    }, SequenceRng([roll]))
+    assert engine.apply_batch(instance, result["event_batch"])["applied"]
+
+    sheet = instance.get_character_sheet("gm")
+    assert condition in sheet["ruleset_character"]["conditions"]
+    assert sheet["deceased"] is (condition == "dead")
+    combat = engine.gameplay_view(instance)["combat"]
+    if has_living_ally:
+        assert combat["status"] == "active"
+        assert combat["current_actor_id"] == "player:ally"
+    else:
+        assert combat["status"] == "ended"
+        assert combat["outcome"] == outcome
+
+
+@pytest.mark.parametrize("hp", [0, 5])
+def test_dead_current_actor_cannot_act_or_roll_another_death_save(hp: int) -> None:
+    engine, instance = _instance()
+    _start(engine, instance)
+    canonical = instance.get_character_sheet("gm")["ruleset_character"]
+    canonical["resources"]["hp"] = hp
+    canonical["conditions"] = {"dead": {"source": "death_saves"}}
+    assert {action["type"] for action in engine.available_intents(instance, "gm")} == {
+        "end_turn", "combat.message", "combat.end",
+    }
+    for kind in ("death_save", "attack", "cast_spell", "move", "dodge"):
+        result = engine.resolve_intent(instance, {
+            "intent_id": kind, "type": kind, "expected_version": 1, "distance": 5,
+            "submitted_by": "gm", "actor_id": "player:gm",
+        }, SequenceRng([20]))
+        assert result == {
+            "ok": False, "code": "INVALID_INTENT", "error": "a dead actor cannot act",
+        }
+    result = engine.resolve_intent(instance, {
+        "intent_id": "pass", "type": "end_turn", "expected_version": 1,
+        "submitted_by": "gm", "actor_id": "player:gm",
+    }, SequenceRng([]))
+    assert engine.apply_batch(instance, result["event_batch"])["applied"]
+    assert engine.gameplay_view(instance)["combat"]["outcome"] == "party_defeated"
+
+
+def test_new_encounter_skips_a_dead_character_with_highest_initiative() -> None:
+    engine, instance = _instance()
+    ally = _character(Dnd2024Runtime(), "stalwart_guardian", "Mira")
+    instance.players["mira"] = {"character_name": "Mira", "character_sheet": ally}
+    dead_character = instance.get_character_sheet("gm")["ruleset_character"]
+    dead_character["resources"]["hp"] = 0
+    dead_character["conditions"] = {"dead": {"source": "death_saves"}}
+
+    _start(engine, instance)
+
+    combat = engine.gameplay_view(instance)["combat"]
+    assert combat["current_actor_id"] == "player:mira"
+    assert next(actor for actor in combat["actors"] if actor["actor_id"] == "player:gm")["is_dead"]
+
+
+def test_private_reaction_pauses_the_current_players_turn() -> None:
+    engine, instance = _instance()
+    ally = _character(Dnd2024Runtime(), "curious_arcanist", "Mira")
+    instance.players["mira"] = {"character_name": "Mira", "character_sheet": ally}
+    _start(engine, instance)
+    combat = ruleset_runtime.state(instance)["combat"]
+    combat["pending_decisions"] = [{
+        "kind": "hit_reaction_spell", "decision_id": "shield",
+        "assigned_to": "mira", "actor_id": "player:mira", "options": ["cast", "decline"],
+    }]
+    assert [action["type"] for action in engine.available_intents(instance, "gm")] == [
+        "combat.message",
+    ]
+    assert engine.gameplay_view(instance, "gm", False)["combat"]["pending_decisions"] == []
+    assert [action["type"] for action in engine.available_intents(instance, "mira")] == [
+        "combat.message", "decision.resolve",
+    ]
+
+
 def test_revival_clears_canonical_death_save_state_and_invalidates_combat_actions() -> None:
     engine, instance = _instance()
     runtime = Dnd2024Runtime()
@@ -356,7 +457,7 @@ def test_revival_clears_canonical_death_save_state_and_invalidates_combat_action
     sheet["hp"] = 0
     sheet["deceased"] = True
     assert engine.available_intents(instance, "gm")[0]["type"] == "combat.message"
-    assert any(item["type"] == "death_save" for item in engine.available_intents(instance, "gm"))
+    assert "death_save" not in {item["type"] for item in engine.available_intents(instance, "gm")}
 
     apply_revive_commands(
         instance, {"revive_commands": [{"uid": "gm", "method": "法术"}]}, runtime,

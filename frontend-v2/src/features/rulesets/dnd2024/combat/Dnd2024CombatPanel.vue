@@ -26,7 +26,7 @@ import type {
   RulesetGameplayResponse,
   RulesetPendingDecision,
 } from '@/api/types'
-import { api } from '@/api/client'
+import { api, ApiError } from '@/api/client'
 import { useLocale } from '@/composables/useLocale'
 import CombatLiveBar from '@/components/play/CombatLiveBar.vue'
 import ActionDock, { type DockTab } from './hud/ActionDock.vue'
@@ -214,7 +214,7 @@ const waitingText = computed(() => {
     // §35.1：队友回合显示"米拉正在行动…"，而不是"等待队友点击"。
     return `${targetName(current)}（AI 队友）正在行动…`
   }
-  if (current === `player:${props.actorId}`) return copy.value.waiting
+  if (current === `player:${props.actorId}`) return copy.value.waitingForAction
   return `${copy.value.waitingForTeammate}：${targetName(current)}`
 })
 const selectedDestination = computed(() => (
@@ -433,6 +433,9 @@ const ownToken = computed(() => battleTokens.value.find(token => token.isOwn) ||
 // `combat.economy` belongs to whoever is acting, so the dock only opens on the
 // viewer's own turn; everyone else keeps the read-only waiting state.
 const isOwnTurn = computed(() => combat.value?.current_actor_id === `player:${props.actorId}`)
+const hasTurnActions = computed(() => actions.value.some(
+  entry => entry.actor_id === combat.value?.current_actor_id,
+))
 const dockTabs = computed<DockTab[]>(() => {
   const economy = combat.value?.economy || {}
   const movement = Number(economy.movement ?? 0)
@@ -466,7 +469,7 @@ const dockCost = computed(() => {
   if (dockMode.value === 'move') return `${Math.abs(Number(movementDistance.value || 0))} ${copy.value.feet}`
   return ''
 })
-const dockNeedsTarget = computed(() => dockMode.value === 'attack' || dockMode.value === 'spell'
+const dockNeedsTarget = computed(() => dockMode.value === 'attack' || (dockMode.value === 'spell' && spellChoices.value.length > 0)
   || (dockMode.value === 'capability' && Boolean(selectedCapability.value?.requires_target))
   || (dockMode.value === 'item' && selectedItem.value?.target === 'ally'))
 const canStageDock = computed(() => {
@@ -774,16 +777,21 @@ function clearGameScopedState(): void {
   returnFocus = null
 }
 
-async function load(silent = false): Promise<void> {
+async function load(silent = false, rejection?: string): Promise<void> {
   const gameKey = props.gameKey
-  if (!gameKey || (busy.value && silent)) return
+  if (!gameKey || (busy.value && silent && rejection === undefined)) return
   const sequence = ++loadSequence
+  if (rejection !== undefined) error.value = rejection
   if (!silent) busy.value = true
   try {
     const response = await fetchRulesetAvailableActions(gameKey)
     if (sequence !== loadSequence || props.gameKey !== gameKey) return
     data.value = response
-    error.value = ''
+    error.value = rejection ?? ''
+    if (rejection !== undefined && staged.value
+      && staged.value.expected_version !== response.gameplay.state_version) {
+      staged.value = null
+    }
     resetSelections()
   } catch (cause: unknown) {
     if (sequence !== loadSequence || props.gameKey !== gameKey) return
@@ -806,6 +814,7 @@ function stage(payload: JsonObject): void {
 // Resolves to true once the server accepted the intent.
 async function submit(payload: JsonObject): Promise<boolean> {
   const gameKey = props.gameKey
+  ++loadSequence
   busy.value = true
   try {
     const response = await submitRulesetIntent(gameKey, payload)
@@ -825,8 +834,10 @@ async function submit(payload: JsonObject): Promise<boolean> {
     return true
   } catch (cause: unknown) {
     if (props.gameKey !== gameKey) return false
-    error.value = friendlyCombatError(cause)
-    await load(true)
+    if (cause instanceof ApiError && (cause.status === 409 || cause.status === 422)) {
+      staged.value = null
+    }
+    await load(true, friendlyCombatError(cause))
     return false
   } finally {
     if (props.gameKey === gameKey) busy.value = false
@@ -1024,6 +1035,7 @@ const windowDie = computed(() => Number(
 
 async function decide(decision: RulesetPendingDecision, option: string, extra: JsonObject = {}): Promise<void> {
   const gameKey = props.gameKey
+  ++loadSequence
   busy.value = true
   try {
     const payload = {
@@ -1041,8 +1053,7 @@ async function decide(decision: RulesetPendingDecision, option: string, extra: J
     emit('refresh')
   } catch (cause: unknown) {
     if (props.gameKey !== gameKey) return
-    error.value = friendlyCombatError(cause)
-    await load(true)
+    await load(true, friendlyCombatError(cause))
   } finally {
     if (props.gameKey === gameKey) busy.value = false
   }
@@ -1311,7 +1322,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
         </section>
 
         <ActionDock
-          v-if="isOwnTurn && actions.length && (!pendingDecision || pendingDecision.kind === 'melee_hit_spell')"
+          v-if="isOwnTurn && hasTurnActions && (!pendingDecision || pendingDecision.kind === 'melee_hit_spell')"
           :active-tab="dockTab"
           :own="ownToken"
           :hp-label="copy.hp"
@@ -1419,6 +1430,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
                   <span>{{ copy.maximizeDamage }}<small>{{ copy.maximizeHint }}</small></span>
                 </label>
               </template>
+              <p v-else class="dock-hint">{{ copy.noCombatSpell }}</p>
               <SpellAvailability :spells="spellActor?.spells || []" />
             </div>
 
@@ -1547,7 +1559,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               <span v-if="dockNeedsTarget && dockTargetDistance !== null"><small>{{ copy.distance }}</small><b>{{ dockTargetDistance }} {{ copy.feet }}</b></span>
             </div>
             <div class="dock-actions">
-              <button type="button" class="dock-confirm" :disabled="!canStageDock" @click="stageDock">
+              <button v-if="dockMode !== 'spell' || spellChoices.length" type="button" class="dock-confirm" :disabled="!canStageDock" @click="stageDock">
                 <NIcon :component="FlashOutline" />{{ copy.confirmAction }}
               </button>
               <div class="dock-finish">

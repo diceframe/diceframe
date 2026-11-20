@@ -162,7 +162,7 @@ class CombatReducerMixin:
             return
         if event_type == "dnd2024.combat.started":
             state["combat"] = {
-                "status": "active", "round": event["round"], "turn_index": 0,
+                "status": "active", "round": event["round"], "turn_index": int(event.get("turn_index", 0)),
                 "initiative": deepcopy(event["initiative"]),
                 # 首轮 turn 顺序的权威形态：一个角色可以有两个 slot（Thief's
                 # Reflexes），``initiative`` 仍保持去重，因为其他读者只问

@@ -86,7 +86,7 @@ class CombatReactionSpellsMixin:
         if int((combat.get("reactions") or {}).get(actor.get("actor_id"), 0) or 0) < 1:
             return False
         conditions = actor.get("conditions") or {}
-        if "reaction_blocked" in conditions:
+        if "dead" in conditions or "reaction_blocked" in conditions:
             return False
         if opportunity and "opportunity_attack_blocked" in conditions:
             return False
