@@ -13,6 +13,7 @@ from src.rulesets.dnd2024.character.attunement import owned_ref_counts
 from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.combat.catalog import DAMAGE_TYPES
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.features.models import Dnd2024ClassFeatureCatalog
 from src.rulesets.dnd2024.features.resources import reset_feature_usage
 from src.rulesets.dnd2024.items.charges import ChargesError, recharge_for_rest
 from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
@@ -272,6 +273,7 @@ class Dnd2024RestEngine:
         free_cast: dict[str, Any] | None = None,
         recovery: dict[str, Any] | None = None,
         fiendish_resilience: str | None = None,
+        hunter_options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if free_cast:
             # Spell Mastery 的研究只发生在长休；短休给这个参数不是"没效果"，
@@ -290,6 +292,13 @@ class Dnd2024RestEngine:
         # 任何状态变化之前拒绝，这样一次非法选择不会留下半个休息结果。
         recovery_plan = self._plan_short_recovery(
             character, recovery if recovery is not None else payload.get("recovery"),
+        )
+        # Hunter 的选项替换与 Fiend 的抗性改选同形：先算计划，任何一步非法都
+        # 在状态变化之前拒绝。
+        hunter_plan = self._plan_hunter_options(
+            character,
+            hunter_options if hunter_options is not None
+            else payload.get("hunter_options"),
         )
         events: list[dict[str, Any]] = []
         rolls = hit_die_rolls or {}
@@ -327,6 +336,7 @@ class Dnd2024RestEngine:
         self._recover_spell_slots(character, "short", events)
         self._recover_free_cast_slots(character, "short", events)
         events.extend(self._apply_short_recovery(character, recovery_plan))
+        events.extend(self._apply_hunter_options(character, hunter_plan))
         events.extend(self._apply_fiendish_resilience(character, fiendish_choice))
         events.extend(self._reset_relentless_rage_dc(character))
         events.extend(self._apply_attunement(character, payload, attunement))
@@ -344,9 +354,15 @@ class Dnd2024RestEngine:
         prepared_spells: dict[str, list[str]] | None = None,
         free_cast: dict[str, Any] | None = None,
         fiendish_resilience: str | None = None,
+        hunter_options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         character = self.sync_resources(payload)
         self._require_conscious(character, "Long Rest")
+        hunter_plan = self._plan_hunter_options(
+            character,
+            hunter_options if hunter_options is not None
+            else payload.get("hunter_options"),
+        )
         fiendish_choice = self._plan_fiendish_resilience(
             character,
             fiendish_resilience if fiendish_resilience is not None
@@ -365,6 +381,7 @@ class Dnd2024RestEngine:
             else payload.get("free_cast"),
         )
         events: list[dict[str, Any]] = []
+        events.extend(self._apply_hunter_options(character, hunter_plan))
         resources = character["resources"]
         previous_hp = int(resources.get("hp", 0) or 0)
         resources["hp"] = int(resources.get("max_hp", 0) or 0)
@@ -564,7 +581,46 @@ class Dnd2024RestEngine:
             # 短休那一半也一并交出：面板只有一个休息入口，客户端不该为了知道
             # 「这一觉能拿回什么槽」再去猜一份自己的表。
             "short_recovery": self._recovery_projection(payload),
+            "hunter_options": self._hunter_option_projection(payload),
         }
+
+    def _hunter_option_projection(
+        self, payload: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        """The Hunter option groups this character may replace at rest.
+
+        One row per group, carrying the current pick and the alternatives the
+        catalog declares -- so the panel offers exactly what the commit path
+        accepts, and a ranger without the subclass gets an empty list rather
+        than an error.
+        """
+
+        resolver = Dnd2024ClassFeatureResolver(self.bundle)
+        catalog = Dnd2024ClassFeatureCatalog.from_bundle(self.bundle)
+        raw = (payload.get("features") or {}).get("feature_choices")
+        records = [dict(row) for row in raw] if isinstance(raw, list) else []
+        rows: list[dict[str, Any]] = []
+        for feature_id, owner in self.HUNTER_OPTION_GROUPS.items():
+            if not resolver.has_feature(payload, feature_id, owner=owner):
+                continue
+            options = sorted(self._option_ids(feature_id))
+            current = ""
+            for record in records:
+                if (str(record.get("owner") or "") != owner
+                        or str(record.get("feature_id") or "") != feature_id):
+                    continue
+                refs = record.get("selected_refs")
+                if isinstance(refs, list) and refs:
+                    current = str(refs[0]).removeprefix("feature:")
+                    break
+            rows.append({
+                "owner": owner,
+                "feature_id": feature_id,
+                "current": current,
+                "options": options,
+                "label": str(catalog.labels.get(feature_id) or feature_id),
+            })
+        return rows
 
     def _recovery_projection(self, payload: Mapping[str, Any]) -> list[dict[str, Any]]:
         """``rest_recovery_options`` that degrades instead of raising.
@@ -840,6 +896,112 @@ class Dnd2024RestEngine:
                 "before": before,
                 "after": maximum,
             })
+
+    HUNTER_OPTION_GROUPS = {
+        # 两组选项都在短休与长休可以替换（SRD p61 "Whenever you finish a Short
+        # or Long Rest"），所以这里不区分休息种类。
+        "hunters_prey": "subclass:hunter",
+        "defensive_tactics": "subclass:hunter",
+    }
+
+    def _option_choice_id(self, feature_id: str) -> str:
+        """The ``choice.id`` of an option group, as the sheet records it."""
+
+        catalog = Dnd2024ClassFeatureCatalog.from_bundle(self.bundle)
+        for definition in catalog.features_by_key.values():
+            if definition.id == feature_id and definition.choice is not None:
+                return definition.choice.id
+        return f"{feature_id}_option"
+
+    def _option_ids(self, feature_id: str) -> set[str]:
+        """The ids this option group declares, read from the catalog itself.
+
+        读取的是父特性的 ``choice.enabled_options``，因此新增或改名一个选项只
+        需要改目录，不需要再到这里补一张表。
+        """
+
+        catalog = Dnd2024ClassFeatureCatalog.from_bundle(self.bundle)
+        ids: set[str] = set()
+        for definition in catalog.features_by_key.values():
+            if definition.id != feature_id or definition.choice is None:
+                continue
+            ids.update(
+                str(ref).removeprefix("feature:")
+                for ref in definition.choice.enabled_options
+            )
+        return ids
+
+    def _plan_hunter_options(
+        self, character: dict[str, Any], requested: Any,
+    ) -> dict[str, str]:
+        """Validate a Hunter's rest-time option swap.
+
+        Absent means "keep what you have": the SRD lets the player replace the
+        option, it never forces a change.  Every rejection happens before any
+        state changes, so a bad payload cannot leave a half-finished rest.
+        """
+
+        if requested is None or requested == "":
+            return {}
+        if not isinstance(requested, dict):
+            raise RestError("hunter_options must be an object keyed by feature id")
+        resolver = Dnd2024ClassFeatureResolver(self.bundle)
+        plan: dict[str, str] = {}
+        for feature_id, raw in requested.items():
+            owner = self.HUNTER_OPTION_GROUPS.get(str(feature_id))
+            if owner is None:
+                raise RestError(f"{feature_id} has no rest-time option to replace")
+            if not isinstance(raw, str) or not raw.strip():
+                raise RestError(f"{feature_id} choice must be a feature id")
+            # 选项以 "feature:" 前缀提交，与 feature_choices 的记录形状一致。
+            choice = raw.strip()
+            choice_id = choice.removeprefix("feature:")
+            if choice_id not in self._option_ids(feature_id):
+                raise RestError(f"{raw} is not an option of {feature_id}")
+            if not resolver.has_feature(character, feature_id, owner=owner):
+                raise RestError(f"this character has no {feature_id}")
+            plan[feature_id] = choice_id
+        return plan
+
+    def _apply_hunter_options(
+        self, character: dict[str, Any], plan: dict[str, str],
+    ) -> list[dict[str, Any]]:
+        if not plan:
+            return []
+        block = character.setdefault("features", {})
+        raw = block.get("feature_choices")
+        records = [dict(row) for row in raw] if isinstance(raw, list) else []
+        events: list[dict[str, Any]] = []
+        for feature_id, option_id in plan.items():
+            owner = self.HUNTER_OPTION_GROUPS[feature_id]
+            # 记录形状与建卡/升级一致：(owner, feature_id, choice_id) 定位槽，
+            # 具体选项放在 selected_refs 里。写错这一层，解析器就当"没选过"。
+            choice_id = self._option_choice_id(feature_id)
+            selected = f"feature:{option_id}"
+            before = ""
+            for record in records:
+                if (str(record.get("owner") or "") == owner
+                        and str(record.get("feature_id") or "") == feature_id
+                        and str(record.get("choice_id") or "") == choice_id):
+                    current = record.get("selected_refs")
+                    if isinstance(current, list) and current:
+                        before = str(current[0])
+                    record["selected_refs"] = [selected]
+                    break
+            else:
+                # 没有历史记录时补一条：换选项本身就是"从这一项改成那一项"，
+                # 缺记录只说明建卡时选了默认项而没有落 slot。
+                records.append({
+                    "owner": owner, "feature_id": feature_id,
+                    "choice_id": choice_id, "selected_refs": [selected],
+                })
+            events.append({
+                "type": "rebind_feature_choice", "owner": owner,
+                "feature_id": feature_id, "choice_id": choice_id,
+                "before": before or None, "after": selected,
+            })
+        block["feature_choices"] = records
+        return events
 
     def _plan_fiendish_resilience(
         self, character: dict[str, Any], requested: Any,

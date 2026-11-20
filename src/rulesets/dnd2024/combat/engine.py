@@ -1045,9 +1045,16 @@ class Dnd2024CombatEngine(
                     "left": hands.get("left"),
                     "right": hands.get("right"),
                 })
+            second_target_of = str(intent.get("second_target_of") or "")
             events.extend(self._attack_events(
                 instance, combat, intent, rng, actor_view=actor_view,
+                # 第二击不付动作，也不占攻击次数：它的合法性由"本回合已对原目标
+                # 出手"这条事实买断，校验层已经证明过。
+                spend_attack_action=not bool(second_target_of),
+                horde_breaker=bool(second_target_of),
             ))
+        elif intent_type == "superior_hunters_prey":
+            events.extend(self._superior_prey_events(instance, combat, intent, rng))
         elif intent_type == "class_capability":
             events.extend(self._class_capability_events(instance, combat, intent, rng))
         elif intent_type == "cast_spell":
@@ -2047,6 +2054,42 @@ class Dnd2024CombatEngine(
             return str(row.get("level") or "none")
         finally:
             self._cover_depth -= 1
+
+    def attacked_this_turn(
+        self, combat: dict[str, Any], actor_id: str,
+    ) -> set[str]:
+        """Targets this actor has already attacked in the current turn.
+
+        "This turn" is ``(round, turn_index)``, not the actor's own turn: an
+        Opportunity Attack happens on somebody else's turn and must not appear
+        in the actor's own record.  Reading the pair off the log is what keeps
+        that distinction instead of approximating it with "recently".
+        """
+
+        round_index = int(combat.get("round", 0) or 0)
+        turn_index = int(combat.get("turn_index", 0) or 0)
+        return {
+            str(row.get("target_id") or "")
+            for row in combat.get("attack_history") or []
+            if str(row.get("actor_id") or "") == actor_id
+            and int(row.get("round", 0) or 0) == round_index
+            and int(row.get("turn_index", 0) or 0) == turn_index
+        }
+
+    def mark_damage_this_turn(
+        self, combat: dict[str, Any], actor_id: str, target_id: str,
+    ) -> bool:
+        """Did this actor deal Hunter's Mark damage to ``target_id`` this turn?"""
+
+        round_index = int(combat.get("round", 0) or 0)
+        turn_index = int(combat.get("turn_index", 0) or 0)
+        return any(
+            str(row.get("actor_id") or "") == actor_id
+            and str(row.get("target_id") or "") == target_id
+            and int(row.get("round", 0) or 0) == round_index
+            and int(row.get("turn_index", 0) or 0) == turn_index
+            for row in combat.get("mark_damage_history") or []
+        )
 
     def _cover_record(
         self, instance: Any, combat: dict[str, Any], target: dict[str, Any],

@@ -1225,6 +1225,7 @@ class CombatResolutionMixin:
     def _attack_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
         *, spend_attack_action: bool = True,
+        horde_breaker: bool = False,
         actor_view: dict[str, Any] | None = None,
         target_view: dict[str, Any] | None = None,
         granted_by: str = "",
@@ -1480,6 +1481,7 @@ class CombatResolutionMixin:
                 ability=ability, modifier=modifier,
                 damage_formula=damage_formula, damage_type=damage_type,
                 crit_on_hit=crit_on_hit, granted_by=granted_by,
+                horde_breaker=horde_breaker,
             ))
         else:
             events.extend(self._miss_mastery_events(
@@ -1555,6 +1557,7 @@ class CombatResolutionMixin:
         damage_formula: str, damage_type: str, crit_on_hit: bool = False,
         exclude_bards: tuple[str, ...] = (), spent_reactions: tuple[str, ...] = (),
         granted_by: str = "",
+        horde_breaker: bool = False,
     ) -> list[dict[str, Any]]:
         """Damage construction and commit for an already-hit attack.
 
@@ -1590,6 +1593,9 @@ class CombatResolutionMixin:
         )
         if sneak_dice:
             extra_dice.append(sneak_dice)
+        slayer_dice = self._colossus_slayer_dice(instance, combat, actor, target)
+        if slayer_dice:
+            extra_dice.append(slayer_dice)
         damage_node = attack_damage_node(
             damage_formula=damage_formula,
             modifier=modifier,
@@ -1628,6 +1634,23 @@ class CombatResolutionMixin:
                 "round": int(combat.get("round", 0)),
                 "turn_index": int(combat.get("turn_index", 0)),
             }
+        if slayer_dice:
+            # 同一条延迟提交规则：命中被改判落空时这一回合的额度不消耗。
+            marks = damage_event.setdefault("feature_uses", [])
+            marks.append({
+                "actor_id": actor_id,
+                "feature_id": "colossus_slayer",
+                "round": int(combat.get("round", 0)),
+                "turn_index": int(combat.get("turn_index", 0)),
+            })
+        if horde_breaker:
+            marks = damage_event.setdefault("feature_uses", [])
+            marks.append({
+                "actor_id": actor_id,
+                "feature_id": "horde_breaker",
+                "round": int(combat.get("round", 0)),
+                "turn_index": int(combat.get("turn_index", 0)),
+            })
         riders = self._hit_rider_declarations(
             actor, weapon, intent, combat, damage_type=damage_type, check=check,
         )
@@ -1798,10 +1821,59 @@ class CombatResolutionMixin:
         return {
             "feature_id": "hunter_s_mark",
             "owner": HUNTERS_MARK_REF,
+            "source_actor_id": str(actor.get("actor_id") or ""),
             "dice": f"1d{sides}",
             "damage_type": str(effect.get("mark_damage_type") or "force"),
             "once_per_turn": False,
         }
+
+    def _superior_prey_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Superior Hunter's Prey: the mark's die, on a second creature.
+
+        One die of the *mark's* damage -- not the weapon's, not the first
+        target's total -- rolled independently and resisted independently, so a
+        fire-resistant second target halves that die and nothing else.
+        """
+
+        actor_id = str(intent["actor_id"])
+        actor = self._actor_view(instance, combat, actor_id)
+        original_id = str(intent["target_id"])
+        second_id = str(intent["second_target_id"])
+        second = self._actor_view(instance, combat, second_id)
+        effect = self.catalog.spell_effects.get(
+            HUNTERS_MARK_REF.removeprefix("spell:")
+        ) or {}
+        sides = self._mark_damage_die(actor, effect)
+        damage_type = str(effect.get("mark_damage_type") or "force")
+        node = attack_damage_node(
+            damage_formula=f"1d{sides}", modifier=0, critical=False,
+            extra_dice_formulas=[],
+        )
+        amount, rolls = roll_damage_node(node, rng)
+        amount = max(0, amount)
+        damage, resistance = self._resist_damage(second, amount, damage_type)
+        event: dict[str, Any] = {
+            "type": "resource.changed", "resource": "hp",
+            "target_id": second_id, "delta": -damage, "amount": damage,
+            "damage_type": damage_type, "critical": False, "rolls": rolls,
+            "feature_id": "superior_hunters_prey",
+            "owner_ref": HUNTERS_MARK_REF,
+            "source_actor_id": actor_id,
+            "second_target_of": original_id,
+        }
+        if resistance:
+            event["resisted"] = True
+            event["resistance"] = resistance
+        events: list[dict[str, Any]] = [event]
+        events.append({
+            "type": "dnd2024.feature.used", "actor_id": actor_id,
+            "feature_id": "superior_hunters_prey",
+            "round": int(combat.get("round", 0)),
+            "turn_index": int(combat.get("turn_index", 0)),
+        })
+        return events
 
     def _mark_damage_die(self, actor: dict[str, Any], effect: dict[str, Any]) -> int:
         """The die this caster's Hunter's Mark rolls, in sides."""
@@ -2191,6 +2263,9 @@ class CombatResolutionMixin:
             "critical": critical, "rolls": rolls,
             "feature_id": str(row.get("feature_id") or ""),
             "owner_ref": str(row.get("owner") or ""),
+            # 谁打出的这一下：Superior Hunter's Prey 问的就是"你本回合对标记
+            # 目标造成过伤害吗"，而伤害事件本身不携带施害者。
+            "source_actor_id": str(row.get("source_actor_id") or ""),
         }
         if resistance:
             event["resisted"] = True
@@ -3432,6 +3507,9 @@ class CombatResolutionMixin:
 
         event = deepcopy(damage_event)
         feature_use = event.pop("feature_use", None)
+        # 一次命中可以同时消耗两项额度（例如潜行 + 巨兽杀手），所以除了单条
+        # 的 feature_use 之外还要接受一组。
+        extra_feature_uses = event.pop("feature_uses", None)
         mastery_effects = event.pop("mastery_effects", None)
         # Hit riders (Radiant/Divine/Primal strikes) are settled by
         # ``_hit_rider_events``: their dice are a separate damage instance, so
@@ -3442,6 +3520,10 @@ class CombatResolutionMixin:
         events: list[dict[str, Any]] = [event]
         if isinstance(feature_use, dict):
             events.append({"type": "dnd2024.feature.used", **feature_use})
+        if isinstance(extra_feature_uses, list):
+            for row in extra_feature_uses:
+                if isinstance(row, dict) and row.get("feature_id"):
+                    events.append({"type": "dnd2024.feature.used", **row})
         if isinstance(mastery_effects, list):
             for effect in mastery_effects:
                 if not isinstance(effect, dict) or not effect.get("condition"):
@@ -3594,6 +3676,39 @@ class CombatResolutionMixin:
             if self._distance(combat, ally_id, target_id) <= 5:
                 return True
         return False
+
+    def _colossus_slayer_dice(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        target: dict[str, Any],
+    ) -> str | None:
+        """Colossus Slayer's extra die, or ``None``.
+
+        Three predicates, in the order the SRD states them: the Hunter owns the
+        option, the target is already missing Hit Points *before this hit
+        lands*, and the option has not been spent this turn.  The dice come
+        from the declaration, so a changed die needs no code change here.
+        """
+
+        character = self._feature_character(actor)
+        if not self.features.has_feature(
+            character, "colossus_slayer", owner="subclass:hunter",
+        ):
+            return None
+        if self._feature_used_this_turn(
+            combat, str(actor["actor_id"]), "colossus_slayer",
+        ):
+            return None
+        # "missing any of its Hit Points" 是命中前的状态：这一击的伤害还没
+        # 落地，所以读的是当前 hp，而不是扣完之后的。
+        if int(target.get("hp", 0) or 0) >= int(target.get("max_hp", 0) or 0):
+            return None
+        dice = self.features.feature_value(
+            character, "colossus_slayer", "bonus_damage", "",
+        )
+        if not isinstance(dice, str) or not dice:
+            raise CombatIntentError("colossus slayer damage dice are unavailable")
+        formula_node_from_dice_formula(dice)
+        return dice
 
     def _sneak_attack_dice(
         self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
@@ -5627,6 +5742,7 @@ class CombatResolutionMixin:
             return self._finish_check_window(instance, combat, decision, intent, rng)
         if decision.get("kind") == DAMAGE_WINDOW_DECISION:
             return self._finish_damage_window(instance, combat, decision, intent, rng)
+
         if decision.get("kind") == RELENTLESS_RAGE_DECISION:
             return self._finish_relentless_rage(instance, combat, decision, intent, rng)
         movement = decision["movement"]

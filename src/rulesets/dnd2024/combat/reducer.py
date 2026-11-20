@@ -62,6 +62,36 @@ class CombatReducerMixin:
         state = snapshot["ruleset_state"]
         combat = state["combat"]
         event_type = str(event["type"])
+        if (
+            event_type == "resource.changed"
+            and event.get("resource") == "hp"
+            and int(event.get("delta", 0) or 0) < 0
+            and event.get("feature_id") == "hunter_s_mark"
+            and event.get("source_actor_id")
+        ):
+            # 标记伤害真的落地了：Superior Hunter's Prey 的前提是"你本回合对
+            # 标记目标造成过伤害"，记在账本上比让调用方自己声明更可靠。
+            history = combat.setdefault("mark_damage_history", [])
+            history.append({
+                "actor_id": str(event.get("source_actor_id") or ""),
+                "target_id": str(event.get("target_id") or ""),
+                "round": int(combat.get("round", 0) or 0),
+                "turn_index": int(combat.get("turn_index", 0) or 0),
+            })
+            return
+        if event_type == "check.resolved" and event.get("kind") == "attack":
+            # 本回合"打过谁"是规则事实：Horde Breaker 要求第二目标"this turn
+            # 还没被打过"，而回合经济只记动作数，答不了这个问题。这里按
+            # round/turn_index 记账，查询方自己按当前回合过滤，因此不需要
+            # 在回合边界做清理。
+            history = combat.setdefault("attack_history", [])
+            history.append({
+                "actor_id": str(event.get("actor_id") or ""),
+                "target_id": str(event.get("target_id") or ""),
+                "round": int(combat.get("round", 0) or 0),
+                "turn_index": int(combat.get("turn_index", 0) or 0),
+            })
+            return
         if event_type in {
             "intent.submitted", "check.resolved", "dnd2024.spell.cast",
             "dnd2024.combat.message", "dnd2024.spell.countered",
@@ -158,6 +188,9 @@ class CombatReducerMixin:
                 "cover": {},
                 # 遭遇级的持握与骑乘：两者都随这场战斗生灭，不落盘到角色卡。
                 "hands": {},
+                # 本回合谁打过谁：Horde Breaker 与"第二目标未被打过"共用。
+                "attack_history": [],
+                "mark_damage_history": [],
                 "mounted": deepcopy(event.get("mounted") or {}),
             }
             return
