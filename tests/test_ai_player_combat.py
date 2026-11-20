@@ -412,6 +412,20 @@ def test_ai_hosted_pc_at_zero_hp_makes_a_death_save() -> None:
     assert _sheet(instance, "ai1")["resources"]["hp"] == 0
 
 
+def test_ai_hosted_dead_pc_passes_turn_without_attempting_a_death_save() -> None:
+    _runtime, engine, instance = _setup()
+    _start(engine, instance, rolls=[20, 1, 3])
+    canonical = _sheet(instance, "ai1")
+    canonical["resources"]["hp"] = 0
+    canonical["conditions"] = {"dead": {"source": "death_saves"}}
+    _set_turn(engine, instance, "player:ai1")
+
+    intent = engine.next_automatic_intent(instance)
+    assert intent is not None
+    assert intent["type"] == "end_turn"
+    _apply(engine, instance, intent, [])
+    assert engine.gameplay_view(instance)["combat"]["current_actor_id"] != "player:ai1"
+
 def test_a_companion_at_zero_hp_still_never_makes_a_death_save() -> None:
     _runtime, engine, instance = _setup()
     _seed_companion(instance, _companion("mira", "Mira", hp=0))

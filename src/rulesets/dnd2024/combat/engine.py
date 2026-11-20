@@ -334,13 +334,23 @@ class Dnd2024CombatEngine(
                     pending, viewer_id=actor_id, viewer_is_gm=viewer_is_gm,
                 ),
             }]
+        if self._turn_decision_error(combat, "end_turn"):
+            return communication
         actor = self._actor_view(instance, combat, current)
+        end_turn_entry: dict[str, Any] = {
+            "type": "end_turn", "label": "End turn", "actor_id": current,
+            "expected_version": version,
+        }
+        if "dead" in actor["conditions"]:
+            actions = [*communication, end_turn_entry]
+            if viewer_is_gm:
+                actions.append({
+                    "type": "combat.end", "label": "End combat", "expected_version": version,
+                })
+            return actions
         if actor["hp"] <= 0 and actor["kind"] == "player":
             if "stable" in actor["conditions"]:
-                return [*communication, {
-                    "type": "end_turn", "label": "End turn",
-                    "expected_version": version, "actor_id": current,
-                }]
+                return [*communication, end_turn_entry]
             return [*communication, {
                 "type": "death_save", "label": "Death saving throw",
                 "expected_version": version, "actor_id": current,
@@ -373,6 +383,7 @@ class Dnd2024CombatEngine(
             adjacent_downed = [
                 target for target in self._all_targets(instance, combat)
                 if target["kind"] == actor["kind"] and target["hp"] <= 0
+                and not target["is_dead"]
                 and self._distance(combat, current, target["actor_id"]) <= 5
             ]
             if adjacent_downed:
@@ -425,10 +436,6 @@ class Dnd2024CombatEngine(
                 "type": "move", "label": "Move", "actor_id": current,
                 "expected_version": version, "movement_remaining": economy["movement"],
             })
-        end_turn_entry: dict[str, Any] = {
-            "type": "end_turn", "label": "End turn", "actor_id": current,
-            "expected_version": version,
-        }
         # 回合末移除是一个"可选"越项：面板必须能看出可移除哪几项，否则
         # 玩家只能靠猜该传什么值；候选来自声明白名单与当前实有条件，服务端
         # 在 intent 边界仍会重验同一份事实。
@@ -806,9 +813,10 @@ class Dnd2024CombatEngine(
         托管席位的回合一定会结束。
         """
         actor = self._actor_view(instance, combat, base["actor_id"])
+        conditions = actor["conditions"]
+        if "dead" in conditions or (actor["hp"] <= 0 and "stable" in conditions):
+            return {**base, "intent_id": f"{base['intent_id']}:end", "type": "end_turn"}
         if actor["hp"] <= 0:
-            if "stable" in actor["conditions"]:
-                return {**base, "intent_id": f"{base['intent_id']}:end", "type": "end_turn"}
             return {
                 **base,
                 "intent_id": f"{base['intent_id']}:death_save",
@@ -843,8 +851,8 @@ class Dnd2024CombatEngine(
             or int(economy.get("surge_action", 0) or 0) > 0
         )
         allies = [
-            target for target in self._all_targets(instance, combat)
-            if target["side"] == "party" and target["actor_id"] != actor_id
+            target for target in self._party_targets(instance, combat)
+            if target["actor_id"] != actor_id
         ]
         if can_act:
             downed = [target for target in allies if int(target.get("hp", 0) or 0) <= 0]

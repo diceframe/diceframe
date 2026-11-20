@@ -263,9 +263,12 @@ class CombatResolutionMixin:
         initiatives: list[dict[str, Any]] = []
         positions: dict[str, int] = {}
         companions = self._active_companions(instance)
+        dead_actor_ids: set[str] = set()
         for uid in sorted(instance.players):
             canonical = _canonical(instance.get_character_sheet(uid))
             actor_id = _player_actor(uid)
+            if "dead" in (canonical.get("conditions") or {}):
+                dead_actor_ids.add(actor_id)
             modifier = int(canonical.get("derived", {}).get("initiative", 0) or 0)
             initiatives.append({
                 "actor_id": actor_id, "modifier": modifier, "kind": "player",
@@ -275,6 +278,8 @@ class CombatResolutionMixin:
         for companion_id in sorted(companions):
             canonical = companions[companion_id].get("ruleset_character") or {}
             actor_id = _companion_actor(companion_id)
+            if "dead" in (canonical.get("conditions") or {}):
+                dead_actor_ids.add(actor_id)
             modifier = int(canonical.get("derived", {}).get("initiative", 0) or 0)
             initiatives.append({
                 "actor_id": actor_id, "modifier": modifier, "kind": "companion",
@@ -323,11 +328,15 @@ class CombatResolutionMixin:
         initiatives.sort(key=lambda row: (-int(row["total"]), row["kind"] != "player", row["actor_id"]))
         order = [row["actor_id"] for row in initiatives]
         slots = self._turn_slots(instance, initiatives, enemies, companions)
-        first = self._actor_view_from_data(instance, enemies, slots[0]["actor_id"], companions)
+        # Preserve the slots for explicit revival during the encounter.
+        first_index = next(i for i, slot in enumerate(slots) if slot["actor_id"] not in dead_actor_ids)
+        first = self._actor_view_from_data(instance, enemies, slots[first_index]["actor_id"], companions)
         # Superior Inspiration hooks the real Initiative roll, not a static
         # character value: every bard that rolled here tops up to two uses.
         refills: list[dict[str, Any]] = []
         for uid in sorted(instance.players):
+            if _player_actor(uid) in dead_actor_ids:
+                continue
             canonical = _canonical(instance.get_character_sheet(uid))
             if not self.features.has_feature(canonical, "superior_inspiration"):
                 continue
@@ -345,12 +354,12 @@ class CombatResolutionMixin:
         # 战斗开始的第一回合也是"自己的回合开始"：首行动者与后续回合共用
         # 同一个 turn-start 辅助，不能因为批次里没有 turn.advanced 就跳过。
         opening = self._initiative_opening_events(
-            instance, enemies, companions, order,
+            instance, enemies, companions, [actor_id for actor_id in order if actor_id not in dead_actor_ids],
             self._initiative_choices(intent), rng,
         )
         return [{
             "type": "dnd2024.combat.started", "round": 1, "initiative": order,
-            "turn_slots": slots,
+            "turn_slots": slots, "turn_index": first_index,
             "initiative_rolls": initiatives, "enemies": enemies, "positions": positions,
             "economy": self._fresh_economy(first), "position_mode": "theater",
             "reactions": {actor_id: 1 for actor_id in order},
@@ -5291,7 +5300,7 @@ class CombatResolutionMixin:
 
     def _end_turn_events(
         self, instance: Any, combat: dict[str, Any], rng: Any,
-        intent: dict[str, Any] | None = None,
+        intent: dict[str, Any] | None = None, *, settled_condition: str = "",
     ) -> list[dict[str, Any]]:
         order = list(combat["initiative"])
         if not any(
@@ -5299,17 +5308,22 @@ class CombatResolutionMixin:
             for enemy in combat.get("enemies", {}).values()
         ):
             return [{"type": "dnd2024.combat.ended", "reason": "victory"}]
-        player_conditions = [
-            self._actor_view(instance, combat, actor_id)["conditions"]
-            for actor_id in order if actor_id.startswith("player:")
-        ]
+        previous_actor = self._current_actor(combat)
+        player_conditions: dict[str, set[str]] = {}
+        for actor_id in order:
+            if actor_id.startswith("player:"):
+                conditions = set(self._actor_view(instance, combat, actor_id)["conditions"])
+                if actor_id == previous_actor and settled_condition:
+                    conditions.add(settled_condition)
+                player_conditions[actor_id] = conditions
         if not any(
             "dead" not in conditions and "stable" not in conditions
-            for conditions in player_conditions
+            for conditions in player_conditions.values()
         ):
             reason = (
                 "party_incapacitated"
-                if any("stable" in conditions for conditions in player_conditions)
+                if any("stable" in conditions and "dead" not in conditions
+                       for conditions in player_conditions.values())
                 else "party_defeated"
             )
             return [{"type": "dnd2024.combat.ended", "reason": reason}]
@@ -5317,17 +5331,14 @@ class CombatResolutionMixin:
         # 回合按 slot 推进：同一角色在首轮可以有两个 slot（Thief's Reflexes），
         # 它们共享 actor identity，但各自刷新经济、反应与 turn-start。
         slots = self._combat_slots(combat)
-        previous_slot = slots[previous_index]
         # 重复豁免 tick 发生在"目标自己回合结束"，排在推进回合之前。
-        events = self._save_repeat_events(
-            instance, combat, str(previous_slot["actor_id"]), rng,
-        )
-        # Self-Restoration 与重复豁免读的是同一个时刻：若那条条件已在本次
-        # tick 里被豁免掉，选定移除就不再产生第二条事件。
-        ender = self._actor_view(instance, combat, str(previous_slot["actor_id"]))
-        events.extend(
-            self._self_restoration_removal_events(ender, intent, events)
-        )
+        events = []
+        if "dead" not in player_conditions.get(previous_actor, ()):
+            events = self._save_repeat_events(instance, combat, previous_actor, rng)
+            # Self-Restoration 与重复豁免读的是同一个时刻：若那条条件已在本次
+            # tick 里被豁免掉，选定移除就不再产生第二条事件。
+            ender = self._actor_view(instance, combat, previous_actor)
+            events.extend(self._self_restoration_removal_events(ender, intent, events))
         next_index = previous_index
         wraps = 0
         for _ in range(len(slots)):
@@ -5344,7 +5355,8 @@ class CombatResolutionMixin:
             # 失能单位跳过回合：敌人/队友 HP 归零即跳过；玩家 0 HP 走死亡豁免。
             if candidate["kind"] in {"enemy", "companion"} and candidate["hp"] <= 0:
                 continue
-            if "dead" in candidate["conditions"] or "stable" in candidate["conditions"]:
+            conditions = player_conditions.get(candidate["actor_id"], candidate["conditions"])
+            if "dead" in conditions or "stable" in conditions:
                 continue
             break
         next_round = int(combat["round"]) + wraps
@@ -5359,7 +5371,7 @@ class CombatResolutionMixin:
                 "type": "dnd2024.turn.advanced", "round": next_round,
                 "turn_index": next_index, "actor_id": next_actor,
                 "slot_id": str(slots[next_index]["slot_id"]),
-                "previous_actor_id": str(previous_slot["actor_id"]),
+                "previous_actor_id": previous_actor,
                 "economy": self._fresh_economy(next_view),
             },
             *self._turn_start_events(next_view),
@@ -5633,6 +5645,7 @@ class CombatResolutionMixin:
             failures += 1
         stable = successes >= 3
         dead = failures >= 3
+        settled_condition = "dead" if dead else "stable" if stable else ""
         return [
             {
                 "type": "dnd2024.death_save.resolved", "actor_id": actor_id,
@@ -5645,7 +5658,9 @@ class CombatResolutionMixin:
                 "successes": min(successes, 3), "failures": min(failures, 3),
                 "stable": stable, "dead": dead, "hp": hp,
             },
-            *([] if dead or hp else self._end_turn_events(instance, combat, rng)),
+            *([] if hp else self._end_turn_events(
+                instance, combat, rng, settled_condition=settled_condition,
+            )),
         ]
 
     def _stabilize_events(

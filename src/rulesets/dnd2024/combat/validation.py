@@ -71,6 +71,16 @@ from .reaction_spells import COUNTER_SPELL_DECISION, HIT_REACTION_DECISION
 from .triggered_spells import HIT_SPELL_DECISION, free_cast_resource, hit_spell_decision
 
 
+_TURN_DECISION_ERRORS = {
+    HIT_SPELL_DECISION: "resolve the melee hit spell decision first",
+    HIT_REACTION_DECISION: "waiting for the defender's reaction spell decision",
+    COUNTER_SPELL_DECISION: "resolve the counter spell decision first",
+    CHECK_WINDOW_DECISION: "resolve the pending check window first",
+    DAMAGE_WINDOW_DECISION: "resolve the pending check window first",
+    RELENTLESS_RAGE_DECISION: "resolve the relentless rage decision first",
+}
+
+
 # S0-MM1：敌人契约的已知字段。未知字段一律拒绝——它过去被静默忽略，
 # 于是 GM 或导入器带来的 MM 字段"看起来进去了"，实际从没生效。
 _ENEMY_KEYS = frozenset({
@@ -438,22 +448,8 @@ class CombatValidationMixin:
             return
         if combat.get("status") != "active":
             raise CombatIntentError("combat is not active")
-        if any(row.get("kind") == HIT_SPELL_DECISION for row in combat.get("pending_decisions", [])) and intent_type not in {"cast_spell", "decision.resolve", "combat.message"}:
-            raise CombatIntentError("resolve the melee hit spell decision first")
-        if any(row.get("kind") == HIT_REACTION_DECISION for row in combat.get("pending_decisions", [])) and intent_type not in {"decision.resolve", "combat.message"}:
-            raise CombatIntentError("waiting for the defender's reaction spell decision")
-        if any(row.get("kind") == COUNTER_SPELL_DECISION for row in combat.get("pending_decisions", [])) and intent_type not in {"decision.resolve", "combat.message"}:
-            raise CombatIntentError("resolve the counter spell decision first")
-        if any(
-            row.get("kind") in {CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION}
-            for row in combat.get("pending_decisions", [])
-        ) and intent_type not in {"decision.resolve", "combat.message"}:
-            raise CombatIntentError("resolve the pending check window first")
-        if any(
-            row.get("kind") == RELENTLESS_RAGE_DECISION
-            for row in combat.get("pending_decisions", [])
-        ) and intent_type not in {"decision.resolve", "combat.message"}:
-            raise CombatIntentError("resolve the relentless rage decision first")
+        if error := self._turn_decision_error(combat, intent_type):
+            raise CombatIntentError(error)
         if intent_type == "combat.set_cover":
             # 掩护是桌子上的判断（"他躲在箱子后面"），所以只有 GM 能声明；
             # 客户端提交的是等级枚举，永远不是加值。
@@ -578,6 +574,10 @@ class CombatValidationMixin:
         if kind == "enemy" and submitted_by != gm_uid:
             raise CombatIntentError("only the GM can submit enemy intents")
         actor = self._actor_view(instance, combat, actor_id)
+        if "dead" in actor["conditions"]:
+            if intent_type == "end_turn":
+                return
+            raise CombatIntentError("a dead actor cannot act")
         if actor["hp"] <= 0 and intent_type != "death_save":
             if not (intent_type == "end_turn" and "stable" in actor["conditions"]):
                 raise CombatIntentError("an unconscious actor can only make a death save")
@@ -648,9 +648,21 @@ class CombatValidationMixin:
             self._validate_item_activation(instance, combat, intent, actor, economy)
         if intent_type == "stabilize":
             target = self._actor_view(instance, combat, str(intent.get("target_id") or ""))
-            if target["kind"] != "player" or target["hp"] > 0:
-                raise CombatIntentError("stabilize requires a player at 0 HP")
+            if target["kind"] != "player" or target["hp"] > 0 or "dead" in target["conditions"]:
+                raise CombatIntentError("stabilize requires a living player at 0 HP")
             self._require_range(combat, actor_id, target["actor_id"], 5)
+
+    @staticmethod
+    def _turn_decision_error(combat: dict[str, Any], intent_type: str) -> str:
+        if intent_type in {"decision.resolve", "combat.message"}:
+            return ""
+        pending_kinds = {row.get("kind") for row in combat.get("pending_decisions", [])}
+        if intent_type == "cast_spell":
+            pending_kinds.discard(HIT_SPELL_DECISION)
+        return next(
+            (message for kind, message in _TURN_DECISION_ERRORS.items() if kind in pending_kinds),
+            "",
+        )
 
     @staticmethod
     def _choice_spent(choice: str, economy: dict[str, Any]) -> bool:

@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ApiError } from '../src/api/client'
 import { i18n } from '../src/i18n'
 
 const mocks = vi.hoisted(() => ({
@@ -252,7 +253,11 @@ describe('D&D 2024 combat panel', () => {
     expect(card.text()).toContain('至圣斩')
     expect(card.text()).toContain('近战武器或徒手攻击命中后可用')
     expect(card.text()).toContain('尚未接入战斗自动结算')
+    expect(card.text()).toContain('当前没有可施放的战斗法术')
     expect(card.find('button').exists()).toBe(false)
+    expect(wrapper.find('.dock-confirm').exists()).toBe(false)
+    await wrapper.get('[data-tile="attack"]').trigger('click')
+    expect(wrapper.get('.dock-confirm').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -1374,6 +1379,73 @@ describe('D&D 2024 combat panel', () => {
 
     expect(wrapper.text()).toContain('Waiting for teammate：Guardian')
     expect(wrapper.find('.combat-actions').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows a waiting state on the current player’s turn when only chat is available', async () => {
+    const data = response('active') as any
+    data.available_actions = [{ type: 'combat.message', expected_version: 1 }]
+    data.gameplay.combat.actors[0].spells = [
+      { spell_ref: 'spell:light', name: 'Light', blocked_reason: 'not_automated' },
+    ]
+    data.gameplay.combat.actors[0].class_resources = [{ id: 'points', name: 'Points', current: 2, maximum: 2 }]
+    mocks.fetch.mockResolvedValue(data)
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: false },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.combat-state').text()).toContain('No combat action can be submitted yet.')
+    expect(wrapper.find('.action-dock').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('refreshes after a rejected intent and stages a retry against the new version', async () => {
+    const refreshed = response('active')
+    refreshed.gameplay.state_version = 2
+    refreshed.available_actions.forEach(entry => { entry.expected_version = 2 })
+    mocks.fetch.mockResolvedValueOnce(response('active')).mockResolvedValueOnce(refreshed)
+    mocks.submit.mockRejectedValueOnce(new ApiError('state version conflict: expected 1, current 2', 422))
+      .mockResolvedValueOnce(refreshed)
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true },
+    })
+    await flushPromises()
+
+    await openTile(wrapper, 'attack')
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.confirm-card').exists()).toBe(false)
+    expect(wrapper.get('.combat-error').text()).toContain('state version conflict')
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+
+    expect(mocks.submit.mock.calls.map(([, intent]) => intent.expected_version)).toEqual([1, 2])
+    wrapper.unmount()
+  })
+
+  it('keeps the intent ID for a retry if the response was lost and the version is unchanged', async () => {
+    const data = response('active')
+    mocks.fetch.mockResolvedValue(data)
+    mocks.submit.mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValueOnce(data)
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true },
+    })
+    await flushPromises()
+
+    await openTile(wrapper, 'attack')
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+
+    expect(mocks.submit).toHaveBeenCalledTimes(2)
+    expect(mocks.submit.mock.calls[1]?.[1]).toEqual(mocks.submit.mock.calls[0]?.[1])
     wrapper.unmount()
   })
 
