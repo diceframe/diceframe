@@ -227,11 +227,33 @@ def test_staging_preserves_new_seats_and_unbounded_live_history_with_independent
     assert not transaction.matches(inst)
 
 
-def test_combat_retry_uses_turn_authority_instead_of_narrative_human_gate():
+@pytest.mark.parametrize("schedule", ["legacy", "ordinary", "extra_turn"])
+def test_combat_retry_uses_turn_authority_instead_of_narrative_human_gate(schedule):
     from src.webui.services.ai_seats import retry_block
-    _runtime, inst, _deps, _calls, _clients, _saved = setup()
+    runtime, inst, deps, _calls, _clients, _saved = setup()
+    combat = ruleset_runtime.state(inst)["combat"]
+    if schedule == "legacy":
+        del combat["turn_slots"]
+    elif schedule == "extra_turn":
+        slots = combat["turn_slots"]
+        slots.append({"slot_id": "player:ai1#2", "actor_id": "player:ai1", "rounds": [1]})
+        combat["turn_index"] = len(slots) - 1
     assert not inst.human_actions_ready()
+    assert runtime.next_automatic_intent(inst)["actor_id"] == "player:ai1"
     assert retry_block(inst, "ai1") == ""
+    assert deps.seat_runtime.project(inst)["seats"]["ai1"]["retry_reason"] == ""
+
+
+def test_combat_retry_rejects_a_missing_authoritative_turn_slot():
+    from src.webui.services.ai_seats import retry_block
+
+    _runtime, inst, _deps, _calls, _clients, _saved = setup()
+    combat = ruleset_runtime.state(inst)["combat"]
+    combat["initiative"] = ["enemy:goblin", "player:ai1"]
+    combat["turn_slots"] = [{"slot_id": "enemy:goblin#1", "actor_id": "enemy:goblin"}]
+    combat["turn_index"] = 1
+
+    assert retry_block(inst, "ai1") == "not_this_seat"
 
 
 @pytest.mark.parametrize("preset", ["kindly_bulwark", "stalwart_guardian"])

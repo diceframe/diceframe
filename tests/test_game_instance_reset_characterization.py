@@ -60,7 +60,7 @@ def _make_populated_instance() -> GameInstance:
     # The combat turn view is derived from the bound D&D authority.
     ruleset_runtime.replace_state(instance, {
         "state_schema_version": 3, "campaign": {"party": []},
-        "combat": {"status": "active", "initiative": ["u1"], "turn_index": 1},
+        "combat": {"status": "active", "initiative": ["enemy:goblin", "player:u1"], "turn_index": 1},
     })
     instance.adventure_binding = {
         "adventure_id": "adv-1",
@@ -257,7 +257,8 @@ async def test_reset_clears_runtime_and_narrative_state() -> None:
     instance = _make_populated_instance()
     assert legacy_combat.view(instance) == {
         "combat_state": "active", "combat_active": True,
-        "initiative_order": ["u1"], "initiative_current": 1,
+        "initiative_order": ["enemy:goblin", "player:u1"], "initiative_current": 1,
+        "current_actor_id": "player:u1",
     }
     await instance.reset(keep_seed=True)
 
@@ -270,6 +271,7 @@ async def test_reset_clears_runtime_and_narrative_state() -> None:
     assert legacy_combat.combat_state(instance) == "none"
     assert legacy_combat.initiative_order(instance) == []
     assert legacy_combat.initiative_current(instance) == 0
+    assert "current_actor_id" not in legacy_combat.view(instance)
     assert narrative_notes.scene(instance) == ""
     assert narrative_notes.game_time(instance) == ""
     assert instance.world_state == fresh_world_state()

@@ -27,21 +27,28 @@ def _manager(request: web.Request) -> LocalModelManager:
     )
 
 
-async def api_embedding_models(request: web.Request) -> web.Response:
-    if not request.get("owner_authenticated", False):
-        return web.json_response({"ok": False, "error": "owner authentication required"}, status=403)
-    try:
-        return web.json_response({"ok": True, "models": _manager(request).catalog()})
-    except ModelCatalogError as exc:
-        return web.json_response({"ok": False, "error": str(exc)}, status=422)
-
-
-async def api_embedding_model_install(request: web.Request) -> web.Response:
+def _require_confirmed_owner(request: web.Request) -> web.Response | None:
     denied = _require_confirmed_request(request)
     if denied is not None:
         return denied
     if not request.get("owner_authenticated", False):
         return web.json_response({"ok": False, "error": "owner authentication required"}, status=403)
+    return None
+
+
+async def api_embedding_models(request: web.Request) -> web.Response:
+    if not request.get("owner_authenticated", False):
+        return web.json_response({"ok": False, "error": "owner authentication required"}, status=403)
+    try:
+        return web.json_response({"ok": True, "models": await asyncio.to_thread(_manager(request).catalog)})
+    except ModelCatalogError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=422)
+
+
+async def api_embedding_model_install(request: web.Request) -> web.Response:
+    denied = _require_confirmed_owner(request)
+    if denied is not None:
+        return denied
     try:
         result = await _manager(request).install(request.match_info["model_id"])
     except ModelCatalogError as exc:
@@ -52,7 +59,7 @@ async def api_embedding_model_install(request: web.Request) -> web.Response:
 async def api_embedding_model_uninstall(request: web.Request) -> web.Response:
     """W5：删除已安装本地模型；当前启用的模型拒绝删除（fail closed）。"""
 
-    denied = _require_confirmed_request(request)
+    denied = _require_confirmed_owner(request)
     if denied is not None:
         return denied
     state = request.app.get("config_state") or {}
@@ -75,7 +82,7 @@ async def api_embedding_catalog_refresh(request: web.Request) -> web.Response:
     远端缓存写入 data/models/remote-catalog.json；读取路径不发网络请求。
     """
 
-    denied = _require_confirmed_request(request)
+    denied = _require_confirmed_owner(request)
     if denied is not None:
         return denied
     try:
@@ -111,11 +118,9 @@ async def _run_rebuild(app: web.Application) -> None:
 
 
 async def api_embedding_rebuild(request: web.Request) -> web.Response:
-    denied = _require_confirmed_request(request)
+    denied = _require_confirmed_owner(request)
     if denied is not None:
         return denied
-    if not request.get("owner_authenticated", False):
-        return web.json_response({"ok": False, "error": "owner authentication required"}, status=403)
     subsystems = request.app.get("subsystems")
     store = getattr(subsystems, "memory_store", None)
     if store is None or store.embedding_client is None:

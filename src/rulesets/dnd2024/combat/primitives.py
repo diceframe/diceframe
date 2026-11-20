@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any
 
 
@@ -67,7 +68,7 @@ TURNS_SCOPED_DURATIONS = frozenset({TURN_UNDEAD_DURATION, ABJURE_FOES_DURATION})
 WORLD_CLOCK_DURATIONS = frozenset({DIVINE_SENSE_DURATION, SACRED_WEAPON_DURATION})
 
 
-def combat_turn_slots(combat: dict[str, Any]) -> list[dict[str, Any]]:
+def combat_turn_slots(combat: Mapping[str, Any]) -> list[dict[str, Any]]:
     """The authoritative turn schedule: one slot per turn, not per actor.
 
     A Thief's Reflexes grants a second turn in round one, so "who acts now"
@@ -94,7 +95,7 @@ def combat_turn_slots(combat: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def current_turn_slot(combat: dict[str, Any]) -> dict[str, Any] | None:
+def current_turn_slot(combat: Mapping[str, Any]) -> dict[str, Any] | None:
     """The slot whose turn it is, or ``None`` when the schedule is inconsistent."""
 
     slots = combat_turn_slots(combat)
