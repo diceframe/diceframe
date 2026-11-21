@@ -1705,6 +1705,11 @@ class Dnd2024CombatEngine(
                     self._divine_sense_projection(instance, combat, viewer_id)
                     if combat.get("status") == "active" else {}
                 ),
+                # G16：GM 的裁定面板要能"先读定义再施加"。玩家侧不给这份目录，
+                # 他们只需要看到自己身上贴了什么。
+                "condition_catalog": (
+                    self.catalog.condition_catalog() if viewer_is_gm else []
+                ),
                 "actors": actors,
             },
             "encounter_presets": self.encounter_presets(),

@@ -122,6 +122,34 @@ class Dnd2024CombatCatalog:
             if str(entry.get("kind") or "") == "condition"
         }
 
+    def condition_definition(self, condition_id: str) -> dict[str, Any] | None:
+        """A rulebook state's three facts: name, rules summary, mechanical flags.
+
+        名称与摘要是 locale 文本（``labels`` 通道），机械 flag 留在 canonical
+        条目里。GM 选择器、战斗面板与将来的规则查询都从这里读，不各自拼。
+        """
+
+        entry = self.conditions.get(condition_id)
+        if entry is None or str(entry.get("kind") or "") != "condition":
+            return None
+        return {
+            "id": condition_id,
+            "name": self.labels.get(f"condition.{condition_id}") or condition_id,
+            "summary": self.labels.get(f"condition.{condition_id}.summary") or "",
+            "effects": {
+                key: deepcopy(value) for key, value in entry.items() if key != "kind"
+            },
+        }
+
+    def condition_catalog(self) -> list[dict[str, Any]]:
+        """Every state a GM may hand out, in stable id order."""
+
+        rows = (
+            self.condition_definition(condition_id)
+            for condition_id in sorted(self.gm_appliable_conditions())
+        )
+        return [row for row in rows if row is not None]
+
     @classmethod
     def from_bundle(
         cls, bundle: LoadedRulesetBundle, *, validate_items: bool = True,

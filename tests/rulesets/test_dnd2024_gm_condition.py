@@ -173,3 +173,54 @@ def test_bad_action_missing_target_and_non_actor_are_refused():
 
 def test_the_intent_is_part_of_the_combat_contract():
     assert "gm_condition" in INTENT_TYPES
+
+
+def test_every_gm_state_carries_a_name_and_a_rules_summary():
+    engine, _instance_ = _combat()
+    catalog = engine.catalog.condition_catalog()
+
+    assert len(catalog) == 14
+    for row in catalog:
+        assert row["name"] and row["name"] != row["id"], row["id"]
+        assert len(row["summary"]) > 10, row["id"]
+        assert row["effects"], row["id"]
+
+
+def test_the_definition_carries_the_flags_the_engine_will_use():
+    engine, _instance_ = _combat()
+    definition = engine.catalog.condition_definition("restrained")
+
+    assert definition is not None
+    assert definition["effects"]["speed_zero"] is True
+    # 效应不是规则书状态，没有定义可读。
+    assert engine.catalog.condition_definition("blessed") is None
+
+
+def test_only_the_gm_view_carries_the_catalog():
+    engine, instance = _combat()
+
+    gm_view = engine.gameplay_view(instance, viewer_id="gm", viewer_is_gm=True)
+    player_view = engine.gameplay_view(instance, viewer_id="p1", viewer_is_gm=False)
+
+    assert len(gm_view["combat"]["condition_catalog"]) == 14
+    assert player_view["combat"]["condition_catalog"] == []
+
+
+def test_both_locales_localise_every_state():
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "templates/rulesets/dnd2024_srd/locales"
+    for locale in ("en", "zh-CN"):
+        labels = json.loads(
+            (root / locale / "combat_catalogs/srd_combat_core.json").read_text(
+                encoding="utf-8"
+            )
+        )["fields"]["labels"]
+        for condition_id in (
+            "blinded", "charmed", "deafened", "frightened", "grappled",
+            "incapacitated", "invisible", "paralyzed", "petrified", "poisoned",
+            "prone", "restrained", "stunned", "unconscious",
+        ):
+            assert labels.get(f"condition.{condition_id}"), (locale, condition_id)
+            assert labels.get(f"condition.{condition_id}.summary"), (locale, condition_id)
