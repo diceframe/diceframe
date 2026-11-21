@@ -18,6 +18,7 @@ from ..character.attunement import (
     item_requires_attunement,
     owned_ref_counts,
 )
+from .action_adapter import is_supported_damage_formula
 from ..features.models import ClassFeatureError
 from ..features.resources import (
     OVERCHANNEL_FEATURE_ID,
@@ -89,8 +90,12 @@ _ENEMY_KEYS = frozenset({
     "initiative_modifier", "counterspell_dc", "abilities", "saving_throws",
     "attacks", "senses", "resist_damage_types", "immune_damage_types",
     "vulnerable_damage_types", "condition_immunities", "cr", "xp",
+    # S0-MM2：除特质与动作之外，stat block 的其余字段都要能进契约。
+    "skills", "languages", "proficiency_bonus", "hit_dice", "subtype",
+    "passive_perception",
 })
 # 速度档位：walk 是唯一被移动预算读的一档，其余四档本切片只投影（阶段三接）。
+_HIT_DICE_RE = re.compile(r"^(\d{1,2})d(\d{1,2})(?:[+-]\d{1,3})?$")
 _SPEED_MODES = ("walk", "fly", "swim", "climb", "burrow")
 # 感官档位：blindsight 已接入观察链；truesight/darkvision/tremorsense 只存不接。
 _SENSE_MODES = ("darkvision", "blindsight", "tremorsense", "truesight")
@@ -277,6 +282,7 @@ def validate_enemy_profiles(enemies: Any) -> None:
         _validate_challenge(enemy, f"enemy {enemy_id}")
         _validate_condition_immunities(enemy, f"enemy {enemy_id}")
         _normalize_speeds(enemy, f"enemy {enemy_id}")
+        _validate_statblock_extras(enemy, f"enemy {enemy_id}")
         if not isinstance(enemy.get("creature_type", ""), str) or (enemy.get("creature_type") and enemy["creature_type"] not in CREATURE_TYPES):
             raise CombatIntentError("enemy creature_type must be a canonical creature type")
         # ``speeds`` 在场时旧标量 ``speed`` 不再参与校验：结构形式才是权威，
@@ -297,22 +303,29 @@ def validate_enemy_profiles(enemies: Any) -> None:
             if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
                 raise CombatIntentError(f"enemy {field_name} is invalid")
         attacks = enemy.get("attacks")
-        if not isinstance(attacks, list) or not 1 <= len(attacks) <= 20:
-            raise CombatIntentError("enemy requires 1 to 20 attacks")
+        # 0 是合法形状：Giant Fly / Seahorse 在 SRD 里本来就没有攻击，
+        # 但它们是合法形态（德鲁伊能变成海马）。没有攻击的敌人只是永远
+        # 没有 attack 意图，而不是数据错误。
+        if not isinstance(attacks, list) or not 0 <= len(attacks) <= 20:
+            raise CombatIntentError("enemy requires 0 to 20 attacks")
         attack_ids: set[str] = set()
         for attack in attacks:
             if not isinstance(attack, dict):
                 raise CombatIntentError("enemy attack profile is invalid")
             attack_id = str(attack.get("id") or "")
             formula = str(attack.get("damage") or "")
+            # 公式层（``formula_node_from_dice_formula``）本来就接受固定值
+            # （"1 点穿刺"这类 Tiny 野兽），校验层不该比它更严——否则目录里
+            # 一半的 Animals 进不来。
             dice_match = DICE_RE.fullmatch(formula)
+            flat_damage = is_supported_damage_formula(formula) and dice_match is None
             attack_bonus = attack.get("attack_bonus")
             normal_range = attack.get("range", 5)
             long_range = attack.get("long_range", normal_range)
             if (
                 not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", attack_id)
                 or attack_id in attack_ids
-                or dice_match is None
+                or (dice_match is None and not flat_damage)
                 or isinstance(attack_bonus, bool)
                 or not isinstance(attack_bonus, int)
                 or not -20 <= attack_bonus <= 30
@@ -325,10 +338,74 @@ def validate_enemy_profiles(enemies: Any) -> None:
                 or long_range > 2000
             ):
                 raise CombatIntentError("enemy attack profile is invalid")
-            dice_count, dice_sides = int(dice_match.group(1)), int(dice_match.group(2))
-            if not 1 <= dice_count <= 100 or not 2 <= dice_sides <= 1000:
-                raise CombatIntentError("enemy attack damage dice are invalid")
+            if dice_match is not None:
+                dice_count = int(dice_match.group(1))
+                dice_sides = int(dice_match.group(2))
+                if not 1 <= dice_count <= 100 or not 2 <= dice_sides <= 1000:
+                    raise CombatIntentError("enemy attack damage dice are invalid")
+            elif not 1 <= int(formula) <= 1000:
+                raise CombatIntentError("enemy attack flat damage is invalid")
             attack_ids.add(attack_id)
+
+
+def _validate_statblock_extras(enemy: dict[str, Any], label: str) -> None:
+    """S0-MM2: the stat-block fields that are neither traits nor actions.
+
+    Six fields, each with the narrowest shape that answers the question the
+    engine actually asks.  Nothing here invents a default: a missing field stays
+    missing so consumers fail closed instead of reading a guess.
+    """
+
+    subtype = enemy.get("subtype")
+    if subtype is not None and (
+        not isinstance(subtype, str) or len(subtype) > 40
+    ):
+        raise CombatIntentError(f"{label} subtype is invalid")
+
+    skills = enemy.get("skills")
+    if skills is not None:
+        if not isinstance(skills, dict) or len(skills) > 32:
+            raise CombatIntentError(f"{label} skills must be an object")
+        for skill_id, bonus in skills.items():
+            if not isinstance(skill_id, str) or not skill_id:
+                raise CombatIntentError(f"{label} skill id is invalid")
+            if isinstance(bonus, bool) or not isinstance(bonus, int) or not -20 <= bonus <= 40:
+                raise CombatIntentError(f"{label} skill bonus is invalid")
+
+    languages = enemy.get("languages")
+    if languages is not None:
+        if not isinstance(languages, list) or len(languages) > 20:
+            raise CombatIntentError(f"{label} languages must be a list")
+        seen: set[str] = set()
+        for item in languages:
+            if not isinstance(item, str) or not item.strip() or len(item) > 40:
+                raise CombatIntentError(f"{label} language entry is invalid")
+            if item in seen:
+                raise CombatIntentError(f"{label} language entry is duplicated")
+            seen.add(item)
+
+    bonus = enemy.get("proficiency_bonus")
+    if bonus is not None and (
+        isinstance(bonus, bool) or not isinstance(bonus, int) or not 1 <= bonus <= 9
+    ):
+        raise CombatIntentError(f"{label} proficiency_bonus is invalid")
+
+    hit_dice = enemy.get("hit_dice")
+    if hit_dice is not None:
+        # 只校验形状，不校验与 hp 相等：SRD 允许取平均值或取整。
+        match = _HIT_DICE_RE.fullmatch(str(hit_dice))
+        if match is None:
+            raise CombatIntentError(f"{label} hit_dice is invalid")
+        count, sides = int(match.group(1)), int(match.group(2))
+        if not 1 <= count <= 30 or sides not in {4, 6, 8, 10, 12, 20}:
+            raise CombatIntentError(f"{label} hit_dice is invalid")
+
+    passive = enemy.get("passive_perception")
+    if passive is not None and (
+        isinstance(passive, bool) or not isinstance(passive, int)
+        or not 0 <= passive <= 40
+    ):
+        raise CombatIntentError(f"{label} passive_perception is invalid")
 
 
 class CombatValidationMixin:

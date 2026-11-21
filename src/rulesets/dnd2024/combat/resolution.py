@@ -17,6 +17,7 @@ from src.rulesets.dnd2024.features.resources import (
     feature_usage_count,
 )
 from ..character.attunement import AttunementError, canonical_item_ref
+from ..character.primitives import derived_save
 from ..items.activation import (
     ItemActivationError,
     build_item_healing_event,
@@ -97,6 +98,68 @@ POTENT_SPELLCASTING_OWNERS = ("class:cleric", "class:druid")
 # event has to name the feature that rewrote its total.  The id lives here so
 # the audit trail and the catalog cannot drift apart.
 INDOMITABLE_MIGHT = "indomitable_might"
+
+
+def _proficiency_bonus_for_cr(cr: str) -> int:
+    """The PB a stat block of this CR carries (SRD table, CR 0-30)."""
+
+    text = str(cr or "0")
+    if "/" in text:
+        numerator, denominator = text.split("/")[:2]
+        value = float(int(numerator) / int(denominator))
+    else:
+        value = float(text or 0)
+    for ceiling, bonus in ((4, 2), (8, 3), (12, 4), (16, 5), (20, 6), (24, 7), (28, 8)):
+        if value <= ceiling:
+            return bonus
+    return 9
+
+
+def _statblock_derived_checks(raw: dict[str, Any]) -> dict[str, Any]:
+    """Effective saves and skills for a stat block.
+
+    A stat block prints only the numbers that differ from the bare ability
+    modifier.  Everything it does not print is still derivable, and the engine
+    derives it: a monster's saving throw is computed like a player's, not read
+    from whatever happened to be written down.
+
+    Declared values win, but the derived ones stay beside them so an audit can
+    tell a stat block typo from a rules difference.
+    """
+
+    abilities = {
+        str(key): int(value) for key, value in (raw.get("abilities") or {}).items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+    declared_bonus = raw.get("proficiency_bonus")
+    bonus = int(
+        declared_bonus
+        if isinstance(declared_bonus, int) and not isinstance(declared_bonus, bool)
+        else _proficiency_bonus_for_cr(str(raw.get("cr") or ""))
+    )
+    declared_saves = {
+        str(key): int(value) for key, value in (raw.get("saving_throws") or {}).items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+    derived_saves = {
+        ability: derived_save(score, proficiency_bonus=bonus, proficient=False)
+        for ability, score in abilities.items()
+    }
+    saves = {**derived_saves, **declared_saves}
+    declared_skills = {
+        str(key): int(value) for key, value in (raw.get("skills") or {}).items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+    peak = int(raw.get("passive_perception") or 0)
+    if not peak and "perception" in declared_skills:
+        peak = 10 + declared_skills["perception"]
+    return {
+        "saving_throws": saves,
+        "saving_throws_declared": declared_saves,
+        "saving_throws_derived": derived_saves,
+        "skills": declared_skills,
+        "passive_perception": peak,
+    }
 
 
 def _without_consumed_conditions(
@@ -317,6 +380,17 @@ class CombatResolutionMixin:
                 "condition_immunities": list(raw.get("condition_immunities") or []),
                 "cr": str(raw.get("cr") or ""),
                 "xp": int(raw.get("xp", 0) or 0),
+                # S0-MM2：六维必须真的参与计算。声明值作为覆盖留在
+                # ``*_declared`` 里，生效值写进 ``saving_throws`` / ``skills``，
+                # 于是所有既有读取点（豁免、隐匿对抗、法术豁免）不必改。
+                **_statblock_derived_checks(raw),
+                "languages": list(raw.get("languages") or []),
+                "subtype": str(raw.get("subtype") or ""),
+                "hit_dice": str(raw.get("hit_dice") or ""),
+                "proficiency_bonus": int(
+                    raw.get("proficiency_bonus")
+                    or _proficiency_bonus_for_cr(str(raw.get("cr") or ""))
+                ),
             }
             enemies[enemy_id] = enemy
             initiatives.append({
