@@ -33,6 +33,7 @@ import ActionDock, { type DockTab } from './hud/ActionDock.vue'
 import ActionTile from './hud/ActionTile.vue'
 import Battlefield from './hud/Battlefield.vue'
 import { battleDistance, buildBattleTokens } from './hud/battleView'
+import ConditionAdjudicator, { type AdjudicableCondition } from './hud/ConditionAdjudicator.vue'
 import InitiativeBar from './hud/InitiativeBar.vue'
 import type { BattlefieldLabels } from './hud/labels'
 import TargetCard from './hud/TargetCard.vue'
@@ -90,6 +91,14 @@ const friendlyCombatError = (cause: unknown): string => friendlyCombatErrorFor(c
 
 const gameplay = computed(() => data.value?.gameplay)
 const combat = computed(() => gameplay.value?.combat)
+// G16：GM 才能拿到这份目录（服务端只在 viewer_is_gm 时下发）；玩家侧是空数组。
+const conditionCatalog = computed<AdjudicableCondition[]>(
+  () => (combat.value?.condition_catalog as AdjudicableCondition[] | undefined) ?? [],
+)
+const adjudicationTargets = computed(() => (combat.value?.actors ?? []).map(actor => ({
+  id: String(actor.actor_id),
+  name: String(actor.name || actor.actor_id),
+})))
 const actions = computed(() => data.value?.available_actions || [])
 const action = (type: string) => actions.value.find(item => item.type === type)
 const currentActor = computed(() => combat.value?.actors.find(
@@ -1191,6 +1200,18 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
       <summary>{{ copy.rulesNote }}</summary>
       <p>{{ copy.legalOnly }}</p>
     </details>
+
+    <ConditionAdjudicator
+      v-if="isGm && combat?.status === 'active' && conditionCatalog.length"
+      :conditions="conditionCatalog"
+      :targets="adjudicationTargets"
+      :busy="busy"
+      :labels="{
+        title: copy.conditionTitle, target: copy.conditionTarget, pick: copy.conditionPick,
+        apply: copy.conditionApply, remove: copy.conditionRemove, hint: copy.conditionHint,
+      }"
+      @submit="submit({ type: 'gm_condition', ...$event })"
+    />
 
     <template v-if="gameplay">
       <template v-if="combat?.status !== 'active'">

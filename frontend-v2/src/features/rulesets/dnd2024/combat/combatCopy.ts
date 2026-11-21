@@ -2,6 +2,8 @@
 export function combatCopy(locale: string) {
   return locale.startsWith('zh') ? {
   title: '战斗', authority: 'D&D 5E 2024 · 权威规则结算', rulesNote: '结算说明',
+  conditionTitle: '裁定状态', conditionTarget: '目标', conditionPick: '状态',
+  conditionApply: '施加', conditionRemove: '移除', conditionHint: '选中后先读定义，再决定是否施加。',
   loading: '正在同步战斗状态…', refresh: '刷新', start: '确认进入战斗',
   chooseEncounter: '选择当前遭遇', noCombat: '当前没有进行中的战斗。', noEncounter: '当前没有可用于正式对局的遭遇。',
   recommendedEncounter: 'AI GM 匹配的敌情', changeEncounter: '改用其他合法遭遇',
@@ -90,6 +92,8 @@ export function combatCopy(locale: string) {
   feedbackMiss: '未命中', feedbackHit: '命中', saveOk: '豁免成功', saveFail: '豁免失败', healBlocked: '无法恢复',
 } : {
   title: 'Combat', authority: 'D&D 5E 2024 · Authoritative resolution', rulesNote: 'Resolution rules',
+  conditionTitle: 'Adjudicate a condition', conditionTarget: 'Target', conditionPick: 'Condition',
+  conditionApply: 'Apply', conditionRemove: 'Remove', conditionHint: 'Read the definition before you apply it.',
   loading: 'Synchronizing combat…', refresh: 'Refresh', start: 'Confirm Combat',
   chooseEncounter: 'Select the encounter', noCombat: 'No combat is active.', noEncounter: 'No encounter is available for standard play.',
   recommendedEncounter: 'AI GM matched opposition', changeEncounter: 'Use another legal encounter',
