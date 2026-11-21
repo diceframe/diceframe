@@ -1,6 +1,7 @@
 """GM initiated, independent dice requests."""
 from __future__ import annotations
 from dataclasses import dataclass
+import inspect
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
@@ -15,6 +16,24 @@ class ManualRollDependencies:
     get_instance: Callable[[tuple[str, ...]], Any | None]
     save_instance: Callable[[Any], Awaitable[None]]
     load_rule: Callable[[Any], Any | None] | None = None
+    # G4：技能/属性检定由规则集结算。通用服务只转发，不认 D&D 的属性表。
+    # None 表示当前组合没有运行时，技能检定不可用（fail closed）。
+    resolve_check: Callable[[Any, str, dict], Any] | None = None
+
+
+def _validated_check(value: object) -> dict[str, Any]:
+    """One table-facing check: an ability or a skill, plus the DC the GM set."""
+
+    if not isinstance(value, dict) or set(value) - {"ability", "skill", "dc"}:
+        raise ValueError("check must be an object with ability, skill and dc")
+    ability = str(value.get("ability") or "").strip()
+    skill = str(value.get("skill") or "").strip()
+    if not ability and not skill:
+        raise ValueError("check needs an ability or a skill")
+    dc = value.get("dc")
+    if isinstance(dc, bool) or not isinstance(dc, int) or not 1 <= dc <= 100:
+        raise ValueError("check dc must be an integer from 1 to 100")
+    return {"ability": ability, "skill": skill, "dc": int(dc)}
 
 def _now() -> str: return datetime.now(timezone.utc).isoformat()
 
@@ -62,12 +81,23 @@ class ManualRollService:
         targets=[str(x).strip() for x in (body.get("target_uids") or []) if str(x).strip() in inst.players]
         if not targets: return {"ok":False,"error":t("webui.services.manual_rolls.targets_required")}
         purpose = self._purpose(body.get("purpose"))
+        check = body.get("check")
+        try:
+            check = _validated_check(check) if check is not None else None
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if check is not None and purpose != "check":
+            return {"ok": False, "error": "check block requires purpose=check"}
+        if check is not None and self.d.resolve_check is None:
+            return {"ok": False, "error": "this ruleset does not support ability checks"}
         rule = self._rule(inst)
         comparison = self._comparison(body.get("comparison"), rule)
         target = None
         if purpose == "check":
+            # check 块自带 DC；旧的裸公式检定仍从 body.target 取目标值。
+            raw_target = check["dc"] if check is not None else body.get("target")
             try:
-                target = int(body.get("target"))
+                target = int(raw_target)
             except (TypeError, ValueError):
                 return {"ok": False, "error": t("webui.services.manual_rolls.target_required")}
             if not 1 <= target <= 10000:
@@ -79,7 +109,7 @@ class ManualRollService:
                 return {"ok":True,"request":old,"idempotent":True}
         session_stats.require_writable(inst)
         checks.require_writable(inst)
-        req={"id":f"mr_{uuid4().hex}","operation_id":op,"run_id":inst.run_id,"round_number":progression_state.round_value(inst),"created_by":uid,"created_at":_now(),"label":str(body.get("label") or "")[:200],"formula":formula,"purpose":purpose,"target":target,"comparison":comparison,"include_in_ai_context":self._include_in_ai_context(purpose,body.get("include_in_ai_context")),"visibility":"private" if body.get("visibility")=="private" else "party","target_uids":targets,"target_names":{u:inst.players[u].get("character_name") or u for u in targets},"status":"pending","results":{}}
+        req={"check":check,"id":f"mr_{uuid4().hex}","operation_id":op,"run_id":inst.run_id,"round_number":progression_state.round_value(inst),"created_by":uid,"created_at":_now(),"label":str(body.get("label") or "")[:200],"formula":formula,"purpose":purpose,"target":target,"comparison":comparison,"include_in_ai_context":self._include_in_ai_context(purpose,body.get("include_in_ai_context")),"visibility":"private" if body.get("visibility")=="private" else "party","target_uids":targets,"target_names":{u:inst.players[u].get("character_name") or u for u in targets},"status":"pending","results":{}}
         checks.add_manual_roll_request(inst, req); session_stats.touch(inst); await self.d.save_instance(inst)
         return {"ok":True,"request":req}
     async def resolve(self,key,uid,rid,body):
@@ -96,8 +126,20 @@ class ManualRollService:
             return {"ok":True,"result":req["results"][target],"idempotent":True}
         session_stats.require_writable(inst)
         checks.require_writable(inst)
-        result=roll(req["formula"]); value={"formula":result.formula,"rolls":result.rolls,"modifier":result.modifier,"total":result.total,"natural":result.natural,"rolled_by":uid,"rolled_at":_now()}
-        if req.get("purpose") == "check" and req.get("target") is not None:
+        check = req.get("check")
+        if isinstance(check, dict) and self.d.resolve_check is not None:
+            resolved = self.d.resolve_check(inst, target, check)
+            resolved = await resolved if inspect.isawaitable(resolved) else resolved
+            if not isinstance(resolved, dict) or "total" not in resolved:
+                return {"ok": False, "error": "ruleset returned an invalid check result"}
+            value = {**resolved, "rolled_by": uid, "rolled_at": _now()}
+            value["target"] = int(check["dc"])
+            value["comparison"] = str(req.get("comparison") or "at_least")
+            value["verdict"] = "success" if value.get("success") else "failure"
+            value.setdefault("formula", "d20")
+        else:
+            result=roll(req["formula"]); value={"formula":result.formula,"rolls":result.rolls,"modifier":result.modifier,"total":result.total,"natural":result.natural,"rolled_by":uid,"rolled_at":_now()}
+        if check is None and req.get("purpose") == "check" and req.get("target") is not None:
             value["target"] = int(req["target"])
             value["comparison"] = str(req.get("comparison") or "at_least")
             value["verdict"] = "success" if (
