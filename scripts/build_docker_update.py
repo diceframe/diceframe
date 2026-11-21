@@ -190,7 +190,7 @@ def build_package(
     if sys.platform == "linux" and platform.machine() == "x86_64" and sys.version_info[:2] == (3, 11):
         subprocess.run(
             [
-                sys.executable, "-I", "-S", str(ROOT / "scripts/smoke_test_local_embedding.py"),
+                sys.executable, "-I", "-B", "-S", str(ROOT / "scripts/smoke_test_local_embedding.py"),
                 str(app_dir), str(site_packages),
             ],
             cwd=ROOT,

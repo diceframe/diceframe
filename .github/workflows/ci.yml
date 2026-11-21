@@ -202,7 +202,7 @@ jobs:
           $runtime = Join-Path $env:RUNNER_TEMP 'diceframe-embedded-python'
           python -c "import sys; from pathlib import Path; from scripts import build_portable as p; p.install_python_runtime(Path(sys.argv[1]), p.DEFAULT_PYTHON_VERSION, p.python_embed_url(p.DEFAULT_PYTHON_VERSION), p.DEFAULT_PYTHON_SHA256, p.PIP_BOOTSTRAP_URL, p.PIP_BOOTSTRAP_SHA256)" $runtime
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & (Join-Path $runtime 'python.exe') -I scripts/smoke_test_local_embedding.py .
+          python -c "import sys; from pathlib import Path; from scripts import build_portable as p; p.verify_python_runtime(Path(sys.argv[1]), p.ROOT)" $runtime
 
       - name: Test isolated managed Docker payload dependencies
         if: runner.os == 'Linux'
@@ -211,7 +211,7 @@ jobs:
           set -euo pipefail
           site_packages="${RUNNER_TEMP}/diceframe-docker-site-packages"
           python -c 'import sys; from pathlib import Path; from scripts import build_docker_update as d; d.install_runtime(Path(sys.argv[1]))' "$site_packages"
-          python -I -S scripts/smoke_test_local_embedding.py . "$site_packages"
+          python -I -B -S scripts/smoke_test_local_embedding.py . "$site_packages"
 
   frontend:
     name: Frontend checks

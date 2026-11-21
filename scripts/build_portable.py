@@ -242,6 +242,9 @@ def cleanup_runtime(runtime_dir: Path) -> None:
             "*/tests",
             "*/test",
             "numpy/**/tests",
+            # Conversion to the .ort format is unused by DiceFrame, and the
+            # generated schema files exceed the updater's archive path limit.
+            "onnxruntime/tools/ort_format_model",
             # 给编码助手看的技能文档（如 pydantic_ai/.agents/skills/…），运行时不读。
             # 它们是包里路径最深的文件：嵌套解压的安装目录下，旧版应用内更新解压到
             # data/_updater/extract-*/… 时会超过 Windows 260 字符而失败。
@@ -284,10 +287,7 @@ def stage_webview2(sdk_dir: Path, app_dir: Path) -> None:
         shutil.copy2(sdk_dir / name, target / name)
 
 
-def validate_zip(output_zip: Path) -> None:
-    with zipfile.ZipFile(output_zip) as zf:
-        names = zf.namelist()
-        infos = zf.infolist()
+def validate_zip_paths(names: list[str]) -> None:
     bad = [name for name in names if any(pattern.search(name.replace("\\", "/")) for pattern in FORBIDDEN_PATTERNS)]
     if bad:
         raise RuntimeError("Portable zip contains forbidden paths:\n" + "\n".join(bad[:20]))
@@ -297,6 +297,27 @@ def validate_zip(output_zip: Path) -> None:
             f"Portable zip path is too long for older in-app updaters "
             f"({len(longest)} > {MAX_ARCHIVE_PATH}): {longest}"
         )
+
+
+def verify_python_runtime(runtime_dir: Path, app_dir: Path) -> None:
+    run(
+        [
+            str(runtime_dir / "python.exe"), "-I", "-B",
+            str(ROOT / "scripts/smoke_test_local_embedding.py"), str(app_dir),
+        ],
+        runtime_dir,
+    )
+    validate_zip_paths([
+        f"{PACKAGE_DIR_NAME}/python/{path.relative_to(runtime_dir).as_posix()}"
+        for path in runtime_dir.rglob("*") if path.is_file()
+    ])
+
+
+def validate_zip(output_zip: Path) -> None:
+    with zipfile.ZipFile(output_zip) as zf:
+        names = zf.namelist()
+        infos = zf.infolist()
+    validate_zip_paths(names)
     required = [
         "/DiceFrame.exe",
         "/python/python.exe",
@@ -389,10 +410,7 @@ def main() -> int:
         args.pip_url,
         args.pip_sha256,
     )
-    run(
-        [str(runtime_dir / "python.exe"), "-I", str(ROOT / "scripts/smoke_test_local_embedding.py"), str(app_dir)],
-        package_dir,
-    )
+    verify_python_runtime(runtime_dir, app_dir)
     build_windows_launcher(package_dir)
     output_zip = make_zip(package_dir, output_zip)
     print(f"\nPortable package created: {output_zip}")
