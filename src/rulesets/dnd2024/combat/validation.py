@@ -439,6 +439,10 @@ class CombatValidationMixin:
         if intent_type not in INTENT_TYPES:
             raise CombatIntentError("intent type is not supported")
         state = self.initialize_state(instance)
+        if intent_type == "ability_check":
+            # 成本可变的检定不属于"动作经济块"，所以放在通用分支之前：
+            # 挂在 hide 那段里会因为外层的动作成本守卫而永远不执行。
+            self._validate_ability_check(intent, state.get("combat", {}))
         expected = intent.get("expected_version")
         if isinstance(expected, bool) or not isinstance(expected, int):
             raise CombatIntentError("expected_version must be an integer")
@@ -807,6 +811,31 @@ class CombatValidationMixin:
                 return "bonus_action"
             return "action" if capability.cost.action == "action" else ""
         return ""
+
+    ABILITY_CHECK_COSTS = frozenset({"action", "bonus_action", "none"})
+
+    def _validate_ability_check(
+        self, intent: dict[str, Any], combat: dict[str, Any],
+    ) -> None:
+        """A bare ability check: ability, DC and what it costs.
+
+        The cost is *declared* rather than implied, because the same arithmetic
+        serves a check paid with an action, one paid with a bonus action, and one
+        that costs nothing at all (a contest, a failed-window consequence).
+        """
+
+        ability = str(intent.get("ability") or "")
+        if ability not in {"str", "dex", "con", "int", "wis", "cha"}:
+            raise CombatIntentError("ability check needs a canonical ability")
+        dc = intent.get("dc")
+        if isinstance(dc, bool) or not isinstance(dc, int) or not 1 <= dc <= 40:
+            raise CombatIntentError("ability check DC must be 1..40")
+        cost = str(intent.get("check_cost") or "action")
+        if cost not in self.ABILITY_CHECK_COSTS:
+            raise CombatIntentError("ability check cost is not supported")
+        economy = combat.get("economy") or {}
+        if cost != "none" and int(economy.get(cost, 0) or 0) < 1:
+            raise CombatIntentError(f"the {cost.replace('_', ' ')} has already been spent")
 
     def _validate_turn_choice(
         self, intent: dict[str, Any], intent_type: str, actor: dict[str, Any],

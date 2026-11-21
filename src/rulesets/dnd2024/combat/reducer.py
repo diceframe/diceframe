@@ -277,6 +277,21 @@ class CombatReducerMixin:
                     })
                     del history[:-64]
             return
+        if event_type in {"dnd2024.form.assumed", "dnd2024.form.reverted"}:
+            # 变形是**角色级**状态而不是战斗状态：Wild Shape 持续等级/2 小时，
+            # 跨遭遇、跨存档。写进 combat 会在下一场战斗里凭空变回原形。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind != "player" or raw_id not in snapshot["characters"]:
+                raise EventBatchError("only an existing player can change shape")
+            character = snapshot["characters"][raw_id]
+            if event_type == "dnd2024.form.reverted":
+                character.pop("forms", None)
+                return
+            payload = event.get("form") or {}
+            if not isinstance(payload, dict) or not payload.get("form_ref"):
+                raise EventBatchError("form.assumed needs a form payload")
+            character["forms"] = {"active": dict(payload)}
+            return
         if event_type == "dnd2024.action.spent":
             resource = str(event["resource"])
             current = int(combat["economy"].get(resource, 0) or 0)

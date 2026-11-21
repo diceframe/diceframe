@@ -32,9 +32,9 @@
 | GAP-18 | 区域只有遮蔽等级，没有进入触发/困难地形 | `combat.zones` 字段仅 `{level, origin, radius_ft, magical, ...}`；无 `on_enter` / `difficult_terrain` / `speed_zero` | 铁蒺藜、滚珠、油腻术这类"铺开一块地"的操作无机械后果 | 阶段三（zone 扩展） | 未开工 |
 | GAP-19 | Heightened Focus 的「Step 携带生物」未实现 | `class_feature_catalogs/srd_class_features.json` 里 `heightened_focus.parameters` 只有 `flurry_strikes` 与 `patient_defense_temp_hp_dice`；付费 Step 携带 5 尺内自愿 Large 或更小生物的能力没有任何事件形状（缺"移动另一个 actor 的 position"的载体） | 付费 Step 少一条效果；被携带者随行、不扣其移动、不引发借机攻击三条都无从表达 | S0-F10A 后续（本片已登记为未实现） | 未开工 |
 | GAP-20 | 怪物/野兽 statblock 只有内联契约，没有持久目录 | 敌人字段白名单已足够宽（`_ENEMY_KEYS`：abilities / speeds / size / senses / attacks / cr / 抗性 / 条件免疫），但只服务 `combat.start` 的临时敌人；`content/` 下无 monster 目录，`skills` 也不在白名单里 | Wild Shape 的已知形态无可读数据；Polymorph 的目标形态同样无处取；「取较高者」缺 `skills` 字段 | **S0-MM2**（已交付 CR0–1 全类型 135 条目录） | 已修 |
-| GAP-21 | 无「形态覆盖」派生层 | `character/derivation.py::derive` 把 abilities/AC/speed 全从角色卡派生，没有 override 输入；`_actor_view` 无 form 概念 | Wild Shape 的「替换物理属性、保留心智/HP/特性」无法表达 | S0-F25 | 未开工 |
-| GAP-22 | 形态攻击无法进玩家行动 | 玩家行动 = 装备攻击 + 职业 capability；Beast 的 `attacks[]` 只在敌人路径被消费 | 变形后无法用形态的动作攻击 | S0-F25 | 未开工 |
-| GAP-23 | 无变形生命周期与施法门控 | 无 `form.assumed` / `form.reverted` 事件、无「变形中不可施法」gates、无装备 merge/wear/drop | assume/revert、跨形态持续效果保留、Polymorph HP 溢出都无从落地 | S0-F25 / 变形类法术 | 未开工 |
+| GAP-21 | 无「形态覆盖」派生层 | `character/derivation.py::derive` 把 abilities/AC/speed 全从角色卡派生，没有 override 输入；`_actor_view` 无 form 概念 | Wild Shape 的「替换物理属性、保留心智/HP/特性」无法表达 | S0-F25（`forms/panel.py`） | 已修 |
+| GAP-22 | 形态攻击无法进玩家行动 | 玩家行动 = 装备攻击 + 职业 capability；Beast 的 `attacks[]` 只在敌人路径被消费 | 变形后无法用形态的动作攻击 | S0-F25（`forms/panel.py`） | 已修 |
+| GAP-23 | 无变形生命周期与施法门控 | 无 `form.assumed` / `form.reverted` 事件、无「变形中不可施法」gates、无装备 merge/wear/drop | assume/revert、跨形态持续效果保留、Polymorph HP 溢出都无从落地 | S0-F25（事件 + 持久化 + 施法门控已接；装备模式与时长到期未消费） | 部分完成 |
 
 | GAP-24 | stat block 缺 6 个非特质字段 | `_ENEMY_KEYS` 无 `skills` / `languages` / `proficiency_bonus` / `hit_dice` / `subtype` / `passive_perception`；敌人 `abilities` 存而不参与任何计算 | 非玩家单位无法像玩家一样算豁免/技能；Wild Shape 的「取较高者」缺 `skills` 与 PB | **S0-MM2**（已交付：六字段校验 + 六维派生 + 视图投影） | 已修 |
 | GAP-25 | `counterspell_dc` 是把特质压成字段的孤例 | 敌人契约里 `counterspell_dc` 一个标量代表「能用法术反制」，在 `reaction_spells.py` 消费；没有 traits/reactions 容器 | 每加一个怪物特质就要再加一个专用字段，契约会持续膨胀 | 未来「特质 + 反应」通用化（未立项） | 未开工 |

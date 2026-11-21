@@ -8,6 +8,9 @@ from .triggered_spells import free_cast_resource
 
 from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.features import CombatCapabilityView
+from ..forms import (
+    FormState, FormStateError, assume_form, panel_from_view, restrictions,
+)
 from src.rulesets.dnd2024.features.combat import martial_arts_profile
 from src.rulesets.dnd2024.features.resources import (
     OVERCHANNEL_FEATURE_ID,
@@ -84,6 +87,7 @@ class CombatViewMixin:
                 raise CombatIntentError("player actor does not exist")
             character = _canonical(instance.get_character_sheet(raw_id))
             view = self._with_hands(combat, self._player_view(raw_id, character))
+            view = self._shaped_view(view, character)
             view["cover"] = cover
             view["obscurement"] = self.obscurement_row(combat, actor_id)
             self._attach_hunter_lore(instance, combat, actor_id, view)
@@ -212,6 +216,62 @@ class CombatViewMixin:
                 "condition": [],
             },
         }
+
+    def _shaped_view(
+        self, view: dict[str, Any], character: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Apply an active shape-shift to the actor view.
+
+        The composition lives in ``forms.panel`` so this method only does the two
+        things combat owns: find the stat block by ref, and put the result back
+        into the view's existing keys.  Nothing here decides *which* slots a form
+        replaces -- that is the effect's policy table.
+        """
+
+        forms = character.get("forms")
+        active = forms.get("active") if isinstance(forms, dict) else None
+        if not isinstance(active, dict):
+            return view
+        entry = self._statblock_by_ref(str(active.get("form_ref") or ""))
+        if entry is None:
+            # 目录里找不到形态就 fail closed：宁可不换面板，也不能猜一份数值。
+            return view
+        try:
+            state = FormState.from_payload(active)
+        except FormStateError:
+            return view
+        merged = assume_form(panel_from_view(view), entry, state)
+        limits = restrictions(state)
+        view = {
+            **view,
+            "abilities": dict(merged.abilities),
+            "armor_class": merged.armor_class,
+            "speed": int(merged.speeds.get("walk", view.get("speed", 0)) or 0),
+            "saving_throws": dict(merged.saving_throws),
+            "skill_values": dict(merged.skills),
+            "attacks": list(merged.attacks),
+            "max_hp": merged.hp,
+            "hit_dice": merged.hit_dice,
+            "size": merged.size,
+            "creature_type": merged.creature_type,
+            "form_ref": state.form_ref,
+            "form_sources": dict(merged.sources),
+            "spellcasting_allowed": bool(limits["spellcasting"]),
+        }
+        return view
+
+    def _statblock_by_ref(self, form_ref: str) -> dict[str, Any] | None:
+        if not form_ref:
+            return None
+        try:
+            catalogs = self.bundle.list("monster_catalog")
+        except Exception:  # pragma: no cover - bundle always exposes list()
+            return None
+        for catalog in catalogs:
+            for entry in catalog.get("entries") or []:
+                if str(entry.get("id") or "") == form_ref:
+                    return dict(entry)
+        return None
 
     def _player_view(self, uid: str, character: dict[str, Any]) -> dict[str, Any]:
         class_magic = character.get("spellcasting", {}).get("class")
