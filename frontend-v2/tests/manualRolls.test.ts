@@ -173,3 +173,77 @@ describe('manual rolls composer include_in_ai_context', () => {
     expect(wrapper.emitted('availability')?.at(-1)).toEqual([true])
   })
 })
+
+describe('manual rolls composer skill check', () => {
+  const players = [{ user_id: 'p1', character_name: 'Alice' }]
+  let wrapper: ReturnType<typeof mount> | undefined
+
+  beforeEach(() => {
+    i18n.global.locale.value = 'zh-CN'
+    mockedApi.mockReset()
+    mockedApi.mockResolvedValue({ ok: true, run_id: 'run-1', requests: [] })
+  })
+
+  afterEach(() => {
+    wrapper?.unmount()
+    wrapper = undefined
+    document.body.innerHTML = ''
+  })
+
+  async function mountPanel() {
+    const mounted = mount(ManualRollsPanel, {
+      attachTo: document.body,
+      global: { plugins: [i18n], stubs: { Teleport: true } },
+      props: { gameKey: 'web|room|bot', runId: 'run-1', actorId: 'gm', isGm: true, players },
+    })
+    await flushPromises()
+    wrapper = mounted
+    return mounted
+  }
+
+  function lastCreateBody() {
+    const calls = mockedApi.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST')
+    const init = calls[calls.length - 1]![1] as RequestInit
+    return JSON.parse(String(init.body)) as Record<string, unknown>
+  }
+
+  async function chooseCheck(panel: ReturnType<typeof mount>) {
+    const send = panel.findAll('button').find(button => button.text() === '发起投掷')
+    await send!.trigger('click')
+    await flushPromises()
+    const purpose = panel.findAll('select').find(select =>
+      select.findAll('option').some(option => option.attributes('value') === 'check'))
+    await purpose!.setValue('check')
+    await flushPromises()
+  }
+
+  it('sends the skill block instead of a raw formula', async () => {
+    const panel = await mountPanel()
+    await chooseCheck(panel)
+
+    const skill = panel.findAll('select').find(select =>
+      select.findAll('option').some(option => option.attributes('value') === 'perception'))
+    await skill!.setValue('perception')
+    await panel.get('input[type="number"]').setValue('12')
+    const send = panel.findAll('button').find(button => button.text() === '发送请求')
+    await send!.trigger('click')
+    await flushPromises()
+
+    expect(lastCreateBody().check).toEqual({ ability: '', skill: 'perception', dc: 12 })
+  })
+
+  it('falls back to the only ability when a skill is not chosen', async () => {
+    const panel = await mountPanel()
+    await chooseCheck(panel)
+
+    const ability = panel.findAll('select').find(select =>
+      select.findAll('option').some(option => option.attributes('value') === 'dex'))
+    await ability!.setValue('dex')
+    await panel.get('input[type="number"]').setValue('15')
+    const send = panel.findAll('button').find(button => button.text() === '发送请求')
+    await send!.trigger('click')
+    await flushPromises()
+
+    expect(lastCreateBody().check).toEqual({ ability: 'dex', skill: '', dc: 15 })
+  })
+})

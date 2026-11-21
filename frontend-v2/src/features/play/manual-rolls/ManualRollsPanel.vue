@@ -2,6 +2,7 @@
 import { computed, ref, toRef, watch } from 'vue'
 import Modal from '@/components/ui/Modal.vue'
 import { useLocale } from '@/composables/useLocale'
+import { ABILITY_OPTIONS, SKILL_OPTIONS } from './checkOptions'
 import { useManualRolls } from './useManualRolls'
 import type { ManualRollComparison, ManualRollPurpose, ManualRollRequest, ManualRollVisibility } from './types'
 
@@ -19,6 +20,8 @@ const copy = computed(() => zh.value ? {
   gmOverride: 'GM 代投', requestNotice: 'GM 请求你进行一次投掷，请确认后提交结果。',
   cancel: '取消请求', pendingRoll: '待投掷', dialog: '发起手动投掷', label: '说明',
   labelPlaceholder: '例如：察觉检定', formula: '骰子公式', formulaHint: '例如 d20、d20+2、2d6+1；自由投掷只记录骰值，规则检定会显示成败。', visibility: '可见范围',
+  ability: '属性', skill: '技能', anyAbility: '按技能自带', anySkill: '不指定',
+  checkHint: '选了技能就用角色的技能加值（含熟练）；只选属性就用属性修正；都不选则按骰子公式结算。',
   party: '全队可见', private: '仅目标可见', targets: '投掷角色', later: '稍后',
   send: '发送请求', sending: '发送中…', roll: '投掷', rolling: '投掷中…',
   chooseTarget: '请至少选择一名投掷角色。',
@@ -31,6 +34,8 @@ const copy = computed(() => zh.value ? {
   purpose: 'Purpose', free: 'Free roll', check: 'Rule check', contest: 'Contest', target: 'Target', targetPlaceholder: 'e.g. 15', comparison: 'Success direction', auto: 'Use current rules', atLeast: 'Meet or exceed target', atMost: 'Stay at or below target',
   label: 'Label', labelPlaceholder: 'e.g. Perception', formula: 'Dice formula', formulaHint: 'Examples: d20, d20+2, 2d6+1. Free rolls only record the result; checks also show success or failure.',
   visibility: 'Visibility', party: 'Party', private: 'Targets only', targets: 'Targets',
+  ability: 'Ability', skill: 'Skill', anyAbility: 'From the skill', anySkill: 'None',
+  checkHint: "A skill uses the character's skill bonus (proficiency included); an ability alone uses its modifier; neither falls back to the dice formula.",
   later: 'Later', send: 'Send request', sending: 'Sending…', roll: 'Roll',
   rolling: 'Rolling…', chooseTarget: 'Select at least one target.',
   tellAi: 'Tell the AI', aiAlwaysIncluded: 'Rule check and contest results are always shared with the AI.',
@@ -41,6 +46,12 @@ const visibleRequests = rolls.visibleRequests
 const activeRequest = rolls.activeRequest
 const composerOpen = ref(false), historyOpen = ref(false), formula = ref('d20'), label = ref(''), purpose = ref<ManualRollPurpose>('free'), target = ref<number | null>(null), comparison = ref<ManualRollComparison>('auto'), visibility = ref<ManualRollVisibility>('party'), targetUids = ref<string[]>([])
 const includeInAi = ref(false)
+// G4：GM 可以指定"用哪个技能/属性"来检定；留空则退回旧的裸公式检定。
+const checkAbility = ref(''), checkSkill = ref('')
+const checkOptions = computed(() => zh.value
+  ? { abilities: ABILITY_OPTIONS.map(item => ({ id: item.id, label: item.zh })), skills: SKILL_OPTIONS.map(item => ({ id: item.id, label: item.zh })) }
+  : { abilities: ABILITY_OPTIONS.map(item => ({ id: item.id, label: item.en })), skills: SKILL_OPTIONS.map(item => ({ id: item.id, label: item.en })) })
+const usesCheck = computed(() => purpose.value === 'check' && Boolean(checkAbility.value || checkSkill.value))
 const busy = ref(false), submitError = ref(''), draftOperationId = ref('')
 const canCreate = computed(() => viewerIsGm.value)
 const canAct = computed(() => !props.preview || Boolean(props.delegate))
@@ -54,7 +65,7 @@ function openPending() {
 }
 function reopen(request: ManualRollRequest) { historyOpen.value = false; rolls.reopen(request.id) }
 
-function resetComposer() { formula.value = 'd20'; label.value = ''; purpose.value = 'free'; target.value = null; comparison.value = 'auto'; visibility.value = 'party'; targetUids.value = props.players.map(player => player.user_id); includeInAi.value = false; submitError.value = ''; draftOperationId.value = '' }
+function resetComposer() { formula.value = 'd20'; checkAbility.value = ''; checkSkill.value = ''; label.value = ''; purpose.value = 'free'; target.value = null; comparison.value = 'auto'; visibility.value = 'party'; targetUids.value = props.players.map(player => player.user_id); includeInAi.value = false; submitError.value = ''; draftOperationId.value = '' }
 function openComposer() { resetComposer(); composerOpen.value = true }
 function toggleTarget(uid: string) { targetUids.value = targetUids.value.includes(uid) ? targetUids.value.filter(item => item !== uid) : [...targetUids.value, uid] }
 async function create() {
@@ -64,7 +75,8 @@ async function create() {
   busy.value = true
   // 检定/对抗由服务端强制收录，前端不发送该开关；自由投掷按勾选发送严格布尔。
   const includeInAiContext = purpose.value === 'free' ? includeInAi.value : undefined
-  try { draftOperationId.value = await rolls.create({ formula: formula.value, label: label.value, purpose: purpose.value, target: target.value, comparison: comparison.value, include_in_ai_context: includeInAiContext, target_uids: targetUids.value, visibility: visibility.value, operation_id: draftOperationId.value || undefined }); composerOpen.value = false; draftOperationId.value = '' }
+  const check = usesCheck.value ? { ability: checkAbility.value, skill: checkSkill.value, dc: Number(target.value) } : undefined
+  try { draftOperationId.value = await rolls.create({ formula: formula.value, label: label.value, purpose: purpose.value, target: target.value, comparison: comparison.value, include_in_ai_context: includeInAiContext, target_uids: targetUids.value, visibility: visibility.value, operation_id: draftOperationId.value || undefined, check }); composerOpen.value = false; draftOperationId.value = '' }
   catch (error: unknown) { submitError.value = error instanceof Error ? error.message : String(error) }
   finally { busy.value = false }
 }
@@ -89,9 +101,15 @@ function purposeText(value?: ManualRollPurpose) { return value === 'check' ? cop
 
   <Modal v-if="composerOpen" :title="copy.dialog" @close="composerOpen = false">
     <label>{{ copy.label }} <input v-model="label" maxlength="200" :placeholder="copy.labelPlaceholder" /></label>
-    <label>{{ copy.formula }} <input v-model="formula" placeholder="d20 + 2" /><small class="manual-roll-field-hint">{{ copy.formulaHint }}</small></label>
+    <label v-if="purpose !== 'check'">{{ copy.formula }} <input v-model="formula" placeholder="d20 + 2" /><small class="manual-roll-field-hint">{{ copy.formulaHint }}</small></label>
     <label>{{ copy.purpose }} <select v-model="purpose"><option value="free">{{ copy.free }}</option><option value="check">{{ copy.check }}</option><option value="contest">{{ copy.contest }}</option></select></label>
-    <template v-if="purpose === 'check'"><label>{{ copy.target }} <input v-model.number="target" type="number" min="1" max="10000" :placeholder="copy.targetPlaceholder" /></label><label>{{ copy.comparison }} <select v-model="comparison"><option value="auto">{{ copy.auto }}</option><option value="at_least">{{ copy.atLeast }}</option><option value="at_most">{{ copy.atMost }}</option></select></label></template>
+    <template v-if="purpose === 'check'">
+      <label>{{ copy.ability }} <select v-model="checkAbility"><option value="">{{ copy.anyAbility }}</option><option v-for="item in checkOptions.abilities" :key="item.id" :value="item.id">{{ item.label }}</option></select></label>
+      <label>{{ copy.skill }} <select v-model="checkSkill"><option value="">{{ copy.anySkill }}</option><option v-for="item in checkOptions.skills" :key="item.id" :value="item.id">{{ item.label }}</option></select></label>
+      <label>{{ copy.target }} <input v-model.number="target" type="number" min="1" max="10000" :placeholder="copy.targetPlaceholder" /></label>
+      <label>{{ copy.comparison }} <select v-model="comparison"><option value="auto">{{ copy.auto }}</option><option value="at_least">{{ copy.atLeast }}</option><option value="at_most">{{ copy.atMost }}</option></select></label>
+      <small class="manual-roll-field-hint">{{ copy.checkHint }}</small>
+    </template>
     <label>{{ copy.visibility }} <select v-model="visibility"><option value="party">{{ copy.party }}</option><option value="private">{{ copy.private }}</option></select></label>
     <label v-if="purpose === 'free'">{{ copy.tellAi }} <input v-model="includeInAi" type="checkbox" data-testid="manual-roll-include-ai" /></label>
     <small v-else class="manual-roll-field-hint">{{ copy.aiAlwaysIncluded }}</small>

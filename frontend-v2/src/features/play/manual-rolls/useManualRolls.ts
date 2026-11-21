@@ -47,7 +47,7 @@ export function useManualRolls(gameKey: Ref<string>, runId: Ref<string>, actorId
   }
   function dismiss(id: string) { dismissed.value = new Set([...dismissed.value, id]); if (activeRequestId.value === id) activeRequestId.value = '' }
   function reopen(id: string) { activeRequestId.value = id; dismissed.value.delete(id); dismissed.value = new Set(dismissed.value) }
-  async function create(input: { formula: string; label: string; purpose: ManualRollPurpose; target?: number | null; comparison?: ManualRollComparison; include_in_ai_context?: boolean; target_uids: string[]; visibility: ManualRollVisibility; operation_id?: string }) {
+  async function create(input: { formula: string; label: string; purpose: ManualRollPurpose; target?: number | null; comparison?: ManualRollComparison; include_in_ai_context?: boolean; target_uids: string[]; visibility: ManualRollVisibility; operation_id?: string; check?: { ability: string; skill: string; dc: number } }) {
     const operation_id = input.operation_id || createOperationId()
     await createManualRollRequest(gameKey.value, { ...input, operation_id, run_id: runId.value })
     await refresh(); return operation_id

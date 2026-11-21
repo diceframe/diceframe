@@ -16,6 +16,12 @@ export interface ManualRollResult {
   rolled_at: string
 }
 
+export interface ManualRollCheck {
+  ability: string
+  skill: string
+  dc: number
+}
+
 export interface ManualRollRequest {
   id: string
   operation_id: string
@@ -25,6 +31,8 @@ export interface ManualRollRequest {
   created_at: string
   label: string
   formula: string
+  /** G4：GM 指定的技能/属性检定；有它时结算由规则集负责。 */
+  check?: ManualRollCheck | null
   purpose?: ManualRollPurpose
   target?: number | null
   comparison?: ManualRollComparison
