@@ -205,7 +205,12 @@ internal static class Sleeper
     {
         // MARKER 只为让两份 exe 内容不同。
         System.Console.WriteLine("MARKER");
-        System.Threading.Thread.Sleep(60000);
+        // 进程必须活过整个用例：那两条“第二次提升必须放弃”的断言，检验的正是
+        // “备份还是正在运行的旧 exe、删不掉”。CI 上光三次编译就可能超过一分钟，
+        // 睡 60 秒会让进程提前退出——备份于是可删，第二次提升成功，断言只剩
+        // 一句无从下手的 "True is False"。用例在 finally 里 kill，睡多久都不会
+        // 真的等待。
+        System.Threading.Thread.Sleep(600000);
     }
 }
 """
@@ -232,6 +237,9 @@ def test_promotes_over_a_running_launcher_on_windows(tmp_path):
     launcher = root / "DiceFrame.exe"
     shutil.copyfile(_compile_sleeper(tmp_path, "old"), launcher)
     shutil.copyfile(_compile_sleeper(tmp_path, "new"), staged)
+    # 三次编译全部落在启动进程之前：断言依赖“旧 exe 仍在运行”，编译耗时不能
+    # 挤占那个窗口，否则慢 runner 上会等到进程自己醒来退出。
+    newest = _compile_sleeper(tmp_path, "newest")
     _signal(staged.parent, staged)
     original = launcher.read_bytes()
 
@@ -249,7 +257,9 @@ def test_promotes_over_a_running_launcher_on_windows(tmp_path):
 
         # 备份就是正在运行的旧 exe，删不掉：再来一次提升必须原样放弃，不能把
         # 已经提升好的 DiceFrame.exe 弄坏。
-        newest = _compile_sleeper(tmp_path, "newest")
+        # 先确认前提还成立——进程若已退出，备份就能被删除，下面的断言也就失去
+        # 意义；让它在原地报出真正的原因。
+        assert running.poll() is None, "sleeper exited before the second promotion"
         shutil.copyfile(newest, staged)
         assert promote_pending_launcher(data, root) is False
         assert launcher.read_bytes() != original
