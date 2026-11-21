@@ -175,6 +175,44 @@ jobs:
           tests/test_launcher_promotion.py
           tests/test_launcher_lifecycle.py
 
+  embedding-runtime:
+    name: Packaged embedding inference (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements-portable.lock
+            requirements-docker-amd64.lock
+
+      - name: Test embedded Windows Python after package cleanup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP 'diceframe-embedded-python'
+          python -c "import sys; from pathlib import Path; from scripts import build_portable as p; p.install_python_runtime(Path(sys.argv[1]), p.DEFAULT_PYTHON_VERSION, p.python_embed_url(p.DEFAULT_PYTHON_VERSION), p.DEFAULT_PYTHON_SHA256, p.PIP_BOOTSTRAP_URL, p.PIP_BOOTSTRAP_SHA256)" $runtime
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & (Join-Path $runtime 'python.exe') -I scripts/smoke_test_local_embedding.py .
+
+      - name: Test isolated managed Docker payload dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          site_packages="${RUNNER_TEMP}/diceframe-docker-site-packages"
+          python -c 'import sys; from pathlib import Path; from scripts import build_docker_update as d; d.install_runtime(Path(sys.argv[1]))' "$site_packages"
+          python -I -S scripts/smoke_test_local_embedding.py . "$site_packages"
+
   frontend:
     name: Frontend checks
     runs-on: ubuntu-latest

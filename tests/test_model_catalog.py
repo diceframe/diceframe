@@ -247,3 +247,22 @@ async def test_embedding_model_write_proceeds_after_owner_check(handler_name):
     # owner 鉴权通过后进入管理流程：存储未就绪 → 422（证明鉴权不是永久挡板）
     response = await getattr(embedding_models, handler_name)(_model_write_request(owner=True))
     assert response.status == 422
+
+
+@pytest.mark.asyncio
+async def test_runtime_failure_blocks_model_download(monkeypatch):
+    from src.webui.routes import embedding_models
+
+    def unavailable():
+        raise embedding_models.LocalModelError("CPU runtime unavailable")
+
+    def unexpected_download(_request):
+        pytest.fail("A model download must not start without a CPU runtime")
+
+    monkeypatch.setattr(embedding_models, "check_local_embedding_runtime", unavailable)
+    monkeypatch.setattr(embedding_models, "_manager", unexpected_download)
+
+    response = await embedding_models.api_embedding_model_install(_model_write_request(owner=True))
+
+    assert response.status == 422
+    assert json.loads(response.text)["code"] == "LOCAL_EMBEDDING_RUNTIME_UNAVAILABLE"

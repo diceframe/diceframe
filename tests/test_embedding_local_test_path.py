@@ -12,7 +12,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from aiohttp import web
+import pytest
 
+from src.memory.local_embedding import LocalModelError
 from src.webui.config_controller import ConfigController
 
 
@@ -76,3 +78,27 @@ def test_unsaved_local_source_draft_uses_local_test_path(tmp_path):
     payload = _body(response)
     assert payload["source"] == "local"
     assert "本地模型加载失败" in payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_failed_local_activation_leaves_existing_embedding_configuration_intact(monkeypatch, tmp_path):
+    from src.webui import config_controller
+
+    state = {"embedding_enabled": True, "embedding_source": "external", "embedding_provider_ref": "provider-a"}
+    controller = _controller(state)
+    controller.dependencies.cors_env_value = ""
+    previous = dict(state)
+
+    async def fail_probe(models_dir, model_id):
+        assert models_dir == tmp_path / "models"
+        assert model_id == "broken-model"
+        raise LocalModelError("inference failed")
+
+    monkeypatch.setattr(config_controller, "probe_local_embedding", fail_probe)
+    response = await controller.apply_values(_request(tmp_path).app, {
+        "embedding_enabled": True, "embedding_source": "local", "embedding_local_model_id": "broken-model",
+    })
+
+    assert response.status == 422
+    assert _body(response)["error"] == "inference failed"
+    assert state == previous

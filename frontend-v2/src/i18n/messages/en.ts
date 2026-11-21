@@ -545,8 +545,11 @@ export const en = {
   creatorInspectorAdvancedHint: 'Edit source files directly; saving increments the revision.',
   // W5 embedding model cards
   embeddingModelPickHint: 'No installed model yet: click Download on a model card below, then enable it here.',
-  embeddingModelDownload: 'Download',
-  embeddingModelDownloading: 'Verifying download…',
+  embeddingModelDownloadAndEnable: 'Download and enable',
+  embeddingModelDownloading: 'Downloading model…',
+  embeddingModelVerifying: 'Testing model…',
+  embeddingModelEnable: 'Enable',
+  embeddingModelActivationHint: 'DiceFrame tests the model before switching. If it fails, your current model stays active.',
   embeddingModelDelete: 'Delete',
   embeddingModelActive: 'Active',
   embeddingModelStatusInstalled: 'Installed',

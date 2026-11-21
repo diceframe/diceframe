@@ -545,8 +545,11 @@ export const zhCN = {
   creatorInspectorAdvancedHint: '手动修改源文件；保存后 revision +1。',
   // W5 向量模型卡片
   embeddingModelPickHint: '还没有已安装模型：点击下方模型卡片的「下载」，完成后回到这里选择启用。',
-  embeddingModelDownload: '下载',
-  embeddingModelDownloading: '校验下载中…',
+  embeddingModelDownloadAndEnable: '下载并启用',
+  embeddingModelDownloading: '正在下载模型…',
+  embeddingModelVerifying: '正在验证推理…',
+  embeddingModelEnable: '启用',
+  embeddingModelActivationHint: '通过推理测试后才会切换模型，失败时保留当前配置。',
   embeddingModelDelete: '删除',
   embeddingModelActive: '当前启用',
   embeddingModelStatusInstalled: '已安装',

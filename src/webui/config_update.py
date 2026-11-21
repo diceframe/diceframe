@@ -126,6 +126,8 @@ def _degrade_speech_engines_lost_provider(candidate: dict[str, Any], refs_before
     if imagegen_ref_cleared:
         candidate["imagegen_enabled"] = False
     for capability in ("fallback1", "fallback2", "embedding", "check"):
+        if capability == "embedding" and candidate.get("embedding_source") == "local":
+            continue
         ref_key = f"{capability}_provider_ref"
         if refs_before.get(ref_key) and not candidate.get(ref_key):
             candidate["check_model_enabled" if capability == "check" else f"{capability}_enabled"] = False

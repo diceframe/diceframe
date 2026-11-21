@@ -6,6 +6,7 @@ import argparse
 import ast
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -49,13 +50,14 @@ def _assert_lock_covers_requirements() -> None:
     separator = re.compile(r"[-_.]+")
     requirement = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9_.-]*)")
     wanted: set[str] = set()
-    for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines():
-        stripped = line.split("#", 1)[0].strip()
-        if not stripped or stripped.startswith("-"):
-            continue
-        match = requirement.match(stripped)
-        if match:
-            wanted.add(separator.sub("-", match.group(1)).lower())
+    for filename in ("requirements.txt", "requirements-embedding.txt"):
+        for line in (ROOT / filename).read_text(encoding="utf-8").splitlines():
+            stripped = line.split("#", 1)[0].strip()
+            if not stripped or stripped.startswith("-"):
+                continue
+            match = requirement.match(stripped)
+            if match:
+                wanted.add(separator.sub("-", match.group(1)).lower())
     locked: set[str] = set()
     for line in LOCK_FILE.read_text(encoding="utf-8").splitlines():
         match = re.match(r"^([A-Za-z0-9][A-Za-z0-9_.-]*)==", line.strip())
@@ -76,6 +78,7 @@ def install_runtime(target: Path) -> None:
         sys.executable, "-m", "pip", "install",
         "--require-hashes", "--no-deps", "--only-binary=:all:",
         "--platform", "manylinux_2_17_x86_64",
+        "--platform", "manylinux2014_x86_64",
         "--platform", "manylinux_2_28_x86_64",
         "--python-version", "3.11", "--implementation", "cp", "--abi", "cp311",
         "--target", str(target), "-r", str(LOCK_FILE),
@@ -182,7 +185,17 @@ def build_package(
         shutil.copytree(prebuilt, app_dir / "static-v2", dirs_exist_ok=True)
     shutil.rmtree(app_dir / "frontend-v2", ignore_errors=True)
     _assert_lock_covers_requirements()
-    install_runtime(package_dir / "runtime" / "site-packages")
+    site_packages = package_dir / "runtime" / "site-packages"
+    install_runtime(site_packages)
+    if sys.platform == "linux" and platform.machine() == "x86_64" and sys.version_info[:2] == (3, 11):
+        subprocess.run(
+            [
+                sys.executable, "-I", "-S", str(ROOT / "scripts/smoke_test_local_embedding.py"),
+                str(app_dir), str(site_packages),
+            ],
+            cwd=ROOT,
+            check=True,
+        )
     write_manifest(package_dir, version, commit)
 
     output_dir.mkdir(parents=True, exist_ok=True)

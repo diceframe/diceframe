@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from hashlib import file_digest, sha256
 import json
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,38 @@ def _tokenizer_runtime():
             "pip install onnxruntime tokenizers（或改用外部 Embedding 服务商）",
         ) from exc
     return ort, Tokenizer
+
+
+def check_local_embedding_runtime() -> None:
+    """Check native CPU dependencies before downloading any model assets."""
+    try:
+        ort, _ = _tokenizer_runtime()
+        _numpy()
+    except (LocalModelError, OSError, RuntimeError) as exc:
+        raise LocalModelError(
+            "本地向量推理组件不可用。请升级 DiceFrame，或在模型配置中使用外部 Embedding 服务商。"
+        ) from exc
+    if "CPUExecutionProvider" not in ort.get_available_providers():
+        raise LocalModelError("本地向量推理缺少 ONNX CPU 执行支持。")
+
+
+async def probe_local_embedding(models_dir: Path, model_id: str) -> int:
+    """Load a verified model and return its dimension after one CPU inference."""
+    if not model_id:
+        raise LocalModelError("请先选择本地向量模型")
+    try:
+        backend = await asyncio.to_thread(LocalOnnxEmbeddingBackend, models_dir, model_id)
+    except (ValueError, TypeError, OSError, RuntimeError) as exc:
+        raise LocalModelError(f"本地模型加载失败：{exc}") from exc
+    try:
+        embedding = await backend.embed("测试")
+        if not embedding or not any(embedding) or not all(map(isfinite, embedding)):
+            raise LocalModelError("本地模型未返回有效向量")
+        return len(embedding)
+    except Exception as exc:
+        raise LocalModelError(f"本地模型推理失败：{exc}") from exc
+    finally:
+        await backend.close()
 
 
 def _safe_relative(value: object) -> Path:

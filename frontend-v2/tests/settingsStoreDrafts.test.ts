@@ -39,3 +39,23 @@ it('preserves unrelated unsaved fields when saving a section', async () => {
   expect(store.config.context_recent_rounds).toBe(10)
   expect(store.config.assistant_agent_max_tokens).toBe(8192)
 })
+
+it('persists local embedding as a focused patch after server verification', async () => {
+  const initial = { embedding_enabled: true, embedding_source: 'external', context_recent_rounds: 0 }
+  mocks.api.mockResolvedValueOnce(initial)
+  const store = useSettingsStore()
+  await store.load()
+  store.setConfigField('context_recent_rounds', 10)
+  const activation = { embedding_enabled: true, embedding_source: 'local', embedding_local_model_id: 'tiny' } as const
+
+  mocks.api.mockRejectedValueOnce(new Error('inference failed'))
+  await expect(store.saveConfigPatch(activation)).rejects.toThrow('inference failed')
+  expect(store.config.embedding_source).toBe('external')
+
+  mocks.api.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ...initial, ...activation })
+  await store.saveConfigPatch(activation)
+  expect(mocks.api).toHaveBeenNthCalledWith(3, '/config', {
+    method: 'POST', body: JSON.stringify(activation),
+  })
+  expect(store.config).toMatchObject({ ...activation, context_recent_rounds: 10 })
+})

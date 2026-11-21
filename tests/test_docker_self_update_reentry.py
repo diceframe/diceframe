@@ -73,10 +73,12 @@ def test_docker_lock_covers_every_requirement(tmp_path):
     requirements.write_text(
         "aiohttp>=3\n# comment\npython-i18n[YAML]>=0.3.9,<0.4\n", encoding="utf-8",
     )
+    (tmp_path / "requirements-embedding.txt").write_text("onnxruntime>=1.32\n", encoding="utf-8")
     complete = tmp_path / "ok.lock"
     complete.write_text(
         "aiohttp==3.14.1 --hash=sha256:" + "0" * 64 + "\n"
-        "python-i18n==0.3.9 --hash=sha256:" + "0" * 64 + "\n",
+        "python-i18n==0.3.9 --hash=sha256:" + "0" * 64 + "\n"
+        "onnxruntime==1.32.0 --hash=sha256:" + "0" * 64 + "\n",
         encoding="utf-8",
     )
     stale = tmp_path / "stale.lock"
@@ -90,7 +92,7 @@ def test_docker_lock_covers_every_requirement(tmp_path):
         build_docker_update.LOCK_FILE = complete
         build_docker_update._assert_lock_covers_requirements()
         build_docker_update.LOCK_FILE = stale
-        with pytest.raises(SystemExit, match="python-i18n"):
+        with pytest.raises(SystemExit, match="onnxruntime, python-i18n"):
             build_docker_update._assert_lock_covers_requirements()
     finally:
         build_docker_update.ROOT = original_root

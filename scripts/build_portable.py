@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import hmac
+import os
 import re
 import shutil
 import subprocess
@@ -115,6 +116,29 @@ def python_embed_url(version: str) -> str:
     return f"https://www.python.org/ftp/python/{version}/python-{version}-embed-amd64.zip"
 
 
+def stage_msvc_runtime(runtime_dir: Path) -> None:
+    """Deploy the redistributable CRT beside python.exe for native ONNX wheels."""
+    installer = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+    vswhere = installer / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
+    installation = subprocess.check_output(
+        [str(vswhere), "-utf8", "-latest", "-products", "*", "-property", "installationPath"],
+        encoding="utf-8",
+    ).strip()
+    if not installation:
+        raise RuntimeError("Visual Studio installation with the x64 C++ Redistributable was not found")
+    redist = Path(installation) / "VC" / "Redist" / "MSVC"
+    candidates = [
+        folder for folder in redist.glob("*/x64/Microsoft.VC14*.CRT")
+        if (folder / "msvcp140.dll").is_file()
+        and all(part.isdigit() for part in folder.parent.parent.name.split("."))
+    ]
+    if not candidates:
+        raise RuntimeError("Visual Studio x64 C++ Redistributable files were not found")
+    latest = max(candidates, key=lambda folder: tuple(map(int, folder.parent.parent.name.split("."))))
+    for dll in latest.glob("*.dll"):
+        shutil.copy2(dll, runtime_dir / dll.name)
+
+
 def install_python_runtime(
     runtime_dir: Path,
     version: str,
@@ -129,6 +153,7 @@ def install_python_runtime(
     archive = download(python_url, CACHE_DIR / Path(python_url).name, python_sha256)
     with zipfile.ZipFile(archive) as zf:
         zf.extractall(runtime_dir)
+    stage_msvc_runtime(runtime_dir)
     patch_pth(runtime_dir)
     pip_wheel = download(pip_url, CACHE_DIR / Path(pip_url).name, pip_sha256)
     python_exe = runtime_dir / "python.exe"
@@ -216,6 +241,7 @@ def cleanup_runtime(runtime_dir: Path) -> None:
         removable_patterns = (
             "*/tests",
             "*/test",
+            "numpy/**/tests",
             # 给编码助手看的技能文档（如 pydantic_ai/.agents/skills/…），运行时不读。
             # 它们是包里路径最深的文件：嵌套解压的安装目录下，旧版应用内更新解压到
             # data/_updater/extract-*/… 时会超过 Windows 260 字符而失败。
@@ -226,8 +252,6 @@ def cleanup_runtime(runtime_dir: Path) -> None:
             "setuptools-*.dist-info",
             "wheel",
             "wheel-*.dist-info",
-            "packaging",
-            "packaging-*.dist-info",
         )
         for pattern in removable_patterns:
             for path in site_packages.glob(pattern):
@@ -364,6 +388,10 @@ def main() -> int:
         args.python_sha256,
         args.pip_url,
         args.pip_sha256,
+    )
+    run(
+        [str(runtime_dir / "python.exe"), "-I", str(ROOT / "scripts/smoke_test_local_embedding.py"), str(app_dir)],
+        package_dir,
     )
     build_windows_launcher(package_dir)
     output_zip = make_zip(package_dir, output_zip)

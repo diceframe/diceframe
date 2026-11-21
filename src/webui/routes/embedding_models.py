@@ -6,6 +6,7 @@ import asyncio
 from aiohttp import web
 
 from src.webui.routes._common import _require_confirmed_request
+from src.memory.local_embedding import LocalModelError, check_local_embedding_runtime
 from src.memory.model_catalog import LocalModelManager, ModelCatalogError
 from src.network_proxy import effective_proxy_url
 
@@ -49,6 +50,13 @@ async def api_embedding_model_install(request: web.Request) -> web.Response:
     denied = _require_confirmed_owner(request)
     if denied is not None:
         return denied
+    try:
+        await asyncio.to_thread(check_local_embedding_runtime)
+    except LocalModelError as exc:
+        return web.json_response(
+            {"ok": False, "error": str(exc), "code": "LOCAL_EMBEDDING_RUNTIME_UNAVAILABLE"},
+            status=422,
+        )
     try:
         result = await _manager(request).install(request.match_info["model_id"])
     except ModelCatalogError as exc:

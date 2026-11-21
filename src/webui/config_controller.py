@@ -21,7 +21,7 @@ from src.ai_providers import resolve_provider
 from src.common_factory import close_model_clients
 from src.memory.embedding import EmbeddingClient
 from src.memory.embedding_profile import profile_for_client
-from src.memory.local_embedding import list_installed_models
+from src.memory.local_embedding import LocalModelError, list_installed_models, probe_local_embedding
 from src.memory.model_catalog import LocalModelManager, ModelCatalogError
 from src.network_proxy import (
     effective_proxy_url,
@@ -246,6 +246,22 @@ class ConfigController:
             changed_keys & API_RUNTIME_CONFIG_KEYS
         ) or provider_runtime_changed(changed_keys)
         old_subsystems = app.get("subsystems")
+        activating_local_embedding = (
+            prepared.state.get("embedding_enabled")
+            and prepared.state.get("embedding_source") == "local"
+            and any(
+                state.get(key) != prepared.state.get(key)
+                for key in ("embedding_enabled", "embedding_source", "embedding_local_model_id")
+            )
+        )
+        if activating_local_embedding:
+            try:
+                await probe_local_embedding(
+                    self._embedding_models_dir(app),
+                    str(prepared.state.get("embedding_local_model_id") or ""),
+                )
+            except LocalModelError as exc:
+                return web.json_response({"ok": False, "error": str(exc)}, status=422)
         plugin_host = app.get("plugin_host")
         old_embedding = (
             old_subsystems.memory_store.embedding_client
@@ -261,6 +277,8 @@ class ConfigController:
                     reuse=old_subsystems,
                     config=prepared.state,
                 )
+                if activating_local_embedding and subsystems.memory_store.embedding_client is None:
+                    raise LocalModelError("本地模型已不可用，请重新选择并启用")
                 new_api = dependencies.make_api(
                     subsystems,
                     plugin_host,
@@ -655,48 +673,26 @@ class ConfigController:
         finally:
             await client.close()
 
-    async def _test_embedding_local(self, request: web.Request, model_id: str = "") -> web.Response:
-        """本地来源的向量测试：真实加载 ONNX 并跑一次推理，回报维数与耗时。"""
-
-        state = self.dependencies.state
-        model_id = model_id or str(state.get("embedding_local_model_id") or "").strip()
-        if not model_id:
-            return web.json_response(
-                {"ok": False, "source": "local", "error": "请先选择要测试的本地模型"},
-            )
-        subsystems = request.app.get("subsystems")
+    @staticmethod
+    def _embedding_models_dir(app: Any) -> Path:
+        subsystems = app.get("subsystems")
         memory_store = getattr(subsystems, "memory_store", None)
-        models_dir = (
+        return (
             Path(memory_store.db_path).parent / "models"
             if memory_store is not None else Path("data") / "models"
         )
-        from src.memory.local_embedding import LocalModelError, LocalOnnxEmbeddingBackend
 
+    async def _test_embedding_local(self, request: web.Request, model_id: str = "") -> web.Response:
+        model_id = model_id or str(self.dependencies.state.get("embedding_local_model_id") or "").strip()
         start = time.time()
         try:
-            backend = LocalOnnxEmbeddingBackend(models_dir, model_id)
+            dimension = await probe_local_embedding(self._embedding_models_dir(request.app), model_id)
         except LocalModelError as exc:
-            return web.json_response(
-                {"ok": False, "source": "local", "error": f"本地模型加载失败：{exc}"},
-            )
-        try:
-            embedding = await backend.embed("测试")
-            elapsed = round(time.time() - start, 2)
-            if embedding and len(embedding) > 0:
-                return web.json_response(
-                    {
-                        "ok": True,
-                        "source": "local",
-                        "model": model_id,
-                        "dimension": len(embedding),
-                        "elapsed": elapsed,
-                    }
-                )
-            return web.json_response(
-                {"ok": False, "source": "local", "error": "本地模型返回异常", "elapsed": elapsed},
-            )
-        finally:
-            await backend.close()
+            return web.json_response({"ok": False, "source": "local", "error": str(exc)})
+        return web.json_response({
+            "ok": True, "source": "local", "model": model_id,
+            "dimension": dimension, "elapsed": round(time.time() - start, 2),
+        })
 
     async def test_proxy(self, request: web.Request) -> web.Response:
         body = await request.json()

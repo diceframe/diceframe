@@ -50,6 +50,7 @@ ROOT_FILES = [
     "THIRD_PARTY_NOTICES.md",
     "docker-compose.yml",
     "requirements.txt",
+    "requirements-embedding.txt",
     "requirements-portable.lock",
     "web_server.py",
     "web_ui.bat",

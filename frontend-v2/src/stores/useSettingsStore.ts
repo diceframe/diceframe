@@ -100,6 +100,12 @@ export const useSettingsStore = defineStore('settings', () => {
     return result.warnings || []
   }
 
+  async function saveConfigPatch(patch: Partial<AppConfig>) {
+    const revisions = new Map(fieldRevisions)
+    await api('/config', { method: 'POST', body: JSON.stringify(patch) })
+    await load(Object.keys(patch), revisions)
+  }
+
   async function saveProviders(providers: AiProviderInput[]) {
     const payload: Record<string, unknown> = {
       ai_providers: providers.map((p) => ({
@@ -215,7 +221,7 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   return {
-    config, secrets, loading, error, load, saveSection, saveProviders, isConfigDirty,
+    config, secrets, loading, error, load, saveSection, saveConfigPatch, saveProviders, isConfigDirty,
     saveAccessPassword, clearProxy, botToken, test, testProvider, fetchProviderModels, setConfigField,
   }
 })
