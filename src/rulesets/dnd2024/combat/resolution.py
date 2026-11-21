@@ -17,7 +17,7 @@ from src.rulesets.dnd2024.features.resources import (
     feature_usage_count,
 )
 from ..character.attunement import AttunementError, canonical_item_ref
-from ..character.primitives import derived_save
+from ..character.primitives import derived_save, derived_skill
 from ..items.activation import (
     ItemActivationError,
     build_item_healing_event,
@@ -115,7 +115,9 @@ def _proficiency_bonus_for_cr(cr: str) -> int:
     return 9
 
 
-def _statblock_derived_checks(raw: dict[str, Any]) -> dict[str, Any]:
+def _statblock_derived_checks(
+    raw: dict[str, Any], skill_abilities: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Effective saves and skills for a stat block.
 
     A stat block prints only the numbers that differ from the bare ability
@@ -150,14 +152,31 @@ def _statblock_derived_checks(raw: dict[str, Any]) -> dict[str, Any]:
         str(key): int(value) for key, value in (raw.get("skills") or {}).items()
         if isinstance(value, (int, float)) and not isinstance(value, bool)
     }
+    # 决策 D-1：默认按六维算，面板印出的值优先覆盖。stat block 只印熟练项，
+    # 所以派生侧**永不加 PB**——没印就是没熟练，加了会让所有怪物技能凭空变高。
+    skills: dict[str, int] = {}
+    for skill_id, ability in (skill_abilities or {}).items():
+        if skill_id in declared_skills:
+            skills[skill_id] = declared_skills[skill_id]
+            continue
+        score = abilities.get(ability)
+        if score is not None:
+            skills[skill_id] = derived_skill(
+                score, proficiency_bonus=bonus, proficient=False,
+            )
+    # 未登记在技能目录里的声明值也要保留（目录可能落后于内容）。
+    for skill_id, value in declared_skills.items():
+        skills.setdefault(skill_id, value)
     peak = int(raw.get("passive_perception") or 0)
-    if not peak and "perception" in declared_skills:
-        peak = 10 + declared_skills["perception"]
+    if not peak:
+        # 与 skill_values.perception 自洽：10 + 生效技能值，而不是只看声明值。
+        peak = 10 + int(skills.get("perception", 0) or 0)
     return {
         "saving_throws": saves,
         "saving_throws_declared": declared_saves,
         "saving_throws_derived": derived_saves,
-        "skills": declared_skills,
+        "skills": skills,
+        "skills_declared": declared_skills,
         "passive_perception": peak,
     }
 
@@ -383,7 +402,7 @@ class CombatResolutionMixin:
                 # S0-MM2：六维必须真的参与计算。声明值作为覆盖留在
                 # ``*_declared`` 里，生效值写进 ``saving_throws`` / ``skills``，
                 # 于是所有既有读取点（豁免、隐匿对抗、法术豁免）不必改。
-                **_statblock_derived_checks(raw),
+                **_statblock_derived_checks(raw, self._skill_abilities()),
                 "languages": list(raw.get("languages") or []),
                 "subtype": str(raw.get("subtype") or ""),
                 "hit_dice": str(raw.get("hit_dice") or ""),
@@ -4180,6 +4199,25 @@ class CombatResolutionMixin:
         if capability.feature_id != "flurry_of_blows" or upgraded <= 0:
             return int(declared)
         return max(int(declared), upgraded)
+
+    def _skill_abilities(self) -> dict[str, str]:
+        """skill id -> ability id, read from the bundle once per batch.
+
+        The mapping lives in content (one entity per skill), so the engine never
+        hard-codes "Perception is Wisdom".
+        """
+
+        try:
+            rows = self.bundle.list("skill")
+        except Exception:  # pragma: no cover - bundle always exposes list()
+            return {}
+        mapped: dict[str, str] = {}
+        for row in rows:
+            skill_id = str(row.get("id") or "")
+            ability = str(row.get("ability_ref") or "").removeprefix("ability:")
+            if skill_id and ability:
+                mapped[skill_id] = ability
+        return mapped
 
     def _fleet_step_grant_events(
         self, actor: dict[str, Any], capability: Any,

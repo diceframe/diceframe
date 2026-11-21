@@ -185,3 +185,68 @@ def test_resistance_halves_rounding_down(amount: int, halved: int) -> None:
 def test_contract_accepts_a_catalog_entry(catalog) -> None:
     wolf = _entry(catalog, "wolf")
     validate_enemy_profiles([wolf])
+
+
+# ---------------------------------------------------------------------------
+# 10. D-1：技能默认按六维算，面板值覆盖
+# ---------------------------------------------------------------------------
+
+_SKILL_ABILITIES = {
+    "acrobatics": "dex", "animal_handling": "wis", "arcana": "int",
+    "athletics": "str", "deception": "cha", "history": "int", "insight": "wis",
+    "intimidation": "cha", "investigation": "int", "medicine": "wis",
+    "nature": "int", "perception": "wis", "performance": "cha",
+    "persuasion": "cha", "religion": "int", "sleight_of_hand": "dex",
+    "stealth": "dex", "survival": "wis",
+}
+
+
+def test_every_skill_is_derived_from_ability_when_not_printed() -> None:
+    """A stat block prints only its proficient skills; the rest are still known.
+
+    Before this rule the engine answered ``0`` for an unprinted skill, so a
+    goblin's Perception read ``0`` while its own passive Perception said ``9``.
+    """
+
+    checks = _statblock_derived_checks({
+        "abilities": {"str": 8, "dex": 15, "con": 10, "int": 10, "wis": 8, "cha": 8},
+        "cr": "1/4",
+        "skills": {"stealth": 6},
+    }, _SKILL_ABILITIES)
+    assert checks["skills"]["perception"] == -1      # WIS 8 -> -1，未印即未熟
+    assert checks["skills"]["stealth"] == 6          # 面板值覆盖派生值
+    assert checks["skills"]["athletics"] == -1       # STR 8 -> -1
+    assert checks["skills_declared"] == {"stealth": 6}
+
+
+def test_passive_perception_agrees_with_the_derived_skill() -> None:
+    checks = _statblock_derived_checks({
+        "abilities": {"str": 10, "dex": 10, "con": 10, "int": 10, "wis": 8, "cha": 10},
+        "cr": "0",
+    }, _SKILL_ABILITIES)
+    assert checks["skills"]["perception"] == -1
+    assert checks["passive_perception"] == 10 + checks["skills"]["perception"]
+
+
+def test_printed_passive_perception_wins_over_the_derived_one() -> None:
+    checks = _statblock_derived_checks({
+        "abilities": {"str": 10, "dex": 10, "con": 10, "int": 10, "wis": 10, "cha": 10},
+        "cr": "0",
+        "passive_perception": 15,
+    }, _SKILL_ABILITIES)
+    assert checks["passive_perception"] == 15
+
+
+def test_proficiency_is_never_added_to_a_derived_skill() -> None:
+    """The PB only appears through a printed value.
+
+    Adding it to the derived side would silently give every monster a bonus it
+    does not have, and Wild Shape's "use the higher" would then be wrong.
+    """
+
+    checks = _statblock_derived_checks({
+        "abilities": {"str": 10, "dex": 10, "con": 10, "int": 10, "wis": 10, "cha": 10},
+        "cr": "20",
+        "proficiency_bonus": 6,
+    }, _SKILL_ABILITIES)
+    assert checks["skills"]["perception"] == 0
