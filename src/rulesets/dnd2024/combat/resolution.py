@@ -17,6 +17,7 @@ from src.rulesets.dnd2024.features.resources import (
     feature_usage_count,
 )
 from ..character.attunement import AttunementError, canonical_item_ref
+from ..character.primitives import derived_save, derived_skill
 from ..items.activation import (
     ItemActivationError,
     build_item_healing_event,
@@ -97,6 +98,87 @@ POTENT_SPELLCASTING_OWNERS = ("class:cleric", "class:druid")
 # event has to name the feature that rewrote its total.  The id lives here so
 # the audit trail and the catalog cannot drift apart.
 INDOMITABLE_MIGHT = "indomitable_might"
+
+
+def _proficiency_bonus_for_cr(cr: str) -> int:
+    """The PB a stat block of this CR carries (SRD table, CR 0-30)."""
+
+    text = str(cr or "0")
+    if "/" in text:
+        numerator, denominator = text.split("/")[:2]
+        value = float(int(numerator) / int(denominator))
+    else:
+        value = float(text or 0)
+    for ceiling, bonus in ((4, 2), (8, 3), (12, 4), (16, 5), (20, 6), (24, 7), (28, 8)):
+        if value <= ceiling:
+            return bonus
+    return 9
+
+
+def _statblock_derived_checks(
+    raw: dict[str, Any], skill_abilities: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Effective saves and skills for a stat block.
+
+    A stat block prints only the numbers that differ from the bare ability
+    modifier.  Everything it does not print is still derivable, and the engine
+    derives it: a monster's saving throw is computed like a player's, not read
+    from whatever happened to be written down.
+
+    Declared values win, but the derived ones stay beside them so an audit can
+    tell a stat block typo from a rules difference.
+    """
+
+    abilities = {
+        str(key): int(value) for key, value in (raw.get("abilities") or {}).items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+    declared_bonus = raw.get("proficiency_bonus")
+    bonus = int(
+        declared_bonus
+        if isinstance(declared_bonus, int) and not isinstance(declared_bonus, bool)
+        else _proficiency_bonus_for_cr(str(raw.get("cr") or ""))
+    )
+    declared_saves = {
+        str(key): int(value) for key, value in (raw.get("saving_throws") or {}).items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+    derived_saves = {
+        ability: derived_save(score, proficiency_bonus=bonus, proficient=False)
+        for ability, score in abilities.items()
+    }
+    saves = {**derived_saves, **declared_saves}
+    declared_skills = {
+        str(key): int(value) for key, value in (raw.get("skills") or {}).items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+    # 决策 D-1：默认按六维算，面板印出的值优先覆盖。stat block 只印熟练项，
+    # 所以派生侧**永不加 PB**——没印就是没熟练，加了会让所有怪物技能凭空变高。
+    skills: dict[str, int] = {}
+    for skill_id, ability in (skill_abilities or {}).items():
+        if skill_id in declared_skills:
+            skills[skill_id] = declared_skills[skill_id]
+            continue
+        score = abilities.get(ability)
+        if score is not None:
+            skills[skill_id] = derived_skill(
+                score, proficiency_bonus=bonus, proficient=False,
+            )
+    # 未登记在技能目录里的声明值也要保留（目录可能落后于内容）。
+    for skill_id, value in declared_skills.items():
+        skills.setdefault(skill_id, value)
+    peak = int(raw.get("passive_perception") or 0)
+    if not peak:
+        # 与 skill_values.perception 自洽：10 + 生效技能值，而不是只看声明值。
+        peak = 10 + int(skills.get("perception", 0) or 0)
+    return {
+        "saving_throws": saves,
+        "saving_throws_declared": declared_saves,
+        "saving_throws_derived": derived_saves,
+        "skills": skills,
+        "skills_declared": declared_skills,
+        "passive_perception": peak,
+    }
 
 
 def _without_consumed_conditions(
@@ -317,6 +399,17 @@ class CombatResolutionMixin:
                 "condition_immunities": list(raw.get("condition_immunities") or []),
                 "cr": str(raw.get("cr") or ""),
                 "xp": int(raw.get("xp", 0) or 0),
+                # S0-MM2：六维必须真的参与计算。声明值作为覆盖留在
+                # ``*_declared`` 里，生效值写进 ``saving_throws`` / ``skills``，
+                # 于是所有既有读取点（豁免、隐匿对抗、法术豁免）不必改。
+                **_statblock_derived_checks(raw, self._skill_abilities()),
+                "languages": list(raw.get("languages") or []),
+                "subtype": str(raw.get("subtype") or ""),
+                "hit_dice": str(raw.get("hit_dice") or ""),
+                "proficiency_bonus": int(
+                    raw.get("proficiency_bonus")
+                    or _proficiency_bonus_for_cr(str(raw.get("cr") or ""))
+                ),
             }
             enemies[enemy_id] = enemy
             initiatives.append({
@@ -3828,6 +3921,58 @@ class CombatResolutionMixin:
             })
         return events
 
+    def _skill_check_events(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any], rng: Any,
+        *, skill: str, dc: int, kind: str, events: list[dict[str, Any]],
+        sources: list[dict[str, Any]] | None = None, intent_id: str = "",
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        """One d20 skill check: the only place a skill is rolled in combat.
+
+        ``kind`` doubles as the event kind and the window settlement kind, which
+        is what the pre-roll bonus windows key off (``"hide"``,
+        ``"peerless_skill"``...).  Returns the events so far -- possibly ending
+        in a pending window -- plus the check row, or ``None`` when a window now
+        owns the outcome.
+
+        The DC belongs to the caller: Hide passes a placeholder derived from the
+        enemies' Wisdom, which is a registered gap rather than an accident here.
+        """
+
+        actor_id = str(actor["actor_id"])
+        bonus = int(actor["skill_values"].get(skill, 0) or 0)
+        declared = list(sources or ())
+        mode = mode_from_sources(declared)
+        first = int(rng.randint(1, 20))
+        second = int(rng.randint(1, 20)) if mode == "disadvantage" else None
+        rolls = [first] if second is None else [first, second]
+        natural = min(rolls) if mode == "disadvantage" else first
+        floor, floor_sources = self._skill_check_floor(actor, skill)
+        effective = max(natural, floor) if floor else natural
+        total = effective + bonus
+        success = total >= dc
+        event: dict[str, Any] = {
+            "type": "check.resolved", "kind": kind, "actor_id": actor_id,
+            "ability": skill, "rolls": rolls, "natural": effective,
+            "modifier": bonus, "total": total, "target": dc, "success": success,
+            "roll_id": self._roll_id(events, kind, actor_id),
+        }
+        if floor:
+            event["raw_d20"] = natural
+            event["effective_d20"] = effective
+            event["d20_floor"] = floor
+            event["d20_floor_sources"] = floor_sources
+        if mode:
+            event["advantage_mode"] = mode
+            event["advantage_sources"] = declared
+        window = self._ability_check_window_offer(
+            instance, combat, actor, event,
+            {"kind": kind, "intent_id": intent_id},
+        )
+        if window is not None:
+            events.append({"type": "dnd2024.decision.pending", **window})
+            return events, None
+        return events, event
+
     def _hide_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
         *, spend_action: bool = True,
@@ -3841,6 +3986,11 @@ class CombatResolutionMixin:
         """
 
         actor_id = str(intent["actor_id"])
+        # 两个入口（基本动作与 ``cunning_hide`` 能力）共用这一处复核：默认拒绝，
+        # 只有重度遮蔽或 ¾/Total 掩护才允许尝试。
+        gate = self.hide_preconditions(instance, combat, actor_id)
+        if not gate["allowed"]:
+            raise CombatIntentError(str(gate["reason"]))
         actor = self._actor_view(instance, combat, actor_id)
         events: list[dict[str, Any]] = []
         if spend_action:
@@ -3848,7 +3998,6 @@ class CombatResolutionMixin:
                 "type": "dnd2024.action.spent", "actor_id": actor_id,
                 "resource": self._spend_action_resource(combat), "amount": 1,
             })
-        stealth = int(actor["skill_values"].get("stealth", 0) or 0)
         alive_wisdom = [
             int((self._actor_view(instance, combat, f"enemy:{enemy_id}")["saving_throws"]
                 or {}).get("wis", 0) or 0)
@@ -3856,46 +4005,18 @@ class CombatResolutionMixin:
             if int(enemy.get("hp", 0) or 0) > 0
         ]
         dc = 10 + max(alive_wisdom, default=0)
-        # S-P12 迁移债 D2：未受训护甲的隐匿劣势在此接线。
         sources: list[dict[str, Any]] = []
         if bool((actor.get("armor_training") or {}).get("stealth_disadvantage")):
             sources.append({"code": "stealth_disadvantage", "mode": "disadvantage"})
-        mode = mode_from_sources(sources)
-        first = int(rng.randint(1, 20))
-        second = int(rng.randint(1, 20)) if mode == "disadvantage" else None
-        rolls = [first] if second is None else [first, second]
-        natural = min(rolls) if mode == "disadvantage" else first
-        # 下限在加值之前、在掷后窗口之前作用：被替换的是 d20 面值本身，
-        # 所以它必须发生在 total 计算之前，并且不能再掷一次骰。
-        floor, floor_sources = self._skill_check_floor(actor, "stealth")
-        effective = max(natural, floor) if floor else natural
-        total = effective + stealth
-        success = total >= dc
-        event: dict[str, Any] = {
-            "type": "check.resolved", "kind": "hide", "actor_id": actor_id,
-            "ability": "stealth", "rolls": rolls, "natural": effective,
-            "modifier": stealth, "total": total, "target": dc, "success": success,
-            "roll_id": self._roll_id(events, "hide", actor_id),
-        }
-        if floor:
-            event["raw_d20"] = natural
-            event["effective_d20"] = effective
-            event["d20_floor"] = floor
-            event["d20_floor_sources"] = floor_sources
-        if mode:
-            event["advantage_mode"] = mode
-            event["advantage_sources"] = sources
-        window = self._ability_check_window_offer(
-            instance, combat, actor, event,
-            {"kind": "hide", "intent_id": str(intent.get("intent_id") or "")},
+        events, check = self._skill_check_events(
+            instance, combat, actor, rng,
+            skill="stealth", dc=dc, kind="hide", events=events, sources=sources,
+            intent_id=str(intent.get("intent_id") or ""),
         )
-        if window is not None:
-            # The check is on the table; the invisible condition (or the
-            # bardic die) waits for the window owner.
-            events.append({"type": "dnd2024.decision.pending", **window})
+        if check is None:
             return events
-        events.append(event)
-        if success:
+        events.append(check)
+        if check["success"]:
             events.append({
                 "type": "condition.applied", "target_id": actor_id,
                 "condition": "invisible", "duration": "combat",
@@ -4018,6 +4139,107 @@ class CombatResolutionMixin:
         })
         return events
 
+    #: Bonus Action 附带移动的声明表。今天只有两项消费者，所以先写成代码表；
+    #: 第三个出现时再搬进 catalog（与 ``unavailable_reason`` 同一条纪律）。
+    RIDER_MOVES = {
+        "rage": {"feature_id": "instinctive_pounce", "provokes_opportunity": False},
+        "second_wind": {"feature_id": "tactical_shift", "provokes_opportunity": False},
+    }
+
+    def _rider_move_events(
+        self, combat: dict[str, Any], actor: dict[str, Any], capability_id: str,
+        intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """附带移动：上限为半速，且**不占用**普通移动额度。
+
+        RAW 把它写成"作为该附赠动作的一部分移动至多半速"，不是"给你更多移动力"，
+        所以这里发一条 ``movement_cost: 0`` 的位移事件——额度在结算时按半速校验，
+        而不是加进 ``economy.movement`` 让玩家自己再提交一次 move。
+        """
+
+        rider = self.RIDER_MOVES.get(capability_id)
+        raw = intent.get("rider_move")
+        if rider is None or raw in (None, 0):
+            return []
+        character = self._feature_character(actor)
+        if not self.features.has_feature(character, str(rider["feature_id"])):
+            return []
+        distance = int(raw)
+        allowance = effective_speed(
+            self.catalog.conditions, actor.get("conditions") or {},
+            int(actor.get("speed", 30) or 30),
+        ) // 2
+        if distance <= 0 or abs(distance) > allowance:
+            raise CombatIntentError("granted movement exceeds half your speed")
+        return [{
+            "type": "dnd2024.position.changed",
+            "actor_id": str(actor["actor_id"]),
+            "distance": distance,
+            "movement_cost": 0,
+            "granted_by": str(rider["feature_id"]),
+            "allowance_ft": allowance,
+            "provokes_opportunity": bool(rider["provokes_opportunity"]),
+        }]
+
+    def _strike_count(
+        self, actor: dict[str, Any], capability: Any, declared: int,
+    ) -> int:
+        """How many strikes this capability makes, after feature upgrades.
+
+        声明给出的是"未升级"的基线（Flurry 两次），Heightened Focus 把它抬到
+        三次——两者的差别不在成本上，所以不改 capability，只在计数处读特性。
+        """
+
+        character = self._feature_character(actor)
+        if not self.features.has_feature(character, "heightened_focus"):
+            return int(declared)
+        upgraded = int(self.features.feature_value(
+            character, "heightened_focus", "flurry_strikes", 0,
+        ) or 0)
+        if capability.feature_id != "flurry_of_blows" or upgraded <= 0:
+            return int(declared)
+        return max(int(declared), upgraded)
+
+    def _skill_abilities(self) -> dict[str, str]:
+        """skill id -> ability id, read from the bundle once per batch.
+
+        The mapping lives in content (one entity per skill), so the engine never
+        hard-codes "Perception is Wisdom".
+        """
+
+        try:
+            rows = self.bundle.list("skill")
+        except Exception:  # pragma: no cover - bundle always exposes list()
+            return {}
+        mapped: dict[str, str] = {}
+        for row in rows:
+            skill_id = str(row.get("id") or "")
+            ability = str(row.get("ability_ref") or "").removeprefix("ability:")
+            if skill_id and ability:
+                mapped[skill_id] = ability
+        return mapped
+
+    def _fleet_step_grant_events(
+        self, actor: dict[str, Any], capability: Any,
+    ) -> list[dict[str, Any]]:
+        """Fleet Step: a non-Step Bonus Action leaves one free Step behind.
+
+        旗标每回合只由这一个来源写入；Step 自己不再授予（否则链式无限），
+        所以判断的是"这个能力是不是 Step of the Wind"而不是"花了附赠动作没有"。
+        """
+
+        if capability.feature_id == "step_of_the_wind":
+            return []
+        if capability.cost.action != "bonus_action":
+            return []
+        character = self._feature_character(actor)
+        if not self.features.has_feature(character, "fleet_step"):
+            return []
+        return [{
+            "type": "dnd2024.economy.granted", "actor_id": str(actor["actor_id"]),
+            "grants": {}, "flags": {"fleet_step_available": True},
+        }]
+
     def _class_capability_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
     ) -> list[dict[str, Any]]:
@@ -4039,16 +4261,23 @@ class CombatResolutionMixin:
         if capability is None:  # pragma: no cover - validation guards this
             raise CombatIntentError("class capability is not available to this actor")
         events: list[dict[str, Any]] = []
-        if capability.cost.action:
+        via_fleet_step = bool(intent.get("via_fleet_step"))
+        if capability.cost.action and not via_fleet_step:
             events.append({
                 "type": "dnd2024.action.spent", "actor_id": actor_id,
                 "resource": capability.cost.action, "amount": 1,
+            })
+        if via_fleet_step:
+            events.append({
+                "type": "dnd2024.economy.granted", "actor_id": actor_id,
+                "grants": {}, "flags": {"fleet_step_available": False},
             })
         for resource_cost in capability.cost.resources:
             events.append({
                 "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
                 "resource_id": resource_cost.resource_id, "amount": resource_cost.amount,
             })
+        events.extend(self._fleet_step_grant_events(actor, capability))
         target_id = str(intent.get("target_id") or "")
         # Reuse the actual reducer on an isolated aggregate, not a second
         # approximation of HP, positions, conditions or per-turn usage.
@@ -4056,7 +4285,8 @@ class CombatResolutionMixin:
         simulated = 0
         for action in capability.actions:
             if action.kind == "unarmed_strike":
-                for _ in range(action.count):
+                strike_count = self._strike_count(actor, capability, action.count)
+                for _ in range(strike_count):
                     self._simulate_capability_events(staged, events[simulated:])
                     simulated = len(events)
                     current_combat = ruleset_runtime.state(staged)["combat"]
@@ -4168,6 +4398,19 @@ class CombatResolutionMixin:
                     "heal_die": dice, "heal_bonus": bonus,
                     **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
                 })
+                events.extend(
+                    self._rider_move_events(combat, actor, capability_id, intent)
+                )
+            elif action.kind == "steady_aim":
+                events.append({
+                    "type": "condition.applied", "target_id": actor_id,
+                    "condition": "next_attack_advantage", "duration": "combat",
+                })
+                events.append({
+                    "type": "condition.applied", "target_id": actor_id,
+                    "condition": "steady_aim_slow", "duration": "caster_turn_end",
+                    "source_actor_id": actor_id,
+                })
             elif action.kind == "temp_hp":
                 events.extend(self._temp_hp_grant_events(
                     actor, capability.feature_id, rng,
@@ -4203,6 +4446,9 @@ class CombatResolutionMixin:
                 # 免疫只拦新增，已经挂上的条目要真的删除并留下可审计事件。
                 events.extend(
                     self._condition_gain_cleanup_events(instance, actor, "rage")
+                )
+                events.extend(
+                    self._rider_move_events(combat, actor, "rage", intent)
                 )
             elif action.kind == "rage_sustain":
                 # 只刷新续期标记；``turns_remaining`` 由回合结束的到期检查递减，

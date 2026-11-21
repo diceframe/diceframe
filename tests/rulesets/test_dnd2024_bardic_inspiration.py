@@ -28,6 +28,7 @@ from dnd2024_monk_common import (
     goblin,
     monk_draft,
     monk_instance,
+    grant_hide_footing,
 )
 
 LOCALE = "en"
@@ -162,6 +163,8 @@ def _combat(
         intent["player_positions"] = positions
     _apply(engine, instance, intent, SequenceRng(list(rolls)))
     return engine, instance
+    # S0-F10B：Hide 默认拒绝，夹具必须给出一个合法的落脚点。
+    grant_hide_footing(engine, instance)
 
 
 def _current(instance) -> str:
@@ -783,6 +786,9 @@ def test_peerless_needs_no_held_die_and_never_touches_instances(
 
 
 def _hide(engine, instance, *, uid: str, rolls: list[int]) -> dict:
+    state = _state(instance)
+    # S0-F10B：Hide 默认拒绝，先给这个行动者一块合法的落脚点。
+    grant_hide_footing(engine, instance, actor_id=f"player:{uid}")
     state = _state(instance)
     return engine.resolve_intent(instance, {
         "intent_id": f"hide-{uid}", "type": "hide",

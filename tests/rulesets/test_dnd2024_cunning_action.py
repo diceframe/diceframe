@@ -23,7 +23,7 @@ from src.rulesets.dnd2024.features.models import (
 )
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 
-from dnd2024_monk_common import SequenceRng, advance, monk_instance
+from dnd2024_monk_common import SequenceRng, advance, monk_instance, grant_hide_footing
 
 LOCALE = "en"
 CUNNING_CAPABILITIES = ("cunning_dash", "cunning_disengage", "cunning_hide")
@@ -92,6 +92,8 @@ def _start(engine: Dnd2024CombatEngine, instance, enemies: list[dict]) -> dict:
     assert resolved["ok"] is True, resolved
     assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
     assert ruleset_runtime.state(instance)["combat"]["initiative"][0] == "player:gm"
+    # S0-F10B：Hide 默认拒绝，夹具必须给出一个合法的落脚点。
+    grant_hide_footing(engine, instance)
     return ruleset_runtime.state(instance)["combat"]
 
 
@@ -466,8 +468,13 @@ def test_fast_hands_is_owned_at_three_but_declares_no_capability() -> None:
     assert resolver.has_feature(canonical, "fast_hands") is True
     assert resolver.has_feature(canonical, "cunning_action") is True
     capabilities = resolver.combat_capabilities(canonical, {"action": 1, "bonus_action": 1})
-    assert [view.id for view in capabilities] == list(CUNNING_CAPABILITIES)
-    assert [view.feature_id for view in capabilities] == ["cunning_action"] * 3
+    # 三级盗贼同时拥有 Steady Aim（S0-F10A），它排在 Cunning Action 之前：
+    # 这里断言的是"三件 Cunning 能力都在、且都归属 cunning_action"，不是全表。
+    by_feature = {
+        feature_id: [view.id for view in capabilities if view.feature_id == feature_id]
+        for feature_id in {view.feature_id for view in capabilities}
+    }
+    assert by_feature["cunning_action"] == list(CUNNING_CAPABILITIES)
 
 
 def test_a_fighter_never_owns_cunning_capabilities() -> None:

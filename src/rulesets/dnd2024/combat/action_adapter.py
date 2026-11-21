@@ -42,6 +42,17 @@ def _parse_ndm(formula: str) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
+def is_supported_damage_formula(formula: str) -> bool:
+    """Whether the formula layer can evaluate this damage line.
+
+    Validation must not be stricter than the evaluator: Tiny beasts hit for a
+    flat ``1``, and the AST already models that as a constant node.
+    """
+
+    text = str(formula or "")
+    return bool(_FLAT_DAMAGE_RE.fullmatch(text) or DICE_RE.fullmatch(text))
+
+
 def formula_node_from_dice_formula(formula: str) -> dict[str, Any]:
     """把目录骰式 ``NdM`` / ``NdM+K`` / 固定值翻译成通用公式 AST。
 

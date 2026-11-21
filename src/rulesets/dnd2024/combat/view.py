@@ -115,7 +115,8 @@ class CombatViewMixin:
                 "attacks": deepcopy(enemy.get("attacks") or []),
                 "conditions": deepcopy(enemy.get("conditions") or {}),
                 "death_saves": {}, "equipment_refs": [], "spell_refs": [], "slots": {},
-                "weapon_category_refs": [], "proficiency_bonus": 0,
+                "weapon_category_refs": [],
+                "proficiency_bonus": int(enemy.get("proficiency_bonus") or 0),
                 "creature_type": str(enemy.get("creature_type") or ""),
                 "counterspell_dc": int(enemy.get("counterspell_dc", 0) or 0),
                 # S0-MM1：stat block 的事实必须能被读回。缺省一律"未知/空"，
@@ -134,7 +135,14 @@ class CombatViewMixin:
                 "condition_immunities": list(enemy.get("condition_immunities") or []),
                 "cr": str(enemy.get("cr") or ""),
                 "xp": int(enemy.get("xp", 0) or 0),
-                "skill_values": {}, "skill_refs": [], "concentration": None,
+                # S0-MM2：技能的生效值来自 stat block（声明即覆盖），六个
+                # 非特质字段一并投影，避免"校验过了、视图读不到"。
+                "skill_values": deepcopy(enemy.get("skills") or {}),
+                "skill_refs": [], "concentration": None,
+                "languages": list(enemy.get("languages") or []),
+                "subtype": str(enemy.get("subtype") or ""),
+                "hit_dice": str(enemy.get("hit_dice") or ""),
+                "passive_perception": int(enemy.get("passive_perception") or 0),
                 # S0-C2A 投影：敌人同样有掩护等级。
                 "cover": cover,
                 # S0-C2B 投影：敌人的遮蔽等级同样要能被读回（掩护已在此分支

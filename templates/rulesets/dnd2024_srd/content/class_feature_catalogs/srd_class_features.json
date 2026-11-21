@@ -297,6 +297,25 @@
           ]
         },
         {
+          "id": "heightened_focus",
+          "minimum_level": 10,
+          "source_ref": "srd-5.2.1:p52:heightened-focus",
+          "summary": "Your Flurry of Blows, Patient Defense, and Step of the Wind gain benefits: Flurry makes three Unarmed Strikes, a paid Patient Defense grants Temporary Hit Points equal to two rolls of your Martial Arts die, and a paid Step of the Wind can carry a willing Large or smaller creature within 5 feet with you.",
+          "parameters": {
+            "flurry_strikes": 3,
+            "patient_defense_temp_hp_dice": 2
+          }
+        },
+        {
+          "id": "fleet_step",
+          "minimum_level": 11,
+          "source_ref": "srd-5.2.1:p51:fleet-step",
+          "summary": "When you take a Bonus Action other than Step of the Wind, you can also use Step of the Wind immediately after that Bonus Action.",
+          "parameters": {
+            "free_step_after_bonus_action": true
+          }
+        },
+        {
           "id": "monks_focus",
           "minimum_level": 2,
           "source_ref": "srd-5.2.1:p50:monks-focus",
@@ -891,7 +910,16 @@
               ]
             }
           ]
+        },        {
+          "id": "tactical_shift",
+          "minimum_level": 5,
+          "source_ref": "srd-5.2.1:p48:tactical-shift",
+          "summary": "Whenever you activate your Second Wind with a Bonus Action, you can move up to half your Speed without provoking Opportunity Attacks.",
+          "parameters": {
+            "rider_move": "tactical_shift"
+          }
         },
+
         {
           "id": "weapon_mastery",
           "minimum_level": 1,
@@ -1098,6 +1126,15 @@
             "save_advantage_abilities": [
               "dex"
             ]
+          }
+        },
+        {
+          "id": "instinctive_pounce",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p29:instinctive-pounce",
+          "summary": "As part of the Bonus Action you take to enter your Rage, you can move up to half your Speed.",
+          "parameters": {
+            "rider_move": "instinctive_pounce"
           }
         },
         {
@@ -1327,6 +1364,26 @@
             "damage_dice_track": "sneak_attack_dice",
             "damage_dice_format": "{die}d6"
           }
+        },
+        {
+          "id": "steady_aim",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p62:steady-aim",
+          "summary": "As a Bonus Action, you give yourself Advantage on your next attack roll on the current turn. You can use this feature only if you haven't moved during this turn, and after you use it, your Speed is 0 until the end of the current turn.",
+          "capabilities": [
+            {
+              "id": "steady_aim",
+              "cost": {
+                "bonus_action": 1
+              },
+              "requires_hostile_target": false,
+              "actions": [
+                {
+                  "kind": "steady_aim"
+                }
+              ]
+            }
+          ]
         },
         {
           "id": "cunning_action",
