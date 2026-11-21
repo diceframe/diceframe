@@ -11,6 +11,22 @@
 - `CONTENT_ARCHITECTURE_VNEXT_MASTER_PLAN.md` — 内容架构 vNext 母方案；
 - `design/` — 带日期的设计草案与核查记录。
 
+**D&D 2024 S0 切片的入口是两张表**：
+
+- `design/SLICE_STATUS.md` — 每个切片做到哪儿了（状态 + 证据）。
+- `design/GAP_REGISTER.md` — 发现但本片不做的缺口（`GAP-n`）。
+
+规格本体（32 份 `S0*.md`，含权威索引 `S0_TASK_INDEX_2026-11-07.md`）不在 `main`，在
+`docs/dnd2024-s0-specs` 分支上。要读规格：
+
+```bash
+git fetch origin docs/dnd2024-s0-specs
+git show FETCH_HEAD:docs/internal/design/S0_TASK_INDEX_2026-11-07.md
+```
+
+命名约定：切片写 `S0-G2`，缺口写 `GAP-19`——**不要只写 `G2`**，两套编号会撞。
+
+
 Boundary rules:
 
 - These documents describe **local, possibly unreleased** work. Branch names, PR ordering, token/step budgets and unfinished boundaries are internal coordination details, not product announcements or release commitments.

@@ -32,6 +32,7 @@ from dnd2024_monk_common import (
     goblin,
     monk_draft,
     monk_instance,
+    grant_hide_footing,
 )
 
 LOCALE = "en"
@@ -225,6 +226,8 @@ def _combat(
         intent["player_positions"] = positions
     _apply(engine, instance, intent, SequenceRng(list(rolls)))
     return engine, instance
+    # S0-F10B：Hide 默认拒绝，夹具必须给出一个合法的落脚点。
+    grant_hide_footing(engine, instance)
 
 
 def _current(instance) -> str:
@@ -281,6 +284,8 @@ def _decide(engine, instance, decision: dict, option: str, rolls: list[int] | No
 
 
 def _hide(engine, instance, *, uid: str = "gm", rolls: list[int]) -> dict:
+    # S0-F10B：Hide 默认拒绝，先给这个行动者一块合法的落脚点。
+    grant_hide_footing(engine, instance, actor_id=f"player:{uid}")
     result = _try(engine, instance, {
         "intent_id": f"hide-{uid}-{_state(instance)['version']}", "type": "hide",
         "expected_version": _state(instance)["version"],

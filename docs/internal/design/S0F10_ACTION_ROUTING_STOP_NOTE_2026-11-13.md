@@ -91,3 +91,42 @@
 - F11 的停止条件里同样有「远程重定向需要 Total Cover」，与本节 1.1 是同一个缺口；
   重启 F10/F11 时应一起补模型，而不是各补一半。
 - F12（豁免减伤、动态抗性、归零存活）不依赖本切片的任何一项，已单独推进。
+
+## 5. 后续：本切片已拆分（2026-11-20）
+
+两个阻塞项一个已解一半、一个完全未动，整体重启已不可能，故 S0-F10 拆为五片，
+原任务书 `S0F10_ACTION_ROUTING_TASK_SPEC_2026-11-07.md` 作废（不再按其执行）。
+
+| 片 | 范围 | 状态 | 任务书 |
+|---|---|---|---|
+| F10A | Instinctive Pounce / Tactical Shift / Steady Aim / Fleet Step / Heightened Focus | **已完成**（GAP-14 关闭；Step 携带见 GAP-19） | `S0F10A_ACTION_MECHANICS_TASK_SPEC_2026-11-20.md` |
+| **F10B** | 战斗内 Hide（默认不可藏 + 三前提 + 检定收口） | **已写，待执行** | `S0F10B_HIDE_TASK_SPEC_2026-11-20.md` |
+| F10C | 战前潜行（遭遇前） | **不做**：产物是突袭，GAP-5（无 Surprised）未解 | — |
+| F10D | Fast Hands ①③（工具存在性 + 借用 + 标准动作→附赠动作） | **已写，等 B** | `S0F10D_FAST_HANDS_TASK_SPEC_2026-11-20.md` |
+| F10E | Fast Hands ②（Utilize） | **不做**：数据已在（GAP-6），但 GM 无法施加机械后果（GAP-16/GAP-18） | — |
+
+### 5.1 阻塞项的现状（逐条对账）
+
+| 原停止条件 | 2026-11-20 现状 | 落在哪片 |
+|---|---|---|
+| 2. 无 Heavily Obscured / ¾·Total Cover 模型 | **已解**：掩蔽 C2A（已合入）、遮蔽 C2B/C2E（#823） | F10B |
+| 2. 无视线（line of sight） | **未解**，F10B 选择折叠进 total cover / heavily 的 GM 声明，作为显式偏差 | F10B（记偏差）、阶段三（真解） |
+| 3. 无工具/对象/物品动作元数据 | **半解，且有一处更正**：工具表 `equipment_catalogs/srd_tools.json` **已带** `utilize: [{task, dc}]`（36 个工具中 35 个有，盗贼工具是开锁/拆陷阱 DC 15）——数据在、引擎没读；物品原语（充能/消耗/激活/同调）已完成但零内容使用；激活效果只有 healing | F10D / F10E |
+
+### 5.2 `cunning_action` 已完成，不重复实现
+
+原任务书 §1.2 要求"完整实现七项"，其中 `cunning_action` 已有三个 capability
+（`cunning_dash` / `cunning_disengage` / `cunning_hide`）并通过 `class_capability`
+路由到既有基本动作，配套测试在 `test_dnd2024_cunning_action.py`。拆分后不再计入范围。
+
+### 5.3 拆分时的两条纪律
+
+1. **一个环境门槛动作先落一个具名字段**（F10B 的 `unavailable_reason`），第二个出现再抽象，
+   不许提前造通用"可用性原因"体系。
+2. **F10B 不动 DC**：现行 `DC = 10 + 存活敌人最高感知豁免` 是占位符（用感知豁免冒充被动察觉），
+   DC 15、被动察觉、工具检定、GM 逐次指定 DC 一并归入独立切片「检定工具」。
+
+### 5.4 缺口去哪了
+
+本轮发现的全部缺口已集中登记在 `docs/internal/design/GAP_REGISTER.md`（GAP-1–GAP-14），
+每条带证据位置与归属片。修复后改状态，不删行。
