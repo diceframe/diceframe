@@ -224,3 +224,27 @@ def test_both_locales_localise_every_state():
         ):
             assert labels.get(f"condition.{condition_id}"), (locale, condition_id)
             assert labels.get(f"condition.{condition_id}.summary"), (locale, condition_id)
+
+
+def test_the_effects_live_in_their_own_section_with_a_named_source():
+    engine, _instance_ = _combat()
+    catalog = engine.catalog
+
+    assert len(catalog.effects) == 15
+    for effect_id, entry in catalog.effects.items():
+        assert entry["kind"] == "effect"
+        assert str(entry.get("source_ref") or ""), effect_id
+    # 合并视图仍包含它们：解释器按 flag 取值，行为不变。
+    assert "blessed" in catalog.conditions and "blurred" in catalog.conditions
+
+
+def test_effects_are_found_from_their_source_without_a_stored_back_pointer():
+    engine, _instance_ = _combat()
+    catalog = engine.catalog
+
+    assert catalog.effects_for_source("feature:brutal_strike") == ["hamstrung"]
+    assert catalog.effects_for_source("feature:stunning_strike") == [
+        "staggered", "staggered_opening",
+    ]
+    assert catalog.effects_for_source("mastery:vex") == ["next_attack_advantage"]
+    assert catalog.effects_for_source("nobody:none") == []
