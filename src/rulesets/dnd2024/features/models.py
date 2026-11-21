@@ -35,6 +35,9 @@ ACTION_KINDS = frozenset({
     # 全部抗性"。三者都不产生攻击或移动，但都必须走同一套资源/经济结算，
     # 所以作为封闭 kind 声明而不是让客户端拼事件。
     "temp_hp", "invisible", "resistance_all",
+    # Steady Aim 只给自己两件事：下一次攻击优势、以及本回合剩余速度 0。两个
+    # 后果都落条件，所以它是一个独立的封闭 kind，而不是"buff"的另一种拼法。
+    "steady_aim",
     # Channel Divinity 的效果各自是一个封闭 kind：它们的成本同为一次引导，
     # 但目标数量、是否要豁免、以及"分配一个预算"这三件事没有任何共同形状，
     # 合成一个 kind 只会让结算按 intent 字段猜分支。

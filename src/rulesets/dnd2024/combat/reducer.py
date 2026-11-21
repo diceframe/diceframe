@@ -45,7 +45,7 @@ _GRANTABLE_ECONOMY = frozenset({
 })
 # economy.granted 的 flags 是引擎内部记账（如 action_surge_used 的「每回合
 # 一次」），不是向 economy 任意写字段的通道；未知 flag fail closed。
-_GRANTABLE_FLAGS = frozenset({"action_surge_used"})
+_GRANTABLE_FLAGS = frozenset({"action_surge_used", "fleet_step_available"})
 # 只在回合边界到期的条件时长；战斗结束时一并清除。
 _TURN_SCOPED_DURATIONS = frozenset({
     "actor_turn_start", "target_turn_start", "caster_turn_end",
@@ -674,11 +674,11 @@ class CombatReducerMixin:
                 if remaining < cost:
                     raise EventBatchError("movement resource is already spent")
                 combat["economy"]["movement"] = remaining - cost
-                if str(combat["economy"].get("actor_id") or "") == actor_id:
-                    # "这次移动用掉了本回合的移动选择"只对当前行动者成立：
-                    # 被推开的第三方不消耗任何人的选择权。Abjure Foes 的三选一
-                    # 靠这个标记区分"选了移动"与"还没选"。
-                    combat["economy"]["moved"] = True
+            if (
+                str(combat["economy"].get("actor_id") or "") == actor_id
+                and not event.get("forced")
+            ):
+                combat["economy"]["moved"] = True
             if event.get("crit_move"):
                 # 额度只覆盖它自己这一次移动；消费后即失效，其他移动要按
                 # 常规规则判定借机攻击。

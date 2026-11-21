@@ -67,6 +67,8 @@ class CombatContext:
     # 它是一个独立布尔而不是第四种"剩余次数"：跳过之后它由 combat 层关闭，
     # 而不是被某种动作消耗。
     turn_start: bool = False
+    # Fleet Step：一个非 Step 的附赠动作结算后，本回合还剩一次免费的 Step。
+    fleet_step: bool = False
 
     @classmethod
     def from_economy(
@@ -87,6 +89,7 @@ class CombatContext:
             bonus_action=budget("bonus_action"),
             reaction=budget("reaction"),
             turn_start=bool(actor_id) and str(window.get("actor_id") or "") == actor_id,
+            fleet_step=bool(source.get("fleet_step_available")),
         )
 
     def remaining(self, action: str) -> int:
@@ -133,6 +136,12 @@ def _cost_views(
     return tuple(views)
 
 
+def _is_step_of_the_wind(capability: FeatureCapability) -> bool:
+    """Whether this capability *is* Step of the Wind (paid or free)."""
+
+    return capability.feature_id == "step_of_the_wind"
+
+
 def _blocked_reason(
     catalog: Dnd2024ClassFeatureCatalog,
     capability: FeatureCapability,
@@ -161,7 +170,9 @@ def _blocked_reason(
             return f"{name} is empty"
     action = capability.cost.action
     if action and context.remaining(action) < 1:
-        return f"the {action.replace('_', ' ')} has already been spent"
+        if not (action == "bonus_action" and context.fleet_step
+                and _is_step_of_the_wind(capability)):
+            return f"the {action.replace('_', ' ')} has already been spent"
     if capability.cost.turn_start and not context.turn_start:
         # 窗口一旦被动作或跳过关掉，就不能回头再激活：这就是"at the start of
         # your turn"的可执行含义。

@@ -8,7 +8,7 @@
 | 代码基线 | 祖先基线 `integration/dnd2024-srd@35653f81`（`35653f8149717c19d2a9b3333ef9cf28569793e7`） |
 | 前置任务 | S0-C 被动派生与 Draconic Resilience；F1 被动检定；F3 失败 D20 窗口及重掷后的 total 重算 |
 | 建议分支 | `feat/dnd2024-s0f24-passive-capstones` |
-| 状态 | 待执行；本文是执行契约，不表示功能已实现 |
+| 状态 | 已由 #784 实现并合并（本文件保留原始契约，状态见 `SLICE_STATUS.md`） |
 
 ## 1. 执行纪律与范围锁定
 

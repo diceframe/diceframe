@@ -244,3 +244,27 @@ def capability_intent(
 def focus_state(instance: GameInstance, uid: str = "gm") -> dict[str, Any]:
     canonical = instance.get_character_sheet(uid)["ruleset_character"]
     return dict(canonical.get("resources", {}).get("class", {}).get("focus_points") or {})
+
+
+def grant_hide_footing(
+    engine: Any, instance: Any, actor_id: str = "player:gm",
+    level: str = "heavily",
+) -> None:
+    """Give the actor a legal place to hide, through the real GM declaration.
+
+    S0-F10B made Hide default-deny, so every fixture that exercises the Hidden
+    state has to say *where* it hides.  Declaring obscurement (rather than
+    writing the fact straight into state) keeps the tests honest: the same
+    validation a table goes through runs here.
+    """
+
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": f"hide-footing-{level}",
+        "type": "combat.set_obscurement",
+        "expected_version": int(
+            ruleset_runtime.state(instance).get("version", 0) or 0
+        ),
+        "submitted_by": "gm", "target_id": actor_id, "level": level,
+    }, SequenceRng([]))
+    assert resolved["ok"] is True, resolved
+    assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True

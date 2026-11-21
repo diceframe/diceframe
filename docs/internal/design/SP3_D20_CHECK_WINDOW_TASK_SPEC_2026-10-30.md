@@ -347,10 +347,10 @@
 | O1 | 死亡豁免掷骰 <10 花点 | +d10 重判；≥10/20 不出窗口；一次豁免一次 |
 | O2 | 专注豁免失败花点 | pending 期间不落 concentration.ended；花点达标则专注保持 |
 | O3 | DOOL 一次检定一次 | 同窗口 spend 后 decline 不可再花 |
-| G1 | 直通不变式 | 无三特性资格的角色跑既有攻击/死亡豁免套件，事件序列与 RNG 消耗与 HEAD 等价（既有全量测试守护 + 至少 1 个显式 RNG 序列断言） |
-| G2 | check_window pending 门控 | 其它意图（attack/end_turn/cast_spell）被拒；只允许 decision.resolve/combat.message |
-| G3 | 非 owner resolve | 拒绝 |
-| G4 | damage_window pending 门控 | 同 G2 |
+| GAP-1 | 直通不变式 | 无三特性资格的角色跑既有攻击/死亡豁免套件，事件序列与 RNG 消耗与 HEAD 等价（既有全量测试守护 + 至少 1 个显式 RNG 序列断言） |
+| GAP-2 | check_window pending 门控 | 其它意图（attack/end_turn/cast_spell）被拒；只允许 decision.resolve/combat.message |
+| GAP-3 | 非 owner resolve | 拒绝 |
+| GAP-4 | damage_window pending 门控 | 同 GAP-2 |
 | A1 | AI Lucky | 预判命中且取低可能翻盘 → spend；否则 decline |
 | A2 | AI CW 两面 | 翻盘/减伤可行 → spend；否则 decline（确定性） |
 | A3 | AI DOOL | 失败且 +10 可达 DC → spend；否则 decline |
@@ -380,7 +380,7 @@ git diff --stat
 4. 禁止把 lucky/DOOL/CW 写成 `attack_sources` 的持续条件扫描规则（它们是意图声明与掷后窗口，不是持续条件源；check_modes 只接受 `extra_sources` 注入点这一处改动）。
 5. 禁止在 resolution/validation 的 generic path 写具体特性 if 分支：窗口逻辑全部走 check_windows 注册表；resolution 只做注册表调用与尾段提取。
 6. 禁止修改 `reducer.py`（`class_resource.spent` 既有路径零改动）、禁止修改 `engine._concentration_events`、禁止修改 bardic_inspiration 池声明。
-7. 禁止把窗口骰并入既有骰的 RNG 序列（直通不变式 G1 是本切片的生命线；花点路径的新骰必须在窗口 resolve 时单独掷）。
+7. 禁止把窗口骰并入既有骰的 RNG 序列（直通不变式 GAP-1 是本切片的生命线；花点路径的新骰必须在窗口 resolve 时单独掷）。
 8. 禁止为旧存档写迁移（新 `resources.class.*` 键对旧存档缺省，sync 自动补齐——既有 resize 路径即迁移）。
 9. 禁止猜测 source_ref 页码定稿（执行时从原文核实，禁止沿用本任务书示例中的候选页码未经核实落盘）。
 10. 禁止使用"补天"一词（项目惯例，含代码注释、文档与执行报告）。
@@ -413,7 +413,7 @@ git diff --stat
 - P7/P8 隔离：在途文件 diff 状态=<未触碰/异常>
 - source_ref 核实：DOOL=<页码>；lucky=<页码>；cutting_words=<页码>（原文路径+行号）
 - §4 测试矩阵：W/R/D/L/C/O/G/A 各项结果（pytest 输出摘要）
-- 直通不变式 G1：RNG 序列审计结果
+- 直通不变式 GAP-1：RNG 序列审计结果
 - §1.6 裁剪确认：8 项裁剪均未被越界实现
 - 遗留偏差与原因
 ```
