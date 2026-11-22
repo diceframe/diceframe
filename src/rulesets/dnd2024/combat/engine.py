@@ -1075,6 +1075,10 @@ class Dnd2024CombatEngine(
                 spend_attack_action=not bool(second_target_of),
                 horde_breaker=bool(second_target_of),
             ))
+        elif intent_type == "multiattack":
+            events.extend(self._multiattack_events(instance, combat, intent, rng))
+        elif intent_type == "save_action":
+            events.extend(self._save_action_events(instance, combat, intent, rng))
         elif intent_type == "superior_hunters_prey":
             events.extend(self._superior_prey_events(instance, combat, intent, rng))
         elif intent_type == "class_capability":
@@ -1822,18 +1826,49 @@ class Dnd2024CombatEngine(
 
     def _attack_cost_event(
         self, combat: dict[str, Any], actor: dict[str, Any], *, resource: str = "",
-        weapon: dict[str, Any] | None = None,
+        weapon: dict[str, Any] | None = None, attacks_per_action: int = 0,
     ) -> dict[str, Any]:
         return {
             "type": "dnd2024.attack.spent", "actor_id": actor["actor_id"],
             "resource": resource or self._spend_action_resource(combat),
-            "attacks_per_action": self._attacks_per_action(actor),
+            "attacks_per_action": (
+                attacks_per_action or self._attacks_per_action(actor)
+            ),
             # 归约需要知道"这一击用的是不是 Light 武器"，才能回答下一问：
             # "本回合还允许 Light 追加攻击吗"。
             "light_weapon": bool((weapon or {}).get("light")),
             # Loading 的节流单位是"一次 action/Bonus/Reaction"，归约按窗口记账。
             "loading_weapon": bool((weapon or {}).get("loading")),
         }
+
+    def _ally_within(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        target: dict[str, Any], feet: int,
+    ) -> bool:
+        """Whether a living, conscious ally of ``actor`` stands near ``target``.
+
+        Pack Tactics is about the *target's* surroundings — "another enemy of the
+        target within 5 feet of it" — not the attacker's, so the search is over
+        the target's neighbours rather than the attacker's.
+        """
+
+        side = str(actor.get("side") or "")
+        actor_id = str(actor.get("actor_id") or "")
+        target_id = str(target.get("actor_id") or "")
+        for candidate_id in combat.get("initiative") or []:
+            if candidate_id in {actor_id, target_id}:
+                continue
+            try:
+                candidate = self._actor_view(instance, combat, str(candidate_id))
+            except CombatIntentError:  # pragma: no cover - initiative is authoritative
+                continue
+            if str(candidate.get("side") or "") != side or candidate["hp"] <= 0:
+                continue
+            if "incapacitated" in candidate["conditions"]:
+                continue
+            if self._distance(combat, str(candidate_id), target_id) <= feet:
+                return True
+        return False
 
     def _consume_attack_conditions(
         self, actor_id: str, target_id: str, actor: dict[str, Any], target: dict[str, Any],
@@ -2635,6 +2670,20 @@ class Dnd2024CombatEngine(
                 ):
                     # "Until the start of your next turn": the source actor's
                     # turn has just begun, so this instance expires now.
+                    target_conditions.pop(condition_id, None)
+                    continue
+                if value.get("duration") == "target_turn_end" and (
+                    target_id == previous_actor_id
+                ):
+                    # "Until the end of its next turn"（怪物命中后的 Poisoned
+                    # 等 rider）：到期时刻是**目标自己**这一回合结束，
+                    # 因此读 previous_actor_id，与来源是谁无关。记录里
+                    # ``expires_after`` > 1 表示它是在目标自己的回合里挂上的，
+                    # 那一次回合结束还不是"下个回合"。
+                    remaining_turns = int(value.get("expires_after", 1) or 1)
+                    if remaining_turns > 1:
+                        value["expires_after"] = remaining_turns - 1
+                        continue
                     target_conditions.pop(condition_id, None)
                     continue
                 if value.get("duration") in TURNS_SCOPED_DURATIONS:

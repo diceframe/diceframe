@@ -149,6 +149,17 @@
     "staggered": {"speed_halved": true},
     "staggered_opening": {"attack_modes": [{"side": "target", "mode": "advantage", "consume_on": "attack_resolved"}]},
     "reckless": {"attack_modes": [{"side": "target", "mode": "advantage"}]},
-    "hamstrung": {"speed_modifier": -15}
+    "hamstrung": {"speed_modifier": -15},
+    "grappled": {"speed_zero": true},
+    "restrained": {"speed_zero": true, "attack_modes": [
+      {"side": "target", "mode": "advantage"},
+      {"side": "actor", "mode": "disadvantage"}
+    ]},
+    "blinded": {"attack_modes": [
+      {"side": "target", "mode": "advantage"},
+      {"side": "actor", "mode": "disadvantage"}
+    ]},
+    "deafened": {"attack_modes": []},
+    "poisoned": {"attack_modes": [{"side": "actor", "mode": "disadvantage"}]}
   }
 }

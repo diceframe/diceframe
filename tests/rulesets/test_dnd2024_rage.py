@@ -497,7 +497,8 @@ def test_rage_leaves_nonphysical_damage_alone() -> None:
     })
     _end_turn(engine, instance)
     combat = ruleset_runtime.state(instance)["combat"]
-    combat["enemies"]["goblin-1"]["attacks"][0]["damage_type"] = "fire"
+    # 攻击的伤害段是数组（S0-MM3a）：改类型要改第一段的 type。
+    combat["enemies"]["goblin-1"]["attacks"][0]["damage"][0]["type"] = "fire"
 
     events = _goblin_attacks_the_barbarian(engine, instance, [15, 5])
 

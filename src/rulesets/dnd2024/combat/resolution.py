@@ -67,13 +67,21 @@ from .primitives import (
     RAGE_MAX_ROUNDS,
     UNARMED_STRIKE_REF,
     actor_kind as _actor_kind,
+    attack_damage_parts,
+    attack_riders,
     canonical as _canonical,
     combat_turn_slots,
     companion_actor as _companion_actor,
     current_turn_slot as _current_turn_slot,
     enemy_actor as _enemy_actor,
+    normalize_attack_profile,
     player_actor as _player_actor,
+    LEGENDARY_RESISTANCE_DEFAULT_PER_DAY,
     rider_attack_kind,
+    rider_condition,
+    size_at_most,
+    trait_ids,
+    trait_params,
 )
 from .check_modes import (
     HUNTERS_MARK_REF,
@@ -200,6 +208,23 @@ def _without_consumed_conditions(
     return {**view, "conditions": conditions}
 
 
+def _with_climb_speed(
+    speeds: dict[str, Any], traits: Any,
+) -> dict[str, Any]:
+    """S0-MM3d: Spider Climb means climbing costs no extra movement.
+
+    The engine's only expression of that fact is a climb speed equal to the
+    walking speed, so it is derived here — once, at load — instead of in every
+    reader.  A stat block that prints its own climb speed keeps it.
+    """
+
+    if "spider_climb" not in trait_ids(traits):
+        return speeds
+    if not int(speeds.get("climb", 0) or 0):
+        speeds["climb"] = int(speeds.get("walk", 30) or 30)
+    return speeds
+
+
 class CombatResolutionMixin:
     """Turn validated intents and server RNG into immutable event batches."""
 
@@ -229,9 +254,11 @@ class CombatResolutionMixin:
                     key=lambda key: ability_modifier(abilities[key]),
                 )
             flat_bonus += ability_modifier(abilities[ability])
-        return average_damage(
-            str(attack.get("damage") or ""),
-            flat_bonus=flat_bonus,
+        # 两段伤害的期待值相加：The AI 用这个数决定值不值得花一个反应，
+        # 少算第二段会让"火焰附加"的攻击看起来比实际弱。
+        return sum(
+            average_damage(str(part["dice"]), flat_bonus=flat_bonus if index == 0 else 0.0)
+            for index, part in enumerate(attack_damage_parts(attack))
         )
 
     def _activate_item_events(
@@ -381,14 +408,26 @@ class CombatResolutionMixin:
                 "speed": int(raw.get("speed", 30) or 30),
                 "abilities": deepcopy(raw.get("abilities") or {}),
                 "saving_throws": deepcopy(raw.get("saving_throws") or {}),
-                "attacks": deepcopy(raw["attacks"]), "conditions": {},
+                "attacks": [
+                    normalize_attack_profile(item)
+                    for item in raw["attacks"]
+                ], "conditions": {},
+                # S0-MM3b：动作容器原样落地。Multiattack 的 part 引用同一只
+                # 生物的攻击表，因此它必须在同一个 dict 里，别处都读到。
+                "actions": deepcopy(raw.get("actions") or []),
+                # S0-MM3d：特质是事实声明。未知 id 已在装载期拒绝，所以这里
+                # 原样落地即可——消费者各自来查，引擎不替它们改数值。
+                "traits": deepcopy(raw.get("traits") or []),
                 "creature_type": str(raw.get("creature_type") or ""),
                 "counterspell_dc": int(raw.get("counterspell_dc", 0) or 0),
                 # S0-MM1：stat block 的事实必须在开局时一次性落账，否则校验
                 # 通过了、视图读不到——"看起来进去了，实际没生效"。
                 "size": str(raw.get("size") or ""),
-                "speeds": deepcopy(
-                    raw.get("speeds") or {"walk": int(raw.get("speed", 30) or 30)}
+                "speeds": _with_climb_speed(
+                    deepcopy(
+                        raw.get("speeds") or {"walk": int(raw.get("speed", 30) or 30)}
+                    ),
+                    raw.get("traits"),
                 ),
                 "senses": deepcopy(raw.get("senses") or {}),
                 "resist_damage_types": list(raw.get("resist_damage_types") or []),
@@ -469,7 +508,7 @@ class CombatResolutionMixin:
                 for uid in (intent.get("mounted_player_ids") or [])
                 if str(uid)
             },
-        }, *refills, *opening, *self._turn_start_events(first)]
+        }, *refills, *opening, *self._turn_start_events(first, rng)]
 
     @staticmethod
     def _initiative_choices(intent: dict[str, Any]) -> dict[str, dict[str, bool]]:
@@ -776,8 +815,46 @@ class CombatResolutionMixin:
             })
         return events
 
+    def _legendary_resistance_events(
+        self, actor: dict[str, Any], actor_id: str, succeeded: bool,
+        events: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """S0-MM3d: turn a failed save into a success, at the cost of one use.
+
+        The creature's own declaration decides whether the trait exists and how
+        many uses a day it has; the uses are counted in the same ``usage`` ledger
+        as recharge actions, so a save/load round trip keeps them.  A creature
+        with no uses left simply fails: exhaustion must not be papered over.
+
+        Known limitation (registered, not hidden): the trait is applied
+        automatically.  "You can choose to succeed" is a decision, and there is
+        no GM-facing decline channel for it yet — a window would have to be
+        threaded through every place a save is rolled.
+        """
+
+        if succeeded:
+            return {"used": False, "remaining": 0}
+        traits = actor.get("traits")
+        if "legendary_resistance" not in trait_ids(traits):
+            return {"used": False, "remaining": 0}
+        per_day = int(
+            trait_params(traits, "legendary_resistance").get(
+                "per_day", LEGENDARY_RESISTANCE_DEFAULT_PER_DAY,
+            ) or LEGENDARY_RESISTANCE_DEFAULT_PER_DAY
+        )
+        used = int(((actor.get("usage") or {}).get("trait:legendary_resistance") or {})
+                   .get("used", 0) or 0)
+        if used >= per_day:
+            return {"used": False, "remaining": 0}
+        events.append({
+            "type": "dnd2024.legendary_resistance.spent",
+            "actor_id": actor_id,
+            "per_day": per_day,
+        })
+        return {"used": True, "remaining": per_day - used - 1}
+
     def _saving_throw_sources(
-        self, actor: dict[str, Any], ability: str,
+        self, actor: dict[str, Any], ability: str, *, against_spell: bool = False,
     ) -> list[dict[str, Any]]:
         """Every declared Advantage/Disadvantage source on one saving throw.
 
@@ -1103,6 +1180,13 @@ class CombatResolutionMixin:
                     character, "studied_attacks", "mode", "",
                 ) or "advantage"),
             })
+        if (
+            "pack_tactics" in trait_ids(actor.get("traits"))
+            and self._ally_within(instance, combat, actor, target, 5)
+        ):
+            # Pack Tactics 问的不是"攻击者身边有没有同伙"，而是"目标身边有没有
+            # 攻击者的同伙"——那只同伙也是目标的敌人。
+            extra.append({"code": "pack_tactics", "mode": "advantage"})
         check_mode = attack_mode(
             self, instance, actor, target, range_disadvantage,
             use_grant=use_grant, extra_sources=tuple(extra), combat=combat,
@@ -1324,6 +1408,143 @@ class CombatResolutionMixin:
                 return bonus, str(condition_id)
         return 0, ""
 
+    def _save_action_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """S0-MM3c: one save, then one of two declared outcomes.
+
+        The save is the target's, rolled by the server; the damage comes from
+        the branch the result selects.  Each part of that branch is its own
+        resisted instance, so a fire breath that also dealt bludgeoning would
+        not be halved as a lump.  ``usage_limits`` is settled in the same batch
+        as the effect: an action that was spent must read as spent even if the
+        target saved.
+        """
+
+        actor_id = str(intent["actor_id"])
+        target_id = str(intent["target_id"])
+        actor = self._actor_view(instance, combat, actor_id)
+        action = self._declared_action(actor, intent)
+        if action is None:  # pragma: no cover - validation guards this
+            raise CombatIntentError("save action profile is not available to the actor")
+        target = self._actor_view(instance, combat, target_id)
+        action_id = str(action.get("id") or "")
+        events: list[dict[str, Any]] = [
+            {
+                "type": "dnd2024.action.spent", "actor_id": actor_id,
+                "resource": self._spend_action_resource(combat), "amount": 1,
+            },
+            {
+                "type": "dnd2024.action.used", "actor_id": actor_id,
+                "action_id": action_id,
+                "usage_limits": deepcopy(action.get("usage_limits")),
+            },
+        ]
+        check = self._saving_throw_check(
+            instance, combat, target, target_id,
+            str(action.get("ability") or ""), int(action.get("dc") or 0),
+            actor_id, events, rng,
+        )
+        check["source_action"] = action_id
+        events.append(check)
+        branch = action.get("on_fail") if not check["success"] else action.get("on_success")
+        for row in branch or []:
+            if not isinstance(row, dict):
+                continue
+            for part in row.get("damage") or []:
+                if not isinstance(part, dict) or not part.get("dice"):
+                    continue
+                event, _amount = self._damage_instance_event(
+                    str(part["dice"]), str(part.get("type") or ""), target,
+                    False, rng, half=bool(part.get("half")),
+                )
+                if event is not None:
+                    events.append(event)
+        return events
+
+    def _multiattack_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """One intent, N attacks, one action.
+
+        The action is bought once: the first attack opens the budget
+        (``attacks_per_action`` = total) and every following attack spends from
+        it, which is exactly how the Attack action's extra attacks are paid.
+        Two things can end a Multiattack early, and both say so in the ledger
+        rather than silently dropping the rest: the target being defeated, and a
+        decision window opening (a Shield that must be answered before the next
+        die can be rolled).  In the window case the untouched attacks stay
+        available, so the GM can finish them as ordinary attacks.
+        """
+
+        actor_id = str(intent["actor_id"])
+        target_id = str(intent["target_id"])
+        actor = self._actor_view(instance, combat, actor_id)
+        action = self._declared_action(actor, intent)
+        if action is None:  # pragma: no cover - validation guards this
+            raise CombatIntentError("multiattack profile is not available to the actor")
+        parts = self._multiattack_parts(actor, action, intent)
+        total = sum(count for _attack, count in parts)
+        target = self._actor_view(instance, combat, target_id)
+        remaining_hp = int(target["hp"])
+        events: list[dict[str, Any]] = []
+        # 每一击都在自己的局部 list 里计数，于是每击的攻击检定都会拿到
+        # ``attack:<actor>:0``。整批里同名 id 会让重掷推导与前端对不上，
+        # 所以收集完按 (kind, actor) 重排一次序号。
+        roll_seq: dict[tuple[str, str], int] = {}
+        made = 0
+        for attack, count in parts:
+            for _ in range(count):
+                if remaining_hp <= 0:
+                    events.append({
+                        "type": "dnd2024.multiattack.truncated",
+                        "actor_id": actor_id, "action_id": str(action.get("id") or ""),
+                        "reason": "target_defeated", "attacks_made": made,
+                        "attacks_left": total - made,
+                    })
+                    return events
+                attempt = {
+                    **intent,
+                    "attack_id": str(attack.get("id") or ""),
+                    # 一次 Multiattack 里不存在"换手/双手"这类声明：它们属于
+                    # 玩家武器的意图面，随 intent 复制会把上次攻击的选择带进
+                    # 第二击。
+                }
+                # 任一击被拒绝即整批拒绝：这里不吞异常，抛出的事件批次不会
+                # 落地，前几击也不落账（任务书 §2 的原子性要求）。
+                part_events = self._attack_events(
+                    instance, combat, attempt, rng,
+                    attacks_in_action=total if made == 0 else 0,
+                )
+                for event in part_events:
+                    if event.get("type") != "check.resolved":
+                        continue
+                    key = (str(event.get("kind") or ""), str(event.get("actor_id") or ""))
+                    seq = roll_seq.get(key, 0)
+                    event["roll_id"] = f"{key[0]}:{key[1]}:{seq}"
+                    roll_seq[key] = seq + 1
+                events.extend(part_events)
+                made += 1
+                remaining_hp -= sum(
+                    -int(event.get("delta", 0) or 0)
+                    for event in part_events
+                    if event.get("type") == "resource.changed"
+                    and event.get("resource") == "hp"
+                    and event.get("target_id") == target_id
+                )
+                if any(
+                    event.get("type") == "dnd2024.decision.pending"
+                    for event in part_events
+                ):
+                    events.append({
+                        "type": "dnd2024.multiattack.truncated",
+                        "actor_id": actor_id, "action_id": str(action.get("id") or ""),
+                        "reason": "pending_decision", "attacks_made": made,
+                        "attacks_left": total - made,
+                    })
+                    return events
+        return events
+
     def _attack_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
         *, spend_attack_action: bool = True,
@@ -1331,6 +1552,7 @@ class CombatResolutionMixin:
         actor_view: dict[str, Any] | None = None,
         target_view: dict[str, Any] | None = None,
         granted_by: str = "",
+        attacks_in_action: int = 0,
     ) -> list[dict[str, Any]]:
         actor_id = str(intent["actor_id"])
         target_id = str(intent["target_id"])
@@ -1370,12 +1592,16 @@ class CombatResolutionMixin:
                 # 战斗风格专长的远程武器加值是特性投影字段：只在真远程武器
                 # 生效，投掷近战武器不适用（与上方 Thrown 语义划分一致）。
                 attack_bonus += int(actor.get("ranged_attack_bonus") or 0)
-            damage_formula = str(weapon["damage"])
+            # 一次攻击的伤害是一到两段。玩家武器只有一段，形态（野兽的
+            # ``attacks[]``）可以带第二段；同一个读取函数让两条路都不用
+            # 关心数据形状。
+            parts = attack_damage_parts(weapon)
+            damage_formula = str(parts[0]["dice"]) if parts else ""
+            damage_type = str(parts[0]["type"]) if parts else ""
             if intent.get("two_handed"):
                 # 两用武器双手持用换用更大的骰式；validation 已保证只有声明
                 # damage_two_handed 的武器才允许声明该意图。
                 damage_formula = str(weapon.get("damage_two_handed") or damage_formula)
-            damage_type = str(weapon["damage_type"])
             # 神圣武器只祝福被绑定的那一把：加值是攻击检定上的独立加成，
             # 不改属性、不改熟练，也不波及同名的另一把武器。
             sacred_bonus = self._sacred_weapon_bonus(
@@ -1396,8 +1622,12 @@ class CombatResolutionMixin:
             weapon = next(item for item in actor["attacks"] if item["id"] == intent["attack_id"])
             modifier = int(weapon.get("damage_modifier", 0) or 0)
             attack_bonus = int(weapon["attack_bonus"])
-            damage_formula = str(weapon["damage"])
-            damage_type = str(weapon.get("damage_type") or "bludgeoning")
+            parts = attack_damage_parts(weapon)
+            # 第一段是"主伤害"：重击阈值、抗性与日志都按它记账，第二段在
+            # 提交时作为独立实例结算。缺省空串而不是 bludgeoning——数据没有
+            # 说类型时，引擎不该替它挑一个。
+            damage_formula = str(parts[0]["dice"]) if parts else ""
+            damage_type = str(parts[0]["type"]) if parts else ""
             distance = self._distance(combat, actor_id, target_id)
             range_disadvantage = self.attack_range_disadvantage(weapon, distance)
         from .check_modes import attack_mode, mode_from_sources
@@ -1463,6 +1693,9 @@ class CombatResolutionMixin:
                 combat, actor,
                 resource="bonus_action" if intent.get("light_extra_attack") else "",
                 weapon=weapon,
+                # Multiattack 的第一次攻击为"这一次动作"开一张总额度，后续
+                # 每一击都从同一份额度里扣：动作只付一次，次数不重复付。
+                attacks_per_action=attacks_in_action,
             )] if spend_attack_action else []),
         ]
         events.extend(self._attack_declaration_events(
@@ -1768,6 +2001,15 @@ class CombatResolutionMixin:
         brutal_effects = self._brutal_effect_declarations(actor, intent, check)
         if brutal_effects:
             damage_event["brutal_strike_effects"] = brutal_effects
+        # 第二段伤害与 stat block 的附带效果都属于"命中之后才生效"的一类，
+        # 因此和 hit_riders 一样先挂在伤害事件上：护盾术把命中改判落空时，
+        # 它们一个都不能落地。
+        extra_parts = attack_damage_parts(weapon)[1:]
+        if extra_parts:
+            damage_event["extra_damage_parts"] = extra_parts
+        statblock_riders = attack_riders(weapon)
+        if statblock_riders:
+            damage_event["statblock_riders"] = statblock_riders
         mastery = self._weapon_mastery_effect(actor, weapon)
         if mastery is not None and str(mastery.get("on")) == "hit" and (
             not mastery.get("requires_damage") or damage > 0
@@ -2335,6 +2577,41 @@ class CombatResolutionMixin:
             total += damage
         return events, total
 
+    def _damage_instance_event(
+        self, dice: str, damage_type: str, target: dict[str, Any],
+        critical: bool, rng: Any, *, half: bool = False,
+    ) -> tuple[dict[str, Any] | None, int]:
+        """One damage instance as its own resisted ``resource.changed``.
+
+        Shared by every "not the main damage" producer — a second damage part,
+        a hit rider, a Hunter's Mark die — so resistance is applied once per
+        instance and every one of them produces the same event shape.
+        """
+
+        node = attack_damage_node(
+            damage_formula=dice, modifier=0,
+            critical=critical, extra_dice_formulas=[],
+        )
+        amount, rolls = roll_damage_node(node, rng)
+        amount = max(0, amount)
+        if half:
+            # "Success: Half damage" 落到一个独立掷出的骰池上再折半：取整口径
+            # 与规则一致（向下取整），且绝不复用失败分支的骰值。
+            amount //= 2
+        if amount <= 0:
+            return None, 0
+        damage, resistance = self._resist_damage(target, amount, damage_type)
+        event: dict[str, Any] = {
+            "type": "resource.changed", "resource": "hp",
+            "target_id": str(target["actor_id"]),
+            "delta": -damage, "amount": damage, "damage_type": damage_type,
+            "critical": critical, "rolls": rolls,
+        }
+        if resistance:
+            event["resisted"] = True
+            event["resistance"] = resistance
+        return event, damage
+
     def _rider_damage_event(
         self, row: dict[str, Any], target: dict[str, Any],
         critical: bool, rng: Any,
@@ -2348,30 +2625,19 @@ class CombatResolutionMixin:
         same event shape and the same resistance boundary.
         """
 
-        node = attack_damage_node(
-            damage_formula=str(row["dice"]), modifier=0,
-            critical=critical, extra_dice_formulas=[],
+        event, damage = self._damage_instance_event(
+            str(row["dice"]), str(row.get("damage_type") or ""), target,
+            critical, rng,
         )
-        amount, rolls = roll_damage_node(node, rng)
-        amount = max(0, amount)
-        if amount <= 0:
+        if event is None:
             return None, 0
-        damage_type = str(row.get("damage_type") or "")
-        damage, resistance = self._resist_damage(target, amount, damage_type)
-        event: dict[str, Any] = {
-            "type": "resource.changed", "resource": "hp",
-            "target_id": str(target["actor_id"]),
-            "delta": -damage, "amount": damage, "damage_type": damage_type,
-            "critical": critical, "rolls": rolls,
+        event.update({
             "feature_id": str(row.get("feature_id") or ""),
             "owner_ref": str(row.get("owner") or ""),
             # 谁打出的这一下：Superior Hunter's Prey 问的就是"你本回合对标记
             # 目标造成过伤害吗"，而伤害事件本身不携带施害者。
             "source_actor_id": str(row.get("source_actor_id") or ""),
-        }
-        if resistance:
-            event["resisted"] = True
-            event["resistance"] = resistance
+        })
         return event, damage
 
     def _hit_condition_declarations(
@@ -2891,18 +3157,18 @@ class CombatResolutionMixin:
     ) -> list[dict[str, Any]]:
         """Submit a final hit's damage and run its trailing consequences."""
 
-        rider_events, rider_damage = self._hit_rider_events(
-            combat, target, damage_event, rng, attacker_id=attacker_id,
+        consequences, extra_damage = self._hit_tail_events(
+            instance, combat, attacker_id, target, damage_event, rng,
         )
         events = list(self._submit_hit_damage(damage_event))
-        events.extend(rider_events)
+        events.extend(consequences)
         if damage_event.get("critical"):
             events.extend(
                 self._critical_hit_move_events(instance, combat, attacker_id)
             )
         # 一次命中只有一个专注 DC：额外伤害实例与主伤害合并计算，而不是每个
         # 实例各掷一次豁免。
-        total_damage = damage + rider_damage
+        total_damage = damage + extra_damage
         events.extend(
             self._concentration_with_dool(instance, combat, target, total_damage, rng)
         )
@@ -2915,6 +3181,161 @@ class CombatResolutionMixin:
         if self._last_hostile_defeated(combat, target, total_damage):
             events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         return events
+
+    def _hit_tail_events(
+        self, instance: Any, combat: dict[str, Any], attacker_id: str,
+        target: dict[str, Any], damage_event: dict[str, Any], rng: Any,
+        *, multiplier: float = 1.0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Everything a landed hit owes beyond its main damage instance.
+
+        Three producers, one entry point: the attack's second damage part, the
+        feature riders (Hunter's Mark, Radiant/Divine/Primal strikes) and the
+        stat-block riders (prone / grapple / condition / push).  Every path that
+        can land a hit calls this — the straight-through one, the post-roll
+        decision finishers and the hit-triggered spell — because a hit that
+        skipped it would silently lose half its text.
+
+        ``multiplier`` is for the reactions that halve "the damage from that
+        attack" (Uncanny Dodge): the reduction applies to every instance of the
+        attack, not only to the first one.
+        """
+
+        extra_events, extra_damage = self._extra_damage_events(
+            combat, target, damage_event, rng,
+        )
+        rider_events, rider_damage = self._hit_rider_events(
+            combat, target, damage_event, rng, attacker_id=attacker_id,
+        )
+        if multiplier != 1.0:
+            for event in (*extra_events, *rider_events):
+                if event.get("type") != "resource.changed":
+                    continue
+                scaled = int(int(event.get("amount", 0) or 0) * multiplier)
+                event["amount"] = scaled
+                event["delta"] = -scaled
+            extra_damage = int(extra_damage * multiplier)
+            rider_damage = int(rider_damage * multiplier)
+        events = [*extra_events, *rider_events]
+        events.extend(self._statblock_rider_events(
+            instance, combat, attacker_id, target, damage_event, rng,
+            events=events,
+        ))
+        return events, extra_damage + rider_damage
+
+    def _extra_damage_events(
+        self, combat: dict[str, Any], target: dict[str, Any],
+        damage_event: dict[str, Any], rng: Any,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """The second damage instance of an attack, resisted on its own.
+
+        ``2d6+4 slashing plus 1d6 fire`` is one hit and two instances: taking
+        resistance once on the sum would let a fire-resistant target halve the
+        slashing too.  The dice are rolled here rather than at declaration time
+        so a window that turns the hit into a miss wastes no roll.
+        """
+
+        parts = damage_event.get("extra_damage_parts")
+        if not isinstance(parts, list) or not parts:
+            return [], 0
+        critical = bool(damage_event.get("critical"))
+        events: list[dict[str, Any]] = []
+        total = 0
+        for row in parts:
+            if not isinstance(row, dict) or not row.get("dice"):
+                continue
+            event, landed = self._damage_instance_event(
+                str(row["dice"]), str(row.get("type") or ""), target,
+                critical, rng,
+            )
+            if event is None:
+                continue
+            events.append(event)
+            total += landed
+        return events, total
+
+    def _statblock_rider_events(
+        self, instance: Any, combat: dict[str, Any], attacker_id: str,
+        target: dict[str, Any], damage_event: dict[str, Any], rng: Any,
+        *, events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """What a stat-block hit does beyond damage, in declaration order.
+
+        Three of the four kinds ask the same question first — is the target
+        small enough for this rider — so the size gate lives here instead of in
+        each kind.  A rider whose gate cannot be answered (the target's size is
+        unknown) is skipped and said so: a wolf that silently knocks down a
+        Huge dragon is worse than a wolf that does nothing.
+        """
+
+        riders = damage_event.get("statblock_riders")
+        if not isinstance(riders, list) or not riders:
+            return []
+        target_id = str(target["actor_id"])
+        applied: list[dict[str, Any]] = []
+        for rider in riders:
+            if not isinstance(rider, dict):
+                continue
+            limit = str(rider.get("max_target_size") or "")
+            if limit and not size_at_most(str(target.get("size") or ""), limit):
+                applied.append({
+                    "type": "dnd2024.rider.skipped", "target_id": target_id,
+                    "source_actor_id": attacker_id,
+                    "kind": str(rider.get("kind") or ""),
+                    "reason": "size_gate",
+                })
+                continue
+            save = rider.get("save")
+            if isinstance(save, dict) and save.get("ability"):
+                check = self._saving_throw_check(
+                    instance, combat, target, target_id,
+                    str(save["ability"]), int(save.get("dc") or 0),
+                    attacker_id, [*events, *applied], rng,
+                )
+                applied.append(check)
+                if check["success"]:
+                    # 失败才吃效果：成功就等于这条 rider 没有发生，不必再
+                    # 发一条空事件，`check.resolved` 已经把掷骰留在日志里。
+                    continue
+            kind = str(rider.get("kind") or "")
+            if kind == "push":
+                direction = (
+                    1 if self._position(combat, target_id)
+                    >= self._position(combat, attacker_id) else -1
+                )
+                applied.append({
+                    "type": "dnd2024.position.changed", "actor_id": target_id,
+                    "distance": direction * int(rider.get("distance") or 0),
+                    "forced": True,
+                    "source_rider": "push",
+                })
+                continue
+            condition = rider_condition(rider)
+            if not condition:
+                continue
+            meta: dict[str, Any] = {
+                "type": "condition.applied", "target_id": target_id,
+                "condition": condition,
+                "source_actor_id": attacker_id,
+                "source_rider": kind,
+                # 缺省按遭遇计时。没有"起身""挣脱"这两个动作时，一条没有
+                # 时限的击倒会跟着角色卡活到下一场战斗——那是数据泄漏，不是
+                # 规则。登记 GAP-38。
+                "duration": str(rider.get("duration") or "combat"),
+            }
+            if (
+                meta["duration"] == "target_turn_end"
+                and str((combat.get("economy") or {}).get("actor_id") or "") == target_id
+            ):
+                # 在目标自己的回合里给它"到其下个回合结束"：这一次回合结束
+                # 不是"下个"，所以要多撑一个回合边界。
+                meta["expires_after"] = 2
+            if kind == "grapple":
+                # 挣脱 DC 是擒抱的一部分事实，跟着条件走；挣脱本身是一个
+                # 技能检定动作（下一片的消费者），这里只把数字留下。
+                meta["escape_dc"] = int(rider.get("escape_dc") or 0)
+            applied.append(meta)
+        return applied
 
     def _maybe_overchannel(self, intent: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
         """门控已由 _validate_spell 完成（fail closed）；此处只做变换。"""
@@ -3183,6 +3604,9 @@ class CombatResolutionMixin:
                 check_event = self._saving_throw_check(
                     instance, combat, target, target_id, save_ability,
                     int(actor["spell_save_dc"]), actor_id, events, rng,
+                    # Magic Resistance 只对抗法术的豁免：这一处是唯一由法术
+                    # 产出的豁免，其余的（呼吸、rider）不享受它。
+                    against_spell=True,
                 )
                 if not check_event.get("auto_failed"):
                     # 掩蔽只帮敏捷豁免，Indomitable Might 用力量值替换总值；
@@ -3592,6 +4016,11 @@ class CombatResolutionMixin:
                 continue
             adjacent_hostiles.append(target)
         actor = self._actor_view(instance, combat, actor_id)
+        if "flyby" in trait_ids(actor.get("traits")):
+            # Flyby：这只生物飞离触及范围不引发借机攻击，因此威胁表直接清空。
+            # 规则原文的前提是"飞行中"，而本引擎没有飞行状态——这个特质只
+            # 挂在靠飞行移动的 stat block 上，登记为已知简化。
+            adjacent_hostiles = []
         disengaged = bool(economy.get("disengaged")) or "disengaged" in actor["conditions"]
         # Remarkable Athlete 的暴击后移动：这份额度自身免借机攻击，且只免
         # 这一次移动——阈值是额度（英尺），不是"永久免疫"。
@@ -3656,6 +4085,10 @@ class CombatResolutionMixin:
         event.pop("hit_riders", None)
         event.pop("hit_condition_effects", None)
         event.pop("brutal_strike_effects", None)
+        # 第二段伤害与 stat block rider 由 ``_resolve_committed_hit`` 结算：
+        # 它们是独立事件，不能混进主伤害的线上形状。
+        event.pop("extra_damage_parts", None)
+        event.pop("statblock_riders", None)
         events: list[dict[str, Any]] = [event]
         if isinstance(feature_use, dict):
             events.append({"type": "dnd2024.feature.used", **feature_use})
@@ -5345,9 +5778,15 @@ class CombatResolutionMixin:
     def _saving_throw_check(
         self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
         actor_id: str, ability: str, dc: int, source_actor_id: str,
-        events: list[dict[str, Any]], rng: Any,
+        events: list[dict[str, Any]], rng: Any, *, against_spell: bool = False,
     ) -> dict[str, Any]:
-        """Shared save authority for spells, repeated saves and hit riders."""
+        """Shared save authority for spells, repeated saves and hit riders.
+
+        Two stat-block traits attach here because this is the only place that
+        knows a save is being rolled at all: Magic Resistance (Advantage when
+        the effect is a spell) and Legendary Resistance (a failed save becomes
+        a success, at the cost of one use).
+        """
 
         modifier = int(actor["saving_throws"].get(ability, 0) or 0)
         auto_fail = ability in condition_flags(
@@ -5365,7 +5804,12 @@ class CombatResolutionMixin:
                 "target": dc, "success": False, "auto_failed": True,
                 "roll_id": self._roll_id(events, "saving_throw", actor_id),
             }
-        save_sources = self._saving_throw_sources(actor, ability)
+        save_sources = self._saving_throw_sources(
+            actor, ability, against_spell=against_spell,
+        )
+        traits = actor.get("traits")
+        if against_spell and "magic_resistance" in trait_ids(traits):
+            save_sources.append({"code": "magic_resistance", "mode": "advantage"})
         save_mode = mode_from_sources(save_sources)
         first = int(rng.randint(1, 20))
         second = int(rng.randint(1, 20)) if save_mode else None
@@ -5388,6 +5832,9 @@ class CombatResolutionMixin:
             + int(aura["bonus"]) + int(cover["bonus"])
         )
         total, replacement = self._strength_total_replacement(actor, ability, total)
+        legendary = self._legendary_resistance_events(
+            actor, actor_id, total >= dc, events,
+        )
         check_event = {
             "type": "check.resolved", "kind": "saving_throw",
             "actor_id": actor_id,
@@ -5397,10 +5844,14 @@ class CombatResolutionMixin:
             "natural": roll, "modifier": modifier,
             "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
             "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
-            "total": total, "target": dc, "success": total >= dc,
+            "total": total, "target": dc,
+            "success": total >= dc or legendary["used"],
             "roll_id": self._roll_id(events, "saving_throw", actor_id),
             **replacement,
         }
+        if legendary["used"]:
+            # 掷骰结果原样留着：日志要能看出"这一掷本来是失败的"。
+            check_event["legendary_resistance"] = legendary["remaining"]
         if int(cover["bonus"]):
             check_event["cover_bonus"] = int(cover["bonus"])
             check_event["cover_sources"] = cover["sources"]
@@ -5620,7 +6071,7 @@ class CombatResolutionMixin:
                 "previous_actor_id": previous_actor,
                 "economy": self._fresh_economy(next_view),
             },
-            *self._turn_start_events(next_view),
+            *self._turn_start_events(next_view, rng),
         ]
 
     def _superior_defense_expiry_events(
@@ -5684,7 +6135,9 @@ class CombatResolutionMixin:
 
         return combat_turn_slots(combat)
 
-    def _turn_start_events(self, actor: dict[str, Any]) -> list[dict[str, Any]]:
+    def _turn_start_events(
+        self, actor: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
         """Everything a turn beginning does, in registration order.
 
         Survivor's regeneration was registered first and keeps its position;
@@ -5696,7 +6149,44 @@ class CombatResolutionMixin:
         return [
             *self._turn_start_regen_events(actor),
             *self._turn_start_heroic_events(actor),
+            *self._turn_start_recharge_events(actor, rng),
         ]
+
+    @staticmethod
+    def _turn_start_recharge_events(
+        actor: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """S0-MM3c: roll each spent recharge action back at the owner's turn start.
+
+        The roll happens here rather than at intent time because the rule is
+        "at the start of its turn, roll a d6": doing it lazily would let a
+        creature decide after seeing whether it wants the action.  A recharge
+        action that is still available rolls nothing.
+        """
+
+        usage = actor.get("usage")
+        if not isinstance(usage, dict):
+            return []
+        events: list[dict[str, Any]] = []
+        for action in actor.get("actions") or []:
+            if not isinstance(action, dict):
+                continue
+            limits = action.get("usage_limits")
+            if not isinstance(limits, dict) or "recharge" not in limits:
+                continue
+            row = usage.get(str(action.get("id") or ""))
+            if not isinstance(row, dict) or row.get("available", True):
+                continue
+            window = limits.get("recharge") or {}
+            events.append({
+                "type": "dnd2024.action.recharge_rolled",
+                "actor_id": str(actor["actor_id"]),
+                "action_id": str(action.get("id") or ""),
+                "roll": int(rng.randint(1, 6)),
+                "from": int(window.get("from", 6)),
+                "to": int(window.get("to", 6)),
+            })
+        return events
 
     def _turn_start_heroic_events(self, actor: dict[str, Any]) -> list[dict[str, Any]]:
         """Heroic Warrior: a self-grant at turn start, only when lacking it.

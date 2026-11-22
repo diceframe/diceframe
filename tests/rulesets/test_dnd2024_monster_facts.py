@@ -213,9 +213,10 @@ def test_challenge_rating_is_a_closed_set_and_xp_needs_it() -> None:
 
 def test_unknown_fields_fail_closed_and_are_all_named() -> None:
     with pytest.raises(Exception) as caught:
-        validate_enemy_profiles([_profile(sizes="small", traits=[], cr_xp=1)])
+        validate_enemy_profiles([_profile(sizes="small", traits_v2=[], cr_xp=1)])
     message = str(caught.value)
-    assert "sizes" in message and "traits" in message and "cr_xp" in message
+    # traits 自 S0-MM3d 起是正式字段，所以用 traits_v2 才代表"真的不认识"。
+    assert "sizes" in message and "traits_v2" in message and "cr_xp" in message
 
 
 # ---------------------------------------------------------------------------

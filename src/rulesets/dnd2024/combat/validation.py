@@ -48,13 +48,24 @@ from ..spells.font_of_magic import (
 from .cover import COVER_LEVELS
 from .obscurement import OBSCUREMENT_LEVELS
 from .primitives import (
+    CONDITION_CODES,
     DICE_RE,
     INITIATIVE_CHOICES,
     INTENT_TYPES,
+    MAX_ATTACK_DAMAGE_PARTS,
+    MAX_ATTACK_RIDERS,
+    MULTIATTACK_MAX_ATTACKS,
     RELENTLESS_RAGE_DECISION,
+    RIDER_DURATIONS,
+    RIDER_KINDS,
+    RIDER_PUSH_MAXIMUM_FT,
+    RIDER_PUSH_MINIMUM_FT,
+    LEGENDARY_RESISTANCE_DEFAULT_PER_DAY,
     SACRED_WEAPON_CONDITION,
     UNARMED_STRIKE_REF,
     SIZE_CODES,
+    TRAIT_IDS,
+    TRAIT_PARAMS,
     CombatIntentError,
     actor_kind as _actor_kind,
     canonical as _canonical,
@@ -93,6 +104,10 @@ _ENEMY_KEYS = frozenset({
     # S0-MM2：除特质与动作之外，stat block 的其余字段都要能进契约。
     "skills", "languages", "proficiency_bonus", "hit_dice", "subtype",
     "passive_perception",
+    # S0-MM3b：动作容器。Multiattack 不是"攻击"，它有自己的一次动作预算。
+    "actions",
+    # S0-MM3d：特质容器。闭集 id，未知即拒绝。
+    "traits",
 })
 # 速度档位：walk 是唯一被移动预算读的一档，其余四档本切片只投影（阶段三接）。
 _HIT_DICE_RE = re.compile(r"^(\d{1,2})d(\d{1,2})(?:[+-]\d{1,3})?$")
@@ -283,6 +298,8 @@ def validate_enemy_profiles(enemies: Any) -> None:
         _validate_condition_immunities(enemy, f"enemy {enemy_id}")
         _normalize_speeds(enemy, f"enemy {enemy_id}")
         _validate_statblock_extras(enemy, f"enemy {enemy_id}")
+        _validate_enemy_actions(enemy, f"enemy {enemy_id}")
+        _validate_enemy_traits(enemy, f"enemy {enemy_id}")
         if not isinstance(enemy.get("creature_type", ""), str) or (enemy.get("creature_type") and enemy["creature_type"] not in CREATURE_TYPES):
             raise CombatIntentError("enemy creature_type must be a canonical creature type")
         # ``speeds`` 在场时旧标量 ``speed`` 不再参与校验：结构形式才是权威，
@@ -312,40 +329,380 @@ def validate_enemy_profiles(enemies: Any) -> None:
         for attack in attacks:
             if not isinstance(attack, dict):
                 raise CombatIntentError("enemy attack profile is invalid")
-            attack_id = str(attack.get("id") or "")
-            formula = str(attack.get("damage") or "")
-            # 公式层（``formula_node_from_dice_formula``）本来就接受固定值
-            # （"1 点穿刺"这类 Tiny 野兽），校验层不该比它更严——否则目录里
-            # 一半的 Animals 进不来。
-            dice_match = DICE_RE.fullmatch(formula)
-            flat_damage = is_supported_damage_formula(formula) and dice_match is None
-            attack_bonus = attack.get("attack_bonus")
-            normal_range = attack.get("range", 5)
-            long_range = attack.get("long_range", normal_range)
-            if (
-                not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", attack_id)
-                or attack_id in attack_ids
-                or (dice_match is None and not flat_damage)
-                or isinstance(attack_bonus, bool)
-                or not isinstance(attack_bonus, int)
-                or not -20 <= attack_bonus <= 30
-                or isinstance(normal_range, bool)
-                or not isinstance(normal_range, int)
-                or not 1 <= normal_range <= 1000
-                or isinstance(long_range, bool)
-                or not isinstance(long_range, int)
-                or long_range < normal_range
-                or long_range > 2000
+            _validate_attack_profile(attack, attack_ids)
+
+
+def _validate_damage_formula(formula: Any) -> None:
+    """One damage instance: a dice formula or a flat amount the AST can read.
+
+    公式层（``formula_node_from_dice_formula``）本来就接受固定值（"1 点穿刺"
+    这类 Tiny 野兽），校验层不该比它更严——否则目录里一半的 Animals 进不来。
+    """
+
+    text = str(formula or "")
+    dice_match = DICE_RE.fullmatch(text)
+    if dice_match is not None:
+        dice_count = int(dice_match.group(1))
+        dice_sides = int(dice_match.group(2))
+        if not 1 <= dice_count <= 100 or not 2 <= dice_sides <= 1000:
+            raise CombatIntentError("enemy attack damage dice are invalid")
+        return
+    if not is_supported_damage_formula(text):
+        raise CombatIntentError("enemy attack damage is invalid")
+    if not 1 <= int(text) <= 1000:
+        raise CombatIntentError("enemy attack flat damage is invalid")
+
+
+def _validate_attack_damage(attack: dict[str, Any]) -> None:
+    """S0-MM3a: one to two damage instances, structured or legacy.
+
+    The two shapes are alternatives, not layers: an attack that carries both
+    would leave two answers to "how much damage does this do", so it is refused
+    rather than resolved by precedence.
+    """
+
+    raw = attack.get("damage")
+    legacy_type = attack.get("damage_type")
+    # 局部导入：catalog 反向依赖本模块的常量，模块级导入会成环。
+    from .catalog import DAMAGE_TYPES
+    if legacy_type is not None and (
+        not isinstance(legacy_type, str) or legacy_type not in DAMAGE_TYPES
+    ):
+        raise CombatIntentError("enemy attack damage_type is invalid")
+    if isinstance(raw, list):
+        if not 1 <= len(raw) <= MAX_ATTACK_DAMAGE_PARTS:
+            raise CombatIntentError("enemy attack damage must list 1 or 2 parts")
+        if legacy_type is not None:
+            raise CombatIntentError(
+                "enemy attack damage is both a list and a legacy damage_type"
+            )
+        for row in raw:
+            if not isinstance(row, dict) or set(row) - {"dice", "type"}:
+                raise CombatIntentError("enemy attack damage part is invalid")
+            damage_type = row.get("type")
+            if not isinstance(damage_type, str) or damage_type not in DAMAGE_TYPES:
+                raise CombatIntentError("enemy attack damage part type is invalid")
+            _validate_damage_formula(row.get("dice"))
+        return
+    if isinstance(raw, str):
+        _validate_damage_formula(raw)
+        return
+    # 都缺 —— 每次命中要打多少点没有答案，不能默认 0。
+    raise CombatIntentError("enemy attack requires damage")
+
+
+def _validate_rider(rider: dict[str, Any], label: str) -> None:
+    """S0-MM3a: what a hit does beyond damage.
+
+    One closed set of kinds, each with exactly the fields it needs.  A rider
+    that names a condition outside the canonical vocabulary, a save outside the
+    six abilities, or a push distance outside 5–60 ft is a data error the
+    engine must not paper over.
+    """
+
+    kind = str(rider.get("kind") or "")
+    if kind not in RIDER_KINDS:
+        raise CombatIntentError(f"{label} rider kind is invalid")
+    from .catalog import SAVE_ABILITIES
+
+    allowed = {"kind", "save", "max_target_size", "duration"}
+    if kind == "condition":
+        allowed.add("condition")
+    if kind == "grapple":
+        allowed.add("escape_dc")
+    if kind == "push":
+        allowed.add("distance")
+    if set(rider) - allowed:
+        raise CombatIntentError(f"{label} rider has unknown field(s)")
+    if kind == "push":
+        distance = rider.get("distance")
+        if (
+            isinstance(distance, bool) or not isinstance(distance, int)
+            or not RIDER_PUSH_MINIMUM_FT <= distance <= RIDER_PUSH_MAXIMUM_FT
+        ):
+            raise CombatIntentError(f"{label} rider push distance is invalid")
+    if kind == "grapple":
+        escape_dc = rider.get("escape_dc")
+        if isinstance(escape_dc, bool) or not isinstance(escape_dc, int) or not 1 <= escape_dc <= 30:
+            raise CombatIntentError(f"{label} rider escape DC is invalid")
+    if kind == "condition":
+        condition = str(rider.get("condition") or "")
+        if condition not in CONDITION_CODES:
+            raise CombatIntentError(f"{label} rider condition is not canonical")
+    size = rider.get("max_target_size")
+    if size is not None and (
+        not isinstance(size, str) or size not in SIZE_CODES
+    ):
+        raise CombatIntentError(f"{label} rider target size limit is invalid")
+    duration = rider.get("duration")
+    if duration is not None and duration not in RIDER_DURATIONS:
+        raise CombatIntentError(f"{label} rider duration is not supported")
+    save = rider.get("save")
+    if save is not None:
+        if not isinstance(save, dict) or set(save) - {"ability", "dc"}:
+            raise CombatIntentError(f"{label} rider save is invalid")
+        ability = save.get("ability")
+        dc = save.get("dc")
+        if not isinstance(ability, str) or ability not in SAVE_ABILITIES:
+            raise CombatIntentError(f"{label} rider save ability is invalid")
+        if isinstance(dc, bool) or not isinstance(dc, int) or not 1 <= dc <= 30:
+            raise CombatIntentError(f"{label} rider save DC is invalid")
+
+
+def _validate_attack_profile(attack: dict[str, Any], attack_ids: set[str]) -> None:
+    """One attack profile: identity, reach, damage instances and riders."""
+
+    attack_id = str(attack.get("id") or "")
+    attack_bonus = attack.get("attack_bonus")
+    normal_range = attack.get("range", 5)
+    long_range = attack.get("long_range", normal_range)
+    if (
+        not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", attack_id)
+        or attack_id in attack_ids
+        or isinstance(attack_bonus, bool)
+        or not isinstance(attack_bonus, int)
+        or not -20 <= attack_bonus <= 30
+        or isinstance(normal_range, bool)
+        or not isinstance(normal_range, int)
+        or not 1 <= normal_range <= 1000
+        or isinstance(long_range, bool)
+        or not isinstance(long_range, int)
+        or long_range < normal_range
+        or long_range > 2000
+    ):
+        raise CombatIntentError("enemy attack profile is invalid")
+    _validate_attack_damage(attack)
+    riders = attack.get("riders")
+    if riders is not None:
+        if not isinstance(riders, list) or not 0 <= len(riders) <= MAX_ATTACK_RIDERS:
+            raise CombatIntentError("enemy attack riders must list 0 to 3 entries")
+        for rider in riders:
+            if not isinstance(rider, dict):
+                raise CombatIntentError("enemy attack rider is invalid")
+            _validate_rider(rider, "enemy attack")
+    aliases = attack.get("aliases")
+    if aliases is not None:
+        # 生物内的别名：SRD 的 Multiattack 常用一个不存在的动作名指代组合
+        # （"two Rend attacks" 而动作表里只有 Claw / Bite）。别名只在这只
+        # 生物自己的攻击表里解析，禁止全局匹配。
+        if (
+            not isinstance(aliases, list) or not 1 <= len(aliases) <= 3
+            or any(
+                not isinstance(alias, str) or not alias.strip() or len(alias) > 40
+                for alias in aliases
+            )
+        ):
+            raise CombatIntentError("enemy attack aliases are invalid")
+    attack_ids.add(attack_id)
+
+
+def _validate_multiattack_action(action: dict[str, Any], label: str) -> None:
+    """S0-MM3b: repeat / combo / choice, and nothing else."""
+
+    shapes = [key for key in ("repeat", "combo", "choice") if key in action]
+    if len(shapes) != 1:
+        raise CombatIntentError(
+            f"{label} multiattack needs exactly one of repeat, combo or choice"
+        )
+    shape = shapes[0]
+    allowed = {"id", "name", "kind", "description", shape}
+    if set(action) - allowed:
+        raise CombatIntentError(f"{label} multiattack has unknown field(s)")
+
+    def parts_of(entry: Any, where: str) -> list[dict[str, Any]]:
+        if not isinstance(entry, list) or not 1 <= len(entry) <= 4:
+            raise CombatIntentError(f"{label} {where} must list 1 to 4 parts")
+        total = 0
+        for part in entry:
+            if not isinstance(part, dict) or set(part) - {"attack_id", "count"}:
+                raise CombatIntentError(f"{label} {where} part is invalid")
+            attack_id = part.get("attack_id")
+            count = part.get("count")
+            if not isinstance(attack_id, str) or not re.fullmatch(
+                r"[a-z0-9][a-z0-9_.-]{0,63}", attack_id
             ):
-                raise CombatIntentError("enemy attack profile is invalid")
-            if dice_match is not None:
-                dice_count = int(dice_match.group(1))
-                dice_sides = int(dice_match.group(2))
-                if not 1 <= dice_count <= 100 or not 2 <= dice_sides <= 1000:
-                    raise CombatIntentError("enemy attack damage dice are invalid")
-            elif not 1 <= int(formula) <= 1000:
-                raise CombatIntentError("enemy attack flat damage is invalid")
-            attack_ids.add(attack_id)
+                raise CombatIntentError(f"{label} {where} attack id is invalid")
+            if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 6:
+                raise CombatIntentError(f"{label} {where} attack count is invalid")
+            total += count
+        if total > MULTIATTACK_MAX_ATTACKS:
+            raise CombatIntentError(f"{label} multiattack makes too many attacks")
+        return entry
+
+    if shape == "repeat":
+        repeat = action.get("repeat")
+        if not isinstance(repeat, dict) or set(repeat) - {"attack_id", "count"}:
+            raise CombatIntentError(f"{label} multiattack repeat is invalid")
+        parts_of([repeat], "repeat")
+        return
+    if shape == "combo":
+        parts_of(action.get("combo"), "combo")
+        return
+    branches = action.get("choice")
+    if not isinstance(branches, list) or not 2 <= len(branches) <= 4:
+        raise CombatIntentError(f"{label} multiattack choice needs 2 to 4 branches")
+    seen: set[str] = set()
+    for branch in branches:
+        if not isinstance(branch, dict) or set(branch) - {"label", "parts"}:
+            raise CombatIntentError(f"{label} multiattack choice branch is invalid")
+        branch_label = str(branch.get("label") or "")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,31}", branch_label):
+            raise CombatIntentError(f"{label} multiattack choice label is invalid")
+        if branch_label in seen:
+            raise CombatIntentError(f"{label} multiattack choice label is duplicated")
+        seen.add(branch_label)
+        parts_of(branch.get("parts"), f"choice {branch_label}")
+
+
+def _validate_save_action(action: dict[str, Any], label: str) -> None:
+    """S0-MM3c: "one save, then one of two outcomes".
+
+    The save is rolled by the server, so the client only ever names the action.
+    Both outcome lists may carry damage and nothing else: an action that also
+    applies a condition or moves a target is a different primitive, and letting
+    a half-implemented one through would silently drop half its text.
+    """
+
+    from .catalog import SAVE_ABILITIES
+
+    allowed = {
+        "id", "name", "kind", "description", "ability", "dc",
+        "on_fail", "on_success", "usage_limits",
+    }
+    if set(action) - allowed:
+        raise CombatIntentError(f"{label} save action has unknown field(s)")
+    ability = action.get("ability")
+    if not isinstance(ability, str) or ability not in SAVE_ABILITIES:
+        raise CombatIntentError(f"{label} save action ability is invalid")
+    dc = action.get("dc")
+    if isinstance(dc, bool) or not isinstance(dc, int) or not 1 <= dc <= 30:
+        raise CombatIntentError(f"{label} save action DC is invalid")
+    for key in ("on_fail", "on_success"):
+        if key not in action:
+            continue
+        rows = action[key]
+        if not isinstance(rows, list) or not 1 <= len(rows) <= 2:
+            raise CombatIntentError(f"{label} save action {key} must list 1 to 2 outcomes")
+        for row in rows:
+            if not isinstance(row, dict) or set(row) - {"damage"}:
+                raise CombatIntentError(f"{label} save action {key} outcome is invalid")
+            parts = row.get("damage")
+            if not isinstance(parts, list) or not 1 <= len(parts) <= MAX_ATTACK_DAMAGE_PARTS:
+                raise CombatIntentError(
+                    f"{label} save action {key} needs 1 or 2 damage parts"
+                )
+            for part in parts:
+                if not isinstance(part, dict) or set(part) - {"dice", "type", "half"}:
+                    raise CombatIntentError(f"{label} save action damage part is invalid")
+                _validate_damage_formula(part.get("dice"))
+                from .catalog import DAMAGE_TYPES
+                damage_type = part.get("type")
+                if not isinstance(damage_type, str) or damage_type not in DAMAGE_TYPES:
+                    raise CombatIntentError(
+                        f"{label} save action damage type is invalid"
+                    )
+                half = part.get("half")
+                if half is not None and not isinstance(half, bool):
+                    raise CombatIntentError(f"{label} save action half flag is invalid")
+    if "on_fail" not in action:
+        raise CombatIntentError(f"{label} save action needs an on_fail outcome")
+    _validate_usage_limits(action.get("usage_limits"), f"{label} save action")
+
+
+def _validate_usage_limits(limits: Any, label: str) -> None:
+    """S0-MM3c: ``recharge`` or ``per_day`` — the two the engine can answer."""
+
+    if limits is None:
+        return
+    if not isinstance(limits, dict) or len(limits) != 1:
+        raise CombatIntentError(f"{label} usage_limits must name one limit")
+    if "recharge" in limits:
+        window = limits["recharge"]
+        if not isinstance(window, dict) or set(window) - {"from", "to"}:
+            raise CombatIntentError(f"{label} recharge window is invalid")
+        start = window.get("from")
+        end = window.get("to", 6)
+        if (
+            isinstance(start, bool) or not isinstance(start, int) or not 2 <= start <= 6
+            or isinstance(end, bool) or not isinstance(end, int) or not start <= end <= 6
+        ):
+            raise CombatIntentError(f"{label} recharge window is invalid")
+        return
+    if "per_day" in limits:
+        count = limits["per_day"]
+        if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 10:
+            raise CombatIntentError(f"{label} per_day limit is invalid")
+        return
+    raise CombatIntentError(f"{label} usage_limits must name recharge or per_day")
+
+
+def _validate_enemy_traits(enemy: dict[str, Any], label: str) -> None:
+    """S0-MM3d: eight closed trait ids, each with only its own parameters."""
+
+    raw = enemy.get("traits")
+    if raw is None:
+        return
+    if not isinstance(raw, list) or not 0 <= len(raw) <= 20:
+        raise CombatIntentError(f"{label} traits must list 0 to 20 entries")
+    seen: set[str] = set()
+    for row in raw:
+        if not isinstance(row, dict):
+            raise CombatIntentError(f"{label} trait must be an object")
+        if set(row) - {"id", "params"}:
+            raise CombatIntentError(f"{label} trait has unknown field(s)")
+        trait_id = str(row.get("id") or "")
+        if trait_id not in TRAIT_IDS:
+            raise CombatIntentError(f"{label} trait id is not supported: {trait_id!r}")
+        if trait_id in seen:
+            raise CombatIntentError(f"{label} repeats trait {trait_id}")
+        seen.add(trait_id)
+        params = row.get("params")
+        if params is not None and not isinstance(params, dict):
+            raise CombatIntentError(f"{label} trait {trait_id} params must be an object")
+        params = params if isinstance(params, dict) else {}
+        extra = set(params) - TRAIT_PARAMS[trait_id]
+        if extra:
+            raise CombatIntentError(
+                f"{label} trait {trait_id} has unknown parameter(s): "
+                f"{', '.join(sorted(extra))}"
+            )
+        if trait_id == "legendary_resistance":
+            per_day = params.get("per_day", LEGENDARY_RESISTANCE_DEFAULT_PER_DAY)
+            if isinstance(per_day, bool) or not isinstance(per_day, int) or not 1 <= per_day <= 5:
+                raise CombatIntentError(
+                    f"{label} legendary resistance per_day is invalid"
+                )
+
+
+def _validate_enemy_actions(enemy: dict[str, Any], label: str) -> None:
+    """S0-MM3b: the stat block's ``actions[]`` container.
+
+    Only Multiattack is expressible today; a save-based action is the next
+    slice's kind, and an unknown kind must fail closed rather than be ignored —
+    an action the engine cannot settle is worse than an action it refuses.
+    """
+
+    raw = enemy.get("actions")
+    if raw is None:
+        return
+    if not isinstance(raw, list) or not 0 <= len(raw) <= 20:
+        raise CombatIntentError(f"{label} actions must list 0 to 20 entries")
+    seen: set[str] = set()
+    for action in raw:
+        if not isinstance(action, dict):
+            raise CombatIntentError(f"{label} action must be an object")
+        action_id = str(action.get("id") or "")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", action_id) or action_id in seen:
+            raise CombatIntentError(f"{label} action id is invalid or duplicated")
+        seen.add(action_id)
+        kind = str(action.get("kind") or "")
+        if kind == "multiattack":
+            _validate_multiattack_action(action, f"{label} {action_id}")
+            continue
+        if kind == "save_action":
+            _validate_save_action(action, f"{label} {action_id}")
+            continue
+        raise CombatIntentError(f"{label} action kind is not supported")
 
 
 def _validate_statblock_extras(enemy: dict[str, Any], label: str) -> None:
@@ -670,8 +1027,8 @@ class CombatValidationMixin:
         conditions = self._effective_conditions(instance, combat, actor)
         flags = condition_flags(self.catalog.conditions, conditions)
         if flags["incapacitated"] and intent_type in {
-            "attack", "cast_spell", "activate_item", "class_capability", "dash", "dodge",
-            "disengage", "hide", "stabilize",
+            "attack", "multiattack", "save_action", "cast_spell", "activate_item",
+            "class_capability", "dash", "dodge", "disengage", "hide", "stabilize",
         }:
             raise CombatIntentError("an incapacitated actor cannot take actions")
         if flags["speed_zero"] and intent_type == "move":
@@ -680,19 +1037,32 @@ class CombatValidationMixin:
         self._validate_turn_choice(
             intent, intent_type, actor, economy, conditions,
         )
-        if intent_type in {"attack", "dash", "dodge", "disengage", "hide", "stabilize"}:
+        if intent_type in {
+            "attack", "multiattack", "save_action", "dash", "dodge", "disengage",
+            "hide", "stabilize",
+        }:
             has_action = int(economy.get("action", 0) or 0) > 0 or int(
                 economy.get("surge_action", 0) or 0
             ) > 0
-            if intent_type == "attack":
+            if intent_type in {"attack", "multiattack", "save_action"}:
                 # Horde Breaker 的第二击不付动作：它由"本回合已经打过一次"
                 # 这个事实买断，校验里另行证明。
+                #
+                # ``attacks_remaining`` 只兑现 Attack action 剩下的那几次攻击。
+                # Multiattack 与存档型动作各自要有一次完整的动作：让它们也吃
+                # 这份额度，会把"截断的 Multiattack 还剩 2 击"变成"还能再放
+                # 两次吐息"。
                 if intent.get("second_target_of"):
                     pass
-                elif not has_action and int(
-                    economy.get("attacks_remaining", 0) or 0
-                ) < 1:
-                    raise CombatIntentError("the Attack action is no longer available")
+                elif not has_action and not (
+                    intent_type == "attack"
+                    and int(economy.get("attacks_remaining", 0) or 0) >= 1
+                ):
+                    raise CombatIntentError(
+                        "the Attack action is no longer available"
+                        if intent_type == "attack"
+                        else "the action has already been spent"
+                    )
             elif not has_action:
                 raise CombatIntentError("the action has already been spent")
             if intent_type == "hide":
@@ -719,6 +1089,10 @@ class CombatValidationMixin:
         if intent_type == "attack":
             self._validate_attack(instance, combat, intent, actor)
             self._validate_horde_breaker(instance, combat, intent, actor)
+        if intent_type == "multiattack":
+            self._validate_multiattack(instance, combat, intent, actor)
+        if intent_type == "save_action":
+            self._validate_save_action_intent(instance, combat, intent, actor)
         if intent_type == "superior_hunters_prey":
             self._validate_superior_prey(instance, combat, intent, actor)
         if intent_type == "end_turn":
@@ -779,8 +1153,8 @@ class CombatValidationMixin:
         if intent_type == "move":
             return "move"
         if intent_type in {
-            "attack", "dash", "dodge", "disengage", "hide", "stabilize",
-            "activate_item",
+            "attack", "multiattack", "save_action", "dash", "dodge", "disengage",
+            "hide", "stabilize", "activate_item",
         }:
             return "action"
         if intent_type == "cast_spell":
@@ -1805,6 +2179,87 @@ class CombatValidationMixin:
             raise CombatIntentError(f"target is out of range ({distance} > {long_range} feet)")
         self._validate_hit_riders(actor, intent, combat)
         self._validate_attack_state_options(instance, combat, intent, actor, weapon, distance)
+
+    def _validate_save_action_intent(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor: dict[str, Any],
+    ) -> None:
+        """S0-MM3c: name an action the creature has and still may use.
+
+        Availability is checked here rather than during resolution because a
+        spent per-day action or a recharge that has not come back must refuse
+        the whole intent — and must not consume the creature's action either.
+        """
+
+        target_id = str(intent.get("target_id") or "")
+        target = self._actor_view(instance, combat, target_id)
+        if str(target.get("side") or "") == str(actor.get("side") or "") or target["hp"] <= 0:
+            raise CombatIntentError("save action target must be a living hostile actor")
+        action = self._declared_action(actor, intent)
+        if action is None or str(action.get("kind") or "") != "save_action":
+            raise CombatIntentError("save action profile is not available to the actor")
+        usage = self._action_usage(actor, str(action["id"]))
+        if not usage["available"]:
+            raise CombatIntentError("this action is not available yet")
+        if set(intent) - {
+            "intent_id", "type", "expected_version", "submitted_by", "actor_id",
+            "target_id", "action_id",
+        }:
+            raise CombatIntentError("save action intent has unknown field(s)")
+
+    @staticmethod
+    def _action_usage(actor: dict[str, Any], action_id: str) -> dict[str, Any]:
+        """Whether a stat-block action can be used right now, and why not.
+
+        Absence of state means "never used": a fresh combat starts with every
+        recharge available and every per-day budget whole.
+        """
+
+        stored = (actor.get("usage") or {}).get(action_id)
+        stored = stored if isinstance(stored, dict) else {}
+        return {
+            "available": bool(stored.get("available", True)),
+            "used": int(stored.get("used", 0) or 0),
+        }
+
+    def _validate_multiattack(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor: dict[str, Any],
+    ) -> None:
+        """S0-MM3b: one action, N attacks, all of them provable now.
+
+        The whole batch is validated here rather than per attack during
+        resolution: "任一击被拒绝则整批拒绝" only holds if nothing can fail
+        halfway through.  A missing attack id, an out-of-range part or a branch
+        the action does not offer all end the intent before any die is rolled.
+        """
+
+        target_id = str(intent.get("target_id") or "")
+        target = self._actor_view(instance, combat, target_id)
+        if str(target.get("side") or "") == str(actor.get("side") or "") or target["hp"] <= 0:
+            raise CombatIntentError("attack target must be a living hostile actor")
+        # 字段闭集：`second_target_of` 是 Horde Breaker 的免费第二击通道，
+        # 让它出现在 Multiattack 上等于白送一次动作；其余字段（换手、双手、
+        # Lucky）都只属于玩家武器意图。
+        if set(intent) - {
+            "intent_id", "type", "expected_version", "submitted_by", "actor_id",
+            "target_id", "action_id", "choice",
+        }:
+            raise CombatIntentError("multiattack intent has unknown field(s)")
+        action = self._declared_action(actor, intent)
+        if action is None:
+            raise CombatIntentError("multiattack profile is not available to the actor")
+        parts = self._multiattack_parts(actor, action, intent)
+        if not parts:
+            raise CombatIntentError("multiattack resolves to no attack")
+        distance = self._distance(combat, str(actor["actor_id"]), target_id)
+        for attack, _count in parts:
+            long_range = int(attack.get("long_range") or attack.get("range", 5))
+            if distance > long_range:
+                raise CombatIntentError(
+                    f"target is out of range for {attack.get('id')} "
+                    f"({distance} > {long_range} feet)"
+                )
 
     def _validate_attack_state_options(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],

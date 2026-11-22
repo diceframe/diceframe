@@ -225,12 +225,17 @@ def test_a_level_four_rogue_gets_no_reaction_decision() -> None:
 
 
 def test_a_blinded_rogue_is_not_offered_uncanny_dodge() -> None:
-    """Uncanny Dodge needs to see the attacker; a blinded rogue just takes it."""
+    """Uncanny Dodge needs to see the attacker; a blinded rogue just takes it.
+
+    A blinded target also gives its attacker Advantage (registry fact since
+    S0-MM3a), so the roll order is two d20s and then the damage die — the
+    assertion is about the missing decision, not about the number of dice.
+    """
 
     engine, instance = _instance()
     _player(instance).setdefault("conditions", {})["blinded"] = {}
 
-    events = _hit_once(engine, instance, [15, 4])
+    events = _hit_once(engine, instance, [15, 12, 4])
 
     assert not any(
         event["type"] == "dnd2024.decision.pending" for event in events
