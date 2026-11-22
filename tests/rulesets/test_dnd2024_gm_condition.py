@@ -230,7 +230,8 @@ def test_the_effects_live_in_their_own_section_with_a_named_source():
     engine, _instance_ = _combat()
     catalog = engine.catalog
 
-    assert len(catalog.effects) == 15
+    # 15 条法术/特性/精通产物 + Steady Aim 的速度归零（#829 引入）。
+    assert len(catalog.effects) == 16
     for effect_id, entry in catalog.effects.items():
         assert entry["kind"] == "effect"
         assert str(entry.get("source_ref") or ""), effect_id

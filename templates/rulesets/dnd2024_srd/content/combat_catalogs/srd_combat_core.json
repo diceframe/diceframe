@@ -123,40 +123,37 @@
     "scorching_ray": {"mode": "spell_attack", "damage": "2d6", "damage_type": "fire", "range": 120, "target_count": 3, "upcast_target_count": 1, "repeat_targets": true}
   },
   "conditions": {
-    "steady_aim_slow": {"speed_zero": true},
-    "invisible": {"kind": "condition", "initiative_advantage": true, "attack_modes": [
-      {"side": "target", "mode": "disadvantage", "negated_by": ["see_invisibility", "truesight", "blindsight"]},
-      {"side": "actor", "mode": "advantage", "negated_by": ["see_invisibility", "truesight", "blindsight"]}
-    ]},
+    "invisible": {"kind": "condition", "initiative_advantage": true, "attack_modes": [{"side": "target", "mode": "disadvantage", "negated_by": ["see_invisibility", "truesight", "blindsight"]}, {"side": "actor", "mode": "advantage", "negated_by": ["see_invisibility", "truesight", "blindsight"]}]},
     "charmed": {"kind": "condition", "cannot_attack_source": true},
     "frightened": {"kind": "condition", "attack_modes": [{"side": "actor", "mode": "disadvantage"}], "cannot_approach_source": true},
     "incapacitated": {"kind": "condition", "implies_incapacitated": true},
     "paralyzed": {"kind": "condition", "attack_modes": [{"side": "target", "mode": "advantage"}], "implies_incapacitated": true, "speed_zero": true, "auto_fail_saves": ["str", "dex"], "crit_on_hit_within_5": true},
     "stunned": {"kind": "condition", "attack_modes": [{"side": "target", "mode": "advantage"}], "implies_incapacitated": true, "auto_fail_saves": ["str", "dex"]},
     "unconscious": {"kind": "condition", "attack_modes": [{"side": "target", "mode": "advantage"}], "implies_incapacitated": true, "speed_zero": true, "auto_fail_saves": ["str", "dex"], "crit_on_hit_within_5": true},
-    "prone": {"kind": "condition", "attack_modes": [{"side": "actor", "mode": "disadvantage"}]},
+    "prone": {"kind": "condition", "attack_modes": [{"side": "actor", "mode": "disadvantage"}, {"side": "target", "mode": "advantage", "within_ft": 5}, {"side": "target", "mode": "disadvantage", "beyond_ft": 5}], "stand_up": {"cost": "movement", "fraction": 2}},
+    "grappled": {"kind": "condition", "speed_zero": true, "escape": {"cost": "action", "checks": [{"ability": "str", "skill": "athletics"}, {"ability": "dex", "skill": "acrobatics"}]}},
+    "restrained": {"kind": "condition", "speed_zero": true, "attack_modes": [{"side": "target", "mode": "advantage"}, {"side": "actor", "mode": "disadvantage"}], "escape": {"cost": "action", "checks": [{"ability": "str", "skill": "athletics"}, {"ability": "dex", "skill": "acrobatics"}]}},
     "blinded": {"kind": "condition", "attack_modes": [{"side": "target", "mode": "advantage"}, {"side": "actor", "mode": "disadvantage"}]},
     "deafened": {"kind": "condition", "attack_modes": []},
-    "grappled": {"kind": "condition", "speed_zero": true},
-    "petrified": {"kind": "condition", "implies_incapacitated": true, "speed_zero": true, "auto_fail_saves": ["str", "dex"], "attack_modes": [{"side": "target", "mode": "advantage"}]},
     "poisoned": {"kind": "condition", "attack_modes": [{"side": "actor", "mode": "disadvantage"}]},
-    "restrained": {"kind": "condition", "speed_zero": true, "attack_modes": [{"side": "target", "mode": "advantage"}, {"side": "actor", "mode": "disadvantage"}]}
+    "petrified": {"kind": "condition", "implies_incapacitated": true, "speed_zero": true, "auto_fail_saves": ["str", "dex"], "attack_modes": [{"side": "target", "mode": "advantage"}]}
   },
   "condition_effects": {
-    "blessed": {"kind": "effect", "check_bonus_dice": [{"die": 4, "kinds": ["attack", "saving_throw"]}], "source_ref": "spell:bless"},
-    "next_attack_advantage": {"kind": "effect", "attack_modes": [{"side": "target", "mode": "advantage", "consume_on": "attack_resolved"}], "source_ref": "mastery:vex"},
-    "next_attack_disadvantage": {"kind": "effect", "attack_modes": [{"side": "actor", "mode": "disadvantage", "consume_on": "attack_resolved"}], "source_ref": "mastery:sap"},
-    "faerie_fire": {"kind": "effect", "attack_modes": [{"side": "target", "mode": "advantage"}], "source_ref": "spell:faerie_fire"},
-    "dodging": {"kind": "effect", "attack_modes": [{"side": "target", "mode": "disadvantage"}], "source_ref": "action:dodge"},
-    "blurred": {"kind": "effect", "attack_modes": [{"side": "target", "mode": "disadvantage", "negated_by": ["blindsight", "truesight"]}], "source_ref": "spell:blur"},
-    "rage": {"kind": "effect", "resist_damage_types": ["bludgeoning", "piercing", "slashing"], "source_ref": "feature:rage"},
-    "hunters_defense": {"kind": "effect", "attack_modes": [], "source_ref": "feature:superior_hunters_defense"},
-    "stoneskinned": {"kind": "effect", "resist_damage_types": ["bludgeoning", "piercing", "slashing"], "source_ref": "spell:stoneskin"},
-    "poison_resistant": {"kind": "effect", "resist_damage_types": ["poison"], "source_ref": "spell:protection_from_poison"},
-    "slowed_10": {"kind": "effect", "speed_modifier": -10, "source_ref": "mastery:slow"},
-    "staggered": {"kind": "effect", "speed_halved": true, "source_ref": "feature:stunning_strike"},
-    "staggered_opening": {"kind": "effect", "attack_modes": [{"side": "target", "mode": "advantage", "consume_on": "attack_resolved"}], "source_ref": "feature:stunning_strike"},
-    "reckless": {"kind": "effect", "attack_modes": [{"side": "target", "mode": "advantage"}], "source_ref": "feature:reckless_attack"},
-    "hamstrung": {"kind": "effect", "speed_modifier": -15, "source_ref": "feature:brutal_strike"}
+    "steady_aim_slow": {"kind": "effect", "source_ref": "feature:steady_aim", "speed_zero": true},
+    "blessed": {"kind": "effect", "source_ref": "spell:bless", "check_bonus_dice": [{"die": 4, "kinds": ["attack", "saving_throw"]}]},
+    "next_attack_advantage": {"kind": "effect", "source_ref": "mastery:vex", "attack_modes": [{"side": "target", "mode": "advantage", "consume_on": "attack_resolved"}]},
+    "next_attack_disadvantage": {"kind": "effect", "source_ref": "mastery:sap", "attack_modes": [{"side": "actor", "mode": "disadvantage", "consume_on": "attack_resolved"}]},
+    "faerie_fire": {"kind": "effect", "source_ref": "spell:faerie_fire", "attack_modes": [{"side": "target", "mode": "advantage"}]},
+    "dodging": {"kind": "effect", "source_ref": "action:dodge", "attack_modes": [{"side": "target", "mode": "disadvantage"}]},
+    "blurred": {"kind": "effect", "source_ref": "spell:blur", "attack_modes": [{"side": "target", "mode": "disadvantage", "negated_by": ["blindsight", "truesight"]}]},
+    "rage": {"kind": "effect", "source_ref": "feature:rage", "resist_damage_types": ["bludgeoning", "piercing", "slashing"]},
+    "hunters_defense": {"kind": "effect", "source_ref": "feature:superior_hunters_defense", "attack_modes": []},
+    "stoneskinned": {"kind": "effect", "source_ref": "spell:stoneskin", "resist_damage_types": ["bludgeoning", "piercing", "slashing"]},
+    "poison_resistant": {"kind": "effect", "source_ref": "spell:protection_from_poison", "resist_damage_types": ["poison"]},
+    "slowed_10": {"kind": "effect", "source_ref": "mastery:slow", "speed_modifier": -10},
+    "staggered": {"kind": "effect", "source_ref": "feature:stunning_strike", "speed_halved": true},
+    "staggered_opening": {"kind": "effect", "source_ref": "feature:stunning_strike", "attack_modes": [{"side": "target", "mode": "advantage", "consume_on": "attack_resolved"}]},
+    "reckless": {"kind": "effect", "source_ref": "feature:reckless_attack", "attack_modes": [{"side": "target", "mode": "advantage"}]},
+    "hamstrung": {"kind": "effect", "source_ref": "feature:brutal_strike", "speed_modifier": -15}
   }
 }
