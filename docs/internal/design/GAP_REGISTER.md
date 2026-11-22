@@ -46,7 +46,7 @@
 | GAP-31 | 传奇抗性自动生效，没有「拒绝」通道 | `_legendary_resistance_events` 在豁免失败时直接改写成功，不经决策窗口 | GM 无法选择「这次不用传奇抗性」，等于替玩家/怪物做了决定 | S0-MM4（决策窗口统一化），未开工 | 未开工 |
 | GAP-32 | Flyby 缺「飞行中」这个前提 | 引擎没有飞行状态；`_movement_events` 见到 `flyby` 就清空威胁表 | 一只被摔到地上的飞禽仍然免借机攻击 | 与「飞行/坠落」系统同批，未立项 | 未开工 |
 | GAP-33 | 呼吸与穿缝类特质没有规则消费者 | `amphibious` / `water_breathing` / `amorphous` 只做了声明与视图投影，`grep -rn "amphibious" src/` 只有契约与投影 | 水下窒息、挤过 5 尺缝隙这类判定无处生效（与 GAP-2 的技能检定缺口同源） | 环境与探索规则（未立项） | 未开工 |
-| GAP-34 | 模块怪物档案不接受新形状 | `content/contracts.py::_validate_attacks` 仍只认 `id / name / damage(str) / attack_bonus / range`，且没有 `actions` / `traits` | 冒险包里手写的怪物无法使用 riders / Multiattack / 存档型动作 / 特质 | 模块内容契约（未立项） | 未开工 |
+| GAP-34 | 模块怪物档案不接受新形状，且预设投影与权威状态不同形 | `content/contracts.py::_validate_attacks` 仍只认 `id / name / damage(str) / attack_bonus / range`，且没有 `actions` / `traits` | 冒险包里手写的怪物无法使用 riders / Multiattack / 存档型动作 / 特质；`encounter_presets()` 仍返回旧形状字符串（`attacks[0].damage == "1d4+1"`），而 `combat.start` 之后权威状态是段数组，同一份数据在开战前后形状不同 | 模块内容契约（未立项） | 未开工 |
 | GAP-35 | 条件的感官后果没有消费者 | `condition_flags` 只有 5 个布尔；`blinded` 的「依赖视觉的检定自动失败」、`deafened` 的听觉判定、`petrified` 与 `exhaustion` 的整段效果都没有落点 | 这几个条件目前只有攻击面与速度面，感知面仍是空的 | 随 GAP-2 / GAP-3 的检定系统 | 未开工 |
 | GAP-36 | Multiattack 的「替换攻击 / 任意组合」没有原语 | `_validate_multiattack` 只收 `repeat` / `combo` / `choice`；`parse_multiattack` 见到 `replace` / `in any combination` / `Spellcasting` 整条跳过 | CR 0-1 里 6 条 Multiattack（Lion / Pirate / Goblin Boss / Scout / Rust Monster / Dryad）无法导入 | S0-MM4（怪物施法原语之后） | 未开工 |
 | GAP-37 | `spider_climb` 只有速度事实，移动不读它 | `_with_climb_speed` 只写 `speeds.climb`；移动预算仍只读 `speeds.walk`，没有「攀爬不额外消耗」的判定 | 攀爬在战斗里仍按步行速度结算，等于没说 | 阶段三（3D/网格移动） | 未开工 |

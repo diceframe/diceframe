@@ -385,7 +385,9 @@ def test_combat_start_uses_module_monster_profiles(tmp_path) -> None:
         # 敌人数据来自模块 catalog 的 monster profile，而不是内联 statblock。
         assert rat["hp"] == 11 and rat["max_hp"] == 11
         assert rat["armor_class"] == 13
-        assert rat["attacks"][0]["damage"] == "1d4+1"
+        # S0-MM3a 之后权威状态里的伤害是段数组（装配期归一）；模块档案与
+        # 预设投影仍是旧形状的字符串，见 GAP-34。
+        assert rat["attacks"][0]["damage"] == [{"dice": "1d4+1", "type": "bludgeoning"}]
     finally:
         lorebook.close()
 

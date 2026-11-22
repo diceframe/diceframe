@@ -147,7 +147,7 @@ Mark 的额外伤害、光耀/神圣打击）只在直通路径的 `_resolve_com
 | 传奇抗性的拒绝通道 | 自动生效 | GAP-31 |
 | Flyby 的"飞行中" | 无飞行状态，见 `flyby` 即免借机 | GAP-32 |
 | `amphibious` / `water_breathing` / `amorphous` | 只声明与投影，无规则消费者 | GAP-33 |
-| 模块怪物档案 | `content/contracts.py` 不认新形状 | GAP-34 |
+| 模块怪物档案 | `content/contracts.py` 不认新形状；预设投影仍是字符串，权威状态是数组 | GAP-34 |
 | `blinded` / `deafened` / `petrified` / `exhaustion` 的感知面 | 只有攻击面与速度面 | GAP-35 |
 | Multiattack 的替换 / 任意组合（6 条） | 未导入 | GAP-36 |
 | `spider_climb` 的移动折扣 | 只有 climb 速度事实，移动仍读 walk | GAP-37 |
