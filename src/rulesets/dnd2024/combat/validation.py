@@ -809,6 +809,16 @@ class CombatValidationMixin:
         capability_id = str(intent.get("capability_id") or "")
         if not capability_id:
             raise CombatIntentError("capability_id is required")
+        via_fleet_step = intent.get("via_fleet_step")
+        if via_fleet_step is not None and not isinstance(via_fleet_step, bool):
+            raise CombatIntentError("via_fleet_step must be a boolean")
+        if via_fleet_step:
+            if capability_id != "step_of_the_wind":
+                raise CombatIntentError(
+                    "Fleet Step can only grant Step of the Wind"
+                )
+            if not bool(economy.get("fleet_step_available")):
+                raise CombatIntentError("Fleet Step is not available this turn")
         capability = self.features.declared_capability(
             self._feature_character(actor), capability_id,
         )
