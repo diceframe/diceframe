@@ -525,7 +525,9 @@ class WebAPI:
                 ),
             )
         )
-        self._manual_rolls = manual_rolls.ManualRollService(manual_rolls.ManualRollDependencies(_parse_game_key, self._reg.get, self._reg.save, self._load_rule_for_game))
+        self._manual_rolls = manual_rolls.ManualRollService(manual_rolls.ManualRollDependencies(
+            _parse_game_key, self._reg.get, self._reg.save, self._load_rule_for_game,
+            resolve_check=self._resolve_ruleset_check))
         import secrets
         self._profile_games = ProfileService(ProfileDependencies(get=self._reg.get, register=self._reg.register, save=self._reg.save, roll=lambda: secrets.randbelow(6) + 1))
         self._check_reveals = check_reveals.CheckRevealService(check_reveals.CheckRevealDependencies(_parse_game_key, self._reg.get, self._reg.save))
@@ -2148,6 +2150,15 @@ class WebAPI:
             or "freeform_fantasy"
         )
         return self._load_rule_by_id(rule_id, language)
+
+    def _resolve_ruleset_check(self, instance: Any, uid: str, check: dict[str, Any]):
+        """G4：把 GM 发起的技能/属性检定交给规则集结算（通用服务不认规则表）。"""
+
+        runtime = self._load_runtime_for_game(instance)
+        hook = getattr(runtime, "resolve_ability_check", None)
+        if not callable(hook):
+            raise ValueError("this ruleset does not support ability checks")
+        return hook(instance, uid, check)
 
     def _load_runtime_for_game(self, inst):
         rule = self._load_rule_for_game(inst)

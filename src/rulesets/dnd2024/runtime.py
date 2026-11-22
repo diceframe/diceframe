@@ -5,6 +5,7 @@ from __future__ import annotations
 from src.engine import module_hooks
 
 import logging
+import random
 from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
@@ -34,6 +35,7 @@ import src.rulesets.dnd2024.advancement_access as advancement_access
 from src.rulesets.dnd2024.binding import rule_binding
 from src.rulesets.dnd2024.character.attunement import attunement_state_for_projection
 from src.rulesets.dnd2024.character.builder import Dnd2024CharacterBuilder
+from src.rulesets.dnd2024.character.primitives import ABILITY_IDS, ability_modifier
 from src.rulesets.dnd2024.character.reconciliation import (
     Dnd2024CharacterStateReconciler,
     merge_live_character_projection,
@@ -1067,6 +1069,42 @@ class Dnd2024Runtime:
         combat = state.get("combat") if isinstance(state, dict) else None
         if isinstance(combat, dict) and combat.get("active"):
             raise ValueError("战斗进行中不能休息；请先在“权威战斗”中结束战斗")
+
+    def resolve_ability_check(
+        self, instance: Any, uid: str, check: dict[str, Any], rng: Any = None,
+    ) -> dict[str, Any]:
+        """Settle one ability or skill check the table asked for (G4).
+
+        修正取自角色卡已派生的 ``proficiencies.skill_values``——它已经含属性、
+        熟练与专精，所以这里不重算熟练；只做“掷一颗 d20 + 该值，对 DC 判成败”。
+        没有技能时退回属性修正。未知技能 / 非法属性一律拒绝，不猜。
+        """
+
+        sheet = instance.get_character_sheet(uid)
+        canonical = sheet.get("ruleset_character") if isinstance(sheet, dict) else None
+        if not isinstance(canonical, dict):
+            raise ValueError("character is missing ruleset_character")
+        skill = str(check.get("skill") or "")
+        ability = str(check.get("ability") or "")
+        if skill:
+            values = (canonical.get("proficiencies") or {}).get("skill_values") or {}
+            if skill not in values:
+                raise ValueError(f"unknown skill: {skill}")
+            modifier = int(values[skill])
+        else:
+            if ability not in ABILITY_IDS:
+                raise ValueError("ability must be one of " + ", ".join(ABILITY_IDS))
+            modifier = ability_modifier(
+                int((canonical.get("abilities") or {}).get(ability, 10) or 10)
+            )
+        die = int(rng.randint(1, 20)) if rng is not None else random.randint(1, 20)
+        dc = int(check["dc"])
+        total = die + modifier
+        return {
+            "rolls": [die], "natural": die, "modifier": modifier,
+            "ability": ability, "skill": skill, "total": total, "dc": dc,
+            "success": total >= dc,
+        }
 
     def available_intents(self, instance: Any, actor_id: str) -> list[dict[str, Any]]:
         locale = str(getattr(instance, "language", "") or "")
