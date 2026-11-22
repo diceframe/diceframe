@@ -303,6 +303,8 @@ class Dnd2024CombatCatalog:
                 "speed_zero", "auto_fail_saves", "crit_on_hit_within_5",
                 "speed_modifier", "speed_halved", "check_bonus_dice",
                 "initiative_advantage", "cannot_attack_source", "cannot_approach_source",
+                # S0-MM3e：条件自带"怎么解除"，与"怎么施加"分开声明。
+                "escape", "stand_up",
             }:
                 raise CombatCatalogError(
                     f"combat condition has unknown fields: {condition_id}"
@@ -386,6 +388,7 @@ class Dnd2024CombatCatalog:
                         "implies_incapacitated", "speed_zero",
                         "auto_fail_saves", "crit_on_hit_within_5", "speed_modifier",
                         "speed_halved", "cannot_attack_source", "cannot_approach_source",
+                        "escape", "stand_up",
                     )
                 )
             ):
@@ -400,9 +403,27 @@ class Dnd2024CombatCatalog:
                     raise CombatCatalogError(
                         f"combat condition attack mode must be an object: {condition_id}"
                     )
-                if set(declaration) - {"side", "mode", "negated_by", "consume_on"}:
+                if set(declaration) - {
+                    "side", "mode", "negated_by", "consume_on", "within_ft", "beyond_ft",
+                }:
                     raise CombatCatalogError(
                         f"combat condition attack mode has unknown fields: {condition_id}"
+                    )
+                for bound in ("within_ft", "beyond_ft"):
+                    value = declaration.get(bound)
+                    if value is None:
+                        continue
+                    if (
+                        isinstance(value, bool) or not isinstance(value, int)
+                        or not 0 <= value <= 600
+                    ):
+                        raise CombatCatalogError(
+                            f"combat condition attack mode {bound} is invalid: {condition_id}"
+                        )
+                if "within_ft" in declaration and "beyond_ft" in declaration:
+                    raise CombatCatalogError(
+                        "combat condition attack mode cannot be both within and beyond"
+                        f": {condition_id}"
                     )
                 if (
                     declaration.get("side") not in {"actor", "target"}
@@ -423,8 +444,71 @@ class Dnd2024CombatCatalog:
                     raise CombatCatalogError(
                         f"combat condition consume_on is invalid: {condition_id}"
                     )
+            Dnd2024CombatCatalog._validate_condition_release(entry, str(condition_id))
             result[str(condition_id)] = deepcopy(entry)
         return result
+
+    @staticmethod
+    def _validate_condition_release(entry: dict[str, Any], condition_id: str) -> None:
+        """S0-MM3e: how a condition can be ended from inside it.
+
+        ``escape`` names the checks that may remove it and what they cost;
+        ``stand_up`` names the movement price of ending it yourself.  The DC is
+        *not* here: two creatures can grab with different DCs, so the number
+        lives on the applied instance and this block only says what shape the
+        attempt has.
+        """
+
+        escape = entry.get("escape")
+        if escape is not None:
+            if not isinstance(escape, dict) or set(escape) - {"cost", "checks"}:
+                raise CombatCatalogError(
+                    f"combat condition escape is invalid: {condition_id}"
+                )
+            if escape.get("cost") not in {"action", "bonus_action"}:
+                raise CombatCatalogError(
+                    f"combat condition escape cost is invalid: {condition_id}"
+                )
+            checks = escape.get("checks")
+            if not isinstance(checks, list) or not 1 <= len(checks) <= 4:
+                raise CombatCatalogError(
+                    f"combat condition escape checks are invalid: {condition_id}"
+                )
+            seen_abilities: set[str] = set()
+            for row in checks:
+                if not isinstance(row, dict) or set(row) - {"ability", "skill"}:
+                    raise CombatCatalogError(
+                        f"combat condition escape check is invalid: {condition_id}"
+                    )
+                ability = row.get("ability")
+                if ability not in SAVE_ABILITIES or ability in seen_abilities:
+                    raise CombatCatalogError(
+                        f"combat condition escape ability is invalid: {condition_id}"
+                    )
+                seen_abilities.add(str(ability))
+                skill = row.get("skill")
+                if skill is not None and (not isinstance(skill, str) or not skill):
+                    raise CombatCatalogError(
+                        f"combat condition escape skill is invalid: {condition_id}"
+                    )
+        stand_up = entry.get("stand_up")
+        if stand_up is not None:
+            if not isinstance(stand_up, dict) or set(stand_up) - {"cost", "fraction"}:
+                raise CombatCatalogError(
+                    f"combat condition stand up is invalid: {condition_id}"
+                )
+            if stand_up.get("cost") != "movement":
+                raise CombatCatalogError(
+                    f"combat condition stand up cost is invalid: {condition_id}"
+                )
+            fraction = stand_up.get("fraction")
+            if (
+                isinstance(fraction, bool) or not isinstance(fraction, int)
+                or not 1 <= fraction <= 4
+            ):
+                raise CombatCatalogError(
+                    f"combat condition stand up fraction is invalid: {condition_id}"
+                )
 
     @staticmethod
     def _validated_unarmed_strike(raw: Any) -> dict[str, Any] | None:

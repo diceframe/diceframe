@@ -136,6 +136,11 @@ INTENT_TYPES = frozenset({
     # S0-MM3c：目标掷一次豁免，失败吃全额、成功吃（数据声明的）半伤。
     # 掷骰由服务端做，客户端只提交动作 id。
     "save_action",
+    # S0-MM3e：从条件内部解除它。要求（DC / 允许的检定 / 成本）全部来自
+    # 状态：实例给 DC，注册表给形状。客户端只能选"用哪个能力挣"。
+    "escape",
+    # 起身：花一半速度解除自己的 Prone。不是动作，所以与 escape 分开。
+    "stand_up",
 })
 # 归零前的存活决策（Relentless Rage）：伤害已被掷出并挂起，HP 尚未改变。
 # 它和其它 pending decision 一样由 resolution 结算、reducer 记账，区别只在
@@ -378,3 +383,52 @@ def trait_params(traits: Any, trait_id: str) -> dict[str, Any]:
             params = row.get("params")
             return dict(params) if isinstance(params, dict) else {}
     return {}
+
+
+# S0-MM3e：条件自带"怎么解除"。类型面在注册表（能不能挣脱、用什么检定、
+# 花什么成本），数值面在实例（`escape_dc` 来自施加者）。两者缺一不可：
+# 只在注册表写 DC 会让不同擒抱者有同一个 DC，只在实例写又会让"能不能挣脱"
+# 变成施加者的自由裁量。
+def condition_escapes(
+    registry: Mapping[str, Any], conditions: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Every carried condition that declares an escape, with its DC.
+
+    A declaration without ``escape_dc`` on the instance is *not* listed: an
+    attempt whose DC nobody declared cannot be made, and inventing one here
+    would be the engine deciding a number the stat block never printed.
+    """
+
+    found: list[dict[str, Any]] = []
+    for condition_id, entry in conditions.items():
+        declared = (registry.get(str(condition_id)) or {}).get("escape")
+        if not isinstance(declared, dict):
+            continue
+        instance = entry if isinstance(entry, dict) else {}
+        dc = instance.get("escape_dc")
+        if isinstance(dc, bool) or not isinstance(dc, int) or dc <= 0:
+            continue
+        found.append({
+            "condition": str(condition_id),
+            "cost": str(declared.get("cost") or "action"),
+            "checks": [dict(row) for row in declared.get("checks") or []],
+            "escape_dc": dc,
+            "source_actor_id": str(instance.get("source_actor_id") or ""),
+        })
+    return found
+
+
+def stand_up_declaration(
+    registry: Mapping[str, Any], conditions: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """The movement price of ending a carried condition on yourself."""
+
+    for condition_id in conditions:
+        declared = (registry.get(str(condition_id)) or {}).get("stand_up")
+        if not isinstance(declared, dict):
+            continue
+        fraction = int(declared.get("fraction") or 0)
+        if fraction <= 0:
+            continue
+        return {"condition": str(condition_id), "fraction": fraction}
+    return None

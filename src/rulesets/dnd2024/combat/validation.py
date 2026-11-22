@@ -62,6 +62,7 @@ from .primitives import (
     RIDER_PUSH_MINIMUM_FT,
     LEGENDARY_RESISTANCE_DEFAULT_PER_DAY,
     SACRED_WEAPON_CONDITION,
+    stand_up_declaration,
     UNARMED_STRIKE_REF,
     SIZE_CODES,
     TRAIT_IDS,
@@ -1027,8 +1028,9 @@ class CombatValidationMixin:
         conditions = self._effective_conditions(instance, combat, actor)
         flags = condition_flags(self.catalog.conditions, conditions)
         if flags["incapacitated"] and intent_type in {
-            "attack", "multiattack", "save_action", "cast_spell", "activate_item",
-            "class_capability", "dash", "dodge", "disengage", "hide", "stabilize",
+            "attack", "multiattack", "save_action", "escape", "stand_up",
+            "cast_spell", "activate_item", "class_capability", "dash", "dodge",
+            "disengage", "hide", "stabilize",
         }:
             raise CombatIntentError("an incapacitated actor cannot take actions")
         if flags["speed_zero"] and intent_type == "move":
@@ -1093,6 +1095,10 @@ class CombatValidationMixin:
             self._validate_multiattack(instance, combat, intent, actor)
         if intent_type == "save_action":
             self._validate_save_action_intent(instance, combat, intent, actor)
+        if intent_type == "escape":
+            self._validate_escape(intent, actor, economy)
+        if intent_type == "stand_up":
+            self._validate_stand_up(intent, actor, economy)
         if intent_type == "superior_hunters_prey":
             self._validate_superior_prey(instance, combat, intent, actor)
         if intent_type == "end_turn":
@@ -2221,6 +2227,83 @@ class CombatValidationMixin:
             "available": bool(stored.get("available", True)),
             "used": int(stored.get("used", 0) or 0),
         }
+
+    def _validate_escape(
+        self, intent: dict[str, Any], actor: dict[str, Any], economy: dict[str, Any],
+    ) -> None:
+        """S0-MM3e: escape a condition whose DC and shape are already on record.
+
+        The intent names a condition and an ability; the DC, the legal checks
+        and the cost all come from state.  A caller cannot declare a DC — that
+        is the whole point of reading it from the applied instance.
+        """
+
+        if set(intent) - {
+            "intent_id", "type", "expected_version", "submitted_by", "actor_id",
+            "condition", "check",
+        }:
+            raise CombatIntentError("escape intent has unknown field(s)")
+        condition_id = str(intent.get("condition") or "")
+        declared = self.catalog.conditions.get(condition_id) or {}
+        escape = declared.get("escape")
+        if not isinstance(escape, dict):
+            raise CombatIntentError("this condition cannot be escaped")
+        carried = (actor.get("conditions") or {}).get(condition_id)
+        if not isinstance(carried, dict):
+            raise CombatIntentError("the actor does not have that condition")
+        dc = carried.get("escape_dc")
+        if isinstance(dc, bool) or not isinstance(dc, int) or dc <= 0:
+            # 施加时没有写 DC 的条件无法挣：不替它编一个数。
+            raise CombatIntentError("this application declares no escape DC")
+        chosen = str(intent.get("check") or "")
+        allowed = {
+            str(row.get("ability")): (str(row.get("skill") or "") or None)
+            for row in escape.get("checks") or []
+            if isinstance(row, dict)
+        }
+        if chosen not in allowed:
+            raise CombatIntentError("escape check must be one of the declared abilities")
+        cost = str(escape.get("cost") or "action")
+        if int(economy.get(cost, 0) or 0) < 1:
+            raise CombatIntentError(f"escaping costs a {cost.replace('_', ' ')}")
+
+    def _validate_stand_up(
+        self, intent: dict[str, Any], actor: dict[str, Any], economy: dict[str, Any],
+    ) -> None:
+        """Standing up is movement, not an action: half the walking speed."""
+
+        if set(intent) - {
+            "intent_id", "type", "expected_version", "submitted_by", "actor_id",
+        }:
+            raise CombatIntentError("stand up intent has unknown field(s)")
+        declared = stand_up_declaration(self.catalog.conditions, actor.get("conditions") or {})
+        if declared is None:
+            raise CombatIntentError("the actor is not in a condition one can stand up from")
+        # ``or`` would treat a real speed of 0 as "absent" and fall back to the
+        # printed speed — a grappled (speed 0) creature would then be quoted the
+        # price of a stand-up it cannot pay for.
+        current = economy.get("speed")
+        cost = self.stand_up_cost(
+            actor, declared,
+            speed=int(current) if isinstance(current, int) else None,
+        )
+        if int(economy.get("movement", 0) or 0) < cost:
+            raise CombatIntentError("not enough movement left to stand up")
+
+    @staticmethod
+    def stand_up_cost(
+        actor: dict[str, Any], declared: dict[str, Any], *, speed: int | None = None,
+    ) -> int:
+        """Half the walking speed, rounded down (2024: "spend half your Speed").
+
+        The *effective* speed is what the movement budget already uses, so a
+        creature whose speed is halved pays half of the halved value — reading
+        the printed speed instead would let it buy the same stand-up twice.
+        """
+
+        base = max(0, int(actor.get("speed", 0) or 0)) if speed is None else max(0, int(speed))
+        fraction = max(1, int(declared.get("fraction") or 2))
+        return base // fraction
 
     def _validate_multiattack(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],

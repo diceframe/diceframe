@@ -29,7 +29,7 @@
 | 写法 | 指什么 | 在哪 |
 |---|---|---|
 | `S0-G1` / `S0-G2` / `S0-G3` | **切片**（装备地基、Light 追加攻击、成长记录） | 本表 G 系列 |
-| `GAP-1` – `GAP-41` | **缺口**（发现但本片不做） | `GAP_REGISTER.md` |
+| `GAP-1` – `GAP-42` | **缺口**（发现但本片不做） | `GAP_REGISTER.md` |
 
 历史上缺口也叫过 `G1`–`G19`，与切片撞名；现已全部改为 `GAP-n`。引用时带前缀。
 
@@ -135,10 +135,11 @@
 |---|---|---|---|
 | S0-MM1 | stat block 事实层（size / speeds / 三组防御 / 条件免疫 / senses / cr / xp） | ✅ | #809 |
 | S0-MM2 | 六维参与检定 + 六字段 + CR0–1 全类型目录（135 条）+ 查询 | 🔵 | `S0MM2_..._EXECUTION_REPORT`；2653 passed |
-| S0-MM3a | 攻击多段伤害 `damage[]` + 附带效果 `riders[]`（四种 kind） | 🔵 | `feat/dnd2024-s0mm3a-attack-riders`（叠在 #830 上）+ `S0MM3A_ATTACK_RIDERS_TASK_SPEC` |
+| S0-MM3a | 攻击多段伤害 `damage[]` + 附带效果 `riders[]`（四种 kind） | 🔵 | `feat/dnd2024-s0mm3a-attack-riders`（叠在 #829 上）+ `S0MM3A_ATTACK_RIDERS_TASK_SPEC` |
 | S0-MM3b | Multiattack 三原语 `repeat` / `combo` / `choice`，生物内别名，整批原子 | 🔵 | 同上分支（与 MM3a 同一提交，见执行报告 §5） |
 | S0-MM3c | 存档型动作 `save_action` + 半伤独立骰池 + `recharge` / `per_day` | 🔵 | 同上分支 |
 | S0-MM3d | 八个高频被动特质（闭集 id，未知即拒绝） | 🔵 | 同上分支 |
+| S0-MM3e | 条件自带的解除声明：`escape`（挣脱）与 `stand_up`（花半速起身）+ prone 的距离门槛 | 🔵 | 同上分支第三个提交；关掉 GAP-38/39 |
 | S0-MM3+ 余项 | 怪物施法 / 巢穴与传奇动作 / 剩余 318 条特质、507 条动作 | ⬜ | 未立项 |
 
 ## H 与休息
@@ -153,7 +154,7 @@
 
 ## 缺口（不在本表）
 
-缺口单独维护在 `GAP_REGISTER.md`（缺口 GAP-1–缺口 GAP-41）。分工：
+缺口单独维护在 `GAP_REGISTER.md`（缺口 GAP-1–缺口 GAP-42）。分工：
 
 - **切片**：一件要交付的工作，有任务书、验收、完成态 → 本表。
 - **缺口**：一处已知的缺失，挡住谁、归哪片 → 缺口册。

@@ -50,9 +50,10 @@
 | GAP-35 | 条件的感官后果没有消费者 | `condition_flags` 只有 5 个布尔；`blinded` 的「依赖视觉的检定自动失败」、`deafened` 的听觉判定、`petrified` 与 `exhaustion` 的整段效果都没有落点 | 这几个条件目前只有攻击面与速度面，感知面仍是空的 | 随 GAP-2 / GAP-3 的检定系统 | 未开工 |
 | GAP-36 | Multiattack 的「替换攻击 / 任意组合」没有原语 | `_validate_multiattack` 只收 `repeat` / `combo` / `choice`；`parse_multiattack` 见到 `replace` / `in any combination` / `Spellcasting` 整条跳过 | CR 0-1 里 6 条 Multiattack（Lion / Pirate / Goblin Boss / Scout / Rust Monster / Dryad）无法导入 | S0-MM4（怪物施法原语之后） | 未开工 |
 | GAP-37 | `spider_climb` 只有速度事实，移动不读它 | `_with_climb_speed` 只写 `speeds.climb`；移动预算仍只读 `speeds.walk`，没有「攀爬不额外消耗」的判定 | 攀爬在战斗里仍按步行速度结算，等于没说 | 阶段三（3D/网格移动） | 未开工 |
-| GAP-38 | 没有「起身」动作 | 引擎没有 stand-up；`prone` 由 rider 施加后只能等 `combat` 时限（本片已把无时限 rider 默认成 `combat`） | 被击倒的角色在整场战斗里无法站起来（除非有别的效果移除条件） | 动作经济扩展（未立项） | 未开工 |
-| GAP-39 | 擒抱无法挣脱 | `escape_dc` 只被写入、无消费者；`grappled` 现在速度归零，等于一次命中永久定身 | 玩家被擒抱后没有任何反制手段，GM 只能手工移除条件 | 与 GAP-38 同批 | 未开工 |
+| GAP-38 | 没有「起身」 | 引擎没有 stand-up；`prone` 只能等 `combat` 时限 | 被击倒的角色在整场战斗里无法站起来 | **S0-MM3e**（按 2024：花一半速度、不是动作；`stand_up` 意图 + `prone.stand_up` 声明） | 已修 |
+| GAP-39 | 擒抱无法挣脱 | `escape_dc` 只被写入、无消费者 | 玩家被擒抱后没有反制手段 | **S0-MM3e**（`escape` 意图；DC 读实例、允许的检定与成本读注册表） | 已修 |
 | GAP-40 | 存档型动作没有射程与目标上限 | 契约只有 `ability` / `dc` / 两个分支；Satyr 的 90 尺、Constrictor 的 5 尺 Medium 都无法表达 | 任何距离都能吃吐息，目标数量也不受限 | 区域与射程原语（未立项） | 未开工 |
+| GAP-42 | 玩家申报骰面（实体骰）没有通道 | 战斗里每个 d20 都来自服务端 rng；`src/engine/dice.py::parse_player_roll` 只服务老通用引擎的聊天掷骰，不绑定任何 `check.resolved` | 桌上掷实体骰的玩家无法把自己的点数交给引擎，只能由服务端重掷 | 需先定信任模型（谁能申报、如何审计、GM 可否覆盖），未立项 | 未开工 |
 | GAP-41 | rider 的生物类型前提无法表达 | Ghoul 的麻痹写明「非亡灵非精灵」；`parse_riders` 见到这类前提整条不导入 | 这类 rider 在目录里缺席（宁可缺席也不对所有目标生效） | S0-MM4 | 未开工 |
 
 
@@ -67,7 +68,8 @@
 - **阶段三**：GAP-1、GAP-37
 - **未立项**：GAP-10、GAP-11、GAP-12、GAP-13
 - **S0-MM3a**：GAP-26（本片内解决）
-- **S0-MM3b/c/d 的遗留 + 后续 MM 片**：GAP-27 – GAP-41
+- **S0-MM3e**：GAP-38、GAP-39（本片内解决）
+- **S0-MM3b/c/d 的遗留 + 后续 MM 片**：GAP-27 – GAP-37、GAP-40 – GAP-42
 
 ## 附注 A：为什么 Utilize 不需要对象模型
 

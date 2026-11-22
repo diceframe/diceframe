@@ -4,7 +4,7 @@
 |---|---|
 | 任务书 | `S0MM3A_ATTACK_RIDERS_TASK_SPEC_2026-11-21.md`、`S0MM3B_MULTIATTACK_TASK_SPEC`、`S0MM3C_SAVE_ACTIONS_TASK_SPEC`、`S0MM3D_TRAITS_TASK_SPEC` |
 | 数据依据 | `S0MM3_ATTACK_SCHEMA_2026-11-21.md`、`S0MM3_TRAITS_ACTIONS_SURVEY_2026-11-21.md` |
-| 分支 | `feat/dnd2024-s0mm3a-attack-riders`，叠在 #830（S0-F25）之上，其下是 #829（S0-MM2） |
+| 分支 | `feat/dnd2024-s0mm3a-attack-riders`，叠在 #829（S0-MM2）之上 |
 | 状态 | 已执行；四片矩阵全过；**4 处契约偏差**（§5）、**9 条新缺口**（§6） |
 
 ## 1. 交付
@@ -166,8 +166,9 @@ test_dnd2024_multiattack.py                             19 passed
 test_dnd2024_save_actions.py                            17 passed
 test_dnd2024_traits.py                                  18 passed
 test_dnd2024_srd_importer.py                             6 passed
-全量 tests/rulesets（134 个文件，分两批 -n 8）            2767 passed / 0 failed
-                                                         （1659 + 1108；按文件切分，无重跑）
+test_dnd2024_escape_and_stand_up.py                     15 passed
+全量 tests/rulesets（135 个文件，分两批 -n 8）            2756 passed / 0 failed
+                                                         （1651 + 1105；叠在 #829 上的树上）
 ```
 
 全量一次跑完需要 13-15 分钟，本机在这条会话里被中断过两次，因此按文件列表切成
@@ -200,7 +201,40 @@ test_dnd2024_srd_importer.py                             6 passed
 未修（登记为缺口，见 §6）：射程/目标上限、生物类型前提、条件的感知面、复合状态、
 分档失败、传奇抗性的拒绝通道。
 
-## 9. 自查清单（项目固定六条）
+## 9. S0-MM3e 追加：从条件内部解除它（挣脱 / 起身）
+
+评审讨论后补的一片，解决 GAP-38 与 GAP-39。
+
+**声明分两层，缺一不可。** 条件**类型**（注册表）说"能不能解除、用什么、花什么成本"：
+`grappled.escape = {cost: "action", checks: [{ability: "str", skill: "athletics"}, {ability: "dex", skill: "acrobatics"}]}`；
+条件**实例**（角色卡上那一条）带 `escape_dc` —— DC 是施加者的事实，同一条件不同怪不同。
+只在注册表写 DC 会让所有擒抱共用一个数；只在实例写又会让"能不能挣脱"变成施加者的自由裁量。
+rider 没写 DC 的实例（例如手写数据）**不允许挣脱**，不替它编数字。
+
+**没有把后果塞进裸检定。** 已有的 `ability_check` 契约是"调用方声明成本与 DC，引擎只回答成败"；
+加一条"成功就清条件"会让它不再是裸检定，也会给下一个功能开同样的先例。所以另开两个意图，
+它们的后果来自**状态声明**而不是调用方：
+
+| 意图 | 形状 | 成本 |
+|---|---|---|
+| `escape` | `{condition, check: "str"\|"dex"}` | 注册表声明的 `action`/`bonus_action`；失败也照花 |
+| `stand_up` | `{}` | `floor(生效速度 / 2)` 移动，不占动作 |
+
+两者都复用 `check.resolved`（`kind: "escape"`）与 `condition.removed`，不加新事件类型；
+起身的移动消耗走 `position.changed` 的 `movement_cost`（零距离），与所有移动同一本账。
+
+**谁提交：人类席位 AI GM 代交不了。** 现有权限是"人类席位的意图只能本人提交，只有 AI 托管
+席位才由 GM 代交"。所以链路是：面板从注册表 + 实例现算出 `escape`/`stand_up` 入口 → 玩家本人
+提交 → 服务端掷骰结算 → AI GM 只叙述结果。要让"玩家说一句'我挣脱'"直接生效，得另开申报通道。
+
+**玩家申报点数（实体骰）没有路径**，登记 GAP-42：战斗里每个 d20 都来自服务端 rng，
+`src/engine/dice.py::parse_player_roll` 只服务老通用引擎的聊天掷骰、不绑定 `check.resolved`。
+要开需先定信任模型（谁能申报、如何审计、GM 可否覆盖）。
+
+顺带补了 `prone` 真正的规则后果：注册表新增 `within_ft` / `beyond_ft` 距离门槛，
+5 尺内攻击有优势、5 尺外有劣势；距离未知时该声明按 fail closed 跳过（不凭"大概在近处"给优势）。
+
+## 10. 自查清单（项目固定六条）
 
 - **等价性**：玩家武器路径仍产出一条伤害实例，数值逐字节不变（既有回归全绿）；`damage` 读取统一走 `attack_damage_parts`。
 - **多消费者一致性**：条件免疫只有一道闸门（`_statblock_immunity_events`），rider 不另写一套；尺寸判定只有 `size_at_most`。

@@ -80,6 +80,7 @@ from .primitives import (
     rider_attack_kind,
     rider_condition,
     size_at_most,
+    stand_up_declaration,
     trait_ids,
     trait_params,
 )
@@ -1407,6 +1408,82 @@ class CombatResolutionMixin:
             if bonus:
                 return bonus, str(condition_id)
         return 0, ""
+
+    def _escape_events(
+        self, combat: dict[str, Any], intent: dict[str, Any], actor: dict[str, Any],
+        rng: Any,
+    ) -> list[dict[str, Any]]:
+        """S0-MM3e: one ability check, and the condition ends on a success.
+
+        The requirement is read, not declared: the DC comes from the applied
+        instance, the allowed abilities and the cost from the condition type.
+        A failed attempt still spends the action — that is the rule, and paying
+        only on success would make escaping free to retry forever.
+        """
+
+        actor_id = str(actor["actor_id"])
+        condition_id = str(intent["condition"])
+        carried = (actor.get("conditions") or {}).get(condition_id) or {}
+        declared = (self.catalog.conditions.get(condition_id) or {}).get("escape") or {}
+        chosen = str(intent.get("check") or "")
+        rows = [
+            row for row in declared.get("checks") or []
+            if isinstance(row, dict) and str(row.get("ability")) == chosen
+        ]
+        skill = str(rows[0].get("skill") or "") if rows else ""
+        bonus = (
+            int((actor.get("skill_values") or {}).get(skill, 0) or 0)
+            if skill else ability_modifier(int((actor.get("abilities") or {}).get(chosen, 10)))
+        )
+        dc = int(carried.get("escape_dc") or 0)
+        events: list[dict[str, Any]] = [{
+            "type": "dnd2024.action.spent", "actor_id": actor_id,
+            "resource": str(declared.get("cost") or "action"), "amount": 1,
+        }]
+        roll = int(rng.randint(1, 20))
+        total = roll + bonus
+        events.append({
+            "type": "check.resolved", "kind": "escape", "actor_id": actor_id,
+            "ability": chosen, "skill": skill, "rolls": [roll], "natural": roll,
+            "modifier": bonus, "total": total, "target": dc,
+            "success": total >= dc,
+            "condition": condition_id,
+            "source_actor_id": str(carried.get("source_actor_id") or ""),
+            "roll_id": self._roll_id(events, "escape", actor_id),
+        })
+        if total >= dc:
+            events.append({
+                "type": "condition.removed", "target_id": actor_id,
+                "condition": condition_id,
+            })
+        return events
+
+    def _stand_up_events(
+        self, actor: dict[str, Any], intent: dict[str, Any], *, speed: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """S0-MM3e: standing up spends movement, and the position does not change.
+
+        It is emitted as ``position.changed`` with a zero distance and a
+        movement cost so the movement budget is charged by the same reducer
+        branch every other movement uses — no second accounting path.
+        """
+
+        actor_id = str(actor["actor_id"])
+        declared = stand_up_declaration(self.catalog.conditions, actor.get("conditions") or {})
+        if declared is None:  # pragma: no cover - validation guards this
+            raise CombatIntentError("the actor cannot stand up")
+        cost = self.stand_up_cost(actor, declared, speed=speed)
+        return [
+            {
+                "type": "dnd2024.position.changed", "actor_id": actor_id,
+                "distance": 0, "movement_cost": cost, "forced": False,
+                "reason": "stand_up",
+            },
+            {
+                "type": "condition.removed", "target_id": actor_id,
+                "condition": str(declared["condition"]), "reason": "stand_up",
+            },
+        ]
 
     def _save_action_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
