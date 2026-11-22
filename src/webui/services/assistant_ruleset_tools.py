@@ -13,6 +13,7 @@ and state mutation stay in one authoritative pipeline.
 from __future__ import annotations
 
 import inspect
+import hashlib
 import re
 import uuid
 from copy import deepcopy
@@ -37,11 +38,23 @@ def ruleset_slug(runtime_id: str) -> str:
 
 
 def ruleset_domain(runtime_id: str) -> str:
-    return (RULESET_DOMAIN_PREFIX + ruleset_slug(runtime_id))[:_MAX_IDENTIFIER]
+    return _bounded_identifier(RULESET_DOMAIN_PREFIX, runtime_id, ruleset_slug(runtime_id))
 
 
 def ruleset_source_name(runtime_id: str) -> str:
-    return ('ruleset_' + ruleset_slug(runtime_id).replace('-', '_'))[:_MAX_IDENTIFIER]
+    slug = ruleset_slug(runtime_id).replace('-', '_')
+    return _bounded_identifier('ruleset_', runtime_id, slug)
+
+
+def _bounded_identifier(prefix: str, runtime_id: str, slug: str) -> str:
+    """Keep registry identifiers legal without collapsing long runtime ids."""
+
+    base = prefix + slug
+    if len(base) <= _MAX_IDENTIFIER:
+        return base
+    digest = hashlib.sha256(str(runtime_id).encode('utf-8')).hexdigest()[:8]
+    budget = _MAX_IDENTIFIER - len(prefix) - len(digest) - 1
+    return f"{prefix}{slug[:max(1, budget)]}-{digest}"
 
 
 @dataclass(frozen=True)

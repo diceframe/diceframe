@@ -38,13 +38,7 @@ def permits(grant, action, arguments, assessment=None):
             or (assessment is not None and assessment.requires_approval)):
         return False
     if grant['domains'] and action.domain not in grant['domains']:
-        # 规则域不归这份列表管：一个会话能看到哪些规则工具，由“它当前看的
-        # 对局解析到哪个 runtime”决定，调用方已在对局核验与调用层各查一次。
-        # 往 domains 里追加会改变“空列表 = 不限域”的既有语义（显式列表被
-        # 追加是扩大、空列表被追加是收窄），所以这里显式放行规则域，其余域
-        # 维持原判定。
-        if not action.domain.startswith('ruleset-'):
-            return False
+        return False
     scope = grant['scope']
     targets = assessment.targets if assessment is not None and assessment.targets else (arguments,)
     if scope:

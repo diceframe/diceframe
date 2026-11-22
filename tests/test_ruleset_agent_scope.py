@@ -105,11 +105,12 @@ def test_visible_domain_never_filters_a_product_domain():
 # --------------------------------------------------------------- 授权面
 
 
-def test_a_rule_domain_is_not_governed_by_the_grant_domain_list():
+def test_a_rule_domain_must_be_explicitly_granted():
     grant = make_authorization("task", {}, ["games"], 4, 100)
 
-    assert permits(grant, action("set_cover", RULESET_DOMAIN), {})
-    # 非规则域维持原判定：显式列表之外仍然拒绝。
+    assert not permits(grant, action("set_cover", RULESET_DOMAIN), {})
+    explicit = make_authorization("task", {}, [RULESET_DOMAIN], 4, 100)
+    assert permits(explicit, action("set_cover", RULESET_DOMAIN), {})
     assert not permits(grant, action("edit_lorebook", "lorebook"), {})
 
 
@@ -190,6 +191,14 @@ def test_the_source_and_domain_fit_the_registry_contract():
     assert ruleset_source_name("core:dnd2024") == "ruleset_core_dnd2024"
     assert ruleset_domain("core:dnd2024") == RULESET_DOMAIN
     ActionRegistry().register_source(ruleset_source_name("core:dnd2024"), lambda: ())
+
+
+def test_long_runtime_ids_keep_distinct_registry_identifiers():
+    first = "core:" + "a" * 60
+    second = "core:" + "a" * 59 + "b"
+
+    assert ruleset_domain(first) != ruleset_domain(second)
+    assert ruleset_source_name(first) != ruleset_source_name(second)
 
 
 def _tool(deps: RulesetToolDependencies, runtime_id: str = "core:dnd2024"):
