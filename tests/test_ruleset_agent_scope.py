@@ -208,10 +208,20 @@ def _deps(game, viewer, captured: dict) -> RulesetToolDependencies:
     )
 
 
+def _battle_game(status: str = "active"):
+    return SimpleNamespace(
+        run_id="run-1",
+        players={"p1": {"character_name": "Alice"}},
+        modules={"ruleset_runtime": {
+            "version": 7,
+            "combat": {"status": status, "enemies": {"goblin": {"name": "Goblin"}}},
+        }},
+    )
+
+
 def test_set_cover_turns_one_call_into_the_table_intent():
     captured: dict = {}
-    game = SimpleNamespace(run_id="run-1", modules={"ruleset_runtime": {"version": 7}})
-    tool = _tool(_deps(game, SimpleNamespace(uid="gm", is_gm=True), captured))
+    tool = _tool(_deps(_battle_game(), SimpleNamespace(uid="gm", is_gm=True), captured))
 
     result = asyncio.run(tool.handler({
         "game_key": GAME_KEY, "run_id": "run-1",
@@ -230,8 +240,7 @@ def test_set_cover_turns_one_call_into_the_table_intent():
 
 def test_set_cover_refuses_a_stale_run():
     captured: dict = {}
-    game = SimpleNamespace(run_id="run-1", modules={"ruleset_runtime": {"version": 7}})
-    tool = _tool(_deps(game, SimpleNamespace(uid="gm", is_gm=True), captured))
+    tool = _tool(_deps(_battle_game(), SimpleNamespace(uid="gm", is_gm=True), captured))
 
     with pytest.raises(ValueError):
         asyncio.run(tool.handler({
@@ -239,3 +248,43 @@ def test_set_cover_refuses_a_stale_run():
             "target_id": "enemy:goblin", "level": "half",
         }, "gm"))
     assert captured == {}
+
+
+def test_an_unknown_target_comes_back_with_the_current_list():
+    captured: dict = {}
+    tool = _tool(_deps(_battle_game(), SimpleNamespace(uid="gm", is_gm=True), captured))
+
+    result = asyncio.run(tool.handler({
+        "game_key": GAME_KEY, "run_id": "run-1",
+        "target_id": "goblin", "level": "half",
+    }, "gm"))
+
+    # 裸 id 是模型最可能先试的形状：错误里必须直接给出可填的值，
+    # 否则它只能对着 "target actor does not exist" 猜第二次。
+    assert result["code"] == "UNKNOWN_TARGET"
+    assert [row["actor_id"] for row in result["targets"]] == [
+        "player:p1", "enemy:goblin",
+    ]
+    assert [row["name"] for row in result["targets"]] == ["Alice", "Goblin"]
+    assert captured == {}
+
+
+def test_cover_is_refused_before_combat_starts():
+    captured: dict = {}
+    tool = _tool(_deps(_battle_game("idle"), SimpleNamespace(uid="gm", is_gm=True), captured))
+
+    result = asyncio.run(tool.handler({
+        "game_key": GAME_KEY, "run_id": "run-1",
+        "target_id": "enemy:goblin", "level": "half",
+    }, "gm"))
+
+    assert result["code"] == "COMBAT_NOT_ACTIVE"
+    assert captured == {}
+
+
+def test_the_tool_tells_the_model_where_target_ids_come_from():
+    tool = _tool(_deps(_battle_game(), SimpleNamespace(uid="gm", is_gm=True), {}))
+
+    # 取数路径属于工具自描述：不写进系统提示词，也不能悄悄丢。
+    assert "get_ruleset_available_actions" in tool.instructions
+    assert "player:<uid>" in tool.instructions

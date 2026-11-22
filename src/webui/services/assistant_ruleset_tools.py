@@ -75,6 +75,33 @@ def _ruleset_state(game: Any) -> dict:
     return (getattr(game, 'modules', {}) or {}).get('ruleset_runtime') or {}
 
 
+def _cover_targets(game: Any) -> list[dict]:
+    """Combatants a cover declaration can name, in stable order.
+
+    Cover validation only accepts players and enemies, so companions are
+    deliberately absent here: offering a value the validator will reject would
+    turn one clean retry into two.
+    """
+
+    rows: list[dict] = []
+    for uid in sorted(getattr(game, 'players', {}) or {}):
+        player = (getattr(game, 'players', {}) or {}).get(uid) or {}
+        rows.append({
+            'actor_id': f'player:{uid}',
+            'name': str(player.get('character_name') or uid),
+            'kind': 'player',
+        })
+    combat = _ruleset_state(game).get('combat') or {}
+    for enemy_id in sorted(combat.get('enemies') or {}):
+        enemy = (combat.get('enemies') or {}).get(enemy_id) or {}
+        rows.append({
+            'actor_id': f'enemy:{enemy_id}',
+            'name': str(enemy.get('name') or enemy_id),
+            'kind': 'enemy',
+        })
+    return rows
+
+
 def _set_cover_schema() -> dict:
     return {
         'type': 'object',
@@ -111,12 +138,31 @@ def ruleset_tools(
         game, viewer = _game(deps, args, owner)
         if args['run_id'] != game.run_id:
             raise ValueError('Run changed; refresh first')
+        # 兜底：目标或阶段不对时，把"现在能填什么"直接回给模型，而不是让它
+        # 对着一条校验错误猜 id 的写法。两条都在提交意图之前判，所以失败的
+        # 调用不会留下任何事件。
+        combat = _ruleset_state(game).get('combat') or {}
+        if str(combat.get('status') or '') != 'active':
+            return {
+                'ok': False,
+                'code': 'COMBAT_NOT_ACTIVE',
+                'error': 'Cover can only be declared while combat is active',
+            }
+        targets = _cover_targets(game)
+        target_id = str(args['target_id'])
+        if target_id not in {row['actor_id'] for row in targets}:
+            return {
+                'ok': False,
+                'code': 'UNKNOWN_TARGET',
+                'error': f'{target_id!r} is not a player or enemy in this game',
+                'targets': targets,
+            }
         # 版本由服务端现读：模型不必猜，guard 仍然锁住整个规则状态。
         intent = {
             'type': 'combat.set_cover',
             'intent_id': uuid.uuid4().hex,
             'expected_version': int(_ruleset_state(game).get('version', 0) or 0),
-            'target_id': str(args['target_id']),
+            'target_id': target_id,
             'level': str(args['level']),
         }
         return await _call(
@@ -137,7 +183,11 @@ def ruleset_tools(
             instructions=(
                 'Declare how much cover one combatant currently has (the table\'s '
                 'judgement, not a roll). Only the GM may call this, and only while '
-                'combat is active; the target must be a combatant in this game. '
+                'combat is active. '
+                'target_id must be one of the actor_id values from '
+                'get_ruleset_available_actions (gameplay.combat.actors), e.g. '
+                'player:<uid> or enemy:<id>; an unknown id comes back with the '
+                'current list. '
                 'Levels: none, half (+2 AC and Dex saves), three_quarters (+5), '
                 'total (cannot be targeted directly).'
             ),
