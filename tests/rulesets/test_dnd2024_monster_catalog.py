@@ -250,3 +250,72 @@ def test_proficiency_is_never_added_to_a_derived_skill() -> None:
         "proficiency_bonus": 6,
     }, _SKILL_ABILITIES)
     assert checks["skills"]["perception"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 11. ability_check 原语：同一算式，成本由调用方声明
+# ---------------------------------------------------------------------------
+
+def _monk_combat():
+    from tests.rulesets.dnd2024_monk_common import (
+        SequenceRng, monk_instance, monk_sheet, start_combat,
+    )
+    from src.rulesets.dnd2024 import Dnd2024Runtime
+
+    runtime = Dnd2024Runtime()
+    engine, instance = monk_instance(runtime, monk_sheet(runtime, level=2))
+    start_combat(engine, instance)
+    return engine, instance, SequenceRng
+
+
+def test_a_free_ability_check_rolls_without_spending_anything() -> None:
+    from src.engine.modules import ruleset_runtime
+
+    engine, instance, rng = _monk_combat()
+    before = dict(ruleset_runtime.state(instance)["combat"]["economy"])
+    result = engine.resolve_intent(instance, {
+        "intent_id": "ac-free", "type": "ability_check",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+        "ability": "str", "dc": 12, "check_cost": "none",
+    }, rng([15]))
+    assert result["ok"] is True, result
+    checks = [
+        event for event in result["event_batch"]["events"]
+        if event.get("type") == "check.resolved"
+    ]
+    assert checks[0]["kind"] == "ability_check"
+    assert checks[0]["modifier"] == 1  # monk STR 12 -> +1
+    after = ruleset_runtime.state(instance)["combat"]["economy"]
+    assert (after["action"], after["bonus_action"]) == (
+        before["action"], before["bonus_action"],
+    )
+
+
+def test_an_action_priced_ability_check_spends_the_action() -> None:
+    from src.engine.modules import ruleset_runtime
+
+    engine, instance, rng = _monk_combat()
+    result = engine.resolve_intent(instance, {
+        "intent_id": "ac-action", "type": "ability_check",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+        "ability": "dex", "dc": 10, "check_cost": "action",
+    }, rng([11]))
+    assert result["ok"] is True, result
+    engine.apply_batch(instance, result["event_batch"])
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["action"] == 0
+
+
+def test_an_ability_check_rejects_a_non_canonical_ability() -> None:
+    from src.engine.modules import ruleset_runtime
+
+    engine, instance, rng = _monk_combat()
+    result = engine.resolve_intent(instance, {
+        "intent_id": "ac-bad", "type": "ability_check",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+        "ability": "luck", "dc": 10, "check_cost": "none",
+    }, rng([11]))
+    assert result["ok"] is False
+    assert "canonical ability" in result["error"]

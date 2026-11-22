@@ -3896,6 +3896,42 @@ class CombatResolutionMixin:
             return "surge_action"
         return "action"
 
+    ABILITY_CHECK_COSTS = frozenset({"action", "bonus_action", "none"})
+
+    def _ability_check_events(
+        self, combat: dict[str, Any], intent: dict[str, Any], actor: dict[str, Any],
+        rng: Any,
+    ) -> list[dict[str, Any]]:
+        """A bare ability check, at whatever cost the caller declared.
+
+        The arithmetic is the same one players already use (``ability_modifier``);
+        what varies is only what the check costs.  Fighting this into ``hide`` or
+        ``stabilize`` would have meant a third copy of the roll, which is exactly
+        the duplication GAP-3 records.
+        """
+
+        ability = str(intent.get("ability") or "")
+        dc = int(intent.get("dc") or 0)
+        cost = str(intent.get("check_cost") or "action")
+        actor_id = str(actor["actor_id"])
+        events: list[dict[str, Any]] = []
+        if cost != "none":
+            events.append({
+                "type": "dnd2024.action.spent", "actor_id": actor_id,
+                "resource": cost, "amount": 1,
+            })
+        modifier = ability_modifier(int((actor.get("abilities") or {}).get(ability, 10)))
+        roll = int(rng.randint(1, 20))
+        total = roll + modifier
+        events.append({
+            "type": "check.resolved", "kind": "ability_check", "actor_id": actor_id,
+            "ability": ability, "rolls": [roll], "natural": roll,
+            "modifier": modifier, "total": total, "target": dc,
+            "success": total >= dc,
+            "roll_id": self._roll_id(events, "ability_check", actor_id),
+        })
+        return events
+
     @staticmethod
     def _basic_action_events(
         combat: dict[str, Any], intent_type: str, actor_id: str,

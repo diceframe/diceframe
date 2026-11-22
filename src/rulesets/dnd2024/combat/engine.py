@@ -1094,6 +1094,10 @@ class Dnd2024CombatEngine(
             events.extend(self._basic_action_events(combat, intent_type, str(intent["actor_id"])))
         elif intent_type == "hide":
             events.extend(self._hide_events(instance, combat, intent, rng))
+        elif intent_type == "ability_check":
+            events.extend(self._ability_check_events(
+                combat, intent, self._actor_view(instance, combat, str(intent["actor_id"])), rng,
+            ))
         elif intent_type == "end_turn":
             events.extend(self._end_turn_events(instance, combat, rng, intent))
         elif intent_type == "death_save":
