@@ -13,6 +13,8 @@ from types import SimpleNamespace
 import pytest
 
 from src.application_actions import ActionRegistry, ApplicationAction, visible_domain
+from src.llm.client import LLMToolResponse
+from src.webui.services.assistant_agent import AgentDependencies, AgentRuntime
 from src.webui.api import WebAPI
 from src.webui.services.assistant_authorization import make_authorization, permits
 from src.webui.services.assistant_ruleset_tools import (
@@ -288,3 +290,88 @@ def test_the_tool_tells_the_model_where_target_ids_come_from():
     # 取数路径属于工具自描述：不写进系统提示词，也不能悄悄丢。
     assert "get_ruleset_available_actions" in tool.instructions
     assert "player:<uid>" in tool.instructions
+
+
+# --------------------------------------------------------------- 端到端
+
+
+class _RecordingPlanner:
+    """按脚本出牌，并记下每一轮模型实际拿到了哪些工具。"""
+
+    def __init__(self, *steps):
+        self.steps = list(steps)
+        self.offered: list[set[str]] = []
+
+    async def call_tools(self, system, user, **kwargs):
+        self.offered.append({row["function"]["name"] for row in kwargs["tools"]})
+        step = self.steps.pop(0)
+        if step.get("tool") == "respond":
+            return LLMToolResponse(
+                tool_calls=[{"name": "final_result", "arguments": {"answer": step.get("answer", "")}}],
+                total_tokens=0, provider_used="test")
+        return LLMToolResponse(
+            tool_calls=[{"name": step["tool"], "arguments": step.get("arguments", {})}],
+            total_tokens=0, provider_used="test")
+
+
+def _runtime(tmp_path, planner, scope, captured):
+    registry = ActionRegistry()
+    registry.register_source(
+        ruleset_source_name("core:dnd2024"),
+        lambda: ruleset_tools(
+            _deps(_battle_game(), SimpleNamespace(uid="gm", is_gm=True), captured),
+            "core:dnd2024",
+        ),
+    )
+    return AgentRuntime(AgentDependencies(
+        llm_client=lambda: planner,
+        configuration_error=lambda _lang: None,
+        tools=(),
+        registry=registry,
+        storage_dir=tmp_path / "agent",
+        ruleset_scope=lambda _owner, _context: frozenset(scope),
+    ))
+
+
+async def _run(agent, session_id=""):
+    events = []
+    async def emit(name, payload):
+        events.append((name, payload))
+    await agent.run("gm", [{"role": "user", "content": "给他半掩护"}], "zh-CN",
+                    {"game_key": GAME_KEY}, session_id, emit)
+    return events
+
+
+@pytest.mark.asyncio
+async def test_a_dnd_session_offers_and_executes_set_cover(tmp_path):
+    captured: dict = {}
+    planner = _RecordingPlanner(
+        {"tool": "set_cover", "arguments": {
+            "game_key": GAME_KEY, "run_id": "run-1",
+            "target_id": "enemy:goblin", "level": "half"}},
+        {"tool": "respond", "answer": "done"},
+    )
+    agent = _runtime(tmp_path, planner, {"ruleset-core-dnd2024"}, captured)
+    grant = agent.authorize("gm", "", "task", {"game_key": GAME_KEY}, [], 8)
+
+    await _run(agent, grant["session_id"])
+
+    # 工具真的出现在模型的函数列表里，而且调用走到了同一条权威提交路径。
+    assert "set_cover" in planner.offered[0]
+    assert captured["intent"]["type"] == "combat.set_cover"
+    assert captured["intent"]["target_id"] == "enemy:goblin"
+    assert captured["intent"]["level"] == "half"
+
+
+@pytest.mark.asyncio
+async def test_another_ruleset_session_never_offers_set_cover(tmp_path):
+    captured: dict = {}
+    planner = _RecordingPlanner({"tool": "respond", "answer": "not available"})
+    agent = _runtime(tmp_path, planner, set(), captured)
+    # 即使授权了 task 模式、给了完整域列表，不属于本会话的规则域仍然不出现。
+    grant = agent.authorize("gm", "", "task", {"game_key": GAME_KEY}, [], 8)
+
+    await _run(agent, grant["session_id"])
+
+    assert "set_cover" not in planner.offered[0]
+    assert captured == {}
