@@ -1,15 +1,25 @@
-"""Kernel game configuration; persisted owner for difficulty, solo_mode, seed_code, entry_point."""
+"""Kernel game configuration; persisted owner for run-scoped table settings."""
 from __future__ import annotations
 
+import copy
 from typing import Any
 from src.engine.module_state import ModuleStateError, ModuleStateSpec, get_module_state, register_module_state
+from src.engine.currency.validation import validate_declared_currency_system
 
 MODULE_NAME = "game_config"
 SCHEMA_VERSION = 1
 
 
 def fresh() -> dict[str, Any]:
-    return {"schema_version": SCHEMA_VERSION, **{'difficulty': '标准', 'solo_mode': False, 'seed_code': '', 'entry_point': 'web'}}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "difficulty": "标准",
+        "solo_mode": False,
+        "seed_code": "",
+        "entry_point": "web",
+        "currency_label": "",
+        "currency_system": None,
+    }
 
 
 def ensure(raw: Any) -> dict[str, Any]:
@@ -26,6 +36,15 @@ def ensure(raw: Any) -> dict[str, Any]:
         raw['seed_code'] = defaults['seed_code']
     if not isinstance(raw.get('entry_point'), str):
         raw['entry_point'] = defaults['entry_point']
+    if not isinstance(raw.get("currency_label"), str):
+        raw["currency_label"] = defaults["currency_label"]
+    currency_system = raw.get("currency_system")
+    if currency_system is not None:
+        try:
+            validate_declared_currency_system(currency_system)
+        except ValueError:
+            raw["currency_system"] = None
+            raw["currency_label"] = ""
     return raw
 
 
@@ -70,12 +89,46 @@ def replace_entry_point(instance: Any, value: str) -> None:
     get_module_state(instance, MODULE_NAME)["entry_point"] = value
 
 
+def currency_label(instance: Any) -> str:
+    return str(get_module_state(instance, MODULE_NAME).get("currency_label") or "")
+
+
+def currency_system(instance: Any) -> dict[str, Any] | None:
+    value = get_module_state(instance, MODULE_NAME).get("currency_system")
+    return copy.deepcopy(value) if isinstance(value, dict) else None
+
+
+def replace_currency_context(
+    instance: Any,
+    label: str,
+    system: dict[str, Any],
+) -> None:
+    if not isinstance(system, dict):
+        raise ValueError("currency_system must be an object")
+    validate_declared_currency_system(system)
+    slot = get_module_state(instance, MODULE_NAME)
+    slot["currency_label"] = str(label or "").strip()
+    slot["currency_system"] = copy.deepcopy(system)
+
+
+def clear_currency_context(instance: Any) -> None:
+    slot = get_module_state(instance, MODULE_NAME)
+    slot["currency_label"] = ""
+    slot["currency_system"] = None
+
+
 def copy_for_carried_game(candidate: Any, source: Any) -> None:
     """Copy table policy while giving the separate Web game a fresh seed."""
     require_writable(source)
     require_writable(candidate)
     replace_difficulty(candidate, difficulty(source))
     replace_solo_mode(candidate, solo_mode(source))
+    source_label = currency_label(source)
+    source_system = currency_system(source)
+    if source_system is not None:
+        replace_currency_context(candidate, source_label, source_system)
+    else:
+        clear_currency_context(candidate)
 
 
 SPEC = ModuleStateSpec(name=MODULE_NAME, schema_version=SCHEMA_VERSION, fresh=fresh, ensure=ensure)

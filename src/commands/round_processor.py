@@ -69,7 +69,11 @@ from src.engine.economy import (
     has_blocking_economy_decision,
     queue_effect_group,
 )
-from src.engine.economy import filter_unconfirmed_purchase_grants, has_pending_identical_purchase
+from src.engine.economy import (
+    filter_unconfirmed_purchase_grants,
+    has_pending_identical_purchase,
+    item_names_match,
+)
 from src.engine import combat_narrative, module_hooks, progression
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.engine.module_state import ModuleStateError
@@ -545,6 +549,7 @@ class RoundProcessor:
                             if offer.get("remaining_due") is not None else None
                         ),
                         quote_evidence=str(offer.get("evidence") or ""),
+                        ambiguous_target=bool(offer.get("ambiguous_target")),
                         source_ref=(
                             f"ai:{instance.run_id}:{progression_state.round_value(instance)}:"
                             f"{offer['payer_uid']}:{offer['target']}:{quantity}:"
@@ -1637,14 +1642,18 @@ class RoundProcessor:
 
         def _unpriced_without_explicit_free_grant(intent: dict[str, Any]) -> bool:
             uid = str(intent.get("payer_uid") or "").strip()
-            target = str(intent.get("target") or "").strip().casefold()
+            target = str(intent.get("target") or "").strip()
             if not uid or not target:
                 return False
+            if intent.get("ambiguous_target") is True:
+                return not any(
+                    str(marker.get("player") or "").strip() == uid
+                    for marker in free_grant_markers
+                )
             return not any(
                 str(marker.get("player") or "").strip() == uid
-                and (
-                    target in str(marker.get("item") or "").strip().casefold()
-                    or str(marker.get("item") or "").strip().casefold() in target
+                and item_names_match(
+                    {str(marker.get("item") or "").strip()}, target,
                 )
                 for marker in free_grant_markers
             )

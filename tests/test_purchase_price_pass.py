@@ -195,6 +195,24 @@ def test_normalize_economy_actions_keeps_unpriced_intents() -> None:
     ]
 
 
+def test_normalize_generic_unpriced_target_marks_ambiguous_delivery() -> None:
+    instance = _instance()
+    _, unpriced, errors = normalize_economy_actions(instance, [{
+        "type": "purchase",
+        "player": "p1",
+        "target": "报纸",
+        "price_source": "none",
+    }])
+
+    assert errors == []
+    assert unpriced == [{
+        "payer_uid": "p1",
+        "target": "报纸",
+        "quantity": 1,
+        "ambiguous_target": True,
+    }]
+
+
 @pytest.mark.asyncio
 async def test_plan_round_checks_reports_unpriced_intents() -> None:
     instance = _instance()
@@ -250,6 +268,29 @@ def test_filter_strips_unpriced_intent_items_only_with_kwarg() -> None:
     )
     assert removed == 1
     assert [entry["item"] for entry in data["state_update"]["loot"]] == ["磨刀石", "回复药水"]
+
+
+def test_generic_unpriced_intent_blocks_unresolved_item_grants() -> None:
+    instance = _instance()
+    data = {"state_update": {"loot": [
+        {"player": "p1", "item": "当日《新新新闻》", "qty": 1},
+        {"player": "p2", "item": "护符", "qty": 1},
+    ]}}
+    intents = [{
+        "payer_uid": "p1",
+        "target": "报纸",
+        "quantity": 1,
+        "ambiguous_target": True,
+    }]
+
+    removed = filter_unconfirmed_purchase_grants(
+        instance, data, unpriced_purchase_intents=intents,
+    )
+
+    assert removed == 1
+    assert data["state_update"]["loot"] == [
+        {"player": "p2", "item": "护符", "qty": 1},
+    ]
 
 
 def test_unpriced_intents_are_never_persisted() -> None:

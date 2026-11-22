@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.engine.modules import adventure_runtime_state, economy_state
+from src.engine.modules import adventure_runtime_state, economy_state, game_config
 from src.adventures.outcomes import OutcomeError
 from src.adventures.progress import ProgressError
 from src.assistant_agent_limits import DEFAULT_TASK_MAX_TOKENS
@@ -35,7 +35,7 @@ from src.adventures import AdventureBundleLoader, AdventureResolver
 from src.adventures.scene_context import AdventureSceneContext
 from src.adventures.registry import AdventureSource, AdventureSourceRegistry
 from src.memory.delta import MemoryStore
-from src.rules.rule_system import RuleSystem
+from src.rules.rule_system import RuleSystem, apply_currency_context
 from src.rules.loader import RuleBundleLoader
 from src.rulesets.builtin import (
     build_default_ruleset_registry,
@@ -2149,7 +2149,12 @@ class WebAPI:
             or world_data.get("default_rule")
             or "freeform_fantasy"
         )
-        return self._load_rule_by_id(rule_id, language)
+        rule = self._load_rule_by_id(rule_id, language)
+        return apply_currency_context(
+            rule,
+            game_config.currency_label(inst),
+            game_config.currency_system(inst),
+        )
 
     def _resolve_ruleset_check(self, instance: Any, uid: str, check: dict[str, Any]):
         """G4：把 GM 发起的技能/属性检定交给规则集结算（通用服务不认规则表）。"""

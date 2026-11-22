@@ -24,14 +24,14 @@ from src.commands.state_items import (
     grant_classified_item,
 )
 from src.rules.loader import RuleBundleLoader
-from src.rules.rule_system import RuleSystem
+from src.rules.rule_system import RuleSystem, apply_currency_context
 from src.rulesets.contracts import (
     CharacterItemPreparationRuntime,
     CharacterStateReconciliationRuntime,
     NarrativeHealthRuntime,
 )
 from src.engine.economy import queue_proposal
-from src.engine.modules import checks, economy_state, progression_state
+from src.engine.modules import checks, economy_state, game_config, progression_state
 
 logger = logging.getLogger("trpg")
 
@@ -180,7 +180,12 @@ class StateUpdateApplier:
                 str(instance.world_id or ""),
                 language,
             ) or {}
-            return RuleSystem.load_for_world(world_data, self._rules_dir, language)
+            rule = RuleSystem.load_for_world(world_data, self._rules_dir, language)
+            return apply_currency_context(
+                rule,
+                game_config.currency_label(instance),
+                game_config.currency_system(instance),
+            )
         except ValueError:
             raise
         except Exception:
@@ -193,10 +198,20 @@ class StateUpdateApplier:
         language = str(getattr(instance, "language", "") or "")
         if rule_id:
             if (self._rules_dir / f"{rule_id}.json").exists():
-                return RuleSystem(RuleBundleLoader().load_rule(self._rules_dir, rule_id, language))
+                rule = RuleSystem(RuleBundleLoader().load_rule(self._rules_dir, rule_id, language))
+                return apply_currency_context(
+                    rule,
+                    game_config.currency_label(instance),
+                    game_config.currency_system(instance),
+                )
             rule_path = RuleSystem.path_for(self._rules_dir, rule_id, language)
             if rule_path.exists():
-                return RuleSystem.load(rule_path)
+                rule = RuleSystem.load(rule_path)
+                return apply_currency_context(
+                    rule,
+                    game_config.currency_label(instance),
+                    game_config.currency_system(instance),
+                )
         return self._load_rule(instance)
 
     def load_item_categories(self, instance: GameInstance) -> dict[str, list[str]]:

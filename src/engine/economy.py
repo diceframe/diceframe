@@ -8,6 +8,7 @@ at the CurrencyCodec / frontend boundary.
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -676,6 +677,44 @@ def queue_proposal(
 
 PURCHASE_OFFER_SOURCES = frozenset({"gm_manual", "table_offer", "player_self"})
 
+# Purchase authority compares item identities across narrative formatting. The
+# normalization is deliberately limited to punctuation and quantity phrases.
+_ITEM_NAME_NOISE_RE = re.compile(
+    r"[\s《》〈〉「」『』【】\[\]()（）\"'“”‘’·、，,。.：:；;！!?？—_\-]+"
+)
+_ITEM_QUANTITY = (
+    r"(?:[0-9]+|[零〇一二两三四五六七八九十百千万几]+)"
+    r"(?:份|张|个|件|瓶|本|只|把|支|盒|包|条|块|枚|颗|杯|碗|袋|罐|册|部|台|辆|匹|头|束|套|双|对|组|卷|捆|沓|叠)"
+)
+_ITEM_NAME_QUANTITY_HEAD_RE = re.compile(rf"^{_ITEM_QUANTITY}")
+_ITEM_NAME_QUANTITY_TAIL_RE = re.compile(rf"{_ITEM_QUANTITY}$")
+
+
+def normalized_item_name(value: Any) -> str:
+    """Normalize display formatting while preserving the item identity text."""
+
+    text = _ITEM_NAME_NOISE_RE.sub("", str(value or "").strip().casefold())
+    if not text:
+        return ""
+    stripped = _ITEM_NAME_QUANTITY_HEAD_RE.sub("", text)
+    stripped = _ITEM_NAME_QUANTITY_TAIL_RE.sub("", stripped)
+    return stripped or text
+
+
+def item_names_match(names: set[str], key: str) -> bool:
+    """Match item names after formatting normalization."""
+
+    normalized_key = normalized_item_name(key)
+    if not normalized_key:
+        return False
+    for name in names:
+        normalized_name = normalized_item_name(name)
+        if normalized_name and (
+            normalized_name in normalized_key or normalized_key in normalized_name
+        ):
+            return True
+    return False
+
 
 def has_pending_identical_purchase(instance: Any, payer_uid: str, target: str) -> bool:
     """True when a pending purchase proposal already covers this payer+item.
@@ -687,7 +726,7 @@ def has_pending_identical_purchase(instance: Any, payer_uid: str, target: str) -
     (ADR 0002: a hallucinated extra costs one decline click, never a charge).
     """
 
-    key = str(target or "").strip().casefold()
+    key = normalized_item_name(target)
     payer = str(payer_uid or "")
     if not key or not payer:
         return False
@@ -699,11 +738,10 @@ def has_pending_identical_purchase(instance: Any, payer_uid: str, target: str) -
         if str(proposal.get("payer_uid") or "") != payer:
             continue
         for reward in proposal.get("rewards") or []:
-            name = (
-                str(reward.get("name") or "").strip().casefold()
-                if isinstance(reward, dict) else str(reward).strip().casefold()
-            )
-            if name and (name in key or key in name):
+            name = str(
+                reward.get("name") if isinstance(reward, dict) else reward
+            ).strip()
+            if name and item_names_match({name}, key):
                 return True
     return False
 
@@ -720,6 +758,7 @@ def queue_purchase_offer(
     initial_due: int | None = None,
     remaining_due: int | None = None,
     quote_evidence: str = "",
+    ambiguous_target: bool = False,
 ) -> dict[str, Any]:
     """Create one pending purchase charge that only the payer may confirm.
 
@@ -768,6 +807,8 @@ def queue_purchase_offer(
         proposal["payment_terms"] = payment_terms
     if str(quote_evidence or "").strip():
         proposal["quote_evidence"] = str(quote_evidence).strip()[:300]
+    if ambiguous_target:
+        proposal["ambiguous_target"] = True
     return proposal
 
 
@@ -816,8 +857,9 @@ def filter_unconfirmed_purchase_grants(
     that were pending when narrative generation started but were declined or
     rejected before the response was applied.
     Same-round unpriced purchase intents (in-memory round state only, never
-    persisted) are matched the same way: a purchase whose price nobody has
-    stated yet must not be delivered through a narrative LOOT tag either.
+    persisted) are matched the same way. A specific target blocks only the
+    matching grant. A generic or unresolved target blocks all grants to that
+    payer unless the round explicitly marks the item as free.
     Narrative item events (item_gains / equip equipment_ops) are filtered
     entry by entry with the same authority; unequip ops grant nothing and
     pass through.  Other loot and rewards continue through the normal
@@ -851,6 +893,17 @@ def filter_unconfirmed_purchase_grants(
     # 第一层：待确认扣款提案（payment/purchase）。FREE_GRANT 无权绕过——
     # 否则物品先免费发放、付款人之后仍可能确认扣款，形成双重状态错误。
     pending_purchase_items = purchase_grant_protection_snapshot(instance)
+    ambiguous_pending_payers = {
+        str(proposal.get("payer_uid") or proposal.get("uid") or "")
+        for proposal in economy_state.state(instance).get("proposals", [])
+        if (
+            isinstance(proposal, dict)
+            and proposal.get("status") == "pending"
+            and str(proposal.get("kind") or "") == "purchase"
+            and proposal.get("ambiguous_target") is True
+            and str(proposal.get("payer_uid") or proposal.get("uid") or "")
+        )
+    }
     # A response may have started while these proposals were pending, then
     # observed a decline/rejection before its state update is applied.  Keep
     # the detached start-of-generation ownership as an additional block.
@@ -865,16 +918,21 @@ def filter_unconfirmed_purchase_grants(
     # 第二层：无价购买意图（价格未知/无法 canonicalize）。默认拦截；
     # 本轮 GM 明确免费（FREE_GRANT）才放行。unknown price != free。
     unpriced_purchase_items: dict[str, set[str]] = {}
+    ambiguous_unpriced_payers: set[str] = set()
     for intent in unpriced_purchase_intents or []:
         if not isinstance(intent, dict):
             continue
         uid = str(intent.get("payer_uid") or "")
         name = str(intent.get("target") or "").strip().casefold()
-        if uid and name:
-            unpriced_purchase_items.setdefault(uid, set()).add(name)
+        if uid:
+            unpriced_purchase_items.setdefault(uid, set())
+            if name:
+                unpriced_purchase_items[uid].add(name)
+            if intent.get("ambiguous_target") is True:
+                ambiguous_unpriced_payers.add(uid)
 
     def _matches(names: set[str], key: str) -> bool:
-        return any(name and (name in key or key in name) for name in names)
+        return item_names_match(names, key)
 
     def blocked(uid: str, item: str) -> bool:
         key = str(item or "").strip().casefold()
@@ -882,8 +940,14 @@ def filter_unconfirmed_purchase_grants(
             return False
         if _matches(pending_purchase_items.get(uid, set()), key):
             return True
-        if _matches(unpriced_purchase_items.get(uid, set()), key):
-            return not _matches(free_grant_items.get(uid, set()), key)
+        if uid in ambiguous_pending_payers:
+            return True
+        if uid in unpriced_purchase_items:
+            if uid in ambiguous_unpriced_payers:
+                return not _matches(free_grant_items.get(uid, set()), key)
+            return _matches(unpriced_purchase_items.get(uid, set()), key) and not _matches(
+                free_grant_items.get(uid, set()), key,
+            )
         return False
 
     removed = 0

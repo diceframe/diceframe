@@ -1,5 +1,6 @@
 """New-game defaults are snapshots; current-table changes retain authority."""
 from copy import deepcopy
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -217,6 +218,89 @@ async def test_factory_defaults_apply_once_to_new_tables_including_non_web_entri
     assert await factory.create_game(key, 'world', 'World', 'Table') is inst
     assert game_preferences.project(inst)['push_enabled'] is False
     assert game_preferences.project(inst)['quick_actions_enabled'] is False
+
+
+@pytest.mark.asyncio
+async def test_factory_snapshots_world_currency_context(tmp_path):
+    from src.commands.game_factory import GameFactory
+    from src.engine.game_instance import GameRegistry
+    from src.engine.modules import game_config
+
+    worlds_dir = tmp_path / "worlds"
+    rules_dir = tmp_path / "rules"
+    worlds_dir.mkdir()
+    rules_dir.mkdir()
+    (worlds_dir / "republican.json").write_text(json.dumps({
+        "world_id": "republican",
+        "world_name": "民国",
+        "default_rule": "freeform_coc",
+        "currency": "法币",
+        "currency_system": {
+            "schema_version": 2,
+            "base_unit": "copper",
+            "display_unit": "yuan",
+            "units": [
+                {"id": "copper", "name": "铜元", "rate": 1},
+                {"id": "yuan", "name": "元", "rate": 100},
+            ],
+        },
+    }, ensure_ascii=False), encoding="utf-8")
+    (rules_dir / "freeform_coc.json").write_text(json.dumps({
+        "rule_id": "freeform_coc",
+        "rule_name": "CoC",
+        "dice_system": "d100",
+        "currency": "美元",
+        "currency_system": {
+            "schema_version": 2,
+            "base_unit": "cent",
+            "display_unit": "dollar",
+            "units": [
+                {"id": "dollar", "name": "美元", "rate": 100},
+                {"id": "cent", "name": "美分", "rate": 1},
+            ],
+        },
+    }, ensure_ascii=False), encoding="utf-8")
+
+    factory = GameFactory(
+        GameRegistry(tmp_path / "saves"),
+        None,
+        worlds_dir,
+        rules_dir,
+    )
+    instance = await factory.create_game(
+        ("web", "republican", "bot"),
+        "republican",
+        "民国",
+        "测试",
+    )
+
+    assert game_config.currency_label(instance) == "法币"
+    assert game_config.currency_system(instance)["base_unit"] == "copper"
+    assert game_config.currency_system(instance)["display_unit"] == "yuan"
+
+    world = json.loads((worlds_dir / "republican.json").read_text(encoding="utf-8"))
+    world["currency"] = "美元"
+    world["currency_system"] = {
+        "schema_version": 2,
+        "base_unit": "cent",
+        "display_unit": "dollar",
+        "units": [
+            {"id": "dollar", "name": "美元", "rate": 100},
+            {"id": "cent", "name": "美分", "rate": 1},
+        ],
+    }
+    (worlds_dir / "republican.json").write_text(
+        json.dumps(world, ensure_ascii=False), encoding="utf-8",
+    )
+    same = await factory.create_game(
+        ("web", "republican", "bot"),
+        "republican",
+        "民国",
+        "测试",
+    )
+    assert same is instance
+    assert game_config.currency_label(same) == "法币"
+    assert game_config.currency_system(same)["base_unit"] == "copper"
 
 
 @pytest.mark.asyncio

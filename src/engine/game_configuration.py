@@ -30,6 +30,8 @@ def configure_game(
     difficulty: str,
     language: str,
     state: GameState,
+    currency_label: str = "",
+    currency_system: dict[str, Any] | None = None,
 ) -> None:
     """配置新局身份信息；调用方在并发路径中应持有 ``_lock``。"""
     game_config.require_writable(instance)
@@ -39,6 +41,8 @@ def configure_game(
     instance.group_name = group_name
     game_config.replace_seed_code(instance, seed_code)
     game_config.replace_difficulty(instance, difficulty)
+    if currency_system is not None:
+        game_config.replace_currency_context(instance, currency_label, currency_system)
     instance.language = normalize_language(language)
     instance.state = state
 

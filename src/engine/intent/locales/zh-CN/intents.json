@@ -37,7 +37,7 @@
   "purchase_target_connector": ["再", "还", "然后", "并且", "并", "去"],
   "purchase_target_suffix": [],
   "purchase_quantity_classifier": ["个", "件", "瓶", "把", "套", "份", "张", "枚", "只", "本", "支"],
-  "purchase_generic_target": ["这个", "那个", "它"],
+  "purchase_generic_target": ["这个", "那个", "它", "报纸", "商品", "物品", "东西", "货物"],
   "purchase_quantity_word": ["一=1", "二=2", "两=2", "三=3", "四=4", "五=5", "六=6", "七=7", "八=8"],
   "purchase_balance": ["余额", "有", "拥有", "持有", "剩余", "还剩", "预算", "最多", "上限"],
   "purchase_confirm": [

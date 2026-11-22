@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import json
 import logging
 import operator
@@ -160,7 +161,7 @@ class RuleSystem:
         import copy
         import json
         value = copy.deepcopy(self.template)
-        for field in ("rule_name", "name", "description", "attr_hint", "skill_hint", "gm_prompt_appendix", "check_planner_appendix", "difficulty_instructions", "currency", "active_locale", "default_locale", "locale_schema_version"):
+        for field in ("rule_name", "name", "description", "attr_hint", "skill_hint", "gm_prompt_appendix", "check_planner_appendix", "difficulty_instructions", "currency", "currency_system", "active_locale", "default_locale", "locale_schema_version"):
             value.pop(field, None)
         for item in value.get("attributes", []):
             if isinstance(item, dict):
@@ -1040,6 +1041,28 @@ class RuleSystem:
         except Exception:
             logger.warning("世界模板读取失败: %s", world_path)
             return None
+
+
+def apply_currency_context(
+    rule: "RuleSystem | None",
+    label: str,
+    system: dict[str, Any] | None,
+) -> "RuleSystem | None":
+    """Apply a game-scoped currency snapshot without mutating the rule source."""
+
+    if rule is None or not isinstance(system, dict):
+        return rule
+    validate_declared_currency_system(system)
+    template = copy.deepcopy(rule.template)
+    template["currency_system"] = copy.deepcopy(system)
+    if str(label or "").strip():
+        template["currency"] = str(label).strip()
+        ui_schema = template.get("ui_schema")
+        if isinstance(ui_schema, dict):
+            ui_schema = copy.deepcopy(ui_schema)
+            ui_schema["currency_label"] = str(label).strip()
+            template["ui_schema"] = ui_schema
+    return RuleSystem(template)
 
 
 def list_available_rules(rules_dir: str | Path) -> list[dict]:

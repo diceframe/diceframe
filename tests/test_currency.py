@@ -15,8 +15,10 @@ from src.engine.currency import (
     validate_currency_system,
 )
 from src.engine.currency.validation import is_v2_currency_system
+from src.engine.game_instance import GameInstance
+from src.engine.modules import game_config
 from src.rules.loader import RuleBundleLoader
-from src.rules.rule_system import RuleSystem
+from src.rules.rule_system import RuleSystem, apply_currency_context
 
 DOLLAR_SPEC = validate_currency_system({
     "schema_version": 2,
@@ -213,6 +215,58 @@ def test_rule_system_v2_currency_spec(tmp_path):
     assert spec.base_unit == "cent"
     assert parse_currency_amount("0.25", "dollar", spec) == 25
     assert rule.currency_system["display_unit"] == "dollar"
+
+
+def test_currency_context_overlays_rule_without_mutating_shared_template():
+    rule = RuleSystem.load("templates/rules/freeform_coc.json")
+    overlay = {
+        "schema_version": 2,
+        "base_unit": "copper",
+        "display_unit": "yuan",
+        "units": [
+            {"id": "copper", "name": "铜元", "rate": 1},
+            {"id": "yuan", "name": "元", "rate": 100},
+        ],
+    }
+
+    contextual = apply_currency_context(rule, "法币", overlay)
+
+    assert contextual is not rule
+    assert contextual.currency == "法币"
+    assert contextual.currency_spec.base_unit == "copper"
+    assert contextual.currency_spec.display_unit == "yuan"
+    assert contextual.mechanics_snapshot() == rule.mechanics_snapshot()
+    assert rule.currency == "美元"
+    assert rule.currency_spec.base_unit == "cent"
+
+
+def test_game_currency_context_round_trips_through_save():
+    instance = GameInstance(("web", "currency", "bot"))
+    instance.configure_game(
+        world_id="republican",
+        rule_id="freeform_coc",
+        world_name="民国",
+        group_name="测试",
+        seed_code="seed",
+        difficulty="标准",
+        language="zh-CN",
+        currency_label="法币",
+        currency_system={
+            "schema_version": 2,
+            "base_unit": "copper",
+            "display_unit": "yuan",
+            "units": [
+                {"id": "copper", "name": "铜元", "rate": 1},
+                {"id": "yuan", "name": "元", "rate": 100},
+            ],
+        },
+    )
+
+    restored = GameInstance.from_dict(instance.to_dict())
+
+    assert game_config.currency_label(restored) == "法币"
+    assert game_config.currency_system(restored)["base_unit"] == "copper"
+    assert game_config.currency_system(restored)["display_unit"] == "yuan"
 
 
 def test_rule_system_rejects_invalid_v2_currency_system(tmp_path):
