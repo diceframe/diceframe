@@ -48,8 +48,9 @@ _GRANTABLE_ECONOMY = frozenset({
 _GRANTABLE_FLAGS = frozenset({"action_surge_used", "fleet_step_available"})
 # 只在回合边界到期的条件时长；战斗结束时一并清除。
 _TURN_SCOPED_DURATIONS = frozenset({
-    "actor_turn_start", "target_turn_start", "caster_turn_end",
-    "caster_next_turn_end", "after_next_attack", "attacker_next_turn_start",
+    "actor_turn_start", "target_turn_start", "target_turn_end",
+    "caster_turn_end", "caster_next_turn_end", "after_next_attack",
+    "attacker_next_turn_start",
 })
 
 
@@ -95,6 +96,12 @@ class CombatReducerMixin:
         if event_type in {
             "intent.submitted", "check.resolved", "dnd2024.spell.cast",
             "dnd2024.combat.message", "dnd2024.spell.countered",
+            # 审计事件：它们说的是"有人试过、被拒绝了"，状态本来就不该变。
+            # condition.blocked 是 S0-MM1 的免疫回执——直到本片之前它只被
+            # 产出、从未被消费，任何一次真的免疫都会让整批事件 apply 失败。
+            "condition.blocked", "dnd2024.rider.skipped",
+            # Multiattack 提前收尾的回执：剩余几击没打出去，原因写在事件里。
+            "dnd2024.multiattack.truncated",
         }:
             return
         if event_type == "dnd2024.encounter.readiness.changed":
@@ -398,6 +405,57 @@ class CombatReducerMixin:
                 event.get("actor_id") or ""
             ):
                 economy.pop("turn_start_window", None)
+            return
+        if event_type == "dnd2024.action.used":
+            # S0-MM3c：stat block 动作的使用账。recharge 动作被用掉即不可用，
+            # 直到持有者回合开始时掷回；per_day 动作扣次数，用尽即不可用。
+            actor_id = str(event["actor_id"])
+            _kind, enemy_id = _actor_kind(actor_id)
+            enemy = combat.get("enemies", {}).get(enemy_id)
+            if not isinstance(enemy, dict):
+                raise EventBatchError("action usage needs an enemy actor")
+            action_id = str(event["action_id"])
+            limits = event.get("usage_limits")
+            limits = limits if isinstance(limits, dict) else {}
+            row = enemy.setdefault("usage", {}).setdefault(
+                action_id, {"used": 0, "available": True},
+            )
+            row["used"] = int(row.get("used", 0) or 0) + 1
+            if "recharge" in limits:
+                row["available"] = False
+            elif "per_day" in limits:
+                row["available"] = row["used"] < int(limits["per_day"])
+            else:
+                # 无限制的动作：记次数只为审计，可用性不变。
+                row["available"] = True
+            return
+        if event_type == "dnd2024.legendary_resistance.spent":
+            # S0-MM3d：传奇抗性的次数与 recharge 动作共用一本 usage 账，
+            # 键名带 `trait:` 前缀，避免和同名动作 id 撞车。
+            actor_id = str(event["actor_id"])
+            _kind, enemy_id = _actor_kind(actor_id)
+            enemy = combat.get("enemies", {}).get(enemy_id)
+            if not isinstance(enemy, dict):
+                raise EventBatchError("legendary resistance needs an enemy actor")
+            per_day = int(event["per_day"])
+            row = enemy.setdefault("usage", {}).setdefault(
+                "trait:legendary_resistance", {"used": 0, "available": True},
+            )
+            row["used"] = int(row.get("used", 0) or 0) + 1
+            row["available"] = row["used"] < per_day
+            return
+        if event_type == "dnd2024.action.recharge_rolled":
+            actor_id = str(event["actor_id"])
+            _kind, enemy_id = _actor_kind(actor_id)
+            enemy = combat.get("enemies", {}).get(enemy_id)
+            if not isinstance(enemy, dict):
+                raise EventBatchError("recharge needs an enemy actor")
+            action_id = str(event["action_id"])
+            roll = int(event["roll"])
+            row = enemy.setdefault("usage", {}).setdefault(
+                action_id, {"used": 0, "available": True},
+            )
+            row["available"] = int(event["from"]) <= roll <= int(event["to"])
             return
         if event_type == "dnd2024.feature.used":
             # 「每回合一次」按真实攻击者 + 具体回合（round + turn_index）记账。

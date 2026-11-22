@@ -117,11 +117,13 @@ class CombatTriggeredSpellsMixin:
         # （震慑击、散手技巧）在直通路径由 ``_resolve_committed_hit`` 结算，
         # 决策路径若漏掉它们，会变成"有至圣斩窗口的角色悄悄少了半个特性"。
         attacker_id = str(decision["actor_id"])
-        rider_events, rider_damage = self._hit_rider_events(
-            combat, target, decision["damage_event"], rng, attacker_id=attacker_id,
+        # 第二段伤害与 stat block rider 也在这一层结算：这条路径同样是"命中
+        # 落地"，它若漏掉，有至圣斩窗口的攻击就会少打一段、也少了击倒。
+        tail_events, tail_damage = self._hit_tail_events(
+            instance, combat, attacker_id, target, decision["damage_event"], rng,
         )
-        events.extend(rider_events)
-        total = int(decision["damage_event"]["amount"]) + rider_damage
+        events.extend(tail_events)
+        total = int(decision["damage_event"]["amount"]) + tail_damage
         if extra_damage:
             events.append(extra_damage)
             total += int(extra_damage["amount"])

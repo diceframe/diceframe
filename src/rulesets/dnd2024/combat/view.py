@@ -32,6 +32,7 @@ from .primitives import (
     companion_actor as _companion_actor,
     enemy_actor as _enemy_actor,
     player_actor as _player_actor,
+    resolve_attack_ref,
 )
 
 
@@ -117,6 +118,15 @@ class CombatViewMixin:
                 "abilities": deepcopy(enemy.get("abilities") or {}),
                 "saving_throws": deepcopy(enemy.get("saving_throws") or {}),
                 "attacks": deepcopy(enemy.get("attacks") or []),
+                # S0-MM3b：动作容器随 stat block 一起投影——Multiattack 不是
+                # 攻击，但它的每一下都引用上面的攻击表。
+                "actions": deepcopy(enemy.get("actions") or []),
+                # S0-MM3c：动作的使用账要能读回——recharge 与 per_day 的可用性
+                # 不是可以现算的事实，它由 reducer 记账。
+                "usage": deepcopy(enemy.get("usage") or {}),
+                # S0-MM3d：特质随 stat block 投影，消费者（豁免优势、集群
+                # 战术、传奇抗性、飞行经过）都从这一份读，不各自解析文本。
+                "traits": deepcopy(enemy.get("traits") or []),
                 "conditions": deepcopy(enemy.get("conditions") or {}),
                 "death_saves": {}, "equipment_refs": [], "spell_refs": [], "slots": {},
                 "weapon_category_refs": [],
@@ -327,6 +337,12 @@ class CombatViewMixin:
         free_cast_slots = casting["free_cast_slots"]
         view: dict[str, Any] = {
             "actor_id": _player_actor(uid), "kind": "player", "id": uid, "side": "party",
+            # 尺寸是角色卡上的事实（species 的 size_options），也是"击倒只对
+            # Medium 或更小生效"这类 rider 门槛的唯一依据。缺省留空表示未知，
+            # 有门槛的 rider 对未知尺寸 fail closed。
+            "size": str(
+                ((character.get("identity") or {}).get("size") or "")
+            ),
             "hp": int(resources.get("hp", 0) or 0),
             "max_hp": int(resources.get("max_hp", 0) or 0),
             "temp_hp": int(resources.get("temp_hp", 0) or 0),
@@ -701,6 +717,65 @@ class CombatViewMixin:
             ),
             None,
         )
+
+    def _declared_action(
+        self, actor: dict[str, Any], intent: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """The stat-block action an intent names, from this actor's own list.
+
+        Same boundary as ``_declared_attack``: the client names an action, the
+        authoritative stat block decides whether it exists.
+        """
+
+        action_id = str(intent.get("action_id") or "")
+        return next(
+            (
+                deepcopy(action) for action in actor.get("actions") or []
+                if isinstance(action, dict) and str(action.get("id") or "") == action_id
+            ),
+            None,
+        )
+
+    def _multiattack_parts(
+        self, actor: dict[str, Any], action: dict[str, Any], intent: dict[str, Any],
+    ) -> list[tuple[dict[str, Any], int]]:
+        """Expand a Multiattack action into (attack profile, count) pairs.
+
+        Three shapes, one expansion: ``repeat`` is a single part, ``combo`` is
+        the list, ``choice`` is the branch the intent names.  Every reference is
+        resolved **inside this creature's own attack list** — a Multiattack that
+        named another monster's attack would silently borrow its numbers.
+        """
+
+        raw_parts: list[dict[str, Any]] = []
+        repeat = action.get("repeat")
+        if isinstance(repeat, dict):
+            raw_parts = [repeat]
+        elif isinstance(action.get("combo"), list):
+            raw_parts = list(action["combo"])
+        elif isinstance(action.get("choice"), list):
+            wanted = str(intent.get("choice") or "")
+            branch = next(
+                (
+                    row for row in action["choice"]
+                    if isinstance(row, dict) and str(row.get("label") or "") == wanted
+                ),
+                None,
+            )
+            if branch is None:
+                raise CombatIntentError("this multiattack has no such branch")
+            raw_parts = list(branch.get("parts") or [])
+        attacks = [item for item in actor.get("attacks") or [] if isinstance(item, dict)]
+        resolved: list[tuple[dict[str, Any], int]] = []
+        for part in raw_parts:
+            attack = resolve_attack_ref(attacks, str(part.get("attack_id") or ""))
+            if attack is None:
+                raise CombatIntentError(
+                    f"multiattack names an attack this creature does not have: "
+                    f"{part.get('attack_id')}"
+                )
+            resolved.append((deepcopy(attack), int(part.get("count") or 0)))
+        return resolved
 
     @staticmethod
     def _feature_character(actor: dict[str, Any]) -> dict[str, Any]:

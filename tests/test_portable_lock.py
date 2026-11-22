@@ -14,6 +14,7 @@ def _write(path: Path, text: str) -> Path:
 def test_repository_portable_lock_covers_runtime_requirements() -> None:
     root = Path(__file__).resolve().parents[1]
     validate_portable_lock(root / "requirements.txt", root / "requirements-portable.lock")
+    validate_portable_lock(root / "requirements-embedding.txt", root / "requirements-portable.lock")
 
 
 def test_edge_tts_lock_uses_sec_ms_gec_v2_compatible_release() -> None:

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from aiohttp import web
 
 from src.webui.routes._common import _require_confirmed_request
+from src.memory.local_embedding import LocalModelError, check_local_embedding_runtime
 from src.memory.model_catalog import LocalModelManager, ModelCatalogError
 from src.network_proxy import effective_proxy_url
 
@@ -49,6 +51,13 @@ async def api_embedding_model_install(request: web.Request) -> web.Response:
     denied = _require_confirmed_owner(request)
     if denied is not None:
         return denied
+    try:
+        await asyncio.to_thread(check_local_embedding_runtime)
+    except LocalModelError as exc:
+        return web.json_response(
+            {"ok": False, "error": str(exc), "code": "LOCAL_EMBEDDING_RUNTIME_UNAVAILABLE"},
+            status=422,
+        )
     try:
         result = await _manager(request).install(request.match_info["model_id"])
     except ModelCatalogError as exc:
@@ -135,9 +144,19 @@ async def api_embedding_rebuild(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "state": "rebuilding"})
 
 
-def register_embedding_models(application: web.Application) -> None:
+def register_embedding_models(
+    application: web.Application,
+    activate: Callable[[web.Request], Awaitable[web.StreamResponse]],
+) -> None:
+    async def activate_model(request: web.Request) -> web.StreamResponse:
+        denied = _require_confirmed_owner(request)
+        if denied is not None:
+            return denied
+        return await activate(request)
+
     application.router.add_get("/api/embedding/models", api_embedding_models)
     application.router.add_post("/api/embedding/models/{model_id}/install", api_embedding_model_install)
+    application.router.add_post("/api/embedding/models/{model_id}/activate", activate_model)
     application.router.add_delete("/api/embedding/models/{model_id}", api_embedding_model_uninstall)
     application.router.add_post("/api/embedding/catalog/refresh", api_embedding_catalog_refresh)
     application.router.add_post("/api/embedding/rebuild", api_embedding_rebuild)

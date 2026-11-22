@@ -145,10 +145,21 @@
     "paralyzed": {"attack_modes": [{"side": "target", "mode": "advantage"}], "implies_incapacitated": true, "speed_zero": true, "auto_fail_saves": ["str", "dex"], "crit_on_hit_within_5": true},
     "stunned": {"attack_modes": [{"side": "target", "mode": "advantage"}], "implies_incapacitated": true, "auto_fail_saves": ["str", "dex"]},
     "unconscious": {"attack_modes": [{"side": "target", "mode": "advantage"}], "implies_incapacitated": true, "speed_zero": true, "auto_fail_saves": ["str", "dex"], "crit_on_hit_within_5": true},
-    "prone": {"attack_modes": [{"side": "actor", "mode": "disadvantage"}]},
+    "prone": {"attack_modes": [{"side": "actor", "mode": "disadvantage"}, {"side": "target", "mode": "advantage", "within_ft": 5}, {"side": "target", "mode": "disadvantage", "beyond_ft": 5}], "stand_up": {"cost": "movement", "fraction": 2}},
     "staggered": {"speed_halved": true},
     "staggered_opening": {"attack_modes": [{"side": "target", "mode": "advantage", "consume_on": "attack_resolved"}]},
     "reckless": {"attack_modes": [{"side": "target", "mode": "advantage"}]},
-    "hamstrung": {"speed_modifier": -15}
+    "hamstrung": {"speed_modifier": -15},
+    "grappled": {"speed_zero": true, "escape": {"cost": "action", "checks": [{"ability": "str", "skill": "athletics"}, {"ability": "dex", "skill": "acrobatics"}]}},
+    "restrained": {"speed_zero": true, "attack_modes": [
+      {"side": "target", "mode": "advantage"},
+      {"side": "actor", "mode": "disadvantage"}
+    ], "escape": {"cost": "action", "checks": [{"ability": "str", "skill": "athletics"}, {"ability": "dex", "skill": "acrobatics"}]}},
+    "blinded": {"attack_modes": [
+      {"side": "target", "mode": "advantage"},
+      {"side": "actor", "mode": "disadvantage"}
+    ]},
+    "deafened": {"attack_modes": []},
+    "poisoned": {"attack_modes": [{"side": "actor", "mode": "disadvantage"}]}
   }
 }

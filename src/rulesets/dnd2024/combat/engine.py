@@ -76,7 +76,9 @@ from .primitives import (
     canonical as _canonical,
     current_turn_slot as _current_turn_slot,
     enemy_actor as _enemy_actor,
+    condition_escapes,
     player_actor as _player_actor,
+    stand_up_declaration,
 )
 from .readiness import required_encounter_player_ids
 from .reducer import CombatReducerMixin
@@ -304,10 +306,10 @@ class Dnd2024CombatEngine(
                         gm_pending, viewer_id=actor_id, viewer_is_gm=viewer_is_gm,
                     ),
                 }]
-        if current.startswith("enemy:"):
+        if current.startswith("enemy:") and not viewer_is_gm:
             return communication
         requested = _player_actor(actor_id)
-        if requested != current:
+        if requested != current and not (viewer_is_gm and current.startswith("enemy:")):
             return communication
         pending = [
             item for item in combat.get("pending_decisions", [])
@@ -397,6 +399,33 @@ class Dnd2024CombatEngine(
                     "type": "stabilize", "label": "Stabilize", "actor_id": current,
                     "expected_version": version, "targets": adjacent_downed,
                 })
+            if actor["kind"] == "enemy":
+                targets = self._hostile_targets(instance, combat, current)
+                for declaration in actor.get("actions") or []:
+                    if not isinstance(declaration, dict):
+                        continue
+                    kind = str(declaration.get("kind") or "")
+                    action_id = str(declaration.get("id") or "")
+                    if not action_id or kind not in {"multiattack", "save_action"}:
+                        continue
+                    if kind == "save_action" and not self._action_usage(actor, action_id)["available"]:
+                        continue
+                    entry: dict[str, Any] = {
+                        "type": kind,
+                        "label": str(declaration.get("name") or action_id),
+                        "actor_id": current,
+                        "expected_version": version,
+                        "action_id": action_id,
+                        "targets": targets,
+                    }
+                    choices = declaration.get("choice")
+                    if isinstance(choices, list):
+                        entry["choice_ids"] = [
+                            str(row.get("label") or "")
+                            for row in choices
+                            if isinstance(row, dict) and str(row.get("label") or "")
+                        ]
+                    actions.append(entry)
         spells = self._available_spells(
             instance, actor, economy, hit_spell_decision(combat, current),
         )
@@ -441,6 +470,32 @@ class Dnd2024CombatEngine(
             actions.append({
                 "type": "move", "label": "Move", "actor_id": current,
                 "expected_version": version, "movement_remaining": economy["movement"],
+            })
+        # 挣脱与起身都是"从状态里长出来的动作"：面板不该自己推断能不能用、
+        # 需要多少成本，所以两条入口都由注册表 + 实例现算。
+        for escape in condition_escapes(self.catalog.conditions, actor["conditions"]):
+            actions.append({
+                "type": "escape", "label": "Escape", "actor_id": current,
+                "expected_version": version,
+                "condition": escape["condition"],
+                "escape_dc": escape["escape_dc"],
+                "checks": escape["checks"],
+                "cost": escape["cost"],
+                "available": int(economy.get(escape["cost"], 0) or 0) > 0,
+            })
+        stand_up = stand_up_declaration(self.catalog.conditions, actor["conditions"])
+        if stand_up is not None:
+            effective_speed = economy.get("speed")
+            cost = self.stand_up_cost(
+                actor, stand_up,
+                speed=int(effective_speed) if isinstance(effective_speed, int) else None,
+            )
+            actions.append({
+                "type": "stand_up", "label": "Stand up", "actor_id": current,
+                "expected_version": version,
+                "condition": stand_up["condition"],
+                "movement_cost": cost,
+                "available": int(economy.get("movement", 0) or 0) >= cost,
             })
         # 回合末移除是一个"可选"越项：面板必须能看出可移除哪几项，否则
         # 玩家只能靠猜该传什么值；候选来自声明白名单与当前实有条件，服务端
@@ -991,6 +1046,7 @@ class Dnd2024CombatEngine(
             return validation
         combat = state["combat"]
         intent_type = str(intent["type"])
+        actor_id = str(intent.get("actor_id") or "")
         events = [{
             "type": "intent.submitted", "intent_type": intent_type,
             "actor_id": str(intent.get("actor_id") or ""),
@@ -1074,6 +1130,19 @@ class Dnd2024CombatEngine(
                 # 出手"这条事实买断，校验层已经证明过。
                 spend_attack_action=not bool(second_target_of),
                 horde_breaker=bool(second_target_of),
+            ))
+        elif intent_type == "multiattack":
+            events.extend(self._multiattack_events(instance, combat, intent, rng))
+        elif intent_type == "save_action":
+            events.extend(self._save_action_events(instance, combat, intent, rng))
+        elif intent_type == "escape":
+            events.extend(
+                self._escape_events(combat, intent, self._actor_view(instance, combat, actor_id), rng)
+            )
+        elif intent_type == "stand_up":
+            events.extend(self._stand_up_events(
+                self._actor_view(instance, combat, actor_id), intent,
+                speed=int((combat.get("economy") or {}).get("speed") or 0),
             ))
         elif intent_type == "superior_hunters_prey":
             events.extend(self._superior_prey_events(instance, combat, intent, rng))
@@ -1826,18 +1895,49 @@ class Dnd2024CombatEngine(
 
     def _attack_cost_event(
         self, combat: dict[str, Any], actor: dict[str, Any], *, resource: str = "",
-        weapon: dict[str, Any] | None = None,
+        weapon: dict[str, Any] | None = None, attacks_per_action: int = 0,
     ) -> dict[str, Any]:
         return {
             "type": "dnd2024.attack.spent", "actor_id": actor["actor_id"],
             "resource": resource or self._spend_action_resource(combat),
-            "attacks_per_action": self._attacks_per_action(actor),
+            "attacks_per_action": (
+                attacks_per_action or self._attacks_per_action(actor)
+            ),
             # 归约需要知道"这一击用的是不是 Light 武器"，才能回答下一问：
             # "本回合还允许 Light 追加攻击吗"。
             "light_weapon": bool((weapon or {}).get("light")),
             # Loading 的节流单位是"一次 action/Bonus/Reaction"，归约按窗口记账。
             "loading_weapon": bool((weapon or {}).get("loading")),
         }
+
+    def _ally_within(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        target: dict[str, Any], feet: int,
+    ) -> bool:
+        """Whether a living, conscious ally of ``actor`` stands near ``target``.
+
+        Pack Tactics is about the *target's* surroundings — "another enemy of the
+        target within 5 feet of it" — not the attacker's, so the search is over
+        the target's neighbours rather than the attacker's.
+        """
+
+        side = str(actor.get("side") or "")
+        actor_id = str(actor.get("actor_id") or "")
+        target_id = str(target.get("actor_id") or "")
+        for candidate_id in combat.get("initiative") or []:
+            if candidate_id in {actor_id, target_id}:
+                continue
+            try:
+                candidate = self._actor_view(instance, combat, str(candidate_id))
+            except CombatIntentError:  # pragma: no cover - initiative is authoritative
+                continue
+            if str(candidate.get("side") or "") != side or candidate["hp"] <= 0:
+                continue
+            if "incapacitated" in candidate["conditions"]:
+                continue
+            if self._distance(combat, str(candidate_id), target_id) <= feet:
+                return True
+        return False
 
     def _consume_attack_conditions(
         self, actor_id: str, target_id: str, actor: dict[str, Any], target: dict[str, Any],
@@ -2639,6 +2739,20 @@ class Dnd2024CombatEngine(
                 ):
                     # "Until the start of your next turn": the source actor's
                     # turn has just begun, so this instance expires now.
+                    target_conditions.pop(condition_id, None)
+                    continue
+                if value.get("duration") == "target_turn_end" and (
+                    target_id == previous_actor_id
+                ):
+                    # "Until the end of its next turn"（怪物命中后的 Poisoned
+                    # 等 rider）：到期时刻是**目标自己**这一回合结束，
+                    # 因此读 previous_actor_id，与来源是谁无关。记录里
+                    # ``expires_after`` > 1 表示它是在目标自己的回合里挂上的，
+                    # 那一次回合结束还不是"下个回合"。
+                    remaining_turns = int(value.get("expires_after", 1) or 1)
+                    if remaining_turns > 1:
+                        value["expires_after"] = remaining_turns - 1
+                        continue
                     target_conditions.pop(condition_id, None)
                     continue
                 if value.get("duration") in TURNS_SCOPED_DURATIONS:

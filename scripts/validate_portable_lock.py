@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_REQUIREMENTS = ROOT / "requirements.txt"
+EMBEDDING_REQUIREMENTS = ROOT / "requirements-embedding.txt"
 PORTABLE_LOCK = ROOT / "requirements-portable.lock"
 _NAME_SEPARATOR = re.compile(r"[-_.]+")
 _REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9_.-]*)")
@@ -61,6 +62,7 @@ def validate_portable_lock(requirements: Path, lock: Path) -> None:
 def main() -> int:
     try:
         validate_portable_lock(RUNTIME_REQUIREMENTS, PORTABLE_LOCK)
+        validate_portable_lock(EMBEDDING_REQUIREMENTS, PORTABLE_LOCK)
     except ValueError as exc:
         print(exc, file=sys.stderr)
         return 1
