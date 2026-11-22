@@ -27,6 +27,9 @@ export function providerSecretKey(providerId: string): string {
   return `ai_provider_key_${providerId}`
 }
 
+const localEmbeddingSelection = ['embedding_enabled', 'embedding_source', 'embedding_local_model_id'] as const
+const embeddingSettings = [...localEmbeddingSelection, 'embedding_provider_ref', 'embedding_model', 'embedding_max_input'] as const
+
 export const useSettingsStore = defineStore('settings', () => {
   const config = ref<Partial<AppConfig>>({})
   const secrets = ref<SecretInput>({})
@@ -100,10 +103,29 @@ export const useSettingsStore = defineStore('settings', () => {
     return result.warnings || []
   }
 
-  async function saveConfigPatch(patch: Partial<AppConfig>) {
-    const revisions = new Map(fieldRevisions)
-    await api('/config', { method: 'POST', body: JSON.stringify(patch) })
-    await load(Object.keys(patch), revisions)
+  function prepareLocalEmbeddingActivation(modelId: string) {
+    const expectedRevision = lastLoaded.embedding_config_revision
+    if (typeof expectedRevision !== 'string' || !expectedRevision) return null
+    const startingFields = embeddingSettings.map(key => ({
+      key, revision: fieldRevisions.get(key), value: config.value[key],
+    }))
+    return async () => {
+      if (lastLoaded.embedding_config_revision !== expectedRevision || startingFields.some(field => (
+        fieldRevisions.get(field.key) !== field.revision || config.value[field.key] !== field.value
+      ))) return false
+
+      const revisions = new Map(fieldRevisions)
+      try {
+        await api(`/embedding/models/${encodeURIComponent(modelId)}/activate`, {
+          method: 'POST', body: JSON.stringify({ expected_revision: expectedRevision }),
+        })
+      } catch (error: unknown) {
+        if (error instanceof ApiError && error.code === 'EMBEDDING_SETTINGS_CHANGED') return false
+        throw error
+      }
+      await load([...localEmbeddingSelection], revisions)
+      return true
+    }
   }
 
   async function saveProviders(providers: AiProviderInput[]) {
@@ -221,7 +243,7 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   return {
-    config, secrets, loading, error, load, saveSection, saveConfigPatch, saveProviders, isConfigDirty,
+    config, secrets, loading, error, load, saveSection, prepareLocalEmbeddingActivation, saveProviders, isConfigDirty,
     saveAccessPassword, clearProxy, botToken, test, testProvider, fetchProviderModels, setConfigField,
   }
 })

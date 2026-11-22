@@ -548,6 +548,7 @@ export const en = {
   embeddingModelDownloadAndEnable: 'Download and enable',
   embeddingModelDownloading: 'Downloading model…',
   embeddingModelVerifying: 'Testing model…',
+  embeddingSettingsChangedDuringActivation: 'Embedding settings changed. Review the current settings before enabling this model.',
   embeddingModelEnable: 'Enable',
   embeddingModelActivationHint: 'DiceFrame tests the model before switching. If it fails, your current model stays active.',
   embeddingModelDelete: 'Delete',

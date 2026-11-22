@@ -187,8 +187,12 @@ def _host_credentials() -> HostCredentials:
 def _build_subsystems(
     reuse: TRPGSubsystems | None = None,
     config: dict | None = None,
+    *,
+    verified_local_embedding=None,
 ) -> TRPGSubsystems:
-    return _runtime_composition().build_subsystems(reuse=reuse, config=config)
+    return _runtime_composition().build_subsystems(
+        reuse=reuse, config=config, verified_local_embedding=verified_local_embedding,
+    )
 
 
 def _config_with_resolved_api_refs(config: dict) -> dict:
@@ -305,6 +309,7 @@ def _application_dependencies() -> ApplicationDependencies:
         provider_models_post=api_config_provider_models_post,
         test_connection=api_test_connection,
         test_embedding=api_test_embedding,
+        activate_local_embedding=CONFIG_CONTROLLER.activate_local_embedding,
         test_proxy=api_test_proxy,
     )
 

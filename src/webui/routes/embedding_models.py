@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from aiohttp import web
 
 from src.webui.routes._common import _require_confirmed_request
@@ -143,9 +144,19 @@ async def api_embedding_rebuild(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "state": "rebuilding"})
 
 
-def register_embedding_models(application: web.Application) -> None:
+def register_embedding_models(
+    application: web.Application,
+    activate: Callable[[web.Request], Awaitable[web.StreamResponse]],
+) -> None:
+    async def activate_model(request: web.Request) -> web.StreamResponse:
+        denied = _require_confirmed_owner(request)
+        if denied is not None:
+            return denied
+        return await activate(request)
+
     application.router.add_get("/api/embedding/models", api_embedding_models)
     application.router.add_post("/api/embedding/models/{model_id}/install", api_embedding_model_install)
+    application.router.add_post("/api/embedding/models/{model_id}/activate", activate_model)
     application.router.add_delete("/api/embedding/models/{model_id}", api_embedding_model_uninstall)
     application.router.add_post("/api/embedding/catalog/refresh", api_embedding_catalog_refresh)
     application.router.add_post("/api/embedding/rebuild", api_embedding_rebuild)

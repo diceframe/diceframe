@@ -1,5 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, expect, it, vi } from 'vitest'
+import { ApiError } from '../src/api/client'
 import { useSettingsStore } from '../src/stores/useSettingsStore'
 
 const mocks = vi.hoisted(() => ({ api: vi.fn() }))
@@ -40,22 +41,55 @@ it('preserves unrelated unsaved fields when saving a section', async () => {
   expect(store.config.assistant_agent_max_tokens).toBe(8192)
 })
 
-it('persists local embedding as a focused patch after server verification', async () => {
-  const initial = { embedding_enabled: true, embedding_source: 'external', context_recent_rounds: 0 }
+it('refreshes the verified embedding selection and preserves unrelated drafts', async () => {
+  const initial = {
+    embedding_enabled: true, embedding_source: 'external', context_recent_rounds: 0,
+    embedding_config_revision: 'before',
+  }
   mocks.api.mockResolvedValueOnce(initial)
   const store = useSettingsStore()
   await store.load()
   store.setConfigField('context_recent_rounds', 10)
-  const activation = { embedding_enabled: true, embedding_source: 'local', embedding_local_model_id: 'tiny' } as const
+  const activation = { embedding_enabled: true, embedding_source: 'local', embedding_local_model_id: 'tiny' }
+  const activate = store.prepareLocalEmbeddingActivation('tiny')!
 
   mocks.api.mockRejectedValueOnce(new Error('inference failed'))
-  await expect(store.saveConfigPatch(activation)).rejects.toThrow('inference failed')
+  await expect(activate()).rejects.toThrow('inference failed')
   expect(store.config.embedding_source).toBe('external')
 
-  mocks.api.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ ...initial, ...activation })
-  await store.saveConfigPatch(activation)
-  expect(mocks.api).toHaveBeenNthCalledWith(3, '/config', {
-    method: 'POST', body: JSON.stringify(activation),
+  mocks.api.mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({
+    ...initial, ...activation, embedding_config_revision: 'after',
+  })
+  await expect(activate()).resolves.toBe(true)
+  expect(mocks.api).toHaveBeenNthCalledWith(3, '/embedding/models/tiny/activate', {
+    method: 'POST', body: JSON.stringify({ expected_revision: 'before' }),
   })
   expect(store.config).toMatchObject({ ...activation, context_recent_rounds: 10 })
+})
+
+it('skips automatic activation after the owner disables embeddings during download', async () => {
+  mocks.api.mockResolvedValueOnce({
+    embedding_enabled: true, embedding_source: 'external', embedding_config_revision: 'before',
+  })
+  const store = useSettingsStore()
+  await store.load()
+  const activate = store.prepareLocalEmbeddingActivation('tiny')!
+  store.setConfigField('embedding_enabled', false)
+
+  await expect(activate()).resolves.toBe(false)
+  expect(mocks.api).toHaveBeenCalledTimes(1)
+  expect(store.config.embedding_enabled).toBe(false)
+})
+
+it('uses the revision captured before download and skips activation after a server conflict', async () => {
+  mocks.api.mockResolvedValueOnce({ embedding_config_revision: 'before' })
+  const store = useSettingsStore()
+  await store.load()
+  const activate = store.prepareLocalEmbeddingActivation('tiny')!
+  mocks.api.mockRejectedValueOnce(new ApiError('settings changed', 409, 'EMBEDDING_SETTINGS_CHANGED'))
+
+  await expect(activate()).resolves.toBe(false)
+  expect(mocks.api).toHaveBeenLastCalledWith('/embedding/models/tiny/activate', {
+    method: 'POST', body: JSON.stringify({ expected_revision: 'before' }),
+  })
 })

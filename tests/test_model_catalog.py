@@ -266,3 +266,28 @@ async def test_runtime_failure_blocks_model_download(monkeypatch):
 
     assert response.status == 422
     assert json.loads(response.text)["code"] == "LOCAL_EMBEDDING_RUNTIME_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_local_embedding_activation_requires_confirmed_owner_before_delegation():
+    from unittest.mock import AsyncMock
+
+    from aiohttp import web
+    from src.webui.routes import embedding_models
+
+    activate = AsyncMock(return_value=web.json_response({"ok": True}))
+    app = web.Application()
+    embedding_models.register_embedding_models(app, activate)
+    handler = next(
+        route.handler for route in app.router.routes()
+        if route.method == "POST" and route.resource.canonical.endswith("/{model_id}/activate")
+    )
+    unconfirmed = _model_write_request(owner=True)
+    unconfirmed.headers.clear()
+    assert (await handler(unconfirmed)).status == 403
+    assert (await handler(_model_write_request(owner=False))).status == 403
+    activate.assert_not_awaited()
+
+    owner = _model_write_request(owner=True)
+    assert (await handler(owner)).status == 200
+    activate.assert_awaited_once_with(owner)

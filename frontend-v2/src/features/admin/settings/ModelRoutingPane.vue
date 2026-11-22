@@ -177,6 +177,11 @@ function setAsrProvider(value: string) {
 }
 async function activateLocalModel(modelId: string, download: boolean) {
   if (activatingLocalModel.value || uninstallingLocalModel.value || props.saving) return
+  const activate = store.prepareLocalEmbeddingActivation(modelId)
+  if (!activate) {
+    localModelError.value = t('providerBackendOutdated')
+    return
+  }
   activatingLocalModel.value = modelId
   localModelError.value = ''
   let downloaded = false
@@ -187,11 +192,10 @@ async function activateLocalModel(modelId: string, download: boolean) {
       downloaded = true
     }
     localModelPhase.value = 'verify'
-    await store.saveConfigPatch({
-      embedding_enabled: true,
-      embedding_source: 'local',
-      embedding_local_model_id: modelId,
-    })
+    if (!(await activate())) {
+      await store.load([])
+      localModelError.value = t('embeddingSettingsChangedDuringActivation')
+    }
   } catch (error: unknown) {
     localModelError.value = errorMessage(error)
     if (downloaded) await store.load([])

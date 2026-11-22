@@ -548,6 +548,7 @@ export const zhCN = {
   embeddingModelDownloadAndEnable: '下载并启用',
   embeddingModelDownloading: '正在下载模型…',
   embeddingModelVerifying: '正在验证推理…',
+  embeddingSettingsChangedDuringActivation: '向量设置已变更。请核对当前设置后再启用此模型。',
   embeddingModelEnable: '启用',
   embeddingModelActivationHint: '通过推理测试后才会切换模型，失败时保留当前配置。',
   embeddingModelDelete: '删除',

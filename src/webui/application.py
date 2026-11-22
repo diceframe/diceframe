@@ -90,6 +90,7 @@ class ApplicationDependencies:
     provider_models_post: Handler
     test_connection: Handler
     test_embedding: Handler
+    activate_local_embedding: Handler
     test_proxy: Handler
     host_data_dir: Path | None = None
 
@@ -171,7 +172,7 @@ def register_routes(
     register_speech(application)
     register_asr(application)
     register_generated_images(application)
-    register_embedding_models(application)
+    register_embedding_models(application, dependencies.activate_local_embedding)
     register_worlds(application)
     register_lorebooks(application)
     register_rules(application)

@@ -59,8 +59,10 @@ def check_local_embedding_runtime() -> None:
         raise LocalModelError("本地向量推理缺少 ONNX CPU 执行支持。")
 
 
-async def probe_local_embedding(models_dir: Path, model_id: str) -> int:
-    """Load a verified model and return its dimension after one CPU inference."""
+async def open_verified_local_embedding(
+    models_dir: Path, model_id: str,
+) -> tuple[LocalOnnxEmbeddingBackend, int]:
+    """Return the exact backend that passed inference. The caller owns it."""
     if not model_id:
         raise LocalModelError("请先选择本地向量模型")
     try:
@@ -71,11 +73,20 @@ async def probe_local_embedding(models_dir: Path, model_id: str) -> int:
         embedding = await backend.embed("测试")
         if not embedding or not any(embedding) or not all(map(isfinite, embedding)):
             raise LocalModelError("本地模型未返回有效向量")
-        return len(embedding)
+        return backend, len(embedding)
     except Exception as exc:
-        raise LocalModelError(f"本地模型推理失败：{exc}") from exc
-    finally:
         await backend.close()
+        raise LocalModelError(f"本地模型推理失败：{exc}") from exc
+    except asyncio.CancelledError:
+        await backend.close()
+        raise
+
+
+async def probe_local_embedding(models_dir: Path, model_id: str) -> int:
+    """Test inference without keeping the resulting backend alive."""
+    backend, dimension = await open_verified_local_embedding(models_dir, model_id)
+    await backend.close()
+    return dimension
 
 
 def _safe_relative(value: object) -> Path:

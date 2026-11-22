@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.commands.game_handler import GameHandler
 from src.engine.game_instance import GameRegistry
@@ -17,6 +17,9 @@ from src.migrations.world_identity import migrate_legacy_world_ids
 from src.memory.delta import MemoryStore
 from src.rulesets.builtin import build_default_ruleset_registry
 from src.rulesets.registry import RulesetRuntimeRegistry
+
+if TYPE_CHECKING:
+    from src.memory.local_embedding import LocalOnnxEmbeddingBackend
 
 logger = logging.getLogger("trpg")
 
@@ -77,7 +80,13 @@ def create_trpg_subsystems(
     check_model_enabled: bool = False,
     check_provider: ProviderConfig | None = None,
     reuse: TRPGSubsystems | None = None,
+    verified_local_embedding: LocalOnnxEmbeddingBackend | None = None,
 ) -> TRPGSubsystems:
+    if verified_local_embedding is not None and (
+        not embedding_enabled or embedding_source != "local"
+        or verified_local_embedding.model_id != embedding_local_model_id
+    ):
+        raise ValueError("Verified local embedding does not match runtime configuration")
     if reuse is None:
         converted = migrate_legacy_world_ids(data_dir, worlds_dir)
         if converted:
@@ -114,26 +123,26 @@ def create_trpg_subsystems(
         memory_store = MemoryStore(data_dir / "memory.db")
         memory_store.open()
 
-    embedding_client = None
-    if embedding_enabled and embedding_source == "local":
-        from src.memory.local_embedding import LocalModelError, LocalOnnxEmbeddingBackend
+    embedding_client = verified_local_embedding
+    if embedding_enabled and embedding_client is None:
+        if embedding_source == "local":
+            from src.memory.local_embedding import LocalModelError, LocalOnnxEmbeddingBackend
 
-        try:
-            embedding_client = LocalOnnxEmbeddingBackend(
-                data_dir / "models", embedding_local_model_id,
+            try:
+                embedding_client = LocalOnnxEmbeddingBackend(
+                    data_dir / "models", embedding_local_model_id,
+                )
+            except LocalModelError as exc:
+                # 本地模型目录损坏或被删会让构造期校验抛 LocalModelError；
+                # 向量能力本次停用即可，不能让 build_subsystems 冒泡导致进程无法启动。
+                logger.warning("本地向量模型校验失败，向量能力本次停用: %s", exc)
+        elif embedding_base_url:
+            from src.memory.embedding import EmbeddingClient
+            embedding_client = EmbeddingClient(
+                embedding_base_url, embedding_api_key, embedding_model or "nomic-embed-text",
+                max_input_override=embedding_max_input,
+                proxy_url=proxy_url,
             )
-        except LocalModelError as exc:
-            # 本地模型目录损坏或被删会让构造期校验抛 LocalModelError；
-            # 向量能力本次停用即可，不能让 build_subsystems 冒泡导致进程无法启动。
-            logger.warning("本地向量模型校验失败，向量能力本次停用: %s", exc)
-    elif embedding_enabled and embedding_base_url:
-        from src.memory.embedding import EmbeddingClient
-        emb_key = embedding_api_key
-        embedding_client = EmbeddingClient(
-            embedding_base_url, emb_key, embedding_model or "nomic-embed-text",
-            max_input_override=embedding_max_input,
-            proxy_url=proxy_url,
-        )
 
     # A model-client rebuild does not replace installed ruleset authority or
     # the plugin source that owns its live transports.
