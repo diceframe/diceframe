@@ -106,7 +106,7 @@ function purposeText(value?: ManualRollPurpose) { return value === 'check' ? cop
     <template v-if="purpose === 'check'">
       <label>{{ copy.ability }} <select v-model="checkAbility"><option value="">{{ copy.anyAbility }}</option><option v-for="item in checkOptions.abilities" :key="item.id" :value="item.id">{{ item.label }}</option></select></label>
       <label>{{ copy.skill }} <select v-model="checkSkill"><option value="">{{ copy.anySkill }}</option><option v-for="item in checkOptions.skills" :key="item.id" :value="item.id">{{ item.label }}</option></select></label>
-      <label>{{ copy.target }} <input v-model.number="target" type="number" min="1" max="10000" :placeholder="copy.targetPlaceholder" /></label>
+      <label>{{ copy.target }} <input v-model.number="target" type="number" min="1" max="100" :placeholder="copy.targetPlaceholder" /></label>
       <label>{{ copy.comparison }} <select v-model="comparison"><option value="auto">{{ copy.auto }}</option><option value="at_least">{{ copy.atLeast }}</option><option value="at_most">{{ copy.atMost }}</option></select></label>
       <small class="manual-roll-field-hint">{{ copy.checkHint }}</small>
     </template>

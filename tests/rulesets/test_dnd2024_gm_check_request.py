@@ -147,3 +147,31 @@ def test_a_ruleset_without_the_hook_refuses_the_request():
 
     assert created["ok"] is False
     assert "does not support" in created["error"]
+
+
+def test_a_check_cannot_choose_both_an_ability_and_a_skill():
+    _engine, instance = _instance()
+    service = _service(instance, lambda *_args: {"total": 0})
+
+    created = asyncio.run(service.create("test/game", "gm", {
+        "operation_id": "op-both", "run_id": instance.run_id,
+        "purpose": "check", "target_uids": ["gm"],
+        "check": {"ability": "dex", "skill": "stealth", "dc": 10},
+    }))
+
+    assert created["ok"] is False
+    assert "both" in created["error"]
+
+
+def test_a_dnd_check_rejects_at_most_comparison():
+    _engine, instance = _instance()
+    service = _service(instance, lambda *_args: {"total": 0})
+
+    created = asyncio.run(service.create("test/game", "gm", {
+        "operation_id": "op-at-most", "run_id": instance.run_id,
+        "purpose": "check", "comparison": "at_most", "target_uids": ["gm"],
+        "check": {"ability": "dex", "dc": 10},
+    }))
+
+    assert created["ok"] is False
+    assert "at_least" in created["error"]

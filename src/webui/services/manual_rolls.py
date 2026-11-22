@@ -30,6 +30,8 @@ def _validated_check(value: object) -> dict[str, Any]:
     skill = str(value.get("skill") or "").strip()
     if not ability and not skill:
         raise ValueError("check needs an ability or a skill")
+    if ability and skill:
+        raise ValueError("check cannot specify both an ability and a skill")
     dc = value.get("dc")
     if isinstance(dc, bool) or not isinstance(dc, int) or not 1 <= dc <= 100:
         raise ValueError("check dc must be an integer from 1 to 100")
@@ -92,6 +94,8 @@ class ManualRollService:
             return {"ok": False, "error": "this ruleset does not support ability checks"}
         rule = self._rule(inst)
         comparison = self._comparison(body.get("comparison"), rule)
+        if check is not None and comparison == "at_most":
+            return {"ok": False, "error": "D&D ability checks use at_least comparison"}
         target = None
         if purpose == "check":
             # check 块自带 DC；旧的裸公式检定仍从 body.target 取目标值。
