@@ -223,6 +223,17 @@ def test_fleet_step_offers_a_free_step_after_another_bonus_action() -> None:
     assert "step_of_the_wind" in views
 
 
+def test_fleet_step_cannot_be_forged_on_a_fresh_turn() -> None:
+    engine, instance = _monk11()
+
+    resolved = _capability(
+        engine, instance, "step_of_the_wind", via_fleet_step=True,
+    )
+
+    assert resolved["ok"] is False
+    assert "Fleet Step is not available" in str(resolved.get("error"))
+
+
 def test_a_bonus_action_move_still_counts_as_having_moved() -> None:
     """Pounce 的附带移动不花普通移动力，但它确实让角色动过。
 

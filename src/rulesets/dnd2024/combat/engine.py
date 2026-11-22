@@ -306,10 +306,10 @@ class Dnd2024CombatEngine(
                         gm_pending, viewer_id=actor_id, viewer_is_gm=viewer_is_gm,
                     ),
                 }]
-        if current.startswith("enemy:"):
+        if current.startswith("enemy:") and not viewer_is_gm:
             return communication
         requested = _player_actor(actor_id)
-        if requested != current:
+        if requested != current and not (viewer_is_gm and current.startswith("enemy:")):
             return communication
         pending = [
             item for item in combat.get("pending_decisions", [])
@@ -399,6 +399,33 @@ class Dnd2024CombatEngine(
                     "type": "stabilize", "label": "Stabilize", "actor_id": current,
                     "expected_version": version, "targets": adjacent_downed,
                 })
+            if actor["kind"] == "enemy":
+                targets = self._hostile_targets(instance, combat, current)
+                for declaration in actor.get("actions") or []:
+                    if not isinstance(declaration, dict):
+                        continue
+                    kind = str(declaration.get("kind") or "")
+                    action_id = str(declaration.get("id") or "")
+                    if not action_id or kind not in {"multiattack", "save_action"}:
+                        continue
+                    if kind == "save_action" and not self._action_usage(actor, action_id)["available"]:
+                        continue
+                    entry: dict[str, Any] = {
+                        "type": kind,
+                        "label": str(declaration.get("name") or action_id),
+                        "actor_id": current,
+                        "expected_version": version,
+                        "action_id": action_id,
+                        "targets": targets,
+                    }
+                    choices = declaration.get("choice")
+                    if isinstance(choices, list):
+                        entry["choice_ids"] = [
+                            str(row.get("label") or "")
+                            for row in choices
+                            if isinstance(row, dict) and str(row.get("label") or "")
+                        ]
+                    actions.append(entry)
         spells = self._available_spells(
             instance, actor, economy, hit_spell_decision(combat, current),
         )
@@ -458,10 +485,10 @@ class Dnd2024CombatEngine(
             })
         stand_up = stand_up_declaration(self.catalog.conditions, actor["conditions"])
         if stand_up is not None:
-            current = economy.get("speed")
+            effective_speed = economy.get("speed")
             cost = self.stand_up_cost(
                 actor, stand_up,
-                speed=int(current) if isinstance(current, int) else None,
+                speed=int(effective_speed) if isinstance(effective_speed, int) else None,
             )
             actions.append({
                 "type": "stand_up", "label": "Stand up", "actor_id": current,

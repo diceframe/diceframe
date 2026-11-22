@@ -140,6 +140,24 @@ def test_repeat_makes_one_intent_into_three_attacks() -> None:
     assert economy["attacks_remaining"] == 0
 
 
+def test_gm_available_intents_exposes_enemy_multiattack() -> None:
+    engine, instance = _instance()
+    _start(engine, instance, _enemy(
+        [_attack("rend-0", "Rend")],
+        [{"id": "multiattack-0", "name": "Multiattack", "kind": "multiattack",
+          "repeat": {"attack_id": "rend-0", "count": 2}}],
+    ))
+
+    entry = next(
+        item for item in engine.available_intents(instance, "gm")
+        if item["type"] == "multiattack"
+    )
+
+    assert entry["actor_id"] == "enemy:beast-1"
+    assert entry["action_id"] == "multiattack-0"
+    assert [target["actor_id"] for target in entry["targets"]] == ["player:gm"]
+
+
 def test_repeat_costs_exactly_one_action() -> None:
     engine, instance = _instance()
     _start(engine, instance, _enemy(

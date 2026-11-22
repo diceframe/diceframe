@@ -306,6 +306,7 @@ def test_standing_up_costs_half_the_speed_and_no_action() -> None:
         item for item in engine.available_intents(instance, "gm")
         if item["type"] == "stand_up"
     )
+    assert entry["actor_id"] == "player:gm"
     events = _events(engine, instance, {
         "intent_id": "stand-up", "type": "stand_up",
         "expected_version": int(ruleset_runtime.state(instance)["version"]),
