@@ -17,6 +17,28 @@ def ability_modifier(score: int) -> int:
     return (int(score) - 10) // 2
 
 
+def derived_save(score: int, *, proficiency_bonus: int, proficient: bool) -> int:
+    """A saving throw total: the bare modifier, plus PB when proficient.
+
+    Shared by characters and stat blocks.  A stat block only prints its
+    *proficient* saves, so the caller passes ``proficient`` from what it declared
+    and this function stays the single place the arithmetic lives.
+    """
+
+    return ability_modifier(score) + (int(proficiency_bonus) if proficient else 0)
+
+
+def derived_skill(
+    score: int, *, proficiency_bonus: int, proficient: bool, expertise: bool = False,
+) -> int:
+    """A skill total. Expertise replaces the PB contribution, never stacks."""
+
+    if not proficient:
+        return ability_modifier(score)
+    bonus = int(proficiency_bonus)
+    return ability_modifier(score) + (2 * bonus if expertise else bonus)
+
+
 def proficiency_bonus(level: int) -> int:
     return 2 + (max(1, int(level)) - 1) // 4
 

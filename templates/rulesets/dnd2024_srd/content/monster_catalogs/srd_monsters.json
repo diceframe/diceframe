@@ -1,0 +1,6715 @@
+{
+  "schema_version": 1,
+  "kind": "monster_catalog",
+  "id": "srd_monsters",
+  "source_ref": "srd-5.2.1:p344-364:animals",
+  "automation_level": "deterministic",
+  "entries": [
+    {
+      "id": "awakened-shrub",
+      "name": "Awakened Shrub",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_awakened-shrub",
+      "creature_type": "plant",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 9,
+      "hp": 10,
+      "hit_dice": "3d6",
+      "speeds": {
+        "walk": 20
+      },
+      "abilities": {
+        "str": 3,
+        "dex": 8,
+        "con": 11,
+        "int": 10,
+        "wis": 10,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [
+        "Common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rake-0",
+          "name": "Rake",
+          "attack_bonus": 1,
+          "damage": "1",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "baboon",
+      "name": "Baboon",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_baboon",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 3,
+      "hit_dice": "1d6",
+      "speeds": {
+        "walk": 30,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 8,
+        "dex": 14,
+        "con": 11,
+        "int": 4,
+        "wis": 12,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 11,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 1,
+          "damage": "1d4+1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "badger",
+      "name": "Badger",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_badger",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 5,
+      "hit_dice": "1d4+3",
+      "speeds": {
+        "walk": 20,
+        "burrow": 5
+      },
+      "abilities": {
+        "str": 10,
+        "dex": 11,
+        "con": 16,
+        "int": 2,
+        "wis": 12,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 3
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {
+        "darkvision": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 2,
+          "damage": "1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "bat",
+      "name": "Bat",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_bat",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 1,
+      "hit_dice": "1d4-1",
+      "speeds": {
+        "walk": 5,
+        "fly": 30
+      },
+      "abilities": {
+        "str": 2,
+        "dex": 15,
+        "con": 8,
+        "int": 2,
+        "wis": 12,
+        "cha": 4
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 11,
+      "languages": [],
+      "senses": {
+        "blindsight": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "cat",
+      "name": "Cat",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_cat",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 2,
+      "hit_dice": "1d4",
+      "speeds": {
+        "walk": 40,
+        "climb": 40
+      },
+      "abilities": {
+        "str": 3,
+        "dex": 15,
+        "con": 10,
+        "int": 3,
+        "wis": 12,
+        "cha": 7
+      },
+      "saving_throws": {
+        "dex": 4
+      },
+      "skills": {
+        "perception": 3,
+        "stealth": 4
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "scratch-0",
+          "name": "Scratch",
+          "attack_bonus": 4,
+          "damage": "1",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "commoner",
+      "name": "Commoner",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_commoner",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 10,
+      "hp": 4,
+      "hit_dice": "1d8",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 10,
+        "dex": 10,
+        "con": 10,
+        "int": 10,
+        "wis": 10,
+        "cha": 10
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [
+        "Common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "club-0",
+          "name": "Club",
+          "attack_bonus": 2,
+          "damage": "1d4",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "crab",
+      "name": "Crab",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_crab",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 3,
+      "hit_dice": "1d4+1",
+      "speeds": {
+        "walk": 20,
+        "swim": 20
+      },
+      "abilities": {
+        "str": 6,
+        "dex": 11,
+        "con": 12,
+        "int": 1,
+        "wis": 8,
+        "cha": 2
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 2
+      },
+      "passive_perception": 9,
+      "languages": [],
+      "senses": {
+        "blindsight": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "claw-0",
+          "name": "Claw",
+          "attack_bonus": 2,
+          "damage": "1",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "deer",
+      "name": "Deer",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_deer",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 4,
+      "hit_dice": "1d8",
+      "speeds": {
+        "walk": 50
+      },
+      "abilities": {
+        "str": 11,
+        "dex": 16,
+        "con": 11,
+        "int": 2,
+        "wis": 14,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 4
+      },
+      "passive_perception": 14,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "ram-0",
+          "name": "Ram",
+          "attack_bonus": 2,
+          "damage": "1d4",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "eagle",
+      "name": "Eagle",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_eagle",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 4,
+      "hit_dice": "1d6+1",
+      "speeds": {
+        "walk": 10,
+        "fly": 60
+      },
+      "abilities": {
+        "str": 6,
+        "dex": 15,
+        "con": 12,
+        "int": 2,
+        "wis": 14,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 6
+      },
+      "passive_perception": 16,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "talons-0",
+          "name": "Talons",
+          "attack_bonus": 4,
+          "damage": "1d4+2",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "frog",
+      "name": "Frog",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_frog",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 1,
+      "hit_dice": "1d4-1",
+      "speeds": {
+        "walk": 20,
+        "swim": 20
+      },
+      "abilities": {
+        "str": 1,
+        "dex": 13,
+        "con": 8,
+        "int": 1,
+        "wis": 8,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 1,
+        "stealth": 3
+      },
+      "passive_perception": 11,
+      "languages": [],
+      "senses": {
+        "darkvision": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 3,
+          "damage": "1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-fire-beetle",
+      "name": "Giant Fire Beetle",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-fire-beetle",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 4,
+      "hit_dice": "1d6+1",
+      "speeds": {
+        "walk": 30,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 8,
+        "dex": 10,
+        "con": 12,
+        "int": 1,
+        "wis": 7,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 8,
+      "languages": [],
+      "senses": {
+        "blindsight": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 1,
+          "damage": "1",
+          "damage_type": "fire",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-fly",
+      "name": "Giant Fly",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-fly",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 19,
+      "hit_dice": "3d10+3",
+      "speeds": {
+        "walk": 30,
+        "fly": 60
+      },
+      "abilities": {
+        "str": 14,
+        "dex": 13,
+        "con": 13,
+        "int": 2,
+        "wis": 10,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": []
+    },
+    {
+      "id": "goat",
+      "name": "Goat",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_goat",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 10,
+      "hp": 4,
+      "hit_dice": "1d8",
+      "speeds": {
+        "walk": 40,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 11,
+        "dex": 10,
+        "con": 11,
+        "int": 2,
+        "wis": 10,
+        "cha": 5
+      },
+      "saving_throws": {
+        "str": 2
+      },
+      "skills": {
+        "perception": 2
+      },
+      "passive_perception": 12,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "ram-0",
+          "name": "Ram",
+          "attack_bonus": 2,
+          "damage": "1d4",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "hawk",
+      "name": "Hawk",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_hawk",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 1,
+      "hit_dice": "1d4-1",
+      "speeds": {
+        "walk": 10,
+        "fly": 60
+      },
+      "abilities": {
+        "str": 5,
+        "dex": 16,
+        "con": 8,
+        "int": 2,
+        "wis": 14,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 6
+      },
+      "passive_perception": 16,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "talons-0",
+          "name": "Talons",
+          "attack_bonus": 5,
+          "damage": "1",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "homunculus",
+      "name": "Homunculus",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_homunculus",
+      "creature_type": "construct",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 4,
+      "hit_dice": "1d4+2",
+      "speeds": {
+        "walk": 20,
+        "fly": 40
+      },
+      "abilities": {
+        "str": 4,
+        "dex": 15,
+        "con": 14,
+        "int": 10,
+        "wis": 10,
+        "cha": 7
+      },
+      "saving_throws": {
+        "wis": 2,
+        "cha": 0
+      },
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [
+        "Common"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "hyena",
+      "name": "Hyena",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_hyena",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 5,
+      "hit_dice": "1d8+1",
+      "speeds": {
+        "walk": 50
+      },
+      "abilities": {
+        "str": 11,
+        "dex": 13,
+        "con": 12,
+        "int": 2,
+        "wis": 12,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 3
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 2,
+          "damage": "1d6",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "jackal",
+      "name": "Jackal",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_jackal",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 3,
+      "hit_dice": "1d6",
+      "speeds": {
+        "walk": 40
+      },
+      "abilities": {
+        "str": 8,
+        "dex": 15,
+        "con": 11,
+        "int": 3,
+        "wis": 12,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5,
+        "stealth": 4
+      },
+      "passive_perception": 15,
+      "languages": [],
+      "senses": {
+        "darkvision": 90
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 1,
+          "damage": "1d4+1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "lemure",
+      "name": "Lemure",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_lemure",
+      "creature_type": "fiend",
+      "subtype": "",
+      "size": "medium",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 9,
+      "hp": 9,
+      "hit_dice": "2d8",
+      "speeds": {
+        "walk": 20
+      },
+      "abilities": {
+        "str": 10,
+        "dex": 5,
+        "con": 11,
+        "int": 1,
+        "wis": 11,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [
+        "Infernal"
+      ],
+      "senses": {
+        "darkvision": 120
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "vile-slime-0",
+          "name": "Vile Slime",
+          "attack_bonus": 2,
+          "damage": "1d4",
+          "damage_type": "poison",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "lizard",
+      "name": "Lizard",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_lizard",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 10,
+      "hp": 2,
+      "hit_dice": "1d4",
+      "speeds": {
+        "walk": 20,
+        "climb": 20
+      },
+      "abilities": {
+        "str": 2,
+        "dex": 11,
+        "con": 10,
+        "int": 1,
+        "wis": 8,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 9,
+      "languages": [],
+      "senses": {
+        "darkvision": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 2,
+          "damage": "1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "octopus",
+      "name": "Octopus",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_octopus",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 10,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 3,
+      "hit_dice": "1d6",
+      "speeds": {
+        "walk": 5,
+        "swim": 30
+      },
+      "abilities": {
+        "str": 4,
+        "dex": 15,
+        "con": 0,
+        "int": 3,
+        "wis": 10,
+        "cha": -3
+      },
+      "saving_throws": {
+        "con": 30,
+        "cha": -3
+      },
+      "skills": {
+        "perception": 2,
+        "stealth": 6
+      },
+      "passive_perception": 12,
+      "languages": [],
+      "senses": {
+        "darkvision": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "tentacles-0",
+          "name": "Tentacles",
+          "attack_bonus": 4,
+          "damage": "1",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "owl",
+      "name": "Owl",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_owl",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 1,
+      "hit_dice": "1d4-1",
+      "speeds": {
+        "walk": 5,
+        "fly": 60
+      },
+      "abilities": {
+        "str": 3,
+        "dex": 13,
+        "con": 8,
+        "int": 2,
+        "wis": 12,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5,
+        "stealth": 5
+      },
+      "passive_perception": 15,
+      "languages": [],
+      "senses": {
+        "darkvision": 120
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "talons-0",
+          "name": "Talons",
+          "attack_bonus": 3,
+          "damage": "1",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "piranha",
+      "name": "Piranha",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_piranha",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 1,
+      "hit_dice": "1d4-1",
+      "speeds": {
+        "walk": 5,
+        "swim": 40
+      },
+      "abilities": {
+        "str": 2,
+        "dex": 16,
+        "con": 9,
+        "int": 1,
+        "wis": 7,
+        "cha": 2
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 8,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 5,
+          "damage": "1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "rat",
+      "name": "Rat",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_rat",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 10,
+      "hp": 1,
+      "hit_dice": "1d4-1",
+      "speeds": {
+        "walk": 20,
+        "climb": 20
+      },
+      "abilities": {
+        "str": 2,
+        "dex": 11,
+        "con": 9,
+        "int": 2,
+        "wis": 10,
+        "cha": 4
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 2
+      },
+      "passive_perception": 12,
+      "languages": [],
+      "senses": {
+        "darkvision": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 2,
+          "damage": "1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "raven",
+      "name": "Raven",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_raven",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 2,
+      "hit_dice": "1d4",
+      "speeds": {
+        "walk": 10,
+        "fly": 50
+      },
+      "abilities": {
+        "str": 2,
+        "dex": 14,
+        "con": 10,
+        "int": 5,
+        "wis": 13,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 3
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "beak-0",
+          "name": "Beak",
+          "attack_bonus": 4,
+          "damage": "1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "scorpion",
+      "name": "Scorpion",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_scorpion",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 1,
+      "hit_dice": "1d4-1",
+      "speeds": {
+        "walk": 10
+      },
+      "abilities": {
+        "str": 2,
+        "dex": 11,
+        "con": 8,
+        "int": 1,
+        "wis": 8,
+        "cha": 2
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 9,
+      "languages": [],
+      "senses": {
+        "blindsight": 10
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "sting-0",
+          "name": "Sting",
+          "attack_bonus": 2,
+          "damage": "1d6",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "seahorse",
+      "name": "Seahorse",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_seahorse",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 1,
+      "hit_dice": "1d4-1",
+      "speeds": {
+        "walk": 5,
+        "swim": 20
+      },
+      "abilities": {
+        "str": 1,
+        "dex": 12,
+        "con": 8,
+        "int": 1,
+        "wis": 10,
+        "cha": 2
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 2,
+        "stealth": 5
+      },
+      "passive_perception": 12,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": []
+    },
+    {
+      "id": "shrieker-fungus",
+      "name": "Shrieker Fungus",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_shrieker-fungus",
+      "creature_type": "plant",
+      "subtype": "",
+      "size": "medium",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 5,
+      "hp": 13,
+      "hit_dice": "3d8",
+      "speeds": {
+        "walk": 5
+      },
+      "abilities": {
+        "str": 1,
+        "dex": 1,
+        "con": 10,
+        "int": 1,
+        "wis": 3,
+        "cha": 1
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 6,
+      "languages": [],
+      "senses": {
+        "blindsight": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": []
+    },
+    {
+      "id": "spider",
+      "name": "Spider",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_spider",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 1,
+      "hit_dice": "1d4-1",
+      "speeds": {
+        "walk": 20,
+        "climb": 20
+      },
+      "abilities": {
+        "str": 2,
+        "dex": 14,
+        "con": 8,
+        "int": 1,
+        "wis": 10,
+        "cha": 2
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 4
+      },
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {
+        "darkvision": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "1d4",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "vulture",
+      "name": "Vulture",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_vulture",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 10,
+      "hp": 5,
+      "hit_dice": "1d8+1",
+      "speeds": {
+        "walk": 10,
+        "fly": 50
+      },
+      "abilities": {
+        "str": 7,
+        "dex": 10,
+        "con": 13,
+        "int": 2,
+        "wis": 12,
+        "cha": 4
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 3
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "beak-0",
+          "name": "Beak",
+          "attack_bonus": 2,
+          "damage": "1d4",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "weasel",
+      "name": "Weasel",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_weasel",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "0",
+      "xp": 0,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 1,
+      "hit_dice": "1d4-1",
+      "speeds": {
+        "walk": 30,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 3,
+        "dex": 16,
+        "con": 8,
+        "int": 2,
+        "wis": 12,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {
+        "acrobatics": 5,
+        "perception": 3,
+        "stealth": 5
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 5,
+          "damage": "1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "animated-armor",
+      "name": "Animated Armor",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_animated-armor",
+      "creature_type": "construct",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 18,
+      "hp": 33,
+      "hit_dice": "6d8+6",
+      "speeds": {
+        "walk": 25
+      },
+      "abilities": {
+        "str": 14,
+        "dex": 11,
+        "con": 13,
+        "int": 1,
+        "wis": 3,
+        "cha": 1
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 6,
+      "languages": [],
+      "senses": {
+        "blindsight": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "slam-0",
+          "name": "Slam",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "brass-dragon-wyrmling",
+      "name": "Brass Dragon Wyrmling",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_brass-dragon-wyrmling",
+      "creature_type": "dragon",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 15,
+      "hp": 22,
+      "hit_dice": "4d8+4",
+      "speeds": {
+        "walk": 30,
+        "fly": 60,
+        "burrow": 15
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 10,
+        "con": 13,
+        "int": 10,
+        "wis": 11,
+        "cha": 13
+      },
+      "saving_throws": {
+        "dex": 2,
+        "wis": 2
+      },
+      "skills": {
+        "perception": 4,
+        "stealth": 2
+      },
+      "passive_perception": 14,
+      "languages": [
+        "Draconic"
+      ],
+      "senses": {
+        "darkvision": 60,
+        "blindsight": 10
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 4,
+          "damage": "1d10+2",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "brown-bear",
+      "name": "Brown Bear",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_brown-bear",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 22,
+      "hit_dice": "3d10+6",
+      "speeds": {
+        "walk": 40,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 17,
+        "dex": 12,
+        "con": 15,
+        "int": 2,
+        "wis": 13,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 3
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 5,
+          "damage": "1d8+3",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        },
+        {
+          "id": "claw-0",
+          "name": "Claw",
+          "attack_bonus": 5,
+          "damage": "1d4+3",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "bugbear-warrior",
+      "name": "Bugbear Warrior",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_bugbear-warrior",
+      "creature_type": "fey",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 33,
+      "hit_dice": "6d8+6",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 14,
+        "con": 13,
+        "int": 8,
+        "wis": 11,
+        "cha": 9
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 6,
+        "survival": 2
+      },
+      "passive_perception": 10,
+      "languages": [
+        "Common",
+        "Goblin"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "grab-0",
+          "name": "Grab",
+          "attack_bonus": 4,
+          "damage": "2d6+2",
+          "damage_type": "bludgeoning",
+          "range": 10,
+          "long_range": 10
+        },
+        {
+          "id": "light-hammer-0",
+          "name": "Light Hammer",
+          "attack_bonus": 4,
+          "damage": "3d4+2",
+          "damage_type": "bludgeoning",
+          "range": 10,
+          "long_range": 10
+        }
+      ]
+    },
+    {
+      "id": "copper-dragon-wyrmling",
+      "name": "Copper Dragon Wyrmling",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_copper-dragon-wyrmling",
+      "creature_type": "dragon",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 16,
+      "hp": 22,
+      "hit_dice": "4d8+4",
+      "speeds": {
+        "walk": 30,
+        "fly": 60,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 12,
+        "con": 13,
+        "int": 14,
+        "wis": 11,
+        "cha": 13
+      },
+      "saving_throws": {
+        "dex": 3,
+        "wis": 2
+      },
+      "skills": {
+        "perception": 4,
+        "stealth": 3
+      },
+      "passive_perception": 14,
+      "languages": [
+        "Draconic"
+      ],
+      "senses": {
+        "darkvision": 60,
+        "blindsight": 10
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 4,
+          "damage": "1d10+2",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "death-dog",
+      "name": "Death Dog",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_death-dog",
+      "creature_type": "monstrosity",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 39,
+      "hit_dice": "6d8+12",
+      "speeds": {
+        "walk": 40
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 14,
+        "con": 14,
+        "int": 3,
+        "wis": 13,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5,
+        "stealth": 4
+      },
+      "passive_perception": 15,
+      "languages": [],
+      "senses": {
+        "darkvision": 120
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "1d4+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "dire-wolf",
+      "name": "Dire Wolf",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_dire-wolf",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 22,
+      "hit_dice": "3d10+6",
+      "speeds": {
+        "walk": 50
+      },
+      "abilities": {
+        "str": 17,
+        "dex": 15,
+        "con": 15,
+        "int": 3,
+        "wis": 12,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5,
+        "stealth": 4
+      },
+      "passive_perception": 15,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 5,
+          "damage": "1d10+3",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "dryad",
+      "name": "Dryad",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_dryad",
+      "creature_type": "fey",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 16,
+      "hp": 22,
+      "hit_dice": "5d8",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 10,
+        "dex": 12,
+        "con": 11,
+        "int": 14,
+        "wis": 15,
+        "cha": 18
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 4,
+        "stealth": 5
+      },
+      "passive_perception": 14,
+      "languages": [
+        "Elvish",
+        "Sylvan"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "thorn-burst-0",
+          "name": "Thorn Burst",
+          "attack_bonus": 6,
+          "damage": "1d6+4",
+          "damage_type": "piercing",
+          "range": 60,
+          "long_range": 60
+        },
+        {
+          "id": "vine-lash-0",
+          "name": "Vine Lash",
+          "attack_bonus": 6,
+          "damage": "1d8+4",
+          "damage_type": "slashing",
+          "range": 10,
+          "long_range": 10
+        }
+      ]
+    },
+    {
+      "id": "ghoul",
+      "name": "Ghoul",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_ghoul",
+      "creature_type": "undead",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 22,
+      "hit_dice": "5d8",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 13,
+        "dex": 15,
+        "con": 10,
+        "int": 7,
+        "wis": 10,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [
+        "Common"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        },
+        {
+          "id": "claw-0",
+          "name": "Claw",
+          "attack_bonus": 4,
+          "damage": "1d4+2",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-eagle",
+      "name": "Giant Eagle",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-eagle",
+      "creature_type": "celestial",
+      "subtype": "",
+      "size": "large",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 26,
+      "hit_dice": "4d10+4",
+      "speeds": {
+        "walk": 10,
+        "fly": 80
+      },
+      "abilities": {
+        "str": 16,
+        "dex": 17,
+        "con": 13,
+        "int": 8,
+        "wis": 14,
+        "cha": 10
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 6
+      },
+      "passive_perception": 16,
+      "languages": [
+        "Celestial",
+        "Common",
+        "Primordial"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 5,
+          "damage": "1d4+3",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-hyena",
+      "name": "Giant Hyena",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-hyena",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 45,
+      "hit_dice": "6d10+12",
+      "speeds": {
+        "walk": 50
+      },
+      "abilities": {
+        "str": 16,
+        "dex": 14,
+        "con": 14,
+        "int": 2,
+        "wis": 12,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 3
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 5,
+          "damage": "2d6+3",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-octopus",
+      "name": "Giant Octopus",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-octopus",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 45,
+      "hit_dice": "7d10+7",
+      "speeds": {
+        "walk": 10,
+        "swim": 60
+      },
+      "abilities": {
+        "str": 17,
+        "dex": 13,
+        "con": 13,
+        "int": 5,
+        "wis": 10,
+        "cha": 4
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 4,
+        "stealth": 5
+      },
+      "passive_perception": 14,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "tentacles-0",
+          "name": "Tentacles",
+          "attack_bonus": 5,
+          "damage": "2d6+3",
+          "damage_type": "bludgeoning",
+          "range": 10,
+          "long_range": 10
+        }
+      ]
+    },
+    {
+      "id": "giant-spider",
+      "name": "Giant Spider",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-spider",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 26,
+      "hit_dice": "4d10+4",
+      "speeds": {
+        "walk": 30,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 14,
+        "dex": 16,
+        "con": 12,
+        "int": 2,
+        "wis": 11,
+        "cha": 4
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 4,
+        "stealth": 7
+      },
+      "passive_perception": 14,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 5,
+          "damage": "1d8+3",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-toad",
+      "name": "Giant Toad",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-toad",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 39,
+      "hit_dice": "6d10+6",
+      "speeds": {
+        "walk": 30,
+        "swim": 30
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 13,
+        "con": 13,
+        "int": 2,
+        "wis": 10,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-vulture",
+      "name": "Giant Vulture",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-vulture",
+      "creature_type": "monstrosity",
+      "subtype": "",
+      "size": "large",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 10,
+      "hp": 25,
+      "hit_dice": "3d10+9",
+      "speeds": {
+        "walk": 10,
+        "fly": 60
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 10,
+        "con": 16,
+        "int": 6,
+        "wis": 12,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 3
+      },
+      "passive_perception": 13,
+      "languages": [
+        "Common"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "gouge-0",
+          "name": "Gouge",
+          "attack_bonus": 4,
+          "damage": "2d6+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "goblin-boss",
+      "name": "Goblin Boss",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_goblin-boss",
+      "creature_type": "fey",
+      "subtype": "",
+      "size": "small",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 17,
+      "hp": 21,
+      "hit_dice": "6d6",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 10,
+        "dex": 15,
+        "con": 10,
+        "int": 10,
+        "wis": 8,
+        "cha": 10
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 6
+      },
+      "passive_perception": 9,
+      "languages": [
+        "Common",
+        "Goblin"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "scimitar-0",
+          "name": "Scimitar",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        },
+        {
+          "id": "shortbow-0",
+          "name": "Shortbow",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "piercing",
+          "range": 80,
+          "long_range": 320
+        }
+      ]
+    },
+    {
+      "id": "harpy",
+      "name": "Harpy",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_harpy",
+      "creature_type": "monstrosity",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 38,
+      "hit_dice": "7d8+7",
+      "speeds": {
+        "walk": 20,
+        "fly": 40
+      },
+      "abilities": {
+        "str": 12,
+        "dex": 13,
+        "con": 12,
+        "int": 7,
+        "wis": 10,
+        "cha": 13
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [
+        "Common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "claw-0",
+          "name": "Claw",
+          "attack_bonus": 3,
+          "damage": "2d4+1",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "hippogriff",
+      "name": "Hippogriff",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_hippogriff",
+      "creature_type": "monstrosity",
+      "subtype": "",
+      "size": "large",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 26,
+      "hit_dice": "4d10+4",
+      "speeds": {
+        "walk": 40,
+        "fly": 60
+      },
+      "abilities": {
+        "str": 17,
+        "dex": 13,
+        "con": 13,
+        "int": 2,
+        "wis": 12,
+        "cha": 8
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5
+      },
+      "passive_perception": 15,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 5,
+          "damage": "1d8+3",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "imp",
+      "name": "Imp",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_imp",
+      "creature_type": "fiend",
+      "subtype": "",
+      "size": "small",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 21,
+      "hit_dice": "6d4+6",
+      "speeds": {
+        "walk": 20,
+        "fly": 40
+      },
+      "abilities": {
+        "str": 6,
+        "dex": 17,
+        "con": 13,
+        "int": 11,
+        "wis": 12,
+        "cha": 14
+      },
+      "saving_throws": {},
+      "skills": {
+        "deception": 4,
+        "insight": 3,
+        "stealth": 5
+      },
+      "passive_perception": 11,
+      "languages": [
+        "Common",
+        "Infernal"
+      ],
+      "senses": {
+        "darkvision": 120
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "sting-0",
+          "name": "Sting",
+          "attack_bonus": 5,
+          "damage": "1d6+3",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "lion",
+      "name": "Lion",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_lion",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 22,
+      "hit_dice": "4d10",
+      "speeds": {
+        "walk": 50
+      },
+      "abilities": {
+        "str": 17,
+        "dex": 15,
+        "con": 11,
+        "int": 3,
+        "wis": 12,
+        "cha": 8
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 3,
+        "stealth": 4
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 5,
+          "damage": "1d8+3",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "pirate",
+      "name": "Pirate",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_pirate",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 33,
+      "hit_dice": "6d8+6",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 10,
+        "dex": 16,
+        "con": 12,
+        "int": 8,
+        "wis": 12,
+        "cha": 14
+      },
+      "saving_throws": {
+        "dex": 5,
+        "cha": 4
+      },
+      "skills": {},
+      "passive_perception": 11,
+      "languages": [
+        "Common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "dagger-0",
+          "name": "Dagger",
+          "attack_bonus": 5,
+          "damage": "1d4+3",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 60
+        }
+      ]
+    },
+    {
+      "id": "quasit",
+      "name": "Quasit",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_quasit",
+      "creature_type": "fiend",
+      "subtype": "",
+      "size": "small",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 25,
+      "hit_dice": "10d4",
+      "speeds": {
+        "walk": 40
+      },
+      "abilities": {
+        "str": 5,
+        "dex": 17,
+        "con": 10,
+        "int": 7,
+        "wis": 10,
+        "cha": 10
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 5
+      },
+      "passive_perception": 10,
+      "languages": [
+        "Abyssal",
+        "Common"
+      ],
+      "senses": {
+        "darkvision": 120
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 5,
+          "damage": "1d4+3",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "specter",
+      "name": "Specter",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_specter",
+      "creature_type": "undead",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 22,
+      "hit_dice": "5d8",
+      "speeds": {
+        "walk": 30,
+        "fly": 50,
+        "hover": true
+      },
+      "abilities": {
+        "str": 1,
+        "dex": 14,
+        "con": 11,
+        "int": 10,
+        "wis": 10,
+        "cha": 11
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [
+        "Common"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "life-drain-0",
+          "name": "Life Drain",
+          "attack_bonus": 4,
+          "damage": "2d6",
+          "damage_type": "necrotic",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "sphinx-of-wonder",
+      "name": "Sphinx of Wonder",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_sphinx-of-wonder",
+      "creature_type": "celestial",
+      "subtype": "",
+      "size": "small",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 24,
+      "hit_dice": "7d4+7",
+      "speeds": {
+        "walk": 20,
+        "fly": 40
+      },
+      "abilities": {
+        "str": 6,
+        "dex": 17,
+        "con": 13,
+        "int": 15,
+        "wis": 12,
+        "cha": 11
+      },
+      "saving_throws": {},
+      "skills": {
+        "arcana": 4,
+        "religion": 4,
+        "stealth": 5
+      },
+      "passive_perception": 11,
+      "languages": [
+        "Celestial",
+        "Common"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 5,
+          "damage": "1d4+3",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "spy",
+      "name": "Spy",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_spy",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 27,
+      "hit_dice": "6d8",
+      "speeds": {
+        "walk": 30,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 10,
+        "dex": 15,
+        "con": 10,
+        "int": 12,
+        "wis": 14,
+        "cha": 16
+      },
+      "saving_throws": {},
+      "skills": {
+        "deception": 5,
+        "insight": 4,
+        "investigation": 5,
+        "perception": 6,
+        "sleight_of_hand": 4,
+        "stealth": 6
+      },
+      "passive_perception": 16,
+      "languages": [
+        "Common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "hand-crossbow-0",
+          "name": "Hand Crossbow",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "piercing",
+          "range": 30,
+          "long_range": 120
+        },
+        {
+          "id": "shortsword-0",
+          "name": "Shortsword",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "swarm-of-piranhas",
+      "name": "Swarm of Piranhas",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_swarm-of-piranhas",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 28,
+      "hit_dice": "8d8-8",
+      "speeds": {
+        "walk": 5,
+        "swim": 40
+      },
+      "abilities": {
+        "str": 13,
+        "dex": 16,
+        "con": 9,
+        "int": 1,
+        "wis": 7,
+        "cha": 2
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 8,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bites-0",
+          "name": "Bites",
+          "attack_bonus": 5,
+          "damage": "2d4+3",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "tiger",
+      "name": "Tiger",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_tiger",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1",
+      "xp": 200,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 30,
+      "hit_dice": "4d10+8",
+      "speeds": {
+        "walk": 40
+      },
+      "abilities": {
+        "str": 17,
+        "dex": 16,
+        "con": 14,
+        "int": 3,
+        "wis": 12,
+        "cha": 8
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 3,
+        "stealth": 7
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 5,
+          "damage": "2d6+3",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "ape",
+      "name": "Ape",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_ape",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 19,
+      "hit_dice": "3d8+6",
+      "speeds": {
+        "walk": 30,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 16,
+        "dex": 14,
+        "con": 14,
+        "int": 6,
+        "wis": 12,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {
+        "athletics": 5,
+        "perception": 3
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "fist-0",
+          "name": "Fist",
+          "attack_bonus": 5,
+          "damage": "1d4+3",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        },
+        {
+          "id": "rock-0",
+          "name": "Rock",
+          "attack_bonus": 5,
+          "damage": "2d6+3",
+          "damage_type": "bludgeoning",
+          "range": 25,
+          "long_range": 50
+        }
+      ]
+    },
+    {
+      "id": "black-bear",
+      "name": "Black Bear",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_black-bear",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 19,
+      "hit_dice": "3d8+6",
+      "speeds": {
+        "walk": 30,
+        "climb": 30,
+        "swim": 30
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 12,
+        "con": 14,
+        "int": 2,
+        "wis": 12,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5
+      },
+      "passive_perception": 15,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "cockatrice",
+      "name": "Cockatrice",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_cockatrice",
+      "creature_type": "monstrosity",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 22,
+      "hit_dice": "5d6+5",
+      "speeds": {
+        "walk": 20,
+        "fly": 40
+      },
+      "abilities": {
+        "str": 6,
+        "dex": 12,
+        "con": 12,
+        "int": 2,
+        "wis": 13,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 11,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "petrifying-bite-0",
+          "name": "Petrifying Bite",
+          "attack_bonus": 3,
+          "damage": "1d4+1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "crocodile",
+      "name": "Crocodile",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_crocodile",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 13,
+      "hit_dice": "2d10+2",
+      "speeds": {
+        "walk": 20,
+        "swim": 30
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 10,
+        "con": 13,
+        "int": 2,
+        "wis": 10,
+        "cha": 5
+      },
+      "saving_throws": {
+        "con": 3
+      },
+      "skills": {
+        "stealth": 2
+      },
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "1d8+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "darkmantle",
+      "name": "Darkmantle",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_darkmantle",
+      "creature_type": "aberration",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 22,
+      "hit_dice": "5d6+5",
+      "speeds": {
+        "walk": 10,
+        "fly": 30
+      },
+      "abilities": {
+        "str": 16,
+        "dex": 12,
+        "con": 13,
+        "int": 2,
+        "wis": 10,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 3
+      },
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {
+        "blindsight": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "crush-0",
+          "name": "Crush",
+          "attack_bonus": 5,
+          "damage": "1d6+3",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "dust-mephit",
+      "name": "Dust Mephit",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_dust-mephit",
+      "creature_type": "elemental",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 17,
+      "hit_dice": "5d6",
+      "speeds": {
+        "walk": 30,
+        "fly": 30
+      },
+      "abilities": {
+        "str": 5,
+        "dex": 14,
+        "con": 10,
+        "int": 9,
+        "wis": 11,
+        "cha": 10
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 2,
+        "stealth": 4
+      },
+      "passive_perception": 12,
+      "languages": [
+        "Primordial"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "claw-0",
+          "name": "Claw",
+          "attack_bonus": 4,
+          "damage": "1d4+2",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-goat",
+      "name": "Giant Goat",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-goat",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 19,
+      "hit_dice": "3d10+3",
+      "speeds": {
+        "walk": 40,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 17,
+        "dex": 13,
+        "con": 12,
+        "int": 3,
+        "wis": 12,
+        "cha": 6
+      },
+      "saving_throws": {
+        "str": 5
+      },
+      "skills": {
+        "perception": 3
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "ram-0",
+          "name": "Ram",
+          "attack_bonus": 5,
+          "damage": "1d6+3",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-seahorse",
+      "name": "Giant Seahorse",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-seahorse",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 16,
+      "hit_dice": "3d10",
+      "speeds": {
+        "walk": 5,
+        "swim": 40
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 12,
+        "con": 11,
+        "int": 2,
+        "wis": 12,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 11,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "ram-0",
+          "name": "Ram",
+          "attack_bonus": 4,
+          "damage": "2d6+2",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-wasp",
+      "name": "Giant Wasp",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-wasp",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 22,
+      "hit_dice": "5d8",
+      "speeds": {
+        "walk": 10,
+        "fly": 50
+      },
+      "abilities": {
+        "str": 10,
+        "dex": 14,
+        "con": 10,
+        "int": 1,
+        "wis": 10,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "sting-0",
+          "name": "Sting",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "gnoll-warrior",
+      "name": "Gnoll Warrior",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_gnoll-warrior",
+      "creature_type": "fiend",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 15,
+      "hp": 27,
+      "hit_dice": "6d8",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 14,
+        "dex": 12,
+        "con": 11,
+        "int": 6,
+        "wis": 10,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bone-bow-0",
+          "name": "Bone Bow",
+          "attack_bonus": 3,
+          "damage": "1d10+1",
+          "damage_type": "piercing",
+          "range": 150,
+          "long_range": 600
+        },
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "gray-ooze",
+      "name": "Gray Ooze",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_gray-ooze",
+      "creature_type": "ooze",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 9,
+      "hp": 22,
+      "hit_dice": "3d8+9",
+      "speeds": {
+        "walk": 10,
+        "climb": 10
+      },
+      "abilities": {
+        "str": 12,
+        "dex": 6,
+        "con": 16,
+        "int": 1,
+        "wis": 6,
+        "cha": 2
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 2
+      },
+      "passive_perception": 8,
+      "languages": [],
+      "senses": {
+        "blindsight": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "pseudopod-0",
+          "name": "Pseudopod",
+          "attack_bonus": 3,
+          "damage": "2d8+1",
+          "damage_type": "acid",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "hobgoblin-warrior",
+      "name": "Hobgoblin Warrior",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_hobgoblin-warrior",
+      "creature_type": "fey",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 18,
+      "hp": 11,
+      "hit_dice": "2d8+2",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 13,
+        "dex": 12,
+        "con": 12,
+        "int": 10,
+        "wis": 10,
+        "cha": 9
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [
+        "Common",
+        "Goblin"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "longbow-0",
+          "name": "Longbow",
+          "attack_bonus": 3,
+          "damage": "1d8+1",
+          "damage_type": "piercing",
+          "range": 150,
+          "long_range": 600
+        },
+        {
+          "id": "longsword-0",
+          "name": "Longsword",
+          "attack_bonus": 3,
+          "damage": "2d10+1",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "ice-mephit",
+      "name": "Ice Mephit",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_ice-mephit",
+      "creature_type": "elemental",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 21,
+      "hit_dice": "6d6",
+      "speeds": {
+        "walk": 30,
+        "fly": 30
+      },
+      "abilities": {
+        "str": 7,
+        "dex": 13,
+        "con": 10,
+        "int": 9,
+        "wis": 11,
+        "cha": 12
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 2,
+        "stealth": 3
+      },
+      "passive_perception": 12,
+      "languages": [
+        "Primordial"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "claw-0",
+          "name": "Claw",
+          "attack_bonus": 3,
+          "damage": "1d4+1",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "magma-mephit",
+      "name": "Magma Mephit",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_magma-mephit",
+      "creature_type": "elemental",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 18,
+      "hit_dice": "4d6+4",
+      "speeds": {
+        "walk": 30,
+        "fly": 30
+      },
+      "abilities": {
+        "str": 8,
+        "dex": 12,
+        "con": 12,
+        "int": 7,
+        "wis": 10,
+        "cha": 10
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 3
+      },
+      "passive_perception": 10,
+      "languages": [
+        "Primordial"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "claw-0",
+          "name": "Claw",
+          "attack_bonus": 3,
+          "damage": "1d4+1",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "magmin",
+      "name": "Magmin",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_magmin",
+      "creature_type": "elemental",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 13,
+      "hit_dice": "3d6+3",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 7,
+        "dex": 15,
+        "con": 12,
+        "int": 8,
+        "wis": 11,
+        "cha": 10
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [
+        "Primordial"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "touch-0",
+          "name": "Touch",
+          "attack_bonus": 4,
+          "damage": "2d4+2",
+          "damage_type": "fire",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "reef-shark",
+      "name": "Reef Shark",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_reef-shark",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 22,
+      "hit_dice": "4d8+4",
+      "speeds": {
+        "walk": 5,
+        "swim": 30
+      },
+      "abilities": {
+        "str": 14,
+        "dex": 15,
+        "con": 13,
+        "int": 1,
+        "wis": 10,
+        "cha": 4
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 2
+      },
+      "passive_perception": 12,
+      "languages": [],
+      "senses": {
+        "blindsight": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "2d4+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "rust-monster",
+      "name": "Rust Monster",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_rust-monster",
+      "creature_type": "monstrosity",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 33,
+      "hit_dice": "6d8+6",
+      "speeds": {
+        "walk": 40
+      },
+      "abilities": {
+        "str": 13,
+        "dex": 12,
+        "con": 13,
+        "int": 2,
+        "wis": 13,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 11,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 3,
+          "damage": "1d8+1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "sahuagin-warrior",
+      "name": "Sahuagin Warrior",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_sahuagin-warrior",
+      "creature_type": "fiend",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 22,
+      "hit_dice": "4d8+4",
+      "speeds": {
+        "walk": 30,
+        "swim": 40
+      },
+      "abilities": {
+        "str": 13,
+        "dex": 11,
+        "con": 12,
+        "int": 12,
+        "wis": 13,
+        "cha": 9
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5
+      },
+      "passive_perception": 15,
+      "languages": [],
+      "senses": {
+        "darkvision": 120
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "claw-0",
+          "name": "Claw",
+          "attack_bonus": 3,
+          "damage": "1d6+1",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "satyr",
+      "name": "Satyr",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_satyr",
+      "creature_type": "fey",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 31,
+      "hit_dice": "7d8",
+      "speeds": {
+        "walk": 40
+      },
+      "abilities": {
+        "str": 12,
+        "dex": 16,
+        "con": 11,
+        "int": 12,
+        "wis": 10,
+        "cha": 14
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 2,
+        "performance": 6,
+        "stealth": 5
+      },
+      "passive_perception": 12,
+      "languages": [
+        "Common",
+        "Elvish",
+        "Sylvan"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "hooves-0",
+          "name": "Hooves",
+          "attack_bonus": 5,
+          "damage": "1d4+3",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "scout",
+      "name": "Scout",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_scout",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 16,
+      "hit_dice": "3d8+3",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 11,
+        "dex": 14,
+        "con": 12,
+        "int": 11,
+        "wis": 13,
+        "cha": 11
+      },
+      "saving_throws": {},
+      "skills": {
+        "nature": 4,
+        "perception": 5,
+        "stealth": 6,
+        "survival": 5
+      },
+      "passive_perception": 15,
+      "languages": [
+        "Common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "longbow-0",
+          "name": "Longbow",
+          "attack_bonus": 4,
+          "damage": "1d8+2",
+          "damage_type": "piercing",
+          "range": 150,
+          "long_range": 600
+        },
+        {
+          "id": "shortsword-0",
+          "name": "Shortsword",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "shadow",
+      "name": "Shadow",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_shadow",
+      "creature_type": "undead",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 27,
+      "hit_dice": "5d8+5",
+      "speeds": {
+        "walk": 40
+      },
+      "abilities": {
+        "str": 6,
+        "dex": 14,
+        "con": 13,
+        "int": 6,
+        "wis": 10,
+        "cha": 8
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 6
+      },
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "draining-swipe-0",
+          "name": "Draining Swipe",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "necrotic",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "swarm-of-insects",
+      "name": "Swarm of Insects",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_swarm-of-insects",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 19,
+      "hit_dice": "3d8+6",
+      "speeds": {
+        "walk": 20,
+        "fly": 20
+      },
+      "abilities": {
+        "str": 3,
+        "dex": 13,
+        "con": 14,
+        "int": 1,
+        "wis": 7,
+        "cha": 1
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 8,
+      "languages": [],
+      "senses": {
+        "blindsight": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bites-0",
+          "name": "Bites",
+          "attack_bonus": 3,
+          "damage": "2d4+1",
+          "damage_type": "poison",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "tough",
+      "name": "Tough",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_tough",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 32,
+      "hit_dice": "5d8+10",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 12,
+        "con": 14,
+        "int": 10,
+        "wis": 10,
+        "cha": 11
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [
+        "Common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "heavy-crossbow-0",
+          "name": "Heavy Crossbow",
+          "attack_bonus": 3,
+          "damage": "1d10+1",
+          "damage_type": "piercing",
+          "range": 100,
+          "long_range": 400
+        },
+        {
+          "id": "mace-0",
+          "name": "Mace",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "troll-limb",
+      "name": "Troll Limb",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_troll-limb",
+      "creature_type": "giant",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 14,
+      "hit_dice": "4d6",
+      "speeds": {
+        "walk": 20
+      },
+      "abilities": {
+        "str": 18,
+        "dex": 12,
+        "con": 10,
+        "int": 1,
+        "wis": 9,
+        "cha": 1
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 9,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 6,
+          "damage": "2d4+4",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "warhorse",
+      "name": "Warhorse",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_warhorse",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 19,
+      "hit_dice": "3d10+3",
+      "speeds": {
+        "walk": 60
+      },
+      "abilities": {
+        "str": 18,
+        "dex": 12,
+        "con": 13,
+        "int": 2,
+        "wis": 12,
+        "cha": 7
+      },
+      "saving_throws": {
+        "wis": 3
+      },
+      "skills": {},
+      "passive_perception": 11,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "hooves-0",
+          "name": "Hooves",
+          "attack_bonus": 6,
+          "damage": "2d4+4",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "warhorse-skeleton",
+      "name": "Warhorse Skeleton",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_warhorse-skeleton",
+      "creature_type": "undead",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 22,
+      "hit_dice": "3d10+6",
+      "speeds": {
+        "walk": 60
+      },
+      "abilities": {
+        "str": 18,
+        "dex": 12,
+        "con": 15,
+        "int": 2,
+        "wis": 8,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 9,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "hooves-0",
+          "name": "Hooves",
+          "attack_bonus": 6,
+          "damage": "1d6+4",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "worg",
+      "name": "Worg",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_worg",
+      "creature_type": "fey",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/2",
+      "xp": 100,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 26,
+      "hit_dice": "4d10+4",
+      "speeds": {
+        "walk": 50
+      },
+      "abilities": {
+        "str": 16,
+        "dex": 13,
+        "con": 13,
+        "int": 7,
+        "wis": 11,
+        "cha": 8
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 4
+      },
+      "passive_perception": 14,
+      "languages": [
+        "Goblin"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 5,
+          "damage": "1d8+3",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "animated-flying-sword",
+      "name": "Animated Flying Sword",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_animated-flying-sword",
+      "creature_type": "construct",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 17,
+      "hp": 14,
+      "hit_dice": "4d6",
+      "speeds": {
+        "walk": 5,
+        "fly": 50,
+        "hover": true
+      },
+      "abilities": {
+        "str": 12,
+        "dex": 15,
+        "con": 11,
+        "int": 1,
+        "wis": 5,
+        "cha": 1
+      },
+      "saving_throws": {
+        "dex": 4
+      },
+      "skills": {},
+      "passive_perception": 7,
+      "languages": [],
+      "senses": {
+        "blindsight": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "slash-0",
+          "name": "Slash",
+          "attack_bonus": 4,
+          "damage": "1d8+2",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "axe-beak",
+      "name": "Axe Beak",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_axe-beak",
+      "creature_type": "monstrosity",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 19,
+      "hit_dice": "3d10+3",
+      "speeds": {
+        "walk": 50
+      },
+      "abilities": {
+        "str": 14,
+        "dex": 12,
+        "con": 12,
+        "int": 2,
+        "wis": 10,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "beak-0",
+          "name": "Beak",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "blink-dog",
+      "name": "Blink Dog",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_blink-dog",
+      "creature_type": "fey",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 22,
+      "hit_dice": "4d8+4",
+      "speeds": {
+        "walk": 40
+      },
+      "abilities": {
+        "str": 12,
+        "dex": 17,
+        "con": 12,
+        "int": 10,
+        "wis": 13,
+        "cha": 11
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5,
+        "stealth": 5
+      },
+      "passive_perception": 15,
+      "languages": [
+        "Elvish",
+        "Sylvan"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 5,
+          "damage": "1d4+3",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "boar",
+      "name": "Boar",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_boar",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 13,
+      "hit_dice": "2d8+4",
+      "speeds": {
+        "walk": 40
+      },
+      "abilities": {
+        "str": 13,
+        "dex": 11,
+        "con": 14,
+        "int": 2,
+        "wis": 9,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 9,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "gore-0",
+          "name": "Gore",
+          "attack_bonus": 3,
+          "damage": "1d6+1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "constrictor-snake",
+      "name": "Constrictor Snake",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_constrictor-snake",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 13,
+      "hit_dice": "2d10+2",
+      "speeds": {
+        "walk": 30,
+        "swim": 30
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 14,
+        "con": 12,
+        "int": 1,
+        "wis": 10,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 2,
+        "stealth": 4
+      },
+      "passive_perception": 12,
+      "languages": [],
+      "senses": {
+        "blindsight": 10
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "1d8+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "draft-horse",
+      "name": "Draft Horse",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_draft-horse",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 10,
+      "hp": 15,
+      "hit_dice": "2d10+4",
+      "speeds": {
+        "walk": 40
+      },
+      "abilities": {
+        "str": 18,
+        "dex": 10,
+        "con": 15,
+        "int": 2,
+        "wis": 11,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "hooves-0",
+          "name": "Hooves",
+          "attack_bonus": 6,
+          "damage": "1d4+4",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "dretch",
+      "name": "Dretch",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_dretch",
+      "creature_type": "fiend",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 18,
+      "hit_dice": "4d6+4",
+      "speeds": {
+        "walk": 20
+      },
+      "abilities": {
+        "str": 12,
+        "dex": 11,
+        "con": 12,
+        "int": 5,
+        "wis": 8,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 9,
+      "languages": [
+        "Abyssal"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 3,
+          "damage": "1d6+1",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "elk",
+      "name": "Elk",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_elk",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 10,
+      "hp": 11,
+      "hit_dice": "2d10",
+      "speeds": {
+        "walk": 50
+      },
+      "abilities": {
+        "str": 16,
+        "dex": 10,
+        "con": 11,
+        "int": 2,
+        "wis": 10,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 2
+      },
+      "passive_perception": 12,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "ram-0",
+          "name": "Ram",
+          "attack_bonus": 5,
+          "damage": "1d6+3",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-badger",
+      "name": "Giant Badger",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-badger",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 15,
+      "hit_dice": "2d8+6",
+      "speeds": {
+        "walk": 30,
+        "burrow": 10
+      },
+      "abilities": {
+        "str": 13,
+        "dex": 10,
+        "con": 17,
+        "int": 2,
+        "wis": 12,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 3
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 3,
+          "damage": "2d4+1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-bat",
+      "name": "Giant Bat",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-bat",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 22,
+      "hit_dice": "4d10",
+      "speeds": {
+        "walk": 10,
+        "fly": 60
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 16,
+        "con": 11,
+        "int": 2,
+        "wis": 12,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 11,
+      "languages": [],
+      "senses": {
+        "blindsight": 120
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 5,
+          "damage": "1d6+3",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-centipede",
+      "name": "Giant Centipede",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-centipede",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 9,
+      "hit_dice": "2d6+2",
+      "speeds": {
+        "walk": 30,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 5,
+        "dex": 14,
+        "con": 12,
+        "int": 1,
+        "wis": 7,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 8,
+      "languages": [],
+      "senses": {
+        "blindsight": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "1d4+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-frog",
+      "name": "Giant Frog",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-frog",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 18,
+      "hit_dice": "4d8",
+      "speeds": {
+        "walk": 30,
+        "swim": 30
+      },
+      "abilities": {
+        "str": 12,
+        "dex": 13,
+        "con": 11,
+        "int": 2,
+        "wis": 10,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 2,
+        "stealth": 4
+      },
+      "passive_perception": 12,
+      "languages": [],
+      "senses": {
+        "darkvision": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 3,
+          "damage": "1d6+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-lizard",
+      "name": "Giant Lizard",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-lizard",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 19,
+      "hit_dice": "3d10+3",
+      "speeds": {
+        "walk": 40,
+        "climb": 40
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 12,
+        "con": 13,
+        "int": 2,
+        "wis": 10,
+        "cha": 5
+      },
+      "saving_throws": {
+        "dex": 3
+      },
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "1d8+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-owl",
+      "name": "Giant Owl",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-owl",
+      "creature_type": "celestial",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 19,
+      "hit_dice": "3d10+3",
+      "speeds": {
+        "walk": 5,
+        "fly": 60
+      },
+      "abilities": {
+        "str": 13,
+        "dex": 15,
+        "con": 12,
+        "int": 10,
+        "wis": 14,
+        "cha": 10
+      },
+      "saving_throws": {
+        "wis": 4
+      },
+      "skills": {
+        "perception": 6,
+        "stealth": 6
+      },
+      "passive_perception": 16,
+      "languages": [
+        "Celestial",
+        "Common",
+        "Elvish",
+        "Sylvan"
+      ],
+      "senses": {
+        "darkvision": 120
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "talons-0",
+          "name": "Talons",
+          "attack_bonus": 4,
+          "damage": "1d10+2",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-venomous-snake",
+      "name": "Giant Venomous Snake",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-venomous-snake",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 11,
+      "hit_dice": "2d8+2",
+      "speeds": {
+        "walk": 40,
+        "swim": 40
+      },
+      "abilities": {
+        "str": 10,
+        "dex": 18,
+        "con": 13,
+        "int": 2,
+        "wis": 10,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 2
+      },
+      "passive_perception": 12,
+      "languages": [],
+      "senses": {
+        "blindsight": 10
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 6,
+          "damage": "1d4+4",
+          "damage_type": "piercing",
+          "range": 10,
+          "long_range": 10
+        }
+      ]
+    },
+    {
+      "id": "giant-wolf-spider",
+      "name": "Giant Wolf Spider",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-wolf-spider",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 11,
+      "hit_dice": "2d8+2",
+      "speeds": {
+        "walk": 40,
+        "climb": 40
+      },
+      "abilities": {
+        "str": 12,
+        "dex": 16,
+        "con": 13,
+        "int": 3,
+        "wis": 12,
+        "cha": 4
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 3,
+        "stealth": 7
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {
+        "darkvision": 60,
+        "blindsight": 10
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 5,
+          "damage": "1d4+3",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "goblin-warrior",
+      "name": "Goblin Warrior",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_goblin-warrior",
+      "creature_type": "fey",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 15,
+      "hp": 10,
+      "hit_dice": "3d6",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 8,
+        "dex": 15,
+        "con": 10,
+        "int": 10,
+        "wis": 8,
+        "cha": 8
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 6
+      },
+      "passive_perception": 9,
+      "languages": [
+        "Common",
+        "Goblin"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "scimitar-0",
+          "name": "Scimitar",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        },
+        {
+          "id": "shortbow-0",
+          "name": "Shortbow",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "piercing",
+          "range": 80,
+          "long_range": 320
+        }
+      ]
+    },
+    {
+      "id": "grimlock",
+      "name": "Grimlock",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_grimlock",
+      "creature_type": "aberration",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 11,
+      "hit_dice": "2d8+2",
+      "speeds": {
+        "walk": 30,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 16,
+        "dex": 12,
+        "con": 12,
+        "int": 9,
+        "wis": 8,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {
+        "athletics": 5,
+        "perception": 3,
+        "stealth": 5
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {
+        "blindsight": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bone-cudgel-0",
+          "name": "Bone Cudgel",
+          "attack_bonus": 5,
+          "damage": "1d6+3",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "panther",
+      "name": "Panther",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_panther",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 13,
+      "hit_dice": "3d8",
+      "speeds": {
+        "walk": 50,
+        "climb": 40
+      },
+      "abilities": {
+        "str": 14,
+        "dex": 16,
+        "con": 10,
+        "int": 3,
+        "wis": 14,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 4,
+        "stealth": 6
+      },
+      "passive_perception": 14,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 5,
+          "damage": "1d6+3",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "priest-acolyte",
+      "name": "Priest Acolyte",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_priest-acolyte",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 11,
+      "hit_dice": "2d8+2",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 14,
+        "dex": 10,
+        "con": 12,
+        "int": 10,
+        "wis": 14,
+        "cha": 11
+      },
+      "saving_throws": {},
+      "skills": {
+        "medicine": 4,
+        "religion": 2
+      },
+      "passive_perception": 12,
+      "languages": [
+        "Common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "mace-0",
+          "name": "Mace",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        },
+        {
+          "id": "radiant-flame-0",
+          "name": "Radiant Flame",
+          "attack_bonus": 4,
+          "damage": "2d6",
+          "damage_type": "radiant",
+          "range": 60,
+          "long_range": 60
+        }
+      ]
+    },
+    {
+      "id": "pseudodragon",
+      "name": "Pseudodragon",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_pseudodragon",
+      "creature_type": "dragon",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 10,
+      "hit_dice": "3d4+3",
+      "speeds": {
+        "walk": 15,
+        "fly": 60
+      },
+      "abilities": {
+        "str": 6,
+        "dex": 15,
+        "con": 13,
+        "int": 10,
+        "wis": 12,
+        "cha": 10
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5,
+        "stealth": 4
+      },
+      "passive_perception": 15,
+      "languages": [
+        "Common",
+        "Draconic"
+      ],
+      "senses": {
+        "darkvision": 60,
+        "blindsight": 10
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "1d4+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "pteranodon",
+      "name": "Pteranodon",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_pteranodon",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 13,
+      "hit_dice": "3d8",
+      "speeds": {
+        "walk": 10,
+        "fly": 60
+      },
+      "abilities": {
+        "str": 12,
+        "dex": 15,
+        "con": 10,
+        "int": 2,
+        "wis": 9,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 1
+      },
+      "passive_perception": 11,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "1d8+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "riding-horse",
+      "name": "Riding Horse",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_riding-horse",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 13,
+      "hit_dice": "2d10+2",
+      "speeds": {
+        "walk": 60
+      },
+      "abilities": {
+        "str": 16,
+        "dex": 13,
+        "con": 12,
+        "int": 2,
+        "wis": 11,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "hooves-0",
+          "name": "Hooves",
+          "attack_bonus": 5,
+          "damage": "1d8+3",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "skeleton",
+      "name": "Skeleton",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_skeleton",
+      "creature_type": "undead",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 13,
+      "hit_dice": "2d8+4",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 10,
+        "dex": 16,
+        "con": 15,
+        "int": 6,
+        "wis": 8,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 9,
+      "languages": [
+        "Common"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "shortbow-0",
+          "name": "Shortbow",
+          "attack_bonus": 5,
+          "damage": "1d6+3",
+          "damage_type": "piercing",
+          "range": 80,
+          "long_range": 320
+        },
+        {
+          "id": "shortsword-0",
+          "name": "Shortsword",
+          "attack_bonus": 5,
+          "damage": "1d6+3",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "sprite",
+      "name": "Sprite",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_sprite",
+      "creature_type": "fey",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 15,
+      "hp": 10,
+      "hit_dice": "4d4",
+      "speeds": {
+        "walk": 10,
+        "fly": 40
+      },
+      "abilities": {
+        "str": 3,
+        "dex": 18,
+        "con": 10,
+        "int": 14,
+        "wis": 13,
+        "cha": 11
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 3,
+        "stealth": 8
+      },
+      "passive_perception": 13,
+      "languages": [
+        "Common",
+        "Elvish",
+        "Sylvan"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "enchanting-bow-0",
+          "name": "Enchanting Bow",
+          "attack_bonus": 6,
+          "damage": "1",
+          "damage_type": "piercing",
+          "range": 40,
+          "long_range": 40
+        },
+        {
+          "id": "needle-sword-0",
+          "name": "Needle Sword",
+          "attack_bonus": 6,
+          "damage": "1d4+4",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "steam-mephit",
+      "name": "Steam Mephit",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_steam-mephit",
+      "creature_type": "elemental",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 10,
+      "hp": 17,
+      "hit_dice": "5d6",
+      "speeds": {
+        "walk": 30,
+        "fly": 30
+      },
+      "abilities": {
+        "str": 5,
+        "dex": 11,
+        "con": 10,
+        "int": 11,
+        "wis": 10,
+        "cha": 12
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 2
+      },
+      "passive_perception": 10,
+      "languages": [
+        "Primordial"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "claw-0",
+          "name": "Claw",
+          "attack_bonus": 2,
+          "damage": "1d4",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "swarm-of-bats",
+      "name": "Swarm of Bats",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_swarm-of-bats",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 11,
+      "hit_dice": "2d10",
+      "speeds": {
+        "walk": 5,
+        "fly": 30
+      },
+      "abilities": {
+        "str": 5,
+        "dex": 15,
+        "con": 10,
+        "int": 2,
+        "wis": 12,
+        "cha": 4
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 11,
+      "languages": [],
+      "senses": {
+        "blindsight": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bites-0",
+          "name": "Bites",
+          "attack_bonus": 4,
+          "damage": "2d4",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "swarm-of-rats",
+      "name": "Swarm of Rats",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_swarm-of-rats",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 10,
+      "hp": 14,
+      "hit_dice": "4d8-4",
+      "speeds": {
+        "walk": 30,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 9,
+        "dex": 11,
+        "con": 9,
+        "int": 2,
+        "wis": 10,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {
+        "darkvision": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bites-0",
+          "name": "Bites",
+          "attack_bonus": 2,
+          "damage": "2d4",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "swarm-of-ravens",
+      "name": "Swarm of Ravens",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_swarm-of-ravens",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 11,
+      "hit_dice": "2d8+2",
+      "speeds": {
+        "walk": 10,
+        "fly": 50
+      },
+      "abilities": {
+        "str": 6,
+        "dex": 14,
+        "con": 12,
+        "int": 5,
+        "wis": 12,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5
+      },
+      "passive_perception": 15,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "beaks-0",
+          "name": "Beaks",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "violet-fungus",
+      "name": "Violet Fungus",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_violet-fungus",
+      "creature_type": "plant",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 5,
+      "hp": 18,
+      "hit_dice": "4d8",
+      "speeds": {
+        "walk": 5
+      },
+      "abilities": {
+        "str": 3,
+        "dex": 1,
+        "con": 10,
+        "int": 1,
+        "wis": 3,
+        "cha": 1
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 6,
+      "languages": [],
+      "senses": {
+        "blindsight": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rotting-touch-0",
+          "name": "Rotting Touch",
+          "attack_bonus": 2,
+          "damage": "1d8",
+          "damage_type": "necrotic",
+          "range": 10,
+          "long_range": 10
+        }
+      ]
+    },
+    {
+      "id": "wolf",
+      "name": "Wolf",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_wolf",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 11,
+      "hit_dice": "2d8+2",
+      "speeds": {
+        "walk": 40
+      },
+      "abilities": {
+        "str": 14,
+        "dex": 15,
+        "con": 12,
+        "int": 3,
+        "wis": 12,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5,
+        "stealth": 4
+      },
+      "passive_perception": 15,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "1d6+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "zombie",
+      "name": "Zombie",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_zombie",
+      "creature_type": "undead",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/4",
+      "xp": 50,
+      "proficiency_bonus": 2,
+      "armor_class": 8,
+      "hp": 15,
+      "hit_dice": "2d8+6",
+      "speeds": {
+        "walk": 20
+      },
+      "abilities": {
+        "str": 13,
+        "dex": 6,
+        "con": 16,
+        "int": 3,
+        "wis": 6,
+        "cha": 5
+      },
+      "saving_throws": {
+        "wis": 0
+      },
+      "skills": {},
+      "passive_perception": 8,
+      "languages": [
+        "Common"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "slam-0",
+          "name": "Slam",
+          "attack_bonus": 3,
+          "damage": "1d8+1",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "bandit",
+      "name": "Bandit",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_bandit",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 11,
+      "hit_dice": "2d8+2",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 11,
+        "dex": 12,
+        "con": 12,
+        "int": 10,
+        "wis": 10,
+        "cha": 10
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [
+        "Common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "light-crossbow-0",
+          "name": "Light Crossbow",
+          "attack_bonus": 3,
+          "damage": "1d8+1",
+          "damage_type": "piercing",
+          "range": 80,
+          "long_range": 320
+        },
+        {
+          "id": "scimitar-0",
+          "name": "Scimitar",
+          "attack_bonus": 3,
+          "damage": "1d6+1",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "blood-hawk",
+      "name": "Blood Hawk",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_blood-hawk",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 7,
+      "hit_dice": "2d6",
+      "speeds": {
+        "walk": 10,
+        "fly": 60
+      },
+      "abilities": {
+        "str": 6,
+        "dex": 14,
+        "con": 10,
+        "int": 3,
+        "wis": 14,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 6
+      },
+      "passive_perception": 16,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "beak-0",
+          "name": "Beak",
+          "attack_bonus": 4,
+          "damage": "1d4+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "camel",
+      "name": "Camel",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_camel",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 10,
+      "hp": 17,
+      "hit_dice": "2d10+6",
+      "speeds": {
+        "walk": 50
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 8,
+        "con": 17,
+        "int": 2,
+        "wis": 11,
+        "cha": 5
+      },
+      "saving_throws": {
+        "con": 5
+      },
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "1d4+2",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "cultist",
+      "name": "Cultist",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_cultist",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 9,
+      "hit_dice": "2d8",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 11,
+        "dex": 12,
+        "con": 10,
+        "int": 10,
+        "wis": 11,
+        "cha": 10
+      },
+      "saving_throws": {
+        "wis": 2
+      },
+      "skills": {
+        "deception": 2,
+        "religion": 2
+      },
+      "passive_perception": 10,
+      "languages": [
+        "Common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "ritual-sickle-0",
+          "name": "Ritual Sickle",
+          "attack_bonus": 3,
+          "damage": "1d4+1",
+          "damage_type": "slashing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "flying-snake",
+      "name": "Flying Snake",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_flying-snake",
+      "creature_type": "monstrosity",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 5,
+      "hit_dice": "2d4",
+      "speeds": {
+        "walk": 30,
+        "fly": 60,
+        "swim": 30
+      },
+      "abilities": {
+        "str": 4,
+        "dex": 15,
+        "con": 11,
+        "int": 2,
+        "wis": 12,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 11,
+      "languages": [],
+      "senses": {
+        "blindsight": 10
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "2d4",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-crab",
+      "name": "Giant Crab",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-crab",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 15,
+      "hp": 13,
+      "hit_dice": "3d8",
+      "speeds": {
+        "walk": 30,
+        "swim": 30
+      },
+      "abilities": {
+        "str": 13,
+        "dex": 13,
+        "con": 11,
+        "int": 1,
+        "wis": 9,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 3
+      },
+      "passive_perception": 9,
+      "languages": [],
+      "senses": {
+        "blindsight": 30
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "claw-0",
+          "name": "Claw",
+          "attack_bonus": 3,
+          "damage": "1d6+1",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-rat",
+      "name": "Giant Rat",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-rat",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 7,
+      "hit_dice": "2d6",
+      "speeds": {
+        "walk": 30,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 7,
+        "dex": 16,
+        "con": 11,
+        "int": 2,
+        "wis": 10,
+        "cha": 4
+      },
+      "saving_throws": {
+        "dex": 5
+      },
+      "skills": {
+        "perception": 2
+      },
+      "passive_perception": 12,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 5,
+          "damage": "1d4+3",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "giant-weasel",
+      "name": "Giant Weasel",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_giant-weasel",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 9,
+      "hit_dice": "2d8",
+      "speeds": {
+        "walk": 40,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 11,
+        "dex": 17,
+        "con": 10,
+        "int": 4,
+        "wis": 12,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {
+        "acrobatics": 5,
+        "perception": 3,
+        "stealth": 5
+      },
+      "passive_perception": 13,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 5,
+          "damage": "1d4+3",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "goblin-minion",
+      "name": "Goblin Minion",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_goblin-minion",
+      "creature_type": "fey",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 7,
+      "hit_dice": "2d6",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 8,
+        "dex": 15,
+        "con": 10,
+        "int": 10,
+        "wis": 8,
+        "cha": 8
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 6
+      },
+      "passive_perception": 9,
+      "languages": [
+        "Common",
+        "Goblin"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "dagger-0",
+          "name": "Dagger",
+          "attack_bonus": 4,
+          "damage": "1d4+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 60
+        }
+      ]
+    },
+    {
+      "id": "guard",
+      "name": "Guard",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_guard",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 16,
+      "hp": 11,
+      "hit_dice": "2d8+2",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 13,
+        "dex": 12,
+        "con": 12,
+        "int": 10,
+        "wis": 11,
+        "cha": 10
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 2
+      },
+      "passive_perception": 12,
+      "languages": [
+        "Common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "spear-0",
+          "name": "Spear",
+          "attack_bonus": 3,
+          "damage": "1d6+1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 60
+        }
+      ]
+    },
+    {
+      "id": "kobold-warrior",
+      "name": "Kobold Warrior",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_kobold-warrior",
+      "creature_type": "dragon",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 7,
+      "hit_dice": "3d6-3",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 7,
+        "dex": 15,
+        "con": 9,
+        "int": 8,
+        "wis": 7,
+        "cha": 8
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 8,
+      "languages": [
+        "Common",
+        "Draconic"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "dagger-0",
+          "name": "Dagger",
+          "attack_bonus": 4,
+          "damage": "1d4+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 60
+        }
+      ]
+    },
+    {
+      "id": "mastiff",
+      "name": "Mastiff",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_mastiff",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 5,
+      "hit_dice": "1d8+1",
+      "speeds": {
+        "walk": 40
+      },
+      "abilities": {
+        "str": 13,
+        "dex": 14,
+        "con": 12,
+        "int": 3,
+        "wis": 12,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5
+      },
+      "passive_perception": 15,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 3,
+          "damage": "1d6+1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "merfolk-skirmisher",
+      "name": "Merfolk Skirmisher",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_merfolk-skirmisher",
+      "creature_type": "elemental",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 11,
+      "hit_dice": "2d8+2",
+      "speeds": {
+        "walk": 10,
+        "swim": 40
+      },
+      "abilities": {
+        "str": 10,
+        "dex": 13,
+        "con": 12,
+        "int": 11,
+        "wis": 14,
+        "cha": 12
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 12,
+      "languages": [
+        "Common",
+        "Primordial"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "ocean-spear-0",
+          "name": "Ocean Spear",
+          "attack_bonus": 2,
+          "damage": "1d6",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 60
+        }
+      ]
+    },
+    {
+      "id": "mule",
+      "name": "Mule",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_mule",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 10,
+      "hp": 11,
+      "hit_dice": "2d8+2",
+      "speeds": {
+        "walk": 40
+      },
+      "abilities": {
+        "str": 14,
+        "dex": 10,
+        "con": 13,
+        "int": 2,
+        "wis": 10,
+        "cha": 5
+      },
+      "saving_throws": {
+        "str": 4
+      },
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "hooves-0",
+          "name": "Hooves",
+          "attack_bonus": 4,
+          "damage": "1d4+2",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "noble",
+      "name": "Noble",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_noble",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 15,
+      "hp": 9,
+      "hit_dice": "2d8",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 11,
+        "dex": 12,
+        "con": 11,
+        "int": 12,
+        "wis": 14,
+        "cha": 16
+      },
+      "saving_throws": {},
+      "skills": {
+        "deception": 5,
+        "insight": 4,
+        "persuasion": 5
+      },
+      "passive_perception": 12,
+      "languages": [
+        "Common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rapier-0",
+          "name": "Rapier",
+          "attack_bonus": 3,
+          "damage": "1d8+1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "pony",
+      "name": "Pony",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_pony",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "medium",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 10,
+      "hp": 11,
+      "hit_dice": "2d8+2",
+      "speeds": {
+        "walk": 40
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 10,
+        "con": 13,
+        "int": 2,
+        "wis": 11,
+        "cha": 7
+      },
+      "saving_throws": {
+        "str": 4
+      },
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "hooves-0",
+          "name": "Hooves",
+          "attack_bonus": 4,
+          "damage": "1d4+2",
+          "damage_type": "bludgeoning",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "stirge",
+      "name": "Stirge",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_stirge",
+      "creature_type": "monstrosity",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 5,
+      "hit_dice": "2d4",
+      "speeds": {
+        "walk": 10,
+        "fly": 40
+      },
+      "abilities": {
+        "str": 4,
+        "dex": 16,
+        "con": 11,
+        "int": 2,
+        "wis": 8,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 9,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "proboscis-0",
+          "name": "Proboscis",
+          "attack_bonus": 5,
+          "damage": "1d6+3",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "venomous-snake",
+      "name": "Venomous Snake",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_venomous-snake",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 5,
+      "hit_dice": "2d4",
+      "speeds": {
+        "walk": 30,
+        "swim": 30
+      },
+      "abilities": {
+        "str": 2,
+        "dex": 15,
+        "con": 11,
+        "int": 1,
+        "wis": 10,
+        "cha": 3
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [],
+      "senses": {
+        "blindsight": 10
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 4,
+          "damage": "1d4+2",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 5
+        }
+      ]
+    },
+    {
+      "id": "warrior-infantry",
+      "name": "Warrior Infantry",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_warrior-infantry",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "1/8",
+      "xp": 25,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 9,
+      "hit_dice": "2d8",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 13,
+        "dex": 11,
+        "con": 11,
+        "int": 8,
+        "wis": 11,
+        "cha": 8
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [
+        "Common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "spear-0",
+          "name": "Spear",
+          "attack_bonus": 3,
+          "damage": "1d6+1",
+          "damage_type": "piercing",
+          "range": 5,
+          "long_range": 60
+        }
+      ]
+    }
+  ]
+}

@@ -106,7 +106,7 @@
 | F22 | Channel Divinity 与治疗分配/rider | ✅ | #784 |
 | F23 | 武器增益、控制与 Smite 光环 | ✅ | #784 |
 | F24 | 属性、熟练与总值替换被动 | ✅ | #784 |
-| F25 | Wild Shape | ⬜ | 有任务书；引擎无 `wild_shape` 实现 |
+| F25 | Wild Shape（德鲁伊核心，含 Beast Spells / Archdruid） | ⬜ | 有任务书 + 调研 `S0F25_WILD_SHAPE_RESEARCH`；被 **GAP-20/21/22/23** 挡住（变形地基整条未建） |
 | F26 | Land 主动特性 | ⬜ | 有任务书；未开工 |
 | F27 | 召唤物 | ⬜ | 有任务书；只有内容数据，无引擎原语 |
 | F28 | Metamagic | ⬜ | 有任务书；引擎无 `metamagic` 实现 |
@@ -128,6 +128,14 @@
 | S0-G1 | 装备在手状态与实例身份 | ✅ | #785 |
 | S0-G2 | Light 追加攻击（含 F7 移交的 Nick） | ✅ | #785 |
 | S0-G3 | 成长记录与缺项补齐 | ✅ | 并入 #734（索引：A `31842211` / B `c4791489` / C `4e54f6e1` / 面板 `2efdb7da`） |
+
+## MM 系列（怪物 stat block）
+
+| 片 | 内容 | 状态 | 证据 |
+|---|---|---|---|
+| S0-MM1 | stat block 事实层（size / speeds / 三组防御 / 条件免疫 / senses / cr / xp） | ✅ | #809 |
+| S0-MM2 | 六维参与检定 + 六字段 + CR0–1 全类型目录（135 条）+ 查询 | 🔵 | `S0MM2_..._EXECUTION_REPORT`；2653 passed |
+| S0-MM3+ | 特质（traits）与动作（Multiattack / 豁免型 / recharge / legendary） | ⬜ | 未立项；导入 CR≥2 的 196 条生物要先有它 |
 
 ## H 与休息
 
