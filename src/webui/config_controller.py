@@ -21,7 +21,9 @@ from src.ai_providers import resolve_provider
 from src.common_factory import close_model_clients
 from src.memory.embedding import EmbeddingClient
 from src.memory.embedding_profile import profile_for_client
-from src.memory.local_embedding import list_installed_models
+from src.memory.local_embedding import (
+    LocalModelError, list_installed_models, open_verified_local_embedding, probe_local_embedding,
+)
 from src.memory.model_catalog import LocalModelManager, ModelCatalogError
 from src.network_proxy import (
     effective_proxy_url,
@@ -55,6 +57,20 @@ from src.webui.services.assistant_settings_tools import (
 from src.localization.messages import t
 
 
+_LOCAL_EMBEDDING_SELECTION = ("embedding_enabled", "embedding_source", "embedding_local_model_id")
+_EMBEDDING_SETTINGS = _LOCAL_EMBEDDING_SELECTION + (
+    "embedding_provider_ref", "embedding_model", "embedding_max_input",
+)
+
+
+def _config_reload_lock(app: Any) -> asyncio.Lock:
+    lock = app.get("_config_reload_lock")
+    if lock is None:
+        lock = asyncio.Lock()
+        app["_config_reload_lock"] = lock
+    return lock
+
+
 @dataclass(frozen=True)
 class ConfigControllerDependencies:
     state: dict
@@ -78,10 +94,12 @@ class ConfigController:
     ) -> None:
         self.dependencies = dependencies
         self.logger = logger or logging.getLogger("trpg")
+        self._embedding_config_revision = secrets.token_hex(16)
 
     async def get(self, request: web.Request) -> web.Response:
         public = self.dependencies.public_config()
         if request.get("owner_authenticated", False):
+            public["embedding_config_revision"] = self._embedding_config_revision
             subsystems = request.app.get("subsystems")
             memory_store = getattr(subsystems, "memory_store", None)
             models_dir = (
@@ -146,12 +164,30 @@ class ConfigController:
                 {"ok": False, "error": t("webui.config_controller.body_not_object")},
                 status=400,
             )
-        reload_lock = request.app.get("_config_reload_lock")
-        if reload_lock is None:
-            reload_lock = asyncio.Lock()
-            request.app["_config_reload_lock"] = reload_lock
-        async with reload_lock:
+        async with _config_reload_lock(request.app):
             return await self.apply_update(request, body)
+
+    async def activate_local_embedding(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        if (
+            not isinstance(body, dict) or set(body) != {"expected_revision"}
+            or not isinstance(body["expected_revision"], str) or not body["expected_revision"]
+        ):
+            return web.json_response({"ok": False, "error": "Expected embedding configuration revision is required"}, status=400)
+        async with _config_reload_lock(request.app):
+            if body["expected_revision"] != self._embedding_config_revision:
+                return web.json_response({
+                    "ok": False, "error_code": "EMBEDDING_SETTINGS_CHANGED",
+                    "error": "Embedding settings changed. Reload and retry.",
+                }, status=409)
+            return await self.apply_values(request.app, {
+                "embedding_enabled": True,
+                "embedding_source": "local",
+                "embedding_local_model_id": request.match_info["model_id"],
+            }, force_local_embedding=True)
 
     async def apply_update(
         self,
@@ -174,11 +210,7 @@ class ConfigController:
             return
 
         async def apply_config(changes: dict[str, Any]) -> dict[str, Any]:
-            lock = app.get("_config_reload_lock")
-            if lock is None:
-                lock = asyncio.Lock()
-                app["_config_reload_lock"] = lock
-            async with lock:
+            async with _config_reload_lock(app):
                 response = await self.apply_values(app, changes)
             try:
                 payload = json.loads(response.body.decode("utf-8"))
@@ -189,11 +221,7 @@ class ConfigController:
             return payload
 
         async def apply_config_guarded(changes: dict[str, Any], expected_digest: str) -> dict[str, Any]:
-            lock = app.get("_config_reload_lock")
-            if lock is None:
-                lock = asyncio.Lock()
-                app["_config_reload_lock"] = lock
-            async with lock:
+            async with _config_reload_lock(app):
                 if expected_digest != config_digest(self.dependencies.state):
                     raise ValueError("Settings changed; re-read settings and plan again")
                 response = await self.apply_values(app, changes)
@@ -218,6 +246,8 @@ class ConfigController:
         self,
         app: Any,
         body: dict,
+        *,
+        force_local_embedding: bool = False,
     ) -> web.Response:
         dependencies = self.dependencies
         state = dependencies.state
@@ -246,6 +276,23 @@ class ConfigController:
             changed_keys & API_RUNTIME_CONFIG_KEYS
         ) or provider_runtime_changed(changed_keys)
         old_subsystems = app.get("subsystems")
+        activating_local_embedding = (
+            prepared.state.get("embedding_enabled")
+            and prepared.state.get("embedding_source") == "local"
+            and (force_local_embedding or any(
+                state.get(key) != prepared.state.get(key)
+                for key in _LOCAL_EMBEDDING_SELECTION
+            ))
+        )
+        verified_local_embedding = None
+        if activating_local_embedding:
+            try:
+                verified_local_embedding, _ = await open_verified_local_embedding(
+                    self._embedding_models_dir(app),
+                    str(prepared.state.get("embedding_local_model_id") or ""),
+                )
+            except LocalModelError as exc:
+                return web.json_response({"ok": False, "error": str(exc)}, status=422)
         plugin_host = app.get("plugin_host")
         old_embedding = (
             old_subsystems.memory_store.embedding_client
@@ -257,10 +304,15 @@ class ConfigController:
         new_api = app.get("api")
         try:
             if model_runtime_changed:
+                build_options = {"verified_local_embedding": verified_local_embedding} if verified_local_embedding else {}
                 subsystems = dependencies.build_subsystems(
                     reuse=old_subsystems,
                     config=prepared.state,
+                    **build_options,
                 )
+                if (verified_local_embedding is not None
+                        and subsystems.memory_store.embedding_client is not verified_local_embedding):
+                    raise RuntimeError("Runtime did not adopt the verified local embedding model")
                 new_api = dependencies.make_api(
                     subsystems,
                     plugin_host,
@@ -281,6 +333,7 @@ class ConfigController:
                 subsystems,
                 old_subsystems,
                 old_embedding,
+                verified_local_embedding=verified_local_embedding,
             )
             self.logger.exception("配置更新后的运行时重建失败")
             return web.json_response(
@@ -305,12 +358,16 @@ class ConfigController:
                 subsystems,
                 old_subsystems,
                 old_embedding,
+                verified_local_embedding=verified_local_embedding,
             )
             self.logger.exception("保存候选配置失败")
             return web.json_response(
                 {"ok": False, "error": t("webui.config_controller.config_save_failed", exc=exc)},
                 status=500,
             )
+
+        if force_local_embedding or any(previous_state.get(key) != state.get(key) for key in _EMBEDDING_SETTINGS):
+            self._embedding_config_revision = secrets.token_hex(16)
 
         if "web_cors_origins" in changed_keys:
             from src.webui.cors import parse_cors_origins
@@ -439,7 +496,11 @@ class ConfigController:
         candidate,
         previous,
         previous_embedding,
+        *,
+        verified_local_embedding=None,
     ) -> None:
+        if verified_local_embedding is not None:
+            await verified_local_embedding.close()
         if candidate is None or candidate is previous:
             return
         await close_model_clients(candidate, keep=previous)
@@ -448,7 +509,8 @@ class ConfigController:
             "embedding_client",
             None,
         )
-        if candidate_embedding is not None and candidate_embedding is not previous_embedding:
+        if (candidate_embedding is not None and candidate_embedding is not previous_embedding
+                and candidate_embedding is not verified_local_embedding):
             await candidate_embedding.close()
 
     async def bot_token_post(self, request: web.Request) -> web.Response:
@@ -655,48 +717,26 @@ class ConfigController:
         finally:
             await client.close()
 
-    async def _test_embedding_local(self, request: web.Request, model_id: str = "") -> web.Response:
-        """本地来源的向量测试：真实加载 ONNX 并跑一次推理，回报维数与耗时。"""
-
-        state = self.dependencies.state
-        model_id = model_id or str(state.get("embedding_local_model_id") or "").strip()
-        if not model_id:
-            return web.json_response(
-                {"ok": False, "source": "local", "error": "请先选择要测试的本地模型"},
-            )
-        subsystems = request.app.get("subsystems")
+    @staticmethod
+    def _embedding_models_dir(app: Any) -> Path:
+        subsystems = app.get("subsystems")
         memory_store = getattr(subsystems, "memory_store", None)
-        models_dir = (
+        return (
             Path(memory_store.db_path).parent / "models"
             if memory_store is not None else Path("data") / "models"
         )
-        from src.memory.local_embedding import LocalModelError, LocalOnnxEmbeddingBackend
 
+    async def _test_embedding_local(self, request: web.Request, model_id: str = "") -> web.Response:
+        model_id = model_id or str(self.dependencies.state.get("embedding_local_model_id") or "").strip()
         start = time.time()
         try:
-            backend = LocalOnnxEmbeddingBackend(models_dir, model_id)
+            dimension = await probe_local_embedding(self._embedding_models_dir(request.app), model_id)
         except LocalModelError as exc:
-            return web.json_response(
-                {"ok": False, "source": "local", "error": f"本地模型加载失败：{exc}"},
-            )
-        try:
-            embedding = await backend.embed("测试")
-            elapsed = round(time.time() - start, 2)
-            if embedding and len(embedding) > 0:
-                return web.json_response(
-                    {
-                        "ok": True,
-                        "source": "local",
-                        "model": model_id,
-                        "dimension": len(embedding),
-                        "elapsed": elapsed,
-                    }
-                )
-            return web.json_response(
-                {"ok": False, "source": "local", "error": "本地模型返回异常", "elapsed": elapsed},
-            )
-        finally:
-            await backend.close()
+            return web.json_response({"ok": False, "source": "local", "error": str(exc)})
+        return web.json_response({
+            "ok": True, "source": "local", "model": model_id,
+            "dimension": dimension, "elapsed": round(time.time() - start, 2),
+        })
 
     async def test_proxy(self, request: web.Request) -> web.Response:
         body = await request.json()

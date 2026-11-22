@@ -66,7 +66,7 @@ docker compose up -d
 
 可以使用 DeepSeek、硅基流动、OpenAI、Ollama 等服务。只要它提供 OpenAI 兼容接口，就可以在“管理 → 设置 → 模型接口”里配置。
 
-向量记忆（可选）不需要外部服务：3.3.0 起可在“管理 → 设置 → 模型”里直接下载内置本地模型，下载完成即用；Ollama 等外部本地服务仅作为进阶选项。
+Windows x64 安装版、便携版和官方 Docker linux/amd64 的发布包内含本地向量推理组件。在“管理 → 设置 → 模型配置”的向量模型卡选择“DiceFrame 本地模型”，点击“下载并启用”。系统会先验证模型推理，再切换配置。
 
 先克隆仓库，或解压源码发布包：
 
@@ -88,6 +88,8 @@ python web_server.py
 ```
 
 建议先建虚拟环境再装依赖：Windows 用 `py -3 -m venv .venv`，再 `.venv\Scripts\activate`；Linux、macOS 用 `python3 -m venv .venv`，再 `source .venv/bin/activate`。`web_ui.bat` 会优先使用仓库根目录下的 `.venv314` 或 `.venv`，其次才是 `py` 启动器挑的解释器；没有虚拟环境时依赖会装进全局 Python，若该版本没有现成 wheel，第一次启动要等好几分钟。
+
+源码运行如需本地向量，可在运行后端的虚拟环境中执行 `python -m pip install --only-binary=:all: -r requirements-embedding.txt`。使用 `web_ui.bat` 时，启动器会在受支持的虚拟环境里补齐这些组件。源码启动器目前识别 CPython 3.11–3.14 的 Windows x64、glibc 2.28+ 的 Linux x64/ARM64 和 macOS 14+ ARM64。
 
 直接运行时会自动读取项目根目录的 `.env`；已经在 PowerShell、服务管理器或 Docker 中设置的环境变量优先级更高。
 

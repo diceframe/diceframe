@@ -6,7 +6,9 @@ Choose an installation below, then follow [First game](content-and-play.md#first
 
 ## Windows Portable
 
-Download the latest `DiceFrame-vX.Y.Z-windows-portable.zip` from [Releases](https://github.com/diceframe/diceframe/releases/latest), extract it, and run `DiceFrame.exe`. Open **Manage → Settings → Model API**, then add an AI provider with its name, API format, Base URL, API key, and model catalog. Use **Manage → Settings → Model Routing** to assign the main model, fallbacks, embedding, TTS, ASR, and image-generation roles. Vector memory needs no external service: since 3.3.0 a built-in local embedding model can be downloaded right inside **Manage → Settings → Models**; external local services such as Ollama remain an advanced option.
+Download the latest `DiceFrame-vX.Y.Z-windows-portable.zip` from [Releases](https://github.com/diceframe/diceframe/releases/latest), extract it, and run `DiceFrame.exe`. Open **Manage → Settings → Model API**, then add an AI provider with its name, API format, Base URL, API key, and model catalog. Use **Manage → Settings → Model Routing** to assign the main model, fallbacks, embedding, TTS, ASR, and image-generation roles.
+
+Windows x64 installer and portable releases, and official linux/amd64 Docker releases, include CPU inference for local embeddings. In the embedding card in **Model Routing**, select **DiceFrame local model** and click **Download and enable**. DiceFrame tests inference before switching to the model.
 
 Windows portable builds can check for and apply updates from the Version Update section under **Manage → Settings → About**.
 
@@ -43,6 +45,8 @@ python web_server.py
 ```
 
 Use a virtualenv for these dependencies: `py -3 -m venv .venv` then `.venv\Scripts\activate` on Windows, or `python3 -m venv .venv` then `source .venv/bin/activate` elsewhere. `web_ui.bat` prefers `.venv314` or `.venv` in the repository root and otherwise falls back to the interpreter the `py` launcher picks. Without a virtualenv the dependencies go into the global Python, and if that version has no matching wheels the first start can take several minutes.
+
+For local embeddings in a source install, run `python -m pip install --only-binary=:all: -r requirements-embedding.txt` in the server's virtual environment. `web_ui.bat` can install these components in a supported virtual environment. The source launcher currently checks CPython 3.11–3.14 on Windows x64, Linux x64/ARM64 with glibc 2.28+, and macOS 14+ ARM64.
 
 Open:
 

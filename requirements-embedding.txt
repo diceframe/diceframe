@@ -1,0 +1,4 @@
+# CPU inference dependencies for supported local embedding runtimes.
+numpy>=1.26,<3
+onnxruntime>=1.32,<2
+tokenizers>=0.23,<1

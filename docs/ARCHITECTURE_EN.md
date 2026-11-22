@@ -5435,6 +5435,8 @@ Managed Docker
 
 The download/update state machine may be shared, but authority over “who commits an installation” differs.
 
+Windows x64 portable/installer releases and managed Docker linux/amd64 update payloads ship pinned CPU inference dependencies for local embeddings. Release builds run a real inference using the packaged runtime. Model files live under `data/models`. Local activation verifies inference and commits that same backend instance. Automatic activation after a download requires the embedding configuration revision captured when the download started.
+
 ---
 
 ## 42.1 Source

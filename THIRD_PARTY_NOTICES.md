@@ -1,5 +1,11 @@
 # Third-party notices
 
+## Local embedding CPU runtime
+
+Windows x64 and managed Docker linux/amd64 releases bundle [ONNX Runtime](https://pypi.org/project/onnxruntime/), [NumPy](https://pypi.org/project/numpy/), [Hugging Face Tokenizers](https://pypi.org/project/tokenizers/), and their dependencies. Runtime versions are recorded in the platform dependency locks. The packaged wheels retain their license and notice files in the Python runtime.
+
+The Windows package includes the app-local x64 Microsoft Visual C++ Runtime DLLs from the Visual Studio redistributable directory, under the [Microsoft Visual Studio redistribution terms](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files).
+
 ## Pydantic AI slim 1.107.7
 
 DiceFrame includes and uses `pydantic-ai-slim==1.107.7`, distributed under the MIT License.

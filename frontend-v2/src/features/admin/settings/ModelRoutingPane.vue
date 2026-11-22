@@ -44,7 +44,8 @@ const asrProvider = computed(() => String(store.config.asr_provider || 'disabled
 const embeddingStatus = computed(() => store.config.embedding_status || {})
 const embeddingSource = computed(() => String(store.config.embedding_source || 'external'))
 const localEmbeddingModels = computed(() => store.config.embedding_local_models || [])
-const installingLocalModel = ref('')
+const activatingLocalModel = ref('')
+const localModelPhase = ref<'download' | 'verify'>('download')
 const localModelError = ref('')
 const rebuildBusy = ref(false)
 const rebuildFeedback = ref('')
@@ -174,22 +175,39 @@ function setAsrProvider(value: string) {
   setString('asr_provider', value)
   if (value === 'disabled') setString('asr_provider_ref', '')
 }
-async function installLocalModel(modelId: string) {
-  if (installingLocalModel.value) return
-  installingLocalModel.value = modelId; localModelError.value = ''
+async function activateLocalModel(modelId: string, download: boolean) {
+  if (activatingLocalModel.value || uninstallingLocalModel.value || props.saving) return
+  const activate = store.prepareLocalEmbeddingActivation(modelId)
+  if (!activate) {
+    localModelError.value = t('providerBackendOutdated')
+    return
+  }
+  activatingLocalModel.value = modelId
+  localModelError.value = ''
+  let downloaded = false
   try {
-    await api(`/embedding/models/${encodeURIComponent(modelId)}/install`, { method: 'POST', body: '{}' })
-    await store.load()
-    if (!String(store.config.embedding_local_model_id || '').trim()) {
-      store.setConfigField('embedding_local_model_id', modelId)
+    if (download) {
+      localModelPhase.value = 'download'
+      await api(`/embedding/models/${encodeURIComponent(modelId)}/install`, { method: 'POST', body: '{}' })
+      downloaded = true
+    }
+    localModelPhase.value = 'verify'
+    if (!(await activate())) {
+      await store.load([])
+      localModelError.value = t('embeddingSettingsChangedDuringActivation')
     }
   } catch (error: unknown) {
     localModelError.value = errorMessage(error)
-  } finally { installingLocalModel.value = '' }
+    if (downloaded) await store.load([])
+  } finally {
+    activatingLocalModel.value = ''
+  }
 }
 // W5：模型卡片化展示 + 卸载（启用中的模型服务端拒绝，fail closed）。
 const localCatalogAll = computed(() => store.config.embedding_model_catalog || [])
-const activeLocalModelId = computed(() => embeddingSource.value === 'local' ? String(store.config.embedding_local_model_id || '') : '')
+const activeLocalModelId = computed(() => store.config.embedding_enabled && embeddingSource.value === 'local'
+  && !store.isConfigDirty(['embedding_enabled', 'embedding_source', 'embedding_local_model_id'])
+  ? String(store.config.embedding_local_model_id || '') : '')
 const uninstallingLocalModel = ref('')
 const DEFAULT_REMOTE_CATALOG_URL = 'https://raw.githubusercontent.com/diceframe/diceframe-models/main/catalog/index.json'
 function formatBytes(value: number | undefined): string {
@@ -204,14 +222,8 @@ function localModelStatusLabel(model: { status?: string }): string {
   if (model.status === 'invalid') return t('embeddingModelStatusInvalid')
   return t('embeddingModelStatusNotInstalled')
 }
-function activateLocalModel(modelId: string) {
-  setString('embedding_source', 'local')
-  setString('embedding_local_model_id', modelId)
-  store.setConfigField('embedding_enabled', true)
-  emit('save')
-}
 async function uninstallLocalModel(modelId: string) {
-  if (uninstallingLocalModel.value) return
+  if (uninstallingLocalModel.value || activatingLocalModel.value) return
   uninstallingLocalModel.value = modelId; localModelError.value = ''
   try {
     await api(`/embedding/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' })
@@ -363,7 +375,7 @@ onBeforeUnmount(() => { if (typeof window !== 'undefined') window.removeEventLis
             <template v-if="embeddingSource === 'local'">
               <label><span>{{ locale === 'zh-CN' ? '启用的本地模型' : 'Enabled local model' }}</span><select :value="store.config.embedding_local_model_id || ''" :disabled="!store.config.embedding_enabled || !localEmbeddingModels.length" @change="setString('embedding_local_model_id', eventValue($event))"><option value="">{{ locale === 'zh-CN' ? '请选择模型' : 'Choose a model' }}</option><option v-for="model in localEmbeddingModels" :key="model.id" :value="model.id" :disabled="model.status !== 'installed'">{{ model.display_name || model.id }}<template v-if="model.version"> · {{ model.version }}</template></option></select></label>
               <p v-if="!localEmbeddingModels.length" class="model-role-field-hint">{{ t('embeddingModelPickHint') }}</p>
-              <p class="model-role-field-hint embedding-local-flow-hint">{{ locale === 'zh-CN' ? '下载只负责把模型放到本机；选中模型并点击本卡右上角“保存模型配置”后，才会切换到它。' : 'Download only puts the model on this machine. Select it and click “Save model settings” in this card before switching to it.' }}</p>
+              <p class="model-role-field-hint embedding-local-flow-hint">{{ t('embeddingModelActivationHint') }}</p>
               <div class="local-model-catalog-refresh">
                 <NInput v-model:value="remoteCatalogUrl" size="small" :placeholder="t('embeddingCatalogUrlPlaceholder')" data-testid="embedding-catalog-url" />
                 <NButton size="tiny" secondary :loading="refreshCatalogBusy" data-testid="embedding-catalog-refresh" @click="refreshRemoteCatalog">{{ t('embeddingCatalogRefresh') }}</NButton>
@@ -382,13 +394,13 @@ onBeforeUnmount(() => { if (typeof window !== 'undefined') window.removeEventLis
                     <span v-if="model.version">v{{ model.version }}</span>
                   </p>
                   <div class="local-model-actions">
-                    <NButton v-if="model.status !== 'installed'" size="tiny" type="primary" :loading="installingLocalModel === model.id" :data-testid="`local-model-install-${model.id}`" @click="installLocalModel(model.id)">
-                      {{ installingLocalModel === model.id ? t('embeddingModelDownloading') : t('embeddingModelDownload') }}
+                    <NButton v-if="model.status !== 'installed'" size="tiny" type="primary" :loading="activatingLocalModel === model.id" :disabled="!!activatingLocalModel || !!uninstallingLocalModel || saving" :data-testid="`local-model-install-${model.id}`" @click="activateLocalModel(model.id, true)">
+                      {{ activatingLocalModel === model.id ? t(localModelPhase === 'download' ? 'embeddingModelDownloading' : 'embeddingModelVerifying') : t('embeddingModelDownloadAndEnable') }}
                     </NButton>
-                    <NButton v-if="model.status === 'installed' && model.id !== activeLocalModelId" size="tiny" type="primary" :data-testid="`local-model-activate-${model.id}`" @click="activateLocalModel(model.id)">
-                      {{ locale === 'zh-CN' ? '启用并保存' : 'Enable and save' }}
+                    <NButton v-if="model.status === 'installed' && model.id !== activeLocalModelId" size="tiny" type="primary" :loading="activatingLocalModel === model.id" :disabled="!!activatingLocalModel || !!uninstallingLocalModel || saving" :data-testid="`local-model-activate-${model.id}`" @click="activateLocalModel(model.id, false)">
+                      {{ t(activatingLocalModel === model.id ? 'embeddingModelVerifying' : 'embeddingModelEnable') }}
                     </NButton>
-                    <NButton v-if="model.status === 'installed' && model.id !== activeLocalModelId" size="tiny" secondary :loading="uninstallingLocalModel === model.id" :data-testid="`local-model-delete-${model.id}`" @click="uninstallLocalModel(model.id)">
+                    <NButton v-if="model.status === 'installed' && model.id !== activeLocalModelId" size="tiny" secondary :loading="uninstallingLocalModel === model.id" :disabled="!!activatingLocalModel" :data-testid="`local-model-delete-${model.id}`" @click="uninstallLocalModel(model.id)">
                       {{ t('embeddingModelDelete') }}
                     </NButton>
                     <NTag v-if="model.id === activeLocalModelId" size="small" type="info">{{ t('embeddingModelActive') }}</NTag>

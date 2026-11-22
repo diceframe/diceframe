@@ -11,7 +11,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.ai_providers import resolve_provider
 from src.assistant_agent_limits import DEFAULT_TASK_MAX_TOKENS
@@ -24,6 +24,9 @@ from src.migrations.config import DEFAULT_NARRATIVE_MAX_TOKENS
 from src.network_proxy import effective_proxy_url
 from src.tts import SpeechService
 from src.webui.api import WebAPI
+
+if TYPE_CHECKING:
+    from src.memory.local_embedding import LocalOnnxEmbeddingBackend
 
 logger = logging.getLogger("trpg")
 
@@ -70,6 +73,8 @@ class RuntimeComposition:
         self,
         reuse: TRPGSubsystems | None = None,
         config: dict | None = None,
+        *,
+        verified_local_embedding: LocalOnnxEmbeddingBackend | None = None,
     ) -> TRPGSubsystems:
         runtime_config = self.state if config is None else config
         main_provider = resolve_provider(
@@ -198,6 +203,7 @@ class RuntimeComposition:
                 runtime_config.get("model_request_timeout_seconds", 120)
             ),
             reuse=reuse,
+            verified_local_embedding=verified_local_embedding,
         )
 
     @staticmethod

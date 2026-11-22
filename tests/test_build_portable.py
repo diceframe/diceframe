@@ -56,12 +56,28 @@ def test_cleanup_runtime_drops_agent_skill_docs_but_keeps_package_code(tmp_path)
     griffe_agents = site_packages / "griffe" / "_internal" / "agents" / "visitor.py"
     griffe_agents.parent.mkdir(parents=True)
     griffe_agents.write_text("# code", encoding="utf-8")
+    numpy_test = site_packages / "numpy" / "_core" / "tests" / "data" / "fixture.csv"
+    numpy_test.parent.mkdir(parents=True)
+    numpy_test.write_text("fixture", encoding="utf-8")
+    packaging = site_packages / "packaging" / "version.py"
+    packaging.parent.mkdir()
+    packaging.write_text("# code", encoding="utf-8")
+    ort_tool = site_packages / "onnxruntime" / "tools" / "ort_format_model" / "schema.py"
+    ort_tool.parent.mkdir(parents=True)
+    ort_tool.write_text("# code", encoding="utf-8")
+    ort_runtime = site_packages / "onnxruntime" / "capi" / "onnxruntime.dll"
+    ort_runtime.parent.mkdir()
+    ort_runtime.write_bytes(b"runtime")
 
     build_portable.cleanup_runtime(tmp_path / "runtime")
 
     assert not (site_packages / "pydantic_ai" / ".agents").exists()
     assert module.is_file()
     assert griffe_agents.is_file()
+    assert not numpy_test.exists()
+    assert packaging.is_file()
+    assert not ort_tool.exists()
+    assert ort_runtime.is_file()
 
 
 def test_validate_zip_rejects_paths_too_deep_for_older_updaters(tmp_path):
