@@ -240,7 +240,11 @@ def test_capacity_is_base_three_plus_declared_feature_bonus_and_fails_closed() -
     features = runtime.load_bundle("en").entities[
         "class_feature_catalog"
     ]["srd_class_features"]
-    second_wind = features["classes"]["fighter"]["features"][0]
+    # 按 id 取，不按下标：目录里插一个新特性不该让这条用例指向错的对象。
+    second_wind = next(
+        row for row in features["classes"]["fighter"]["features"]
+        if row["id"] == "second_wind"
+    )
     second_wind["parameters"]["attunement_slot_bonus"] = 3
     resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle("en"))
     assert attunement_capacity(canonical, resolver) == 6

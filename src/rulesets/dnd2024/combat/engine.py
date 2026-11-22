@@ -374,11 +374,17 @@ class Dnd2024CombatEngine(
                     ),
                     **self._attack_state_options(actor, combat),
                 })
+            hide_gate = self.hide_preconditions(instance, combat, current)
             actions.extend([
                 {"type": "dash", "label": "Dash", "actor_id": current, "expected_version": version},
                 {"type": "dodge", "label": "Dodge", "actor_id": current, "expected_version": version},
                 {"type": "disengage", "label": "Disengage", "actor_id": current, "expected_version": version},
-                {"type": "hide", "label": "Hide", "actor_id": current, "expected_version": version},
+                {
+                    "type": "hide", "label": "Hide", "actor_id": current,
+                    "expected_version": version,
+                    "available": bool(hide_gate["allowed"]),
+                    "unavailable_reason": str(hide_gate["reason"]),
+                },
             ])
             adjacent_downed = [
                 target for target in self._all_targets(instance, combat)
@@ -2070,6 +2076,44 @@ class Dnd2024CombatEngine(
             return str(row.get("level") or "none")
         finally:
             self._cover_depth -= 1
+
+    HIDE_COVER_LEVELS = ("three_quarters", "total")
+
+    def hide_preconditions(
+        self, instance: Any, combat: dict[str, Any], actor_id: str,
+    ) -> dict[str, Any]:
+        """Whether this creature may attempt to Hide here, and why not.
+
+        默认拒绝：SRD 把"能藏"写成一种**例外**（重度遮蔽、¾ 或 Total Cover），
+        the rest of the world being open ground. 一个判定位，三处消费者共用
+        （validation 拒绝、available_intents 投影、结算前复核）。
+        """
+
+        level = self.obscurement_level(combat, actor_id)
+        if level == "heavily":
+            return {"allowed": True, "source": "obscurement", "reason": ""}
+        cover = self.cover_level(instance, combat, actor_id)
+        if cover in self.HIDE_COVER_LEVELS:
+            return {"allowed": True, "source": "cover", "reason": ""}
+        return {
+            "allowed": False, "source": "",
+            "reason": "no heavy obscurement or three-quarters cover",
+        }
+
+    def has_moved_this_turn(
+        self, combat: dict[str, Any], actor_id: str,
+    ) -> bool:
+        """Whether the *current* actor has spent movement this turn.
+
+        ``economy.moved`` is written by the reducer only when the acting
+        creature pays movement, so a target shoved across the field does not
+        count as having moved -- which is what Steady Aim's wording means.
+        """
+
+        economy = combat.get("economy") or {}
+        if str(economy.get("actor_id") or "") != str(actor_id):
+            return False
+        return bool(economy.get("moved"))
 
     def obscurement_level(
         self, combat: dict[str, Any], actor_id: str,

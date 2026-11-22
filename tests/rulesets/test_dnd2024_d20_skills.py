@@ -34,7 +34,7 @@ from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 
-from dnd2024_monk_common import advancement_choices, goblin, monk_instance
+from dnd2024_monk_common import advancement_choices, goblin, monk_instance, grant_hide_footing
 
 LOCALE = "en"
 # 标准数组必须恰好用满 15/14/13/12/10/8；背景加值在此之上叠加。
@@ -817,6 +817,8 @@ def test_reliable_talent_treats_low_faces_as_ten(
 
     engine, instance = _combat(runtime, _rogue(runtime, 7), rolls=(20, 3))
     rng = _CountingRng([raw])
+    # S0-F10B：Hide 默认拒绝，先给这个行动者一块合法的落脚点。
+    grant_hide_footing(engine, instance)
     events = _apply(engine, instance, _hide_intent(instance), rng)
     check = _check(events, "hide")
 
@@ -890,6 +892,7 @@ def test_the_floored_face_still_takes_the_full_skill_bonus(
 
     sheet = _rogue(runtime, 7)
     engine, instance = _combat(runtime, sheet)
+    grant_hide_footing(engine, instance)
     intent = _hide_intent(instance)
     rng = _CountingRng([2])
     resolved = engine.resolve_intent(instance, intent, rng)
@@ -1196,6 +1199,7 @@ def test_a_client_supplied_face_never_replaces_the_server_roll(
     """21. Dice the caller attaches are inert; only the server's d20 counts."""
 
     engine, instance = _combat(runtime, _rogue(runtime, 7))
+    grant_hide_footing(engine, instance)
     forgery = {
         **_hide_intent(instance),
         "natural": 20, "effective_d20": 20, "total": 99, "rolls": [20],

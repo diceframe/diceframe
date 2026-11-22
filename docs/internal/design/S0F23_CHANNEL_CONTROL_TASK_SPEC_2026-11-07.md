@@ -8,7 +8,7 @@
 | 代码基线 | 祖先基线 `integration/dnd2024-srd@35653f81`（`35653f8149717c19d2a9b3333ef9cf28569793e7`） |
 | 前置任务 | F13 条件免疫/抑制；F14 命中 rider 与伤害类型；F22 Channel 与 Turn Undead；S0-E2 Aura of Protection；无自动光照前置 |
 | 建议分支 | `feat/dnd2024-s0f23-channel-control` |
-| 状态 | 待执行；本文是执行契约，不表示功能已实现 |
+| 状态 | 已由 #784 实现并合并（本文件保留原始契约，状态见 `SLICE_STATUS.md`） |
 
 ## 1. 执行纪律与范围锁定
 

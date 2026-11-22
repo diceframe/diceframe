@@ -8,7 +8,7 @@
 | 代码基线 | `origin/main@1407099b`（含 S-P11 精通声明 `424f6450`）；本分支 `feat/dnd2024-s0f20-combat-start@869eebf7` |
 | 前置任务 | S-P11 武器精通声明（已完成，`combat/weapon_masteries.py`）；F20 `turn_slots`/回合经济（若动 draw 预算需其稳定） |
 | 建议分支 | `feat/dnd2024-s0f38-weapon-hands` |
-| 状态 | 待执行；本文是执行契约，不表示功能已实现 |
+| 状态 | 已由 #785 实现并合并（本文件保留原始契约，状态见 `SLICE_STATUS.md`） |
 
 ## 1. 执行纪律与范围锁定
 

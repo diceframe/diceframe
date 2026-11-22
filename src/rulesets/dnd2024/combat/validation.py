@@ -59,7 +59,7 @@ from .primitives import (
     canonical as _canonical,
     rider_attack_kind,
 )
-from .check_modes import condition_flags, marked_target_id, owned_mark, vision_codes
+from .check_modes import condition_flags, effective_speed, marked_target_id, owned_mark, vision_codes
 from .hands import apply_swap
 from .check_windows import (
     CHECK_WINDOW_DECISION,
@@ -618,6 +618,12 @@ class CombatValidationMixin:
                     raise CombatIntentError("the Attack action is no longer available")
             elif not has_action:
                 raise CombatIntentError("the action has already been spent")
+            if intent_type == "hide":
+                gate = self.hide_preconditions(
+                    instance, combat, str(actor["actor_id"]),
+                )
+                if not gate["allowed"]:
+                    raise CombatIntentError(str(gate["reason"]))
         if intent_type == "move":
             distance = intent.get("distance")
             if isinstance(distance, bool) or not isinstance(distance, int) or distance == 0:
@@ -803,6 +809,16 @@ class CombatValidationMixin:
         capability_id = str(intent.get("capability_id") or "")
         if not capability_id:
             raise CombatIntentError("capability_id is required")
+        via_fleet_step = intent.get("via_fleet_step")
+        if via_fleet_step is not None and not isinstance(via_fleet_step, bool):
+            raise CombatIntentError("via_fleet_step must be a boolean")
+        if via_fleet_step:
+            if capability_id != "step_of_the_wind":
+                raise CombatIntentError(
+                    "Fleet Step can only grant Step of the Wind"
+                )
+            if not bool(economy.get("fleet_step_available")):
+                raise CombatIntentError("Fleet Step is not available this turn")
         capability = self.features.declared_capability(
             self._feature_character(actor), capability_id,
         )
@@ -820,6 +836,34 @@ class CombatValidationMixin:
                     f"{self.features.catalog.label(capability_id, capability_id)} cannot be "
                     f"used while {self.features.catalog.label(forbidden, forbidden)} is active"
                 )
+        if capability_id == "steady_aim":
+            if self.has_moved_this_turn(combat, str(actor["actor_id"])):
+                raise CombatIntentError("you have already moved this turn")
+        rider_move = intent.get("rider_move")
+        if rider_move is not None:
+            allowed = capability is not None and capability_id in {
+                "rage", "second_wind",
+            }
+            if not allowed:
+                raise CombatIntentError(
+                    "granted movement is not available for this capability"
+                )
+            if isinstance(rider_move, bool) or not isinstance(rider_move, int):
+                raise CombatIntentError("granted movement must be an integer")
+            if rider_move <= 0:
+                raise CombatIntentError("granted movement must be positive")
+            allowance = effective_speed(
+                self.catalog.conditions, actor.get("conditions") or {},
+                int(actor.get("speed", 30) or 30),
+            ) // 2
+            if rider_move > allowance:
+                raise CombatIntentError("granted movement exceeds half your speed")
+        if capability is not None and any(
+            action.kind == "hide" for action in capability.actions
+        ):
+            gate = self.hide_preconditions(instance, combat, str(actor["actor_id"]))
+            if not gate["allowed"]:
+                raise CombatIntentError(str(gate["reason"]))
         choice = intent.get("open_hand_choice")
         if choice is not None:
             # Open Hand Technique 只在 Flurry of Blows 授予的攻击上成立；把它
