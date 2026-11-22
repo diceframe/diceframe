@@ -62,7 +62,10 @@ def test_tiny_animals_with_flat_damage_are_expressible(catalog) -> None:
     not be stricter, or half of the Animals simply cannot exist."""
 
     rat = _entry(catalog, "rat")
-    assert [attack["damage"] for attack in rat["attacks"]] == ["1"]
+    # S0-MM3a 之后伤害段是数组：固定值仍然是固定值，只是装在第一段里。
+    assert [attack["damage"] for attack in rat["attacks"]] == [
+        [{"dice": "1", "type": "piercing"}],
+    ]
 
 
 def test_a_form_without_attacks_is_valid(catalog) -> None:
@@ -111,7 +114,8 @@ def test_catalog_rejects_duplicate_ids(payload: dict) -> None:
 
 def test_catalog_rejects_an_unknown_field(payload: dict) -> None:
     broken = json.loads(json.dumps(payload))
-    broken["entries"][0]["traits"] = [{"name": "Pack Tactics"}]
+    # traits 已是正式字段（S0-MM3d），未知字段要用一个真的未知名字证。
+    broken["entries"][0]["traits_v2"] = [{"id": "magic_resistance"}]
     with pytest.raises(Exception, match="unknown field"):
         MonsterCatalog(broken)
 

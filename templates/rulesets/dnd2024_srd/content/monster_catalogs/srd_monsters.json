@@ -44,12 +44,18 @@
           "id": "rake-0",
           "name": "Rake",
           "attack_bonus": 1,
-          "damage": "1",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "baboon",
@@ -89,10 +95,20 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 1,
-          "damage": "1d4+1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "pack_tactics"
         }
       ]
     },
@@ -138,12 +154,18 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 2,
-          "damage": "1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "bat",
@@ -185,12 +207,18 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "cat",
@@ -237,12 +265,18 @@
           "id": "scratch-0",
           "name": "Scratch",
           "attack_bonus": 4,
-          "damage": "1",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "commoner",
@@ -283,12 +317,18 @@
           "id": "club-0",
           "name": "Club",
           "attack_bonus": 2,
-          "damage": "1d4",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d4",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "crab",
@@ -332,10 +372,20 @@
           "id": "claw-0",
           "name": "Claw",
           "attack_bonus": 2,
-          "damage": "1",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "amphibious"
         }
       ]
     },
@@ -380,12 +430,18 @@
           "id": "ram-0",
           "name": "Ram",
           "attack_bonus": 2,
-          "damage": "1d4",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d4",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "eagle",
@@ -427,12 +483,18 @@
           "id": "talons-0",
           "name": "Talons",
           "attack_bonus": 4,
-          "damage": "1d4+2",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d4+2",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "frog",
@@ -477,10 +539,20 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 3,
-          "damage": "1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "amphibious"
         }
       ]
     },
@@ -524,12 +596,18 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 1,
-          "damage": "1",
-          "damage_type": "fire",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "fire"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "giant-fly",
@@ -566,7 +644,9 @@
       "resist_damage_types": [],
       "immune_damage_types": [],
       "vulnerable_damage_types": [],
-      "attacks": []
+      "attacks": [],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "goat",
@@ -612,12 +692,18 @@
           "id": "ram-0",
           "name": "Ram",
           "attack_bonus": 2,
-          "damage": "1d4",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d4",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "hawk",
@@ -659,12 +745,18 @@
           "id": "talons-0",
           "name": "Talons",
           "attack_bonus": 5,
-          "damage": "1",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "homunculus",
@@ -711,12 +803,18 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "hyena",
@@ -759,10 +857,20 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 2,
-          "damage": "1d6",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "pack_tactics"
         }
       ]
     },
@@ -808,12 +916,18 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 1,
-          "damage": "1d4+1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "lemure",
@@ -856,12 +970,18 @@
           "id": "vile-slime-0",
           "name": "Vile Slime",
           "attack_bonus": 2,
-          "damage": "1d4",
-          "damage_type": "poison",
+          "damage": [
+            {
+              "dice": "1d4",
+              "type": "poison"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "lizard",
@@ -903,10 +1023,20 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 2,
-          "damage": "1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "spider_climb"
         }
       ]
     },
@@ -956,10 +1086,20 @@
           "id": "tentacles-0",
           "name": "Tentacles",
           "attack_bonus": 4,
-          "damage": "1",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "water_breathing"
         }
       ]
     },
@@ -1006,10 +1146,20 @@
           "id": "talons-0",
           "name": "Talons",
           "attack_bonus": 3,
-          "damage": "1",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "flyby"
         }
       ]
     },
@@ -1053,10 +1203,20 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 5,
-          "damage": "1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "water_breathing"
         }
       ]
     },
@@ -1102,12 +1262,18 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 2,
-          "damage": "1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "raven",
@@ -1149,12 +1315,18 @@
           "id": "beak-0",
           "name": "Beak",
           "attack_bonus": 4,
-          "damage": "1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "scorpion",
@@ -1195,12 +1367,22 @@
           "id": "sting-0",
           "name": "Sting",
           "attack_bonus": 2,
-          "damage": "1d6",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "piercing"
+            },
+            {
+              "dice": "1d6",
+              "type": "poison"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "seahorse",
@@ -1238,7 +1420,13 @@
       "resist_damage_types": [],
       "immune_damage_types": [],
       "vulnerable_damage_types": [],
-      "attacks": []
+      "attacks": [],
+      "actions": [],
+      "traits": [
+        {
+          "id": "water_breathing"
+        }
+      ]
     },
     {
       "id": "shrieker-fungus",
@@ -1274,7 +1462,9 @@
       "resist_damage_types": [],
       "immune_damage_types": [],
       "vulnerable_damage_types": [],
-      "attacks": []
+      "attacks": [],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "spider",
@@ -1318,10 +1508,24 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "1d4",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "piercing"
+            },
+            {
+              "dice": "1d4",
+              "type": "poison"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "spider_climb"
         }
       ]
     },
@@ -1365,10 +1569,20 @@
           "id": "beak-0",
           "name": "Beak",
           "attack_bonus": 2,
-          "damage": "1d4",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "pack_tactics"
         }
       ]
     },
@@ -1416,12 +1630,18 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 5,
-          "damage": "1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "animated-armor",
@@ -1462,12 +1682,28 @@
           "id": "slam-0",
           "name": "Slam",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "slam-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
     },
     {
       "id": "brass-dragon-wyrmling",
@@ -1519,12 +1755,52 @@
           "id": "rend-0",
           "name": "Rend",
           "attack_bonus": 4,
-          "damage": "1d10+2",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d10+2",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [
+        {
+          "id": "save-0",
+          "name": "Fire Breath",
+          "kind": "save_action",
+          "ability": "dex",
+          "dc": 11,
+          "on_fail": [
+            {
+              "damage": [
+                {
+                  "dice": "4d6",
+                  "type": "fire"
+                }
+              ]
+            }
+          ],
+          "on_success": [
+            {
+              "damage": [
+                {
+                  "dice": "2d6",
+                  "type": "fire"
+                }
+              ]
+            }
+          ],
+          "usage_limits": {
+            "recharge": {
+              "from": 5,
+              "to": 6
+            }
+          }
+        }
+      ],
+      "traits": []
     },
     {
       "id": "brown-bear",
@@ -1568,8 +1844,12 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 5,
-          "damage": "1d8+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d8+3",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         },
@@ -1577,12 +1857,40 @@
           "id": "claw-0",
           "name": "Claw",
           "attack_bonus": 5,
-          "damage": "1d4+3",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d4+3",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
-          "long_range": 5
+          "long_range": 5,
+          "riders": [
+            {
+              "kind": "prone",
+              "max_target_size": "large"
+            }
+          ]
         }
-      ]
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "combo": [
+            {
+              "attack_id": "bite-0",
+              "count": 1
+            },
+            {
+              "attack_id": "claw-0",
+              "count": 1
+            }
+          ]
+        }
+      ],
+      "traits": []
     },
     {
       "id": "bugbear-warrior",
@@ -1629,21 +1937,38 @@
           "id": "grab-0",
           "name": "Grab",
           "attack_bonus": 4,
-          "damage": "2d6+2",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "2d6+2",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 10,
-          "long_range": 10
+          "long_range": 10,
+          "riders": [
+            {
+              "kind": "grapple",
+              "escape_dc": 12,
+              "max_target_size": "medium"
+            }
+          ]
         },
         {
           "id": "light-hammer-0",
           "name": "Light Hammer",
           "attack_bonus": 4,
-          "damage": "3d4+2",
-          "damage_type": "bludgeoning",
-          "range": 10,
-          "long_range": 10
+          "damage": [
+            {
+              "dice": "3d4+2",
+              "type": "bludgeoning"
+            }
+          ],
+          "range": 20,
+          "long_range": 60
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "copper-dragon-wyrmling",
@@ -1695,12 +2020,52 @@
           "id": "rend-0",
           "name": "Rend",
           "attack_bonus": 4,
-          "damage": "1d10+2",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d10+2",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [
+        {
+          "id": "save-0",
+          "name": "Acid Breath",
+          "kind": "save_action",
+          "ability": "dex",
+          "dc": 11,
+          "on_fail": [
+            {
+              "damage": [
+                {
+                  "dice": "4d8",
+                  "type": "acid"
+                }
+              ]
+            }
+          ],
+          "on_success": [
+            {
+              "damage": [
+                {
+                  "dice": "2d8",
+                  "type": "acid"
+                }
+              ]
+            }
+          ],
+          "usage_limits": {
+            "recharge": {
+              "from": 5,
+              "to": 6
+            }
+          }
+        }
+      ],
+      "traits": []
     },
     {
       "id": "death-dog",
@@ -1744,12 +2109,28 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "1d4+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "bite-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
     },
     {
       "id": "dire-wolf",
@@ -1793,10 +2174,26 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 5,
-          "damage": "1d10+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d10+3",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
-          "long_range": 5
+          "long_range": 5,
+          "riders": [
+            {
+              "kind": "prone",
+              "max_target_size": "large"
+            }
+          ]
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "pack_tactics"
         }
       ]
     },
@@ -1845,8 +2242,12 @@
           "id": "thorn-burst-0",
           "name": "Thorn Burst",
           "attack_bonus": 6,
-          "damage": "1d6+4",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+4",
+              "type": "piercing"
+            }
+          ],
           "range": 60,
           "long_range": 60
         },
@@ -1854,10 +2255,20 @@
           "id": "vine-lash-0",
           "name": "Vine Lash",
           "attack_bonus": 6,
-          "damage": "1d8+4",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d8+4",
+              "type": "slashing"
+            }
+          ],
           "range": 10,
           "long_range": 10
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "magic_resistance"
         }
       ]
     },
@@ -1902,8 +2313,16 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "piercing"
+            },
+            {
+              "dice": "1d6",
+              "type": "necrotic"
+            }
+          ],
           "range": 5,
           "long_range": 5
         },
@@ -1911,12 +2330,28 @@
           "id": "claw-0",
           "name": "Claw",
           "attack_bonus": 4,
-          "damage": "1d4+2",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d4+2",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "bite-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
     },
     {
       "id": "giant-eagle",
@@ -1962,12 +2397,32 @@
           "id": "rend-0",
           "name": "Rend",
           "attack_bonus": 5,
-          "damage": "1d4+3",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d4+3",
+              "type": "slashing"
+            },
+            {
+              "dice": "1d6",
+              "type": "radiant"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "rend-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
     },
     {
       "id": "giant-hyena",
@@ -2010,12 +2465,18 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 5,
-          "damage": "2d6+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "2d6+3",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "giant-octopus",
@@ -2060,10 +2521,27 @@
           "id": "tentacles-0",
           "name": "Tentacles",
           "attack_bonus": 5,
-          "damage": "2d6+3",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "2d6+3",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 10,
-          "long_range": 10
+          "long_range": 10,
+          "riders": [
+            {
+              "kind": "grapple",
+              "escape_dc": 13,
+              "max_target_size": "medium"
+            }
+          ]
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "water_breathing"
         }
       ]
     },
@@ -2110,10 +2588,24 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 5,
-          "damage": "1d8+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d8+3",
+              "type": "piercing"
+            },
+            {
+              "dice": "2d6",
+              "type": "poison"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "spider_climb"
         }
       ]
     },
@@ -2157,10 +2649,31 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "piercing"
+            },
+            {
+              "dice": "2d4",
+              "type": "poison"
+            }
+          ],
           "range": 5,
-          "long_range": 5
+          "long_range": 5,
+          "riders": [
+            {
+              "kind": "grapple",
+              "escape_dc": 12,
+              "max_target_size": "medium"
+            }
+          ]
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "amphibious"
         }
       ]
     },
@@ -2208,10 +2721,27 @@
           "id": "gouge-0",
           "name": "Gouge",
           "attack_bonus": 4,
-          "damage": "2d6+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "2d6+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
-          "long_range": 5
+          "long_range": 5,
+          "riders": [
+            {
+              "kind": "condition",
+              "condition": "poisoned",
+              "duration": "target_turn_end"
+            }
+          ]
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "pack_tactics"
         }
       ]
     },
@@ -2259,8 +2789,12 @@
           "id": "scimitar-0",
           "name": "Scimitar",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         },
@@ -2268,12 +2802,18 @@
           "id": "shortbow-0",
           "name": "Shortbow",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "piercing"
+            }
+          ],
           "range": 80,
           "long_range": 320
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "harpy",
@@ -2315,12 +2855,18 @@
           "id": "claw-0",
           "name": "Claw",
           "attack_bonus": 3,
-          "damage": "2d4+1",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "2d4+1",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "hippogriff",
@@ -2362,10 +2908,30 @@
           "id": "rend-0",
           "name": "Rend",
           "attack_bonus": 5,
-          "damage": "1d8+3",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d8+3",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "rend-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": [
+        {
+          "id": "flyby"
         }
       ]
     },
@@ -2416,10 +2982,24 @@
           "id": "sting-0",
           "name": "Sting",
           "attack_bonus": 5,
-          "damage": "1d6+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+3",
+              "type": "piercing"
+            },
+            {
+              "dice": "2d6",
+              "type": "poison"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "magic_resistance"
         }
       ]
     },
@@ -2465,10 +3045,20 @@
           "id": "rend-0",
           "name": "Rend",
           "attack_bonus": 5,
-          "damage": "1d8+3",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d8+3",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "pack_tactics"
         }
       ]
     },
@@ -2514,12 +3104,18 @@
           "id": "dagger-0",
           "name": "Dagger",
           "attack_bonus": 5,
-          "damage": "1d4+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+3",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 60
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "quasit",
@@ -2565,10 +3161,27 @@
           "id": "rend-0",
           "name": "Rend",
           "attack_bonus": 5,
-          "damage": "1d4+3",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d4+3",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
-          "long_range": 5
+          "long_range": 5,
+          "riders": [
+            {
+              "kind": "condition",
+              "condition": "poisoned",
+              "duration": "attacker_next_turn_start"
+            }
+          ]
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "magic_resistance"
         }
       ]
     },
@@ -2615,12 +3228,18 @@
           "id": "life-drain-0",
           "name": "Life Drain",
           "attack_bonus": 4,
-          "damage": "2d6",
-          "damage_type": "necrotic",
+          "damage": [
+            {
+              "dice": "2d6",
+              "type": "necrotic"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "sphinx-of-wonder",
@@ -2669,10 +3288,24 @@
           "id": "rend-0",
           "name": "Rend",
           "attack_bonus": 5,
-          "damage": "1d4+3",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d4+3",
+              "type": "slashing"
+            },
+            {
+              "dice": "2d6",
+              "type": "radiant"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "magic_resistance"
         }
       ]
     },
@@ -2723,8 +3356,16 @@
           "id": "hand-crossbow-0",
           "name": "Hand Crossbow",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "piercing"
+            },
+            {
+              "dice": "2d6",
+              "type": "poison"
+            }
+          ],
           "range": 30,
           "long_range": 120
         },
@@ -2732,12 +3373,22 @@
           "id": "shortsword-0",
           "name": "Shortsword",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "piercing"
+            },
+            {
+              "dice": "2d6",
+              "type": "poison"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "swarm-of-piranhas",
@@ -2779,10 +3430,20 @@
           "id": "bites-0",
           "name": "Bites",
           "attack_bonus": 5,
-          "damage": "2d4+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "2d4+3",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "water_breathing"
         }
       ]
     },
@@ -2828,12 +3489,24 @@
           "id": "rend-0",
           "name": "Rend",
           "attack_bonus": 5,
-          "damage": "2d6+3",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "2d6+3",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
-          "long_range": 5
+          "long_range": 5,
+          "riders": [
+            {
+              "kind": "prone",
+              "max_target_size": "large"
+            }
+          ]
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "ape",
@@ -2876,8 +3549,12 @@
           "id": "fist-0",
           "name": "Fist",
           "attack_bonus": 5,
-          "damage": "1d4+3",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d4+3",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         },
@@ -2885,12 +3562,28 @@
           "id": "rock-0",
           "name": "Rock",
           "attack_bonus": 5,
-          "damage": "2d6+3",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "2d6+3",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 25,
           "long_range": 50
         }
-      ]
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "fist-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
     },
     {
       "id": "black-bear",
@@ -2935,12 +3628,28 @@
           "id": "rend-0",
           "name": "Rend",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "rend-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
     },
     {
       "id": "cockatrice",
@@ -2982,12 +3691,18 @@
           "id": "petrifying-bite-0",
           "name": "Petrifying Bite",
           "attack_bonus": 3,
-          "damage": "1d4+1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "crocodile",
@@ -3031,12 +3746,25 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "1d8+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d8+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
-          "long_range": 5
+          "long_range": 5,
+          "riders": [
+            {
+              "kind": "grapple",
+              "escape_dc": 12,
+              "max_target_size": "medium"
+            }
+          ]
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "darkmantle",
@@ -3080,12 +3808,18 @@
           "id": "crush-0",
           "name": "Crush",
           "attack_bonus": 5,
-          "damage": "1d6+3",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d6+3",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "dust-mephit",
@@ -3132,12 +3866,18 @@
           "id": "claw-0",
           "name": "Claw",
           "attack_bonus": 4,
-          "damage": "1d4+2",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d4+2",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "giant-goat",
@@ -3183,12 +3923,18 @@
           "id": "ram-0",
           "name": "Ram",
           "attack_bonus": 5,
-          "damage": "1d6+3",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d6+3",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "giant-seahorse",
@@ -3228,10 +3974,20 @@
           "id": "ram-0",
           "name": "Ram",
           "attack_bonus": 4,
-          "damage": "2d6+2",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "2d6+2",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "water_breathing"
         }
       ]
     },
@@ -3273,10 +4029,24 @@
           "id": "sting-0",
           "name": "Sting",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "piercing"
+            },
+            {
+              "dice": "2d4",
+              "type": "poison"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "flyby"
         }
       ]
     },
@@ -3319,8 +4089,12 @@
           "id": "bone-bow-0",
           "name": "Bone Bow",
           "attack_bonus": 3,
-          "damage": "1d10+1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d10+1",
+              "type": "piercing"
+            }
+          ],
           "range": 150,
           "long_range": 600
         },
@@ -3328,12 +4102,18 @@
           "id": "rend-0",
           "name": "Rend",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "gray-ooze",
@@ -3377,10 +4157,20 @@
           "id": "pseudopod-0",
           "name": "Pseudopod",
           "attack_bonus": 3,
-          "damage": "2d8+1",
-          "damage_type": "acid",
+          "damage": [
+            {
+              "dice": "2d8+1",
+              "type": "acid"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "amorphous"
         }
       ]
     },
@@ -3426,8 +4216,16 @@
           "id": "longbow-0",
           "name": "Longbow",
           "attack_bonus": 3,
-          "damage": "1d8+1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d8+1",
+              "type": "piercing"
+            },
+            {
+              "dice": "3d4",
+              "type": "poison"
+            }
+          ],
           "range": 150,
           "long_range": 600
         },
@@ -3435,10 +4233,20 @@
           "id": "longsword-0",
           "name": "Longsword",
           "attack_bonus": 3,
-          "damage": "2d10+1",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "2d10+1",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "pack_tactics"
         }
       ]
     },
@@ -3487,12 +4295,57 @@
           "id": "claw-0",
           "name": "Claw",
           "attack_bonus": 3,
-          "damage": "1d4+1",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d4+1",
+              "type": "slashing"
+            },
+            {
+              "dice": "1d4",
+              "type": "cold"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [
+        {
+          "id": "save-0",
+          "name": "Frost Breath",
+          "kind": "save_action",
+          "ability": "con",
+          "dc": 10,
+          "on_fail": [
+            {
+              "damage": [
+                {
+                  "dice": "3d4",
+                  "type": "cold"
+                }
+              ]
+            }
+          ],
+          "on_success": [
+            {
+              "damage": [
+                {
+                  "dice": "3d4",
+                  "type": "cold",
+                  "half": true
+                }
+              ]
+            }
+          ],
+          "usage_limits": {
+            "recharge": {
+              "from": 6,
+              "to": 6
+            }
+          }
+        }
+      ],
+      "traits": []
     },
     {
       "id": "magma-mephit",
@@ -3538,12 +4391,56 @@
           "id": "claw-0",
           "name": "Claw",
           "attack_bonus": 3,
-          "damage": "1d4+1",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d4+1",
+              "type": "slashing"
+            },
+            {
+              "dice": "1d6",
+              "type": "fire"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [
+        {
+          "id": "save-0",
+          "name": "Fire Breath",
+          "kind": "save_action",
+          "ability": "dex",
+          "dc": 11,
+          "on_fail": [
+            {
+              "damage": [
+                {
+                  "dice": "2d6",
+                  "type": "fire"
+                }
+              ]
+            }
+          ],
+          "on_success": [
+            {
+              "damage": [
+                {
+                  "dice": "1d6",
+                  "type": "fire"
+                }
+              ]
+            }
+          ],
+          "usage_limits": {
+            "recharge": {
+              "from": 6,
+              "to": 6
+            }
+          }
+        }
+      ],
+      "traits": []
     },
     {
       "id": "magmin",
@@ -3586,12 +4483,18 @@
           "id": "touch-0",
           "name": "Touch",
           "attack_bonus": 4,
-          "damage": "2d4+2",
-          "damage_type": "fire",
+          "damage": [
+            {
+              "dice": "2d4+2",
+              "type": "fire"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "reef-shark",
@@ -3635,10 +4538,23 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "2d4+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "2d4+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "pack_tactics"
+        },
+        {
+          "id": "water_breathing"
         }
       ]
     },
@@ -3681,12 +4597,18 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 3,
-          "damage": "1d8+1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d8+1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "sahuagin-warrior",
@@ -3730,12 +4652,28 @@
           "id": "claw-0",
           "name": "Claw",
           "attack_bonus": 3,
-          "damage": "1d6+1",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d6+1",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "claw-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
     },
     {
       "id": "satyr",
@@ -3782,10 +4720,38 @@
           "id": "hooves-0",
           "name": "Hooves",
           "attack_bonus": 5,
-          "damage": "1d4+3",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d4+3",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "save-0",
+          "name": "Mockery",
+          "kind": "save_action",
+          "ability": "wis",
+          "dc": 12,
+          "on_fail": [
+            {
+              "damage": [
+                {
+                  "dice": "1d6+2",
+                  "type": "psychic"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "traits": [
+        {
+          "id": "magic_resistance"
         }
       ]
     },
@@ -3833,8 +4799,12 @@
           "id": "longbow-0",
           "name": "Longbow",
           "attack_bonus": 4,
-          "damage": "1d8+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d8+2",
+              "type": "piercing"
+            }
+          ],
           "range": 150,
           "long_range": 600
         },
@@ -3842,12 +4812,18 @@
           "id": "shortsword-0",
           "name": "Shortsword",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "shadow",
@@ -3890,10 +4866,20 @@
           "id": "draining-swipe-0",
           "name": "Draining Swipe",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "necrotic",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "necrotic"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "amorphous"
         }
       ]
     },
@@ -3937,10 +4923,20 @@
           "id": "bites-0",
           "name": "Bites",
           "attack_bonus": 3,
-          "damage": "2d4+1",
-          "damage_type": "poison",
+          "damage": [
+            {
+              "dice": "2d4+1",
+              "type": "poison"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "spider_climb"
         }
       ]
     },
@@ -3983,8 +4979,12 @@
           "id": "heavy-crossbow-0",
           "name": "Heavy Crossbow",
           "attack_bonus": 3,
-          "damage": "1d10+1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d10+1",
+              "type": "piercing"
+            }
+          ],
           "range": 100,
           "long_range": 400
         },
@@ -3992,10 +4992,20 @@
           "id": "mace-0",
           "name": "Mace",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "pack_tactics"
         }
       ]
     },
@@ -4038,12 +5048,18 @@
           "id": "rend-0",
           "name": "Rend",
           "attack_bonus": 6,
-          "damage": "2d4+4",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "2d4+4",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "warhorse",
@@ -4084,12 +5100,18 @@
           "id": "hooves-0",
           "name": "Hooves",
           "attack_bonus": 6,
-          "damage": "2d4+4",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "2d4+4",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "warhorse-skeleton",
@@ -4130,12 +5152,18 @@
           "id": "hooves-0",
           "name": "Hooves",
           "attack_bonus": 6,
-          "damage": "1d6+4",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d6+4",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "worg",
@@ -4180,12 +5208,18 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 5,
-          "damage": "1d8+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d8+3",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "animated-flying-sword",
@@ -4230,12 +5264,18 @@
           "id": "slash-0",
           "name": "Slash",
           "attack_bonus": 4,
-          "damage": "1d8+2",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d8+2",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "axe-beak",
@@ -4274,12 +5314,18 @@
           "id": "beak-0",
           "name": "Beak",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "blink-dog",
@@ -4326,12 +5372,18 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 5,
-          "damage": "1d4+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+3",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "boar",
@@ -4370,12 +5422,18 @@
           "id": "gore-0",
           "name": "Gore",
           "attack_bonus": 3,
-          "damage": "1d6+1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "constrictor-snake",
@@ -4420,12 +5478,36 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "1d8+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d8+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [
+        {
+          "id": "save-0",
+          "name": "Constrict",
+          "kind": "save_action",
+          "ability": "str",
+          "dc": 12,
+          "on_fail": [
+            {
+              "damage": [
+                {
+                  "dice": "3d4",
+                  "type": "bludgeoning"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "traits": []
     },
     {
       "id": "draft-horse",
@@ -4464,12 +5546,18 @@
           "id": "hooves-0",
           "name": "Hooves",
           "attack_bonus": 6,
-          "damage": "1d4+4",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d4+4",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "dretch",
@@ -4512,12 +5600,18 @@
           "id": "rend-0",
           "name": "Rend",
           "attack_bonus": 3,
-          "damage": "1d6+1",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d6+1",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "elk",
@@ -4560,12 +5654,18 @@
           "id": "ram-0",
           "name": "Ram",
           "attack_bonus": 5,
-          "damage": "1d6+3",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d6+3",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "giant-badger",
@@ -4609,12 +5709,18 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 3,
-          "damage": "2d4+1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "2d4+1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "giant-bat",
@@ -4656,12 +5762,18 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 5,
-          "damage": "1d6+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+3",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "giant-centipede",
@@ -4703,12 +5815,25 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "1d4+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
-          "long_range": 5
+          "long_range": 5,
+          "riders": [
+            {
+              "kind": "condition",
+              "condition": "poisoned",
+              "duration": "attacker_next_turn_start"
+            }
+          ]
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "giant-frog",
@@ -4753,10 +5878,27 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 3,
-          "damage": "1d6+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
-          "long_range": 5
+          "long_range": 5,
+          "riders": [
+            {
+              "kind": "grapple",
+              "escape_dc": 11,
+              "max_target_size": "medium"
+            }
+          ]
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "amphibious"
         }
       ]
     },
@@ -4802,10 +5944,20 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "1d8+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d8+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "spider_climb"
         }
       ]
     },
@@ -4859,10 +6011,20 @@
           "id": "talons-0",
           "name": "Talons",
           "attack_bonus": 4,
-          "damage": "1d10+2",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d10+2",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "flyby"
         }
       ]
     },
@@ -4908,12 +6070,22 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 6,
-          "damage": "1d4+4",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+4",
+              "type": "piercing"
+            },
+            {
+              "dice": "1d8",
+              "type": "poison"
+            }
+          ],
           "range": 10,
           "long_range": 10
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "giant-wolf-spider",
@@ -4959,10 +6131,24 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 5,
-          "damage": "1d4+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+3",
+              "type": "piercing"
+            },
+            {
+              "dice": "2d4",
+              "type": "poison"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "spider_climb"
         }
       ]
     },
@@ -5010,8 +6196,12 @@
           "id": "scimitar-0",
           "name": "Scimitar",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         },
@@ -5019,12 +6209,18 @@
           "id": "shortbow-0",
           "name": "Shortbow",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "piercing"
+            }
+          ],
           "range": 80,
           "long_range": 320
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "grimlock",
@@ -5070,12 +6266,22 @@
           "id": "bone-cudgel-0",
           "name": "Bone Cudgel",
           "attack_bonus": 5,
-          "damage": "1d6+3",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d6+3",
+              "type": "bludgeoning"
+            },
+            {
+              "dice": "1d4",
+              "type": "psychic"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "panther",
@@ -5120,12 +6326,18 @@
           "id": "rend-0",
           "name": "Rend",
           "attack_bonus": 5,
-          "damage": "1d6+3",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d6+3",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "priest-acolyte",
@@ -5169,8 +6381,16 @@
           "id": "mace-0",
           "name": "Mace",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "bludgeoning"
+            },
+            {
+              "dice": "1d4",
+              "type": "radiant"
+            }
+          ],
           "range": 5,
           "long_range": 5
         },
@@ -5178,12 +6398,18 @@
           "id": "radiant-flame-0",
           "name": "Radiant Flame",
           "attack_bonus": 4,
-          "damage": "2d6",
-          "damage_type": "radiant",
+          "damage": [
+            {
+              "dice": "2d6",
+              "type": "radiant"
+            }
+          ],
           "range": 60,
           "long_range": 60
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "pseudodragon",
@@ -5232,10 +6458,30 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "1d4+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "bite-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": [
+        {
+          "id": "magic_resistance"
         }
       ]
     },
@@ -5279,10 +6525,20 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "1d8+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d8+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "flyby"
         }
       ]
     },
@@ -5323,12 +6579,18 @@
           "id": "hooves-0",
           "name": "Hooves",
           "attack_bonus": 5,
-          "damage": "1d8+3",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d8+3",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "skeleton",
@@ -5371,8 +6633,12 @@
           "id": "shortbow-0",
           "name": "Shortbow",
           "attack_bonus": 5,
-          "damage": "1d6+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+3",
+              "type": "piercing"
+            }
+          ],
           "range": 80,
           "long_range": 320
         },
@@ -5380,12 +6646,18 @@
           "id": "shortsword-0",
           "name": "Shortsword",
           "attack_bonus": 5,
-          "damage": "1d6+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+3",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "sprite",
@@ -5432,21 +6704,38 @@
           "id": "enchanting-bow-0",
           "name": "Enchanting Bow",
           "attack_bonus": 6,
-          "damage": "1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "piercing"
+            }
+          ],
           "range": 40,
-          "long_range": 40
+          "long_range": 160,
+          "riders": [
+            {
+              "kind": "condition",
+              "condition": "charmed",
+              "duration": "attacker_next_turn_start"
+            }
+          ]
         },
         {
           "id": "needle-sword-0",
           "name": "Needle Sword",
           "attack_bonus": 6,
-          "damage": "1d4+4",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+4",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "steam-mephit",
@@ -5492,12 +6781,56 @@
           "id": "claw-0",
           "name": "Claw",
           "attack_bonus": 2,
-          "damage": "1d4",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d4",
+              "type": "slashing"
+            },
+            {
+              "dice": "1d4",
+              "type": "fire"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [
+        {
+          "id": "save-0",
+          "name": "Steam Breath",
+          "kind": "save_action",
+          "ability": "con",
+          "dc": 10,
+          "on_fail": [
+            {
+              "damage": [
+                {
+                  "dice": "2d4",
+                  "type": "fire"
+                }
+              ]
+            }
+          ],
+          "on_success": [
+            {
+              "damage": [
+                {
+                  "dice": "1d4",
+                  "type": "fire"
+                }
+              ]
+            }
+          ],
+          "usage_limits": {
+            "recharge": {
+              "from": 6,
+              "to": 6
+            }
+          }
+        }
+      ],
+      "traits": []
     },
     {
       "id": "swarm-of-bats",
@@ -5539,12 +6872,18 @@
           "id": "bites-0",
           "name": "Bites",
           "attack_bonus": 4,
-          "damage": "2d4",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "2d4",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "swarm-of-rats",
@@ -5586,12 +6925,18 @@
           "id": "bites-0",
           "name": "Bites",
           "attack_bonus": 2,
-          "damage": "2d4",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "2d4",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "swarm-of-ravens",
@@ -5633,12 +6978,18 @@
           "id": "beaks-0",
           "name": "Beaks",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "violet-fungus",
@@ -5679,12 +7030,28 @@
           "id": "rotting-touch-0",
           "name": "Rotting Touch",
           "attack_bonus": 2,
-          "damage": "1d8",
-          "damage_type": "necrotic",
+          "damage": [
+            {
+              "dice": "1d8",
+              "type": "necrotic"
+            }
+          ],
           "range": 10,
           "long_range": 10
         }
-      ]
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "rotting-touch-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
     },
     {
       "id": "wolf",
@@ -5728,10 +7095,26 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "1d6+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
-          "long_range": 5
+          "long_range": 5,
+          "riders": [
+            {
+              "kind": "prone",
+              "max_target_size": "medium"
+            }
+          ]
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "pack_tactics"
         }
       ]
     },
@@ -5778,12 +7161,18 @@
           "id": "slam-0",
           "name": "Slam",
           "attack_bonus": 3,
-          "damage": "1d8+1",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d8+1",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "bandit",
@@ -5824,8 +7213,12 @@
           "id": "light-crossbow-0",
           "name": "Light Crossbow",
           "attack_bonus": 3,
-          "damage": "1d8+1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d8+1",
+              "type": "piercing"
+            }
+          ],
           "range": 80,
           "long_range": 320
         },
@@ -5833,12 +7226,18 @@
           "id": "scimitar-0",
           "name": "Scimitar",
           "attack_bonus": 3,
-          "damage": "1d6+1",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d6+1",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "blood-hawk",
@@ -5880,10 +7279,20 @@
           "id": "beak-0",
           "name": "Beak",
           "attack_bonus": 4,
-          "damage": "1d4+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "pack_tactics"
         }
       ]
     },
@@ -5928,12 +7337,18 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "1d4+2",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d4+2",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "cultist",
@@ -5979,12 +7394,18 @@
           "id": "ritual-sickle-0",
           "name": "Ritual Sickle",
           "attack_bonus": 3,
-          "damage": "1d4+1",
-          "damage_type": "slashing",
+          "damage": [
+            {
+              "dice": "1d4+1",
+              "type": "slashing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "flying-snake",
@@ -6027,10 +7448,24 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "2d4",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1",
+              "type": "piercing"
+            },
+            {
+              "dice": "2d4",
+              "type": "poison"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "flyby"
         }
       ]
     },
@@ -6076,10 +7511,27 @@
           "id": "claw-0",
           "name": "Claw",
           "attack_bonus": 3,
-          "damage": "1d6+1",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d6+1",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
-          "long_range": 5
+          "long_range": 5,
+          "riders": [
+            {
+              "kind": "grapple",
+              "escape_dc": 11,
+              "max_target_size": "medium"
+            }
+          ]
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "amphibious"
         }
       ]
     },
@@ -6127,10 +7579,20 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 5,
-          "damage": "1d4+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+3",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "pack_tactics"
         }
       ]
     },
@@ -6178,12 +7640,18 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 5,
-          "damage": "1d4+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+3",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "goblin-minion",
@@ -6229,12 +7697,18 @@
           "id": "dagger-0",
           "name": "Dagger",
           "attack_bonus": 4,
-          "damage": "1d4+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 60
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "guard",
@@ -6277,12 +7751,18 @@
           "id": "spear-0",
           "name": "Spear",
           "attack_bonus": 3,
-          "damage": "1d6+1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 60
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "kobold-warrior",
@@ -6326,10 +7806,20 @@
           "id": "dagger-0",
           "name": "Dagger",
           "attack_bonus": 4,
-          "damage": "1d4+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+2",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 60
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "pack_tactics"
         }
       ]
     },
@@ -6374,12 +7864,24 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 3,
-          "damage": "1d6+1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
-          "long_range": 5
+          "long_range": 5,
+          "riders": [
+            {
+              "kind": "prone",
+              "max_target_size": "medium"
+            }
+          ]
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "merfolk-skirmisher",
@@ -6422,10 +7924,24 @@
           "id": "ocean-spear-0",
           "name": "Ocean Spear",
           "attack_bonus": 2,
-          "damage": "1d6",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6",
+              "type": "piercing"
+            },
+            {
+              "dice": "1d4",
+              "type": "cold"
+            }
+          ],
           "range": 5,
           "long_range": 60
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "amphibious"
         }
       ]
     },
@@ -6468,12 +7984,18 @@
           "id": "hooves-0",
           "name": "Hooves",
           "attack_bonus": 4,
-          "damage": "1d4+2",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d4+2",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "noble",
@@ -6518,12 +8040,18 @@
           "id": "rapier-0",
           "name": "Rapier",
           "attack_bonus": 3,
-          "damage": "1d8+1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d8+1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "pony",
@@ -6564,12 +8092,18 @@
           "id": "hooves-0",
           "name": "Hooves",
           "attack_bonus": 4,
-          "damage": "1d4+2",
-          "damage_type": "bludgeoning",
+          "damage": [
+            {
+              "dice": "1d4+2",
+              "type": "bludgeoning"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "stirge",
@@ -6611,12 +8145,18 @@
           "id": "proboscis-0",
           "name": "Proboscis",
           "attack_bonus": 5,
-          "damage": "1d6+3",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+3",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "venomous-snake",
@@ -6658,12 +8198,22 @@
           "id": "bite-0",
           "name": "Bite",
           "attack_bonus": 4,
-          "damage": "1d4+2",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d4+2",
+              "type": "piercing"
+            },
+            {
+              "dice": "1d6",
+              "type": "poison"
+            }
+          ],
           "range": 5,
           "long_range": 5
         }
-      ]
+      ],
+      "actions": [],
+      "traits": []
     },
     {
       "id": "warrior-infantry",
@@ -6704,10 +8254,20 @@
           "id": "spear-0",
           "name": "Spear",
           "attack_bonus": 3,
-          "damage": "1d6+1",
-          "damage_type": "piercing",
+          "damage": [
+            {
+              "dice": "1d6+1",
+              "type": "piercing"
+            }
+          ],
           "range": 5,
           "long_range": 60
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "pack_tactics"
         }
       ]
     }

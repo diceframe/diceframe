@@ -171,11 +171,21 @@ def add_enemy_condition(instance, condition: str, meta: dict | None = None) -> N
 
 
 def set_enemy_attack(instance, *, damage: str | None = None, damage_type: str | None = None) -> None:
+    # S0-MM3a：攻击的伤害是 ``damage: [{dice, type}]``，装配期已归一；改类型
+    # 必须改第一段的 type，旧的 ``damage_type`` 字段不再被读取。
     profile = ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["attacks"][0]
     if damage is not None:
-        profile["damage"] = damage
+        parts = profile.get("damage")
+        if isinstance(parts, list) and parts:
+            parts[0]["dice"] = damage
+        else:
+            profile["damage"] = [{"dice": damage, "type": "slashing"}]
     if damage_type is not None:
-        profile["damage_type"] = damage_type
+        parts = profile.get("damage")
+        if isinstance(parts, list) and parts:
+            parts[0]["type"] = damage_type
+        else:  # pragma: no cover - 装配后的攻击一定是数组
+            profile["damage_type"] = damage_type
 
 
 def set_turn(engine, instance, actor_id: str) -> None:

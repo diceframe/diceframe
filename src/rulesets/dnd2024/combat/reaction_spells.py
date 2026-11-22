@@ -332,9 +332,17 @@ class CombatReactionSpellsMixin:
             damage_event["delta"] = -amount
             events.extend(self._submit_hit_damage(damage_event))
             defender = self._actor_view(instance, combat, defender_id)
-            events.extend(self._concentration_events(instance, combat, defender, amount, rng))
+            # 半伤类反应压的是"这次攻击的伤害"，因此第二段与 rider 同样按
+            # 同一倍率缩放——只压主伤害会让"减半"变成"减了一部分"。
+            tail_events, tail_damage = self._hit_tail_events(
+                instance, combat, str(decision["attacker_id"]), defender,
+                damage_event, rng, multiplier=float(choice["damage_multiplier"]),
+            )
+            events.extend(tail_events)
+            total = amount + tail_damage
+            events.extend(self._concentration_events(instance, combat, defender, total, rng))
             events.extend(self._enemy_zero_hp_feature_events(
-                instance, combat, str(decision["attacker_id"]), defender, amount,
+                instance, combat, str(decision["attacker_id"]), defender, total,
             ))
             return events
         if intent["option"] == "cast":
@@ -385,10 +393,15 @@ class CombatReactionSpellsMixin:
         damage_event = deepcopy(decision["damage_event"])
         events.extend(self._submit_hit_damage(damage_event))
         defender = self._actor_view(instance, combat, defender_id)
-        events.extend(self._concentration_events(instance, combat, defender, int(damage_event["amount"]), rng))
-        events.extend(self._enemy_zero_hp_feature_events(
+        tail_events, tail_damage = self._hit_tail_events(
             instance, combat, str(decision["attacker_id"]), defender,
-            int(damage_event["amount"]),
+            damage_event, rng,
+        )
+        events.extend(tail_events)
+        total = int(damage_event["amount"]) + tail_damage
+        events.extend(self._concentration_events(instance, combat, defender, total, rng))
+        events.extend(self._enemy_zero_hp_feature_events(
+            instance, combat, str(decision["attacker_id"]), defender, total,
         ))
         return events
 
@@ -412,14 +425,19 @@ class CombatReactionSpellsMixin:
         amount = int(damage_event["amount"])
         events.extend(self._submit_hit_damage(damage_event))
         defender = self._actor_view(instance, combat, defender_id)
-        concentration_events = self._concentration_events(instance, combat, defender, amount, rng)
+        tail_events, tail_damage = self._hit_tail_events(
+            instance, combat, attacker_id, defender, damage_event, rng,
+        )
+        events.extend(tail_events)
+        total = amount + tail_damage
+        concentration_events = self._concentration_events(instance, combat, defender, total, rng)
         events.extend(concentration_events)
         events.extend(self._enemy_zero_hp_feature_events(
-            instance, combat, attacker_id, defender, amount,
+            instance, combat, attacker_id, defender, total,
         ))
         hp = int(defender.get("hp", 0) or 0)
         temp_hp = max(0, int(defender.get("temp_hp", 0) or 0))
-        hp_loss = max(0, amount - min(temp_hp, amount))
+        hp_loss = max(0, total - min(temp_hp, total))
         if hp - hp_loss <= 0:
             # 伤害先扣除临时生命值；只有剩余伤害把防守者打到 0 HP 才倒地。
             # 倒在 0 HP 的防守者不能花反应反击，反应预算保留，也不发生攻击。

@@ -38,6 +38,23 @@
 
 | GAP-24 | stat block 缺 6 个非特质字段 | `_ENEMY_KEYS` 无 `skills` / `languages` / `proficiency_bonus` / `hit_dice` / `subtype` / `passive_perception`；敌人 `abilities` 存而不参与任何计算 | 非玩家单位无法像玩家一样算豁免/技能；Wild Shape 的「取较高者」缺 `skills` 与 PB | **S0-MM2**（已交付：六字段校验 + 六维派生 + 视图投影） | 已修 |
 | GAP-25 | `counterspell_dc` 是把特质压成字段的孤例 | 敌人契约里 `counterspell_dc` 一个标量代表「能用法术反制」，在 `reaction_spells.py` 消费；没有 traits/reactions 容器 | 每加一个怪物特质就要再加一个专用字段，契约会持续膨胀 | 未来「特质 + 反应」通用化（未立项） | 未开工 |
+| GAP-26 | `condition.blocked` 只产出、从未被消费 | `engine.py::_statblock_immunity_events` 发这个事件，`reducer.py::_reduce_event` 的无状态白名单里没有它；MM1 的用例只调引擎方法、没走 `apply_batch` | 任何一次真的条件免疫都会让整批事件 apply 失败，攻击直接打不出去 | **S0-MM3a**（已加进无状态白名单） | 已修 |
+| GAP-27 | rider 的复合状态无法表达 | `parse_riders` 不解析 "While Grappled, the target has the Restrained condition"；Crocodile / Giant Octopus / Darkmantle 的附着、吞下都没有形状 | 擒抱应当伴随束缚、吞下与附着的整段效果只能留一条 `grappled` | S0-MM4（复合状态），未立项 | 未开工 |
+| GAP-28 | rider 的移动前提没有事实来源 | 只有 `economy.moved` 布尔，没有「是否在命中前直线移动 20 尺」；`srd_monsters.json` 里 Boar / Elk / Giant Goat / Warhorse 的 prone 因此未导入 | Pounce 类「撞过去才击倒」的 rider 无法表达 | S0-MM4（移动事实），未开工 | 未开工 |
+| GAP-29 | 分档失败没有「差多少」与「第二次」 | `_saving_throw_check` 只返回 `success` 布尔；`parse_riders` / `parse_save_action` 遇到 `Failure by 5 or More`、`Second Failure`、`repeats the save` 整条放弃 | Cockatrice / Death Dog / Homunculus / Pseudodragon / Harpy 这类两阶段效果无法落地 | S0-MM4（分档失败），未开工 | 未开工 |
+| GAP-30 | 存档型动作只有「一次豁免 + 一个伤害分支」 | `_save_action_events` 只发一条 `check.resolved` 与两段伤害，没有持续回合、每回合重复伤害、失败后附加条件 | Steam Mephit 的减速、Ghoul 的麻痹、Pseudodragon 的昏迷都无法表达 | S0-MM4，未开工 | 未开工 |
+| GAP-31 | 传奇抗性自动生效，没有「拒绝」通道 | `_legendary_resistance_events` 在豁免失败时直接改写成功，不经决策窗口 | GM 无法选择「这次不用传奇抗性」，等于替玩家/怪物做了决定 | S0-MM4（决策窗口统一化），未开工 | 未开工 |
+| GAP-32 | Flyby 缺「飞行中」这个前提 | 引擎没有飞行状态；`_movement_events` 见到 `flyby` 就清空威胁表 | 一只被摔到地上的飞禽仍然免借机攻击 | 与「飞行/坠落」系统同批，未立项 | 未开工 |
+| GAP-33 | 呼吸与穿缝类特质没有规则消费者 | `amphibious` / `water_breathing` / `amorphous` 只做了声明与视图投影，`grep -rn "amphibious" src/` 只有契约与投影 | 水下窒息、挤过 5 尺缝隙这类判定无处生效（与 GAP-2 的技能检定缺口同源） | 环境与探索规则（未立项） | 未开工 |
+| GAP-34 | 模块怪物档案不接受新形状，且预设投影与权威状态不同形 | `content/contracts.py::_validate_attacks` 仍只认 `id / name / damage(str) / attack_bonus / range`，且没有 `actions` / `traits` | 冒险包里手写的怪物无法使用 riders / Multiattack / 存档型动作 / 特质；`encounter_presets()` 仍返回旧形状字符串（`attacks[0].damage == "1d4+1"`），而 `combat.start` 之后权威状态是段数组，同一份数据在开战前后形状不同 | 模块内容契约（未立项） | 未开工 |
+| GAP-35 | 条件的感官后果没有消费者 | `condition_flags` 只有 5 个布尔；`blinded` 的「依赖视觉的检定自动失败」、`deafened` 的听觉判定、`petrified` 与 `exhaustion` 的整段效果都没有落点 | 这几个条件目前只有攻击面与速度面，感知面仍是空的 | 随 GAP-2 / GAP-3 的检定系统 | 未开工 |
+| GAP-36 | Multiattack 的「替换攻击 / 任意组合」没有原语 | `_validate_multiattack` 只收 `repeat` / `combo` / `choice`；`parse_multiattack` 见到 `replace` / `in any combination` / `Spellcasting` 整条跳过 | CR 0-1 里 6 条 Multiattack（Lion / Pirate / Goblin Boss / Scout / Rust Monster / Dryad）无法导入 | S0-MM4（怪物施法原语之后） | 未开工 |
+| GAP-37 | `spider_climb` 只有速度事实，移动不读它 | `_with_climb_speed` 只写 `speeds.climb`；移动预算仍只读 `speeds.walk`，没有「攀爬不额外消耗」的判定 | 攀爬在战斗里仍按步行速度结算，等于没说 | 阶段三（3D/网格移动） | 未开工 |
+| GAP-38 | 没有「起身」 | 引擎没有 stand-up；`prone` 只能等 `combat` 时限 | 被击倒的角色在整场战斗里无法站起来 | **S0-MM3e**（按 2024：花一半速度、不是动作；`stand_up` 意图 + `prone.stand_up` 声明） | 已修 |
+| GAP-39 | 擒抱无法挣脱 | `escape_dc` 只被写入、无消费者 | 玩家被擒抱后没有反制手段 | **S0-MM3e**（`escape` 意图；DC 读实例、允许的检定与成本读注册表） | 已修 |
+| GAP-40 | 存档型动作没有射程与目标上限 | 契约只有 `ability` / `dc` / 两个分支；Satyr 的 90 尺、Constrictor 的 5 尺 Medium 都无法表达 | 任何距离都能吃吐息，目标数量也不受限 | 区域与射程原语（未立项） | 未开工 |
+| GAP-42 | 玩家申报骰面（实体骰）没有通道 | 战斗里每个 d20 都来自服务端 rng；`src/engine/dice.py::parse_player_roll` 只服务老通用引擎的聊天掷骰，不绑定任何 `check.resolved` | 桌上掷实体骰的玩家无法把自己的点数交给引擎，只能由服务端重掷 | 需先定信任模型（谁能申报、如何审计、GM 可否覆盖），未立项 | 未开工 |
+| GAP-41 | rider 的生物类型前提无法表达 | Ghoul 的麻痹写明「非亡灵非精灵」；`parse_riders` 见到这类前提整条不导入 | 这类 rider 在目录里缺席（宁可缺席也不对所有目标生效） | S0-MM4 | 未开工 |
 
 
 ## 按片索引
@@ -48,8 +65,11 @@
 - **S0-F10D**：GAP-6（① 依赖工具表，已有数据）、GAP-7、GAP-8
 - **S0-F10E**：GAP-6（② 操作动作本身）
 - **独立片「检定工具」**：GAP-2、GAP-4（并消化 GAP-9）
-- **阶段三**：GAP-1
+- **阶段三**：GAP-1、GAP-37
 - **未立项**：GAP-10、GAP-11、GAP-12、GAP-13
+- **S0-MM3a**：GAP-26（本片内解决）
+- **S0-MM3e**：GAP-38、GAP-39（本片内解决）
+- **S0-MM3b/c/d 的遗留 + 后续 MM 片**：GAP-27 – GAP-37、GAP-40 – GAP-42
 
 ## 附注 A：为什么 Utilize 不需要对象模型
 

@@ -250,7 +250,10 @@ def test_public_window_projection_hides_enemy_settlement_from_non_gm(runtime, sh
     gm_decision = gm_view["combat"]["pending_decisions"][0]
     player_decision = player_view["combat"]["pending_decisions"][0]
 
-    assert gm_decision["settlement"]["weapon"]["damage"] == "1d6+2"
+    # S0-MM3a 之后攻击档案的伤害是数组：窗口结算里带的是归一后的形状。
+    assert gm_decision["settlement"]["weapon"]["damage"] == [
+        {"dice": "1d6+2", "type": "slashing"},
+    ]
     assert player_decision["window_code"] == "cutting_words_check"
     assert "settlement" not in player_decision
     assert "weapon" not in player_decision
@@ -277,7 +280,9 @@ def test_public_window_projection_hides_enemy_settlement_from_non_gm(runtime, sh
         or "settlement" not in event
         for event in projected["event_batch"]["events"]
     )
-    assert raw_result["combat"]["pending_decisions"][0]["settlement"]["weapon"]["damage"] == "1d6+2"
+    assert raw_result["combat"]["pending_decisions"][0]["settlement"]["weapon"]["damage"] == [
+        {"dice": "1d6+2", "type": "slashing"},
+    ]
 
 
 WINDOW_EVENTS = {

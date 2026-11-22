@@ -542,7 +542,10 @@ async def test_golden_steps_8_to_11_encounter_uses_module_monsters(golden) -> No
     assert set(combat["enemies"]) == {f"{MONSTER_ID}_1", f"{MONSTER_ID}_2"}
     assert combat["enemies"][f"{MONSTER_ID}_1"]["hp"] == 11
     assert combat["enemies"][f"{MONSTER_ID}_1"]["armor_class"] == 13
-    assert combat["enemies"][f"{MONSTER_ID}_1"]["attacks"][0]["damage"] == "1d4+1"
+    # S0-MM3a：权威状态里的伤害是段数组，装配期已把模块档案的字符串归一。
+    assert combat["enemies"][f"{MONSTER_ID}_1"]["attacks"][0]["damage"] == [
+        {"dice": "1d4+1", "type": "bludgeoning"},
+    ]
     assert resolved["gameplay"]["combat"]["status"] == "active"
 
     # 步骤 8/11：完成公开节点（objective 完成 + 秘密进程启动）。

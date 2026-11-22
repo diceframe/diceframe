@@ -111,6 +111,7 @@ def attack_sources(
     registry: dict[str, dict], actor: dict, target: dict, range_disadvantage: bool,
     *, actor_senses: frozenset[str] = frozenset(),
     target_senses: frozenset[str] = frozenset(),
+    distance: int | None = None,
 ) -> list[dict]:
     """Collect the registry-declared attack modifiers for this attack roll.
 
@@ -130,6 +131,12 @@ def attack_sources(
 
     ``long_range`` stays code-generated: it is a positional fact of the attack,
     not a condition.
+
+    ``within_ft`` / ``beyond_ft`` are the same kind of fact: Prone grants
+    Advantage only to an attacker within 5 feet and Disadvantage beyond it, and
+    writing that onto either creature would make it true at every distance.
+    When the distance is unknown those declarations are skipped (fail closed: no
+    Advantage from an unprovable claim).
     """
 
     sources = []
@@ -141,6 +148,15 @@ def attack_sources(
             senses = target_senses if on_actor else actor_senses
             if condition_id not in holder["conditions"]:
                 continue
+            within = declaration.get("within_ft")
+            beyond = declaration.get("beyond_ft")
+            if within is not None or beyond is not None:
+                if distance is None:
+                    continue
+                if within is not None and distance > int(within):
+                    continue
+                if beyond is not None and distance <= int(beyond):
+                    continue
             if any(
                 code in observer["conditions"] or code in senses
                 for code in declaration.get("negated_by") or []
@@ -328,7 +344,7 @@ def attack_mode(engine: Any, instance: Any, actor: dict, target: dict,
     )
     sources = attack_sources(
         engine.catalog.conditions, actor, target, range_disadvantage,
-        actor_senses=actor_senses, target_senses=target_senses,
+        actor_senses=actor_senses, target_senses=target_senses, distance=distance,
     )
     # 遮蔽只在"看不见"这一层影响攻击：轻度遮蔽只改感知检定，不改攻击。
     # 两个方向都要算——看不见目标给劣势，自己不被看见给优势，而"看不看得见"

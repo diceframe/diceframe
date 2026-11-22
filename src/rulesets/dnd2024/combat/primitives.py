@@ -133,6 +133,17 @@ INTENT_TYPES = frozenset({
     "class_capability",
     # F19：把标记的额外伤害转给 30 尺内的第二个目标。
     "superior_hunters_prey",
+    # S0-MM3b：一次动作里做若干次攻击。它不是"多打几次 attack"——那会各付
+    # 一次动作；也不是一次的别名——它的结果是一个批次里的 N 次攻击。
+    "multiattack",
+    # S0-MM3c：目标掷一次豁免，失败吃全额、成功吃（数据声明的）半伤。
+    # 掷骰由服务端做，客户端只提交动作 id。
+    "save_action",
+    # S0-MM3e：从条件内部解除它。要求（DC / 允许的检定 / 成本）全部来自
+    # 状态：实例给 DC，注册表给形状。客户端只能选"用哪个能力挣"。
+    "escape",
+    # 起身：花一半速度解除自己的 Prone。不是动作，所以与 escape 分开。
+    "stand_up",
 })
 # 归零前的存活决策（Relentless Rage）：伤害已被掷出并挂起，HP 尚未改变。
 # 它和其它 pending decision 一样由 resolution 结算、reducer 记账，区别只在
@@ -196,3 +207,231 @@ def roll(formula: str, rng: Any, *, critical: bool = False) -> tuple[int, list[i
         count *= 2
     rolls = [int(rng.randint(1, sides)) for _ in range(count)]
     return sum(rolls) + bonus, rolls
+
+
+# S0-MM3a：一次攻击可以打出两段伤害（`2d6+4 slashing plus 1d6 fire`），
+# 每一段各自过抗性/免疫/易伤。契约收结构化数组；旧形状（一条 damage 字符串
+# 加一个 damage_type）继续可读——冒险包、AI 临时敌人与形态数据都是旧形状。
+MAX_ATTACK_DAMAGE_PARTS = 2
+# 命中之后的附带效果。`prone` 与 `condition=prone` 表达同一件事，但 SRD 有
+# 59 处击倒，把它单列成一种 kind 才能让数据与测试都说"击倒"而不是"一个恰好
+# 叫 prone 的条件"。
+RIDER_KINDS = frozenset({"condition", "grapple", "push", "prone"})
+# 条件名与 `condition` kind 的差别：`grapple` 施加的条件是固定的。
+GRAPPLE_CONDITION = "grappled"
+MAX_ATTACK_RIDERS = 3
+RIDER_PUSH_MINIMUM_FT = 5
+RIDER_PUSH_MAXIMUM_FT = 60
+# 附带效果能声明的时长。闭集，因为只有这几个被 ``reducer._expire_conditions``
+# 真正兑现；写一个没人读的时长等于给数据一个"永远不会到期"的假承诺。
+RIDER_DURATIONS = frozenset({
+    "combat", "target_turn_start", "target_turn_end", "attacker_next_turn_start",
+})
+# 规则的 15 个标准条件码。校验用它回答"这是不是一个条件名"；某个条件是否
+# 已经有机械落点，由战斗目录的 ``conditions`` 注册表回答（两者不混用）。
+CONDITION_CODES = frozenset({
+    "blinded", "charmed", "deafened", "exhaustion", "frightened", "grappled",
+    "incapacitated", "invisible", "paralyzed", "petrified", "poisoned", "prone",
+    "restrained", "stunned", "unconscious",
+})
+# S0-MM3b：Multiattack 是一次动作里的若干次攻击。上限 6 不是规则数字，而是
+# 契约的健全性边界：SRD 里最多 5 击，超过它的数据只可能是解析错了。
+MULTIATTACK_MAX_ATTACKS = 6
+MULTIATTACK_KINDS = frozenset({"multiattack"})
+# 生物内别名解析：只在"这只生物自己的攻击表"里按 id → 别名 → 名称找。
+# 全局匹配会让"Rend"同时指向三种不同生物的攻击。
+def resolve_attack_ref(
+    attacks: list[dict[str, Any]], ref: str,
+) -> dict[str, Any] | None:
+    """The attack one Multiattack part names, searched inside this creature only."""
+
+    wanted = str(ref or "")
+    if not wanted:
+        return None
+    for attack in attacks:
+        if str(attack.get("id") or "") == wanted:
+            return attack
+    lowered = wanted.lower()
+    for attack in attacks:
+        if any(str(alias).lower() == lowered for alias in attack.get("aliases") or []):
+            return attack
+    for attack in attacks:
+        if str(attack.get("name") or "").lower() == lowered:
+            return attack
+    return None
+
+
+def attack_damage_parts(profile: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The damage instances this attack profile deals, in declaration order.
+
+    Two shapes reach one reader: the structured ``damage: [{dice, type}]`` the
+    catalog now ships, and the flat ``damage: "1d6+2"`` + ``damage_type`` still
+    produced by adventure packages and AI encounters.  Returning a list for both
+    keeps every consumer (resolution, the opportunity-attack estimate, the
+    view) from branching on the shape.
+    """
+
+    raw = profile.get("damage")
+    parts: list[dict[str, Any]] = []
+    if isinstance(raw, list):
+        for row in raw:
+            if not isinstance(row, dict):
+                continue
+            parts.append({
+                "dice": str(row.get("dice") or ""),
+                "type": str(row.get("type") or ""),
+            })
+        return parts
+    text = str(raw or "")
+    if text:
+        parts.append({
+            "dice": text,
+            # 旧形状可以不带类型（AI 临时敌人与模块怪物档案都不写这一栏）。
+            # 缺省用 bludgeoning 是这条路径一直以来的口径；留空会让
+            # ``_resist_damage`` 认为"没有类型"，等于绕过全部抗性与免疫。
+            "type": str(profile.get("damage_type") or "bludgeoning"),
+        })
+    return parts
+
+
+def attack_riders(profile: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The riders a hit from this profile applies, in declaration order."""
+
+    raw = profile.get("riders")
+    if not isinstance(raw, list):
+        return []
+    return [dict(row) for row in raw if isinstance(row, dict)]
+
+
+def normalize_attack_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
+    """Store one attack profile in the structured shape.
+
+    ``combat.start`` is the one place where the two accepted input shapes are
+    collapsed: after it, every attack in the authoritative state carries
+    ``damage`` as a list, so a reader never has to ask which era the data came
+    from.  The legacy ``damage_type`` becomes the first part's type and is not
+    kept beside the list — one question, one answer.
+    """
+
+    normalized = {
+        key: value for key, value in profile.items()
+        if key not in {"damage", "damage_type"}
+    }
+    normalized["damage"] = attack_damage_parts(profile)
+    if "riders" in profile:
+        normalized["riders"] = attack_riders(profile)
+    return normalized
+
+
+def rider_condition(rider: Mapping[str, Any]) -> str:
+    """Which condition a rider applies; ``""`` when it applies none.
+
+    ``push`` moves the target and grants nothing, so it is the one kind that
+    answers empty — the caller has to treat that as "no condition", not as a
+    missing field.
+    """
+
+    kind = str(rider.get("kind") or "")
+    if kind == "condition":
+        return str(rider.get("condition") or "")
+    if kind == "prone":
+        return "prone"
+    if kind == "grapple":
+        return GRAPPLE_CONDITION
+    return ""
+
+
+# S0-MM3d：八个高频被动特质。闭集 id，一个特质一种拼写；参数与 id 一起
+# 声明，未知 id 或未知参数都 fail closed —— 加载成功但从不生效的特质，比
+# 拒绝加载更糟。
+TRAIT_IDS = frozenset({
+    "magic_resistance", "amphibious", "legendary_resistance", "pack_tactics",
+    "spider_climb", "water_breathing", "flyby", "amorphous",
+})
+# 每个特质允许的参数。空集表示"这个特质就是事实本身"，没有可调的东西。
+TRAIT_PARAMS: dict[str, frozenset[str]] = {
+    "magic_resistance": frozenset(),
+    "amphibious": frozenset(),
+    "legendary_resistance": frozenset({"per_day"}),
+    "pack_tactics": frozenset(),
+    "spider_climb": frozenset(),
+    "water_breathing": frozenset(),
+    "flyby": frozenset(),
+    "amorphous": frozenset(),
+}
+# 传奇抗性的默认次数：SRD 的"3/日（巢穴 4/日）"取前一条，巢穴变体属于
+# 巢穴行动，本片不做。
+LEGENDARY_RESISTANCE_DEFAULT_PER_DAY = 3
+
+
+def trait_ids(traits: Any) -> frozenset[str]:
+    """The declarative trait ids a stat block carries."""
+
+    if not isinstance(traits, list):
+        return frozenset()
+    return frozenset(
+        str(row.get("id") or "")
+        for row in traits
+        if isinstance(row, dict) and row.get("id")
+    )
+
+
+def trait_params(traits: Any, trait_id: str) -> dict[str, Any]:
+    """One trait's declared parameters (empty when the trait is a bare fact)."""
+
+    if not isinstance(traits, list):
+        return {}
+    for row in traits:
+        if isinstance(row, dict) and str(row.get("id") or "") == trait_id:
+            params = row.get("params")
+            return dict(params) if isinstance(params, dict) else {}
+    return {}
+
+
+# S0-MM3e：条件自带"怎么解除"。类型面在注册表（能不能挣脱、用什么检定、
+# 花什么成本），数值面在实例（`escape_dc` 来自施加者）。两者缺一不可：
+# 只在注册表写 DC 会让不同擒抱者有同一个 DC，只在实例写又会让"能不能挣脱"
+# 变成施加者的自由裁量。
+def condition_escapes(
+    registry: Mapping[str, Any], conditions: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Every carried condition that declares an escape, with its DC.
+
+    A declaration without ``escape_dc`` on the instance is *not* listed: an
+    attempt whose DC nobody declared cannot be made, and inventing one here
+    would be the engine deciding a number the stat block never printed.
+    """
+
+    found: list[dict[str, Any]] = []
+    for condition_id, entry in conditions.items():
+        declared = (registry.get(str(condition_id)) or {}).get("escape")
+        if not isinstance(declared, dict):
+            continue
+        instance = entry if isinstance(entry, dict) else {}
+        dc = instance.get("escape_dc")
+        if isinstance(dc, bool) or not isinstance(dc, int) or dc <= 0:
+            continue
+        found.append({
+            "condition": str(condition_id),
+            "cost": str(declared.get("cost") or "action"),
+            "checks": [dict(row) for row in declared.get("checks") or []],
+            "escape_dc": dc,
+            "source_actor_id": str(instance.get("source_actor_id") or ""),
+        })
+    return found
+
+
+def stand_up_declaration(
+    registry: Mapping[str, Any], conditions: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """The movement price of ending a carried condition on yourself."""
+
+    for condition_id in conditions:
+        declared = (registry.get(str(condition_id)) or {}).get("stand_up")
+        if not isinstance(declared, dict):
+            continue
+        fraction = int(declared.get("fraction") or 0)
+        if fraction <= 0:
+            continue
+        return {"condition": str(condition_id), "fraction": fraction}
+    return None
