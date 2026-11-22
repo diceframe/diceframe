@@ -253,6 +253,13 @@ def test_an_unknown_effect_or_mode_is_rejected_on_load() -> None:
         })
 
 
+def test_malformed_turn_metadata_is_rejected_as_form_state_error() -> None:
+    with pytest.raises(FormStateError, match="turn metadata"):
+        FormState.from_payload({
+            "effect_id": "wild_shape", "form_ref": "wolf", "duration_hours": "bad",
+        })
+
+
 def test_the_active_panel_keeps_your_hp_while_you_are_a_wolf() -> None:
     state = wild_shape_state(_wolf_entry(), druid_level=2, beast_spells=False)
     panel = assume_form(panel_from_view(_druid_view()), _wolf_entry(), state)

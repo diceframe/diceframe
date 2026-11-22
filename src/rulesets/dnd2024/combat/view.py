@@ -242,6 +242,10 @@ class CombatViewMixin:
             return view
         merged = assume_form(panel_from_view(view), entry, state)
         limits = restrictions(state)
+        equipment_refs = (
+            list(view.get("equipment_refs") or [])
+            if limits["equipment_effects"] else []
+        )
         view = {
             **view,
             "abilities": dict(merged.abilities),
@@ -257,7 +261,18 @@ class CombatViewMixin:
             "form_ref": state.form_ref,
             "form_sources": dict(merged.sources),
             "spellcasting_allowed": bool(limits["spellcasting"]),
+            "equipment_refs": equipment_refs,
+            "hands": (
+                dict(view.get("hands") or {})
+                if limits["equipment_effects"] else {"left": None, "right": None}
+            ),
         }
+        if not limits["spellcasting"]:
+            view["spell_refs"] = []
+            view["class_spell_refs"] = []
+            view["spell_grants"] = []
+            view["free_cast_slots"] = []
+            view["slots"] = {}
         return view
 
     def _statblock_by_ref(self, form_ref: str) -> dict[str, Any] | None:

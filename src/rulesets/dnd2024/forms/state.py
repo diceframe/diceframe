@@ -84,12 +84,23 @@ class FormState:
         mode = str(payload.get("equipment_mode") or "merge")
         if mode not in {"drop", "merge", "wear"}:
             raise FormStateError(f"unknown equipment mode: {mode!r}")
+        try:
+            duration_hours = payload.get("duration_hours") or 0
+            assumed_at_turn = payload.get("assumed_at_turn") or 0
+            if isinstance(duration_hours, bool) or isinstance(assumed_at_turn, bool):
+                raise ValueError
+            duration_hours = int(duration_hours)
+            assumed_at_turn = int(assumed_at_turn)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise FormStateError("shape-shift turn metadata is invalid") from exc
+        if duration_hours < 0 or assumed_at_turn < 0:
+            raise FormStateError("shape-shift turn metadata is invalid")
         return cls(
             effect_id=effect_id,
             form_ref=form_ref,
             form_name=str(payload.get("form_name") or ""),
-            duration_hours=int(payload.get("duration_hours") or 0),
-            assumed_at_turn=int(payload.get("assumed_at_turn") or 0),
+            duration_hours=duration_hours,
+            assumed_at_turn=assumed_at_turn,
             beast_spells=bool(payload.get("beast_spells")),
             equipment_mode=mode,
         )

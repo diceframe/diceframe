@@ -2209,6 +2209,8 @@ class CombatValidationMixin:
     ) -> None:
         if actor["kind"] not in {"player", "companion"}:
             raise CombatIntentError("enemy spell profiles are not enabled for this actor")
+        if actor.get("spellcasting_allowed") is False:
+            raise CombatIntentError("this shape does not allow spellcasting")
         if "rage" in actor["conditions"]:
             raise CombatIntentError("you cannot cast spells while raging")
         if bool((actor.get("armor_training") or {}).get("untrained_armor_worn")):
