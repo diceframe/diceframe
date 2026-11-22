@@ -21,7 +21,9 @@ from src.rulesets.dnd2024.features.resources import (
     set_feature_usage_count,
 )
 from src.rulesets.dnd2024.spells.feat_spells import concentration_holder
-from src.rulesets.dnd2024.spells.font_of_magic import MAX_CREATED_SLOT_LEVEL
+#: 临时法术位的全局上限：法术位本身最高 9 环，具体能力能造到几环由各自的
+#: planner 决定（F6 = 5，Archdruid Nature Magician = 8）。
+MAX_TEMPORARY_SLOT_LEVEL = 9
 from src.rulesets.dnd2024.spells.casting import apply_free_cast_cost
 from src.rulesets.events import EventBatchError
 from .primitives import actor_kind as _actor_kind
@@ -235,6 +237,7 @@ class CombatReducerMixin:
             combat["status"] = "ended"
             combat["outcome"] = str(event.get("reason") or "ended")
             combat["economy"] = {}
+            combat.pop("wild_resurgence_turn", None)
             # 握持、骑乘与两个攻击窗口账本都是"这一场"的事实：战斗结束就没有
             # 回合，也没有"手上拿着什么"。留着它们只会让下一场之前的读取看到
             # 一场已经结束的战斗的姿势。
@@ -291,13 +294,23 @@ class CombatReducerMixin:
             if kind != "player" or raw_id not in snapshot["characters"]:
                 raise EventBatchError("only an existing player can change shape")
             character = snapshot["characters"][raw_id]
+            forms = character.get("forms")
+            if not isinstance(forms, dict):
+                forms = {}
             if event_type == "dnd2024.form.reverted":
-                character.pop("forms", None)
+                # 只清 active：known 是角色级选择，清掉它等于让德鲁伊变回原形
+                # 之后就"忘了"自己会变成哪些野兽，而长休才不会重新教他。
+                forms.pop("active", None)
+                if forms:
+                    character["forms"] = forms
+                else:
+                    character.pop("forms", None)
                 return
             payload = event.get("form") or {}
             if not isinstance(payload, dict) or not payload.get("form_ref"):
                 raise EventBatchError("form.assumed needs a form payload")
-            character["forms"] = {"active": dict(payload)}
+            forms["active"] = dict(payload)
+            character["forms"] = forms
             return
         if event_type == "dnd2024.action.spent":
             resource = str(event["resource"])
@@ -530,6 +543,36 @@ class CombatReducerMixin:
             current = block.get(feature_id)
             current = current if isinstance(current, dict) else {}
             block[feature_id] = {**deepcopy(current), **deepcopy(values)}
+            return
+        if event_type == "dnd2024.wild_resurgence.used":
+            # 每个自己的回合一次：标记跟着"当前回合的 actor"走，换人就失效。
+            if event.get("turn_limited"):
+                combat["wild_resurgence_turn"] = str(event["actor_id"])
+            return
+        if event_type == "dnd2024.class_resource.restored":
+            # 恢复与消耗走同一本账：加回去必须被 maximum 夹住，否则
+            # "掷先攻恢复一次"能在一场战斗里被反复触发成无限次数。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError("only player/companion class resources are canonical")
+            character = (
+                snapshot["characters"][raw_id]
+                if kind == "player"
+                else self._companion_character(snapshot, raw_id)
+            )
+            state = (character.get("resources") or {}).get("class", {}).get(
+                str(event["resource_id"])
+            )
+            if not isinstance(state, dict):
+                raise EventBatchError(
+                    f"class resource is not initialized: {event['resource_id']}"
+                )
+            maximum = int(state.get("maximum", 0) or 0)
+            current = int(state.get("current", 0) or 0)
+            amount = int(event.get("amount", 1) or 1)
+            if amount < 1:
+                raise EventBatchError("restored amount must be positive")
+            state["current"] = min(maximum, current + amount)
             return
         if event_type == "dnd2024.class_resource.spent":
             # 职业资源永远写在既有的 canonical resources.class 结构里，
@@ -886,7 +929,10 @@ class CombatReducerMixin:
             )
             block = character["spellcasting"]["class"]
             level = int(event["slot_level"])
-            if not 1 <= level <= MAX_CREATED_SLOT_LEVEL:
+            # 这里只守"全局合理上限"（法术位最高 9 环）。各能力自己的上限由
+            # 各自的 planner 守：F6 只到 5 环，Nature Magician 到 8 环（2N）。
+            # 用 F6 的 5 环常量卡这里，会把德鲁伊 20 级的 6/8 环临时槽拒掉。
+            if not 1 <= level <= MAX_TEMPORARY_SLOT_LEVEL:
                 # 伪造的高环临时槽在这里就死掉，不等它去骗过施法校验。
                 raise EventBatchError("temporary spell slot level is illegal")
             stored = block.get("font_slots")
@@ -981,6 +1027,8 @@ class CombatReducerMixin:
                 else:
                     zone["rounds_left"] = left
             combat["economy"] = deepcopy(event["economy"])
+            # 换回合：上一个 actor 的"本回合一次"限制不该跟着新 actor。
+            combat.pop("wild_resurgence_turn", None)
             combat.setdefault("reactions", {})[str(event["actor_id"])] = 1
             return
         if event_type == "dnd2024.death_save.resolved":

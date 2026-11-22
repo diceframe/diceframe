@@ -1163,6 +1163,12 @@ class Dnd2024CombatEngine(
             events.extend(self._basic_action_events(combat, intent_type, str(intent["actor_id"])))
         elif intent_type == "hide":
             events.extend(self._hide_events(instance, combat, intent, rng))
+        elif intent_type == "wild_resurgence":
+            events.extend(self._wild_resurgence_events(instance, combat, intent))
+        elif intent_type == "nature_magician":
+            events.extend(self._nature_magician_events(instance, combat, intent))
+        elif intent_type in {"form.assume", "form.revert"}:
+            events.extend(self._form_events(instance, combat, intent))
         elif intent_type == "ability_check":
             events.extend(self._ability_check_events(
                 combat, intent, self._actor_view(instance, combat, str(intent["actor_id"])), rng,
@@ -1188,6 +1194,7 @@ class Dnd2024CombatEngine(
         events.extend(self._incapacitation_cleanup_events(instance, combat, events))
         events.extend(self._source_incapacitation_events(instance, combat, events))
         events.extend(self._timed_condition_expiry_events(instance, combat))
+        events.extend(self._shape_exit_events(instance, combat))
         # 世界时钟驱动的到期：一场在一分钟内结束的战斗会把效果留在身上，
         # 只要之后还有任何战斗意图或时钟越过那一分钟就会被清掉。end_turn
         # 由回合推进处统一查两个上限，这里不能重复发同一条移除事件。
@@ -1392,6 +1399,53 @@ class Dnd2024CombatEngine(
             for enemy_id in sorted((combat.get("enemies") or {}))
         )
         return ids
+
+    #: 结束形状的三个"非主动"原因。
+    _SHAPE_EXIT_REASONS = ("death", "incapacitated", "expired")
+
+    def _shape_exit_events(
+        self, instance: Any, combat: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """变形在失能、死亡或到期时结束。
+
+        三个判定都可达：失能与死亡是 `condition.applied` 的结果，到期是逻辑时钟
+        的差。这里挂在**每条意图的公共收尾**上，所以不必等到回合末——SRD 明确
+        说失能/死亡立即结束，`end_turn` 才处理就晚了。
+        """
+
+        events: list[dict[str, Any]] = []
+        now = self._logical_minutes(instance)
+        for actor_id in self._combat_actor_ids(instance, combat):
+            try:
+                view = self._actor_view(instance, combat, actor_id)
+            except CombatIntentError:  # pragma: no cover - came from combat
+                continue
+            form = view.get("form_ref")
+            if not form:
+                continue
+            conditions = view.get("conditions") or {}
+            if "dead" in conditions:
+                reason = "death"
+            elif any(
+                self._condition_implies_incapacitated(str(condition_id))
+                for condition_id in conditions
+            ):
+                reason = "incapacitated"
+            else:
+                assumed = int(view.get("form_assumed_at_minute", 0) or 0)
+                hours = int(view.get("form_duration_hours", 0) or 0)
+                if hours <= 0 or now < assumed + hours * 60:
+                    continue
+                reason = "expired"
+            events.append({
+                "type": "dnd2024.form.reverted", "actor_id": actor_id,
+                "reason": reason,
+            })
+        return events
+
+    def _condition_implies_incapacitated(self, condition_id: str) -> bool:
+        row = (self.catalog.conditions or {}).get(condition_id) or {}
+        return bool(row.get("implies_incapacitated"))
 
     def _timed_condition_expiry_events(
         self, instance: Any, combat: dict[str, Any],

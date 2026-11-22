@@ -128,6 +128,10 @@ INTENT_TYPES = frozenset({
     # 一次裸属性检定。成本由调用方声明（可能是动作、附赠动作或免费）：
     # 规则里它既可能是"花动作开锁"，也可能是对抗/失败窗口的一部分。
     "ability_check",
+    # S0-F25：变形本身是一个意图（附赠动作 + 一次 Wild Shape）。
+    "form.assume", "form.revert",
+    # S0-F25：Wild Resurgence 的两个方向与 Nature Magician 的换算，全部 no action。
+    "wild_resurgence", "nature_magician",
     # 职业特性提供的战斗能力：Combat 只认 capability id、动作/资源成本与底层
     # canonical action，"哪个职业在第几级授予它" 由 feature boundary 回答。
     "class_capability",

@@ -22,7 +22,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p107:acid_splash"
+      "source_ref": "srd-5.2.1:p107:acid_splash",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "chill_touch",
@@ -42,7 +44,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p115:chill_touch"
+      "source_ref": "srd-5.2.1:p115:chill_touch",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "dancing_lights",
@@ -63,7 +67,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p121:dancing_lights"
+      "source_ref": "srd-5.2.1:p121:dancing_lights",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "druidcraft",
@@ -81,7 +87,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p126:druidcraft"
+      "source_ref": "srd-5.2.1:p126:druidcraft",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "eldritch_blast",
@@ -99,7 +107,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p127:eldritch_blast"
+      "source_ref": "srd-5.2.1:p127:eldritch_blast",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "elementalism",
@@ -119,7 +129,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p127:elementalism"
+      "source_ref": "srd-5.2.1:p127:elementalism",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "fire_bolt",
@@ -138,7 +150,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p132:fire_bolt"
+      "source_ref": "srd-5.2.1:p132:fire_bolt",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "guidance",
@@ -157,7 +171,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p138:guidance"
+      "source_ref": "srd-5.2.1:p138:guidance",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "light",
@@ -178,7 +194,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p144:light"
+      "source_ref": "srd-5.2.1:p144:light",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "mage_hand",
@@ -199,7 +217,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 minute",
-      "source_ref": "srd-5.2.1:p145:mage_hand"
+      "source_ref": "srd-5.2.1:p145:mage_hand",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "mending",
@@ -222,7 +242,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p148:mending"
+      "source_ref": "srd-5.2.1:p148:mending",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "message",
@@ -243,7 +265,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 round",
-      "source_ref": "srd-5.2.1:p148:message"
+      "source_ref": "srd-5.2.1:p148:message",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "minor_illusion",
@@ -264,7 +288,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 minute",
-      "source_ref": "srd-5.2.1:p149:minor_illusion"
+      "source_ref": "srd-5.2.1:p149:minor_illusion",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "poison_spray",
@@ -285,7 +311,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p153:poison_spray"
+      "source_ref": "srd-5.2.1:p153:poison_spray",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "prestidigitation",
@@ -306,7 +334,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Up to 1 hour",
-      "source_ref": "srd-5.2.1:p154:prestidigitation"
+      "source_ref": "srd-5.2.1:p154:prestidigitation",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "produce_flame",
@@ -324,7 +354,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "10 minutes",
-      "source_ref": "srd-5.2.1:p156:produce_flame"
+      "source_ref": "srd-5.2.1:p156:produce_flame",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "ray_of_frost",
@@ -343,7 +375,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p157:ray_of_frost"
+      "source_ref": "srd-5.2.1:p157:ray_of_frost",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "resistance",
@@ -362,7 +396,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p158:resistance"
+      "source_ref": "srd-5.2.1:p158:resistance",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "sacred_flame",
@@ -380,7 +416,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p159:sacred_flame"
+      "source_ref": "srd-5.2.1:p159:sacred_flame",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "shillelagh",
@@ -399,7 +437,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 minute",
-      "source_ref": "srd-5.2.1:p162:shillelagh"
+      "source_ref": "srd-5.2.1:p162:shillelagh",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "shocking_grasp",
@@ -418,7 +458,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p162:shocking_grasp"
+      "source_ref": "srd-5.2.1:p162:shocking_grasp",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "sorcerous_burst",
@@ -436,7 +478,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p163:sorcerous_burst"
+      "source_ref": "srd-5.2.1:p163:sorcerous_burst",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "spare_the_dying",
@@ -455,7 +499,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p163:spare_the_dying"
+      "source_ref": "srd-5.2.1:p163:spare_the_dying",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "starry_wisp",
@@ -474,7 +520,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p165:starry_wisp"
+      "source_ref": "srd-5.2.1:p165:starry_wisp",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "thaumaturgy",
@@ -491,7 +539,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Up to 1 minute",
-      "source_ref": "srd-5.2.1:p169:thaumaturgy"
+      "source_ref": "srd-5.2.1:p169:thaumaturgy",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "true_strike",
@@ -512,7 +562,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p171:true_strike"
+      "source_ref": "srd-5.2.1:p171:true_strike",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "vicious_mockery",
@@ -529,7 +581,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p171:vicious_mockery"
+      "source_ref": "srd-5.2.1:p171:vicious_mockery",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "alarm",
@@ -549,7 +603,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "8 hours",
-      "source_ref": "srd-5.2.1:p107:alarm"
+      "source_ref": "srd-5.2.1:p107:alarm",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "animal_friendship",
@@ -570,7 +626,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "24 hours",
-      "source_ref": "srd-5.2.1:p107:animal_friendship"
+      "source_ref": "srd-5.2.1:p107:animal_friendship",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "bane",
@@ -591,7 +649,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p112:bane"
+      "source_ref": "srd-5.2.1:p112:bane",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "bless",
@@ -611,7 +671,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p113:bless"
+      "source_ref": "srd-5.2.1:p113:bless",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "burning_hands",
@@ -630,7 +692,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p114:burning_hands"
+      "source_ref": "srd-5.2.1:p114:burning_hands",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "charm_person",
@@ -652,7 +716,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p115:charm_person"
+      "source_ref": "srd-5.2.1:p115:charm_person",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "chromatic_orb",
@@ -672,7 +738,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p115:chromatic_orb"
+      "source_ref": "srd-5.2.1:p115:chromatic_orb",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "color_spray",
@@ -693,7 +761,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p116:color_spray"
+      "source_ref": "srd-5.2.1:p116:color_spray",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "command",
@@ -712,7 +782,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p116:command"
+      "source_ref": "srd-5.2.1:p116:command",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "comprehend_languages",
@@ -734,7 +806,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p117:comprehend_languages"
+      "source_ref": "srd-5.2.1:p117:comprehend_languages",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "create_or_destroy_water",
@@ -754,7 +828,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p121:create_or_destroy_water"
+      "source_ref": "srd-5.2.1:p121:create_or_destroy_water",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "cure_wounds",
@@ -776,7 +852,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p121:cure_wounds"
+      "source_ref": "srd-5.2.1:p121:cure_wounds",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "detect_evil_and_good",
@@ -795,7 +873,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p123:detect_evil_and_good"
+      "source_ref": "srd-5.2.1:p123:detect_evil_and_good",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "detect_magic",
@@ -820,7 +900,9 @@
       "ritual": true,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p123:detect_magic"
+      "source_ref": "srd-5.2.1:p123:detect_magic",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "detect_poison_and_disease",
@@ -842,7 +924,9 @@
       "ritual": true,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p123:detect_poison_and_disease"
+      "source_ref": "srd-5.2.1:p123:detect_poison_and_disease",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "disguise_self",
@@ -862,7 +946,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p124:disguise_self"
+      "source_ref": "srd-5.2.1:p124:disguise_self",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "dissonant_whispers",
@@ -879,7 +965,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p124:dissonant_whispers"
+      "source_ref": "srd-5.2.1:p124:dissonant_whispers",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "divine_favor",
@@ -897,7 +985,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 minute",
-      "source_ref": "srd-5.2.1:p125:divine_favor"
+      "source_ref": "srd-5.2.1:p125:divine_favor",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "divine_smite",
@@ -914,7 +1004,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p125:divine_smite"
+      "source_ref": "srd-5.2.1:p125:divine_smite",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "ensnaring_strike",
@@ -931,7 +1023,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p128:ensnaring_strike"
+      "source_ref": "srd-5.2.1:p128:ensnaring_strike",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "entangle",
@@ -950,7 +1044,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p128:entangle"
+      "source_ref": "srd-5.2.1:p128:entangle",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "expeditious_retreat",
@@ -970,7 +1066,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p129:expeditious_retreat"
+      "source_ref": "srd-5.2.1:p129:expeditious_retreat",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "faerie_fire",
@@ -988,7 +1086,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p129:faerie_fire"
+      "source_ref": "srd-5.2.1:p129:faerie_fire",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "false_life",
@@ -1008,7 +1108,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p129:false_life"
+      "source_ref": "srd-5.2.1:p129:false_life",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "feather_fall",
@@ -1028,7 +1130,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 minute",
-      "source_ref": "srd-5.2.1:p130:feather_fall"
+      "source_ref": "srd-5.2.1:p130:feather_fall",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "find_familiar",
@@ -1047,7 +1151,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p130:find_familiar"
+      "source_ref": "srd-5.2.1:p130:find_familiar",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "floating_disk",
@@ -1066,7 +1172,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p133:floating_disk"
+      "source_ref": "srd-5.2.1:p133:floating_disk",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "fog_cloud",
@@ -1087,7 +1195,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p133:fog_cloud"
+      "source_ref": "srd-5.2.1:p133:fog_cloud",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "goodberry",
@@ -1107,7 +1217,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "24 hours",
-      "source_ref": "srd-5.2.1:p137:goodberry"
+      "source_ref": "srd-5.2.1:p137:goodberry",
+      "material_cost_specified": true,
+      "material_consumed": false
     },
     {
       "id": "grease",
@@ -1127,7 +1239,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 minute",
-      "source_ref": "srd-5.2.1:p137:grease"
+      "source_ref": "srd-5.2.1:p137:grease",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "guiding_bolt",
@@ -1145,7 +1259,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 round",
-      "source_ref": "srd-5.2.1:p138:guiding_bolt"
+      "source_ref": "srd-5.2.1:p138:guiding_bolt",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "healing_word",
@@ -1164,7 +1280,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p139:healing_word"
+      "source_ref": "srd-5.2.1:p139:healing_word",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "hellish_rebuke",
@@ -1182,7 +1300,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p140:hellish_rebuke"
+      "source_ref": "srd-5.2.1:p140:hellish_rebuke",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "heroism",
@@ -1201,7 +1321,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p140:heroism"
+      "source_ref": "srd-5.2.1:p140:heroism",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "hex",
@@ -1220,7 +1342,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p140:hex"
+      "source_ref": "srd-5.2.1:p140:hex",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "hideous_laughter",
@@ -1241,7 +1365,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p140:hideous_laughter"
+      "source_ref": "srd-5.2.1:p140:hideous_laughter",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "hunter_s_mark",
@@ -1278,7 +1404,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p141:ice_knife"
+      "source_ref": "srd-5.2.1:p141:ice_knife",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "identify",
@@ -1298,7 +1426,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p142:identify"
+      "source_ref": "srd-5.2.1:p142:identify",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "illusory_script",
@@ -1318,7 +1448,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "10 days",
-      "source_ref": "srd-5.2.1:p142:illusory_script"
+      "source_ref": "srd-5.2.1:p142:illusory_script",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "inflict_wounds",
@@ -1336,7 +1468,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p143:inflict_wounds"
+      "source_ref": "srd-5.2.1:p143:inflict_wounds",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "jump",
@@ -1358,7 +1492,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 minute",
-      "source_ref": "srd-5.2.1:p143:jump"
+      "source_ref": "srd-5.2.1:p143:jump",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "longstrider",
@@ -1380,7 +1516,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p145:longstrider"
+      "source_ref": "srd-5.2.1:p145:longstrider",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "mage_armor",
@@ -1400,7 +1538,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "8 hours",
-      "source_ref": "srd-5.2.1:p145:mage_armor"
+      "source_ref": "srd-5.2.1:p145:mage_armor",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "magic_missile",
@@ -1419,7 +1559,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p146:magic_missile"
+      "source_ref": "srd-5.2.1:p146:magic_missile",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "protection_from_evil_and_good",
@@ -1442,7 +1584,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration up to 10 minutes",
-      "source_ref": "srd-5.2.1:p157:protection_from_evil_and_good"
+      "source_ref": "srd-5.2.1:p157:protection_from_evil_and_good",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "purify_food_and_drink",
@@ -1462,7 +1606,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p157:purify_food_and_drink"
+      "source_ref": "srd-5.2.1:p157:purify_food_and_drink",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "ray_of_sickness",
@@ -1481,7 +1627,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p158:ray_of_sickness"
+      "source_ref": "srd-5.2.1:p158:ray_of_sickness",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "sanctuary",
@@ -1500,7 +1648,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 minute",
-      "source_ref": "srd-5.2.1:p159:sanctuary"
+      "source_ref": "srd-5.2.1:p159:sanctuary",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "searing_smite",
@@ -1517,7 +1667,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 minute",
-      "source_ref": "srd-5.2.1:p160:searing_smite"
+      "source_ref": "srd-5.2.1:p160:searing_smite",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "shield",
@@ -1536,7 +1688,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 round",
-      "source_ref": "srd-5.2.1:p161:shield"
+      "source_ref": "srd-5.2.1:p161:shield",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "shield_of_faith",
@@ -1556,7 +1710,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p162:shield_of_faith"
+      "source_ref": "srd-5.2.1:p162:shield_of_faith",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "silent_image",
@@ -1577,7 +1733,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p162:silent_image"
+      "source_ref": "srd-5.2.1:p162:silent_image",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "sleep",
@@ -1598,7 +1756,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p163:sleep"
+      "source_ref": "srd-5.2.1:p163:sleep",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "speak_with_animals",
@@ -1619,7 +1779,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "10 minutes",
-      "source_ref": "srd-5.2.1:p164:speak_with_animals"
+      "source_ref": "srd-5.2.1:p164:speak_with_animals",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "thunderwave",
@@ -1640,7 +1802,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p169:thunderwave"
+      "source_ref": "srd-5.2.1:p169:thunderwave",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "unseen_servant",
@@ -1661,7 +1825,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p171:unseen_servant"
+      "source_ref": "srd-5.2.1:p171:unseen_servant",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "acid_arrow",
@@ -1680,7 +1846,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p107:acid_arrow"
+      "source_ref": "srd-5.2.1:p107:acid_arrow",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "aid",
@@ -1703,7 +1871,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "8 hours",
-      "source_ref": "srd-5.2.1:p107:aid"
+      "source_ref": "srd-5.2.1:p107:aid",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "alter_self",
@@ -1722,7 +1892,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p107:alter_self"
+      "source_ref": "srd-5.2.1:p107:alter_self",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "animal_messenger",
@@ -1743,7 +1915,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "24 hours",
-      "source_ref": "srd-5.2.1:p108:animal_messenger"
+      "source_ref": "srd-5.2.1:p108:animal_messenger",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "arcane_lock",
@@ -1762,7 +1936,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Until dispelled",
-      "source_ref": "srd-5.2.1:p110:arcane_lock"
+      "source_ref": "srd-5.2.1:p110:arcane_lock",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "arcanist_s_magic_aura",
@@ -1802,7 +1978,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p111:augury"
+      "source_ref": "srd-5.2.1:p111:augury",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "barkskin",
@@ -1822,7 +2000,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p112:barkskin"
+      "source_ref": "srd-5.2.1:p112:barkskin",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "blindness_deafness",
@@ -1860,7 +2040,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p114:blur"
+      "source_ref": "srd-5.2.1:p114:blur",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "calm_emotions",
@@ -1879,7 +2061,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p114:calm_emotions"
+      "source_ref": "srd-5.2.1:p114:calm_emotions",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "continual_flame",
@@ -1900,7 +2084,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Until dispelled",
-      "source_ref": "srd-5.2.1:p119:continual_flame"
+      "source_ref": "srd-5.2.1:p119:continual_flame",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "darkness",
@@ -1920,7 +2106,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p122:darkness"
+      "source_ref": "srd-5.2.1:p122:darkness",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "darkvision",
@@ -1942,7 +2130,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "8 hours",
-      "source_ref": "srd-5.2.1:p122:darkvision"
+      "source_ref": "srd-5.2.1:p122:darkvision",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "detect_thoughts",
@@ -1963,7 +2153,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p123:detect_thoughts"
+      "source_ref": "srd-5.2.1:p123:detect_thoughts",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "dragon_s_breath",
@@ -2007,7 +2199,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p127:enhance_ability"
+      "source_ref": "srd-5.2.1:p127:enhance_ability",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "enlarge_reduce",
@@ -2048,7 +2242,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p128:enthrall"
+      "source_ref": "srd-5.2.1:p128:enthrall",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "find_steed",
@@ -2066,7 +2262,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p130:find_steed"
+      "source_ref": "srd-5.2.1:p130:find_steed",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "find_traps",
@@ -2086,7 +2284,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p131:find_traps"
+      "source_ref": "srd-5.2.1:p131:find_traps",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "flame_blade",
@@ -2106,7 +2306,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p132:flame_blade"
+      "source_ref": "srd-5.2.1:p132:flame_blade",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "flaming_sphere",
@@ -2127,7 +2329,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p132:flaming_sphere"
+      "source_ref": "srd-5.2.1:p132:flaming_sphere",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "gentle_repose",
@@ -2148,7 +2352,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "10 days",
-      "source_ref": "srd-5.2.1:p135:gentle_repose"
+      "source_ref": "srd-5.2.1:p135:gentle_repose",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "gust_of_wind",
@@ -2170,7 +2376,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p138:gust_of_wind"
+      "source_ref": "srd-5.2.1:p138:gust_of_wind",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "heat_metal",
@@ -2190,7 +2398,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p139:heat_metal"
+      "source_ref": "srd-5.2.1:p139:heat_metal",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "hold_person",
@@ -2214,7 +2424,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p141:hold_person"
+      "source_ref": "srd-5.2.1:p141:hold_person",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "invisibility",
@@ -2236,7 +2448,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p143:invisibility"
+      "source_ref": "srd-5.2.1:p143:invisibility",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "knock",
@@ -2255,7 +2469,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p143:knock"
+      "source_ref": "srd-5.2.1:p143:knock",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "lesser_restoration",
@@ -2277,7 +2493,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p144:lesser_restoration"
+      "source_ref": "srd-5.2.1:p144:lesser_restoration",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "levitate",
@@ -2297,7 +2515,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p144:levitate"
+      "source_ref": "srd-5.2.1:p144:levitate",
+      "material_cost_specified": true,
+      "material_consumed": false
     },
     {
       "id": "locate_animals_or_plants",
@@ -2318,7 +2538,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p144:locate_animals_or_plants"
+      "source_ref": "srd-5.2.1:p144:locate_animals_or_plants",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "locate_object",
@@ -2342,7 +2564,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p145:locate_object"
+      "source_ref": "srd-5.2.1:p145:locate_object",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "magic_mouth",
@@ -2362,7 +2586,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "Until dispelled",
-      "source_ref": "srd-5.2.1:p146:magic_mouth"
+      "source_ref": "srd-5.2.1:p146:magic_mouth",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "magic_weapon",
@@ -2383,7 +2609,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p146:magic_weapon"
+      "source_ref": "srd-5.2.1:p146:magic_weapon",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "mind_spike",
@@ -2402,7 +2630,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p149:mind_spike"
+      "source_ref": "srd-5.2.1:p149:mind_spike",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "mirror_image",
@@ -2423,7 +2653,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 minute",
-      "source_ref": "srd-5.2.1:p150:mirror_image"
+      "source_ref": "srd-5.2.1:p150:mirror_image",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "misty_step",
@@ -2442,7 +2674,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p150:misty_step"
+      "source_ref": "srd-5.2.1:p150:misty_step",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "moonbeam",
@@ -2461,7 +2695,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p150:moonbeam"
+      "source_ref": "srd-5.2.1:p150:moonbeam",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "pass_without_trace",
@@ -2481,7 +2717,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p151:pass_without_trace"
+      "source_ref": "srd-5.2.1:p151:pass_without_trace",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "phantasmal_force",
@@ -2502,7 +2740,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p151:phantasmal_force"
+      "source_ref": "srd-5.2.1:p151:phantasmal_force",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "prayer_of_healing",
@@ -2520,7 +2760,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p154:prayer_of_healing"
+      "source_ref": "srd-5.2.1:p154:prayer_of_healing",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "protection_from_poison",
@@ -2541,7 +2783,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p157:protection_from_poison"
+      "source_ref": "srd-5.2.1:p157:protection_from_poison",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "ray_of_enfeeblement",
@@ -2560,7 +2804,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p157:ray_of_enfeeblement"
+      "source_ref": "srd-5.2.1:p157:ray_of_enfeeblement",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "rope_trick",
@@ -2579,7 +2825,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p159:rope_trick"
+      "source_ref": "srd-5.2.1:p159:rope_trick",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "scorching_ray",
@@ -2598,7 +2846,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p159:scorching_ray"
+      "source_ref": "srd-5.2.1:p159:scorching_ray",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "see_invisibility",
@@ -2619,7 +2869,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p160:see_invisibility"
+      "source_ref": "srd-5.2.1:p160:see_invisibility",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "shatter",
@@ -2640,7 +2892,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p161:shatter"
+      "source_ref": "srd-5.2.1:p161:shatter",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "shining_smite",
@@ -2657,7 +2911,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p162:shining_smite"
+      "source_ref": "srd-5.2.1:p162:shining_smite",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "silence",
@@ -2677,7 +2933,9 @@
       "ritual": true,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p162:silence"
+      "source_ref": "srd-5.2.1:p162:silence",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "spider_climb",
@@ -2698,7 +2956,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p164:spider_climb"
+      "source_ref": "srd-5.2.1:p164:spider_climb",
+      "material_cost_specified": true,
+      "material_consumed": false
     },
     {
       "id": "spike_growth",
@@ -2718,7 +2978,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p164:spike_growth"
+      "source_ref": "srd-5.2.1:p164:spike_growth",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "spiritual_weapon",
@@ -2736,7 +2998,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p165:spiritual_weapon"
+      "source_ref": "srd-5.2.1:p165:spiritual_weapon",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "suggestion",
@@ -2757,7 +3021,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 8 hours",
-      "source_ref": "srd-5.2.1:p166:suggestion"
+      "source_ref": "srd-5.2.1:p166:suggestion",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "warding_bond",
@@ -2777,7 +3043,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p173:warding_bond"
+      "source_ref": "srd-5.2.1:p173:warding_bond",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "web",
@@ -2797,7 +3065,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p174:web"
+      "source_ref": "srd-5.2.1:p174:web",
+      "material_cost_specified": true,
+      "material_consumed": false
     },
     {
       "id": "zone_of_truth",
@@ -2817,7 +3087,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "10 minutes",
-      "source_ref": "srd-5.2.1:p175:zone_of_truth"
+      "source_ref": "srd-5.2.1:p175:zone_of_truth",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "animate_dead",
@@ -2837,7 +3109,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p108:animate_dead"
+      "source_ref": "srd-5.2.1:p108:animate_dead",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "beacon_of_hope",
@@ -2855,7 +3129,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p112:beacon_of_hope"
+      "source_ref": "srd-5.2.1:p112:beacon_of_hope",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "bestow_curse",
@@ -2875,7 +3151,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p112:bestow_curse"
+      "source_ref": "srd-5.2.1:p112:bestow_curse",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "blink",
@@ -2894,7 +3172,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 minute",
-      "source_ref": "srd-5.2.1:p113:blink"
+      "source_ref": "srd-5.2.1:p113:blink",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "call_lightning",
@@ -2912,7 +3192,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p114:call_lightning"
+      "source_ref": "srd-5.2.1:p114:call_lightning",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "clairvoyance",
@@ -2934,7 +3216,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p115:clairvoyance"
+      "source_ref": "srd-5.2.1:p115:clairvoyance",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "conjure_animals",
@@ -2953,7 +3237,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p117:conjure_animals"
+      "source_ref": "srd-5.2.1:p117:conjure_animals",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "counterspell",
@@ -2972,7 +3258,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p120:counterspell"
+      "source_ref": "srd-5.2.1:p120:counterspell",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "create_food_and_water",
@@ -2991,7 +3279,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p120:create_food_and_water"
+      "source_ref": "srd-5.2.1:p120:create_food_and_water",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "daylight",
@@ -3013,7 +3303,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p122:daylight"
+      "source_ref": "srd-5.2.1:p122:daylight",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "dispel_magic",
@@ -3038,7 +3330,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p124:dispel_magic"
+      "source_ref": "srd-5.2.1:p124:dispel_magic",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "fear",
@@ -3060,7 +3354,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p130:fear"
+      "source_ref": "srd-5.2.1:p130:fear",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "fireball",
@@ -3080,7 +3376,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p131:fireball"
+      "source_ref": "srd-5.2.1:p131:fireball",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "fly",
@@ -3101,7 +3399,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p133:fly"
+      "source_ref": "srd-5.2.1:p133:fly",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "gaseous_form",
@@ -3122,7 +3422,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p134:gaseous_form"
+      "source_ref": "srd-5.2.1:p134:gaseous_form",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "glyph_of_warding",
@@ -3143,7 +3445,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Until dispelled or triggered",
-      "source_ref": "srd-5.2.1:p136:glyph_of_warding"
+      "source_ref": "srd-5.2.1:p136:glyph_of_warding",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "haste",
@@ -3163,7 +3467,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p139:haste"
+      "source_ref": "srd-5.2.1:p139:haste",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "hypnotic_pattern",
@@ -3184,7 +3490,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p141:hypnotic_pattern"
+      "source_ref": "srd-5.2.1:p141:hypnotic_pattern",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "lightning_bolt",
@@ -3204,7 +3512,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p144:lightning_bolt"
+      "source_ref": "srd-5.2.1:p144:lightning_bolt",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "magic_circle",
@@ -3226,7 +3536,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p145:magic_circle"
+      "source_ref": "srd-5.2.1:p145:magic_circle",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "major_image",
@@ -3248,7 +3560,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p147:major_image"
+      "source_ref": "srd-5.2.1:p147:major_image",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "mass_healing_word",
@@ -3266,7 +3580,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p148:mass_healing_word"
+      "source_ref": "srd-5.2.1:p148:mass_healing_word",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "meld_into_stone",
@@ -3286,7 +3602,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "8 hours",
-      "source_ref": "srd-5.2.1:p148:meld_into_stone"
+      "source_ref": "srd-5.2.1:p148:meld_into_stone",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "nondetection",
@@ -3307,7 +3625,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "8 hours",
-      "source_ref": "srd-5.2.1:p151:nondetection"
+      "source_ref": "srd-5.2.1:p151:nondetection",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "phantom_steed",
@@ -3325,7 +3645,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p152:phantom_steed"
+      "source_ref": "srd-5.2.1:p152:phantom_steed",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "plant_growth",
@@ -3345,7 +3667,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p153:plant_growth"
+      "source_ref": "srd-5.2.1:p153:plant_growth",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "protection_from_energy",
@@ -3367,7 +3691,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p157:protection_from_energy"
+      "source_ref": "srd-5.2.1:p157:protection_from_energy",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "remove_curse",
@@ -3388,7 +3714,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p158:remove_curse"
+      "source_ref": "srd-5.2.1:p158:remove_curse",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "revivify",
@@ -3410,7 +3738,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p159:revivify"
+      "source_ref": "srd-5.2.1:p159:revivify",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "sending",
@@ -3431,7 +3761,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p161:sending"
+      "source_ref": "srd-5.2.1:p161:sending",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "sleet_storm",
@@ -3452,7 +3784,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p163:sleet_storm"
+      "source_ref": "srd-5.2.1:p163:sleet_storm",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "slow",
@@ -3473,7 +3807,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p163:slow"
+      "source_ref": "srd-5.2.1:p163:slow",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "speak_with_dead",
@@ -3494,7 +3830,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "10 minutes",
-      "source_ref": "srd-5.2.1:p164:speak_with_dead"
+      "source_ref": "srd-5.2.1:p164:speak_with_dead",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "speak_with_plants",
@@ -3514,7 +3852,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "10 minutes",
-      "source_ref": "srd-5.2.1:p164:speak_with_plants"
+      "source_ref": "srd-5.2.1:p164:speak_with_plants",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "spirit_guardians",
@@ -3533,7 +3873,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p164:spirit_guardians"
+      "source_ref": "srd-5.2.1:p164:spirit_guardians",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "stinking_cloud",
@@ -3554,7 +3896,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p165:stinking_cloud"
+      "source_ref": "srd-5.2.1:p165:stinking_cloud",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "tiny_hut",
@@ -3574,7 +3918,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "8 hours",
-      "source_ref": "srd-5.2.1:p169:tiny_hut"
+      "source_ref": "srd-5.2.1:p169:tiny_hut",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "tongues",
@@ -3596,7 +3942,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p169:tongues"
+      "source_ref": "srd-5.2.1:p169:tongues",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "vampiric_touch",
@@ -3616,7 +3964,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p171:vampiric_touch"
+      "source_ref": "srd-5.2.1:p171:vampiric_touch",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "water_breathing",
@@ -3638,7 +3988,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "24 hours",
-      "source_ref": "srd-5.2.1:p173:water_breathing"
+      "source_ref": "srd-5.2.1:p173:water_breathing",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "water_walk",
@@ -3660,7 +4012,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p173:water_walk"
+      "source_ref": "srd-5.2.1:p173:water_walk",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "wind_wall",
@@ -3680,7 +4034,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p174:wind_wall"
+      "source_ref": "srd-5.2.1:p174:wind_wall",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "arcane_eye",
@@ -3699,7 +4055,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p110:arcane_eye"
+      "source_ref": "srd-5.2.1:p110:arcane_eye",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "aura_of_life",
@@ -3717,7 +4075,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p111:aura_of_life"
+      "source_ref": "srd-5.2.1:p111:aura_of_life",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "banishment",
@@ -3740,7 +4100,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p112:banishment"
+      "source_ref": "srd-5.2.1:p112:banishment",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "black_tentacles",
@@ -3759,7 +4121,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p113:black_tentacles"
+      "source_ref": "srd-5.2.1:p113:black_tentacles",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "blight",
@@ -3780,7 +4144,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p113:blight"
+      "source_ref": "srd-5.2.1:p113:blight",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "charm_monster",
@@ -3802,7 +4168,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p114:charm_monster"
+      "source_ref": "srd-5.2.1:p114:charm_monster",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "compulsion",
@@ -3820,7 +4188,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p117:compulsion"
+      "source_ref": "srd-5.2.1:p117:compulsion",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "confusion",
@@ -3842,7 +4212,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p117:confusion"
+      "source_ref": "srd-5.2.1:p117:confusion",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "conjure_minor_elementals",
@@ -3861,7 +4233,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p118:conjure_minor_elementals"
+      "source_ref": "srd-5.2.1:p118:conjure_minor_elementals",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "conjure_woodland_beings",
@@ -3880,7 +4254,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p118:conjure_woodland_beings"
+      "source_ref": "srd-5.2.1:p118:conjure_woodland_beings",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "control_water",
@@ -3901,7 +4277,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p119:control_water"
+      "source_ref": "srd-5.2.1:p119:control_water",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "death_ward",
@@ -3920,7 +4298,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "8 hours",
-      "source_ref": "srd-5.2.1:p122:death_ward"
+      "source_ref": "srd-5.2.1:p122:death_ward",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "dimension_door",
@@ -3940,7 +4320,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p123:dimension_door"
+      "source_ref": "srd-5.2.1:p123:dimension_door",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "divination",
@@ -3961,7 +4343,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p125:divination"
+      "source_ref": "srd-5.2.1:p125:divination",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "dominate_beast",
@@ -3981,7 +4365,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p125:dominate_beast"
+      "source_ref": "srd-5.2.1:p125:dominate_beast",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "fabricate",
@@ -3999,7 +4385,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p129:fabricate"
+      "source_ref": "srd-5.2.1:p129:fabricate",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "faithful_hound",
@@ -4018,7 +4406,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "8 hours",
-      "source_ref": "srd-5.2.1:p129:faithful_hound"
+      "source_ref": "srd-5.2.1:p129:faithful_hound",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "fire_shield",
@@ -4039,7 +4429,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "10 minutes",
-      "source_ref": "srd-5.2.1:p132:fire_shield"
+      "source_ref": "srd-5.2.1:p132:fire_shield",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "freedom_of_movement",
@@ -4061,7 +4453,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p134:freedom_of_movement"
+      "source_ref": "srd-5.2.1:p134:freedom_of_movement",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "giant_insect",
@@ -4079,7 +4473,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p135:giant_insect"
+      "source_ref": "srd-5.2.1:p135:giant_insect",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "greater_invisibility",
@@ -4099,7 +4495,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p137:greater_invisibility"
+      "source_ref": "srd-5.2.1:p137:greater_invisibility",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "guardian_of_faith",
@@ -4116,7 +4514,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "8 hours",
-      "source_ref": "srd-5.2.1:p137:guardian_of_faith"
+      "source_ref": "srd-5.2.1:p137:guardian_of_faith",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "hallucinatory_terrain",
@@ -4138,7 +4538,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "24 hours",
-      "source_ref": "srd-5.2.1:p139:hallucinatory_terrain"
+      "source_ref": "srd-5.2.1:p139:hallucinatory_terrain",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "ice_storm",
@@ -4159,7 +4561,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p141:ice_storm"
+      "source_ref": "srd-5.2.1:p141:ice_storm",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "locate_creature",
@@ -4183,7 +4587,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p145:locate_creature"
+      "source_ref": "srd-5.2.1:p145:locate_creature",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "phantasmal_killer",
@@ -4202,7 +4608,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p152:phantasmal_killer"
+      "source_ref": "srd-5.2.1:p152:phantasmal_killer",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "polymorph",
@@ -4224,7 +4632,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p153:polymorph"
+      "source_ref": "srd-5.2.1:p153:polymorph",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "private_sanctum",
@@ -4243,7 +4653,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "24 hours",
-      "source_ref": "srd-5.2.1:p156:private_sanctum"
+      "source_ref": "srd-5.2.1:p156:private_sanctum",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "resilient_sphere",
@@ -4262,7 +4674,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p158:resilient_sphere"
+      "source_ref": "srd-5.2.1:p158:resilient_sphere",
+      "material_cost_specified": true,
+      "material_consumed": false
     },
     {
       "id": "secret_chest",
@@ -4281,7 +4695,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Until dispelled",
-      "source_ref": "srd-5.2.1:p160:secret_chest"
+      "source_ref": "srd-5.2.1:p160:secret_chest",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "stone_shape",
@@ -4302,7 +4718,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p165:stone_shape"
+      "source_ref": "srd-5.2.1:p165:stone_shape",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "stoneskin",
@@ -4324,7 +4742,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p165:stoneskin"
+      "source_ref": "srd-5.2.1:p165:stoneskin",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "vitriolic_sphere",
@@ -4344,7 +4764,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p172:vitriolic_sphere"
+      "source_ref": "srd-5.2.1:p172:vitriolic_sphere",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "wall_of_fire",
@@ -4365,7 +4787,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p172:wall_of_fire"
+      "source_ref": "srd-5.2.1:p172:wall_of_fire",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "animate_objects",
@@ -4385,7 +4809,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p108:animate_objects"
+      "source_ref": "srd-5.2.1:p108:animate_objects",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "antilife_shell",
@@ -4403,7 +4829,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p109:antilife_shell"
+      "source_ref": "srd-5.2.1:p109:antilife_shell",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "arcane_hand",
@@ -4423,7 +4851,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p110:arcane_hand"
+      "source_ref": "srd-5.2.1:p110:arcane_hand",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "awaken",
@@ -4443,7 +4873,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p111:awaken"
+      "source_ref": "srd-5.2.1:p111:awaken",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "cloudkill",
@@ -4462,7 +4894,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p116:cloudkill"
+      "source_ref": "srd-5.2.1:p116:cloudkill",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "commune",
@@ -4481,7 +4915,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "1 minute",
-      "source_ref": "srd-5.2.1:p116:commune"
+      "source_ref": "srd-5.2.1:p116:commune",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "commune_with_nature",
@@ -4500,7 +4936,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p116:commune_with_nature"
+      "source_ref": "srd-5.2.1:p116:commune_with_nature",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "cone_of_cold",
@@ -4521,7 +4959,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p117:cone_of_cold"
+      "source_ref": "srd-5.2.1:p117:cone_of_cold",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "conjure_elemental",
@@ -4540,7 +4980,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p118:conjure_elemental"
+      "source_ref": "srd-5.2.1:p118:conjure_elemental",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "contact_other_plane",
@@ -4558,7 +5000,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "1 minute",
-      "source_ref": "srd-5.2.1:p119:contact_other_plane"
+      "source_ref": "srd-5.2.1:p119:contact_other_plane",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "contagion",
@@ -4577,7 +5021,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "7 days",
-      "source_ref": "srd-5.2.1:p119:contagion"
+      "source_ref": "srd-5.2.1:p119:contagion",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "creation",
@@ -4597,7 +5043,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Special",
-      "source_ref": "srd-5.2.1:p121:creation"
+      "source_ref": "srd-5.2.1:p121:creation",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "dispel_evil_and_good",
@@ -4617,7 +5065,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p124:dispel_evil_and_good"
+      "source_ref": "srd-5.2.1:p124:dispel_evil_and_good",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "dominate_person",
@@ -4637,7 +5087,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p126:dominate_person"
+      "source_ref": "srd-5.2.1:p126:dominate_person",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "dream",
@@ -4658,7 +5110,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "8 hours",
-      "source_ref": "srd-5.2.1:p126:dream"
+      "source_ref": "srd-5.2.1:p126:dream",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "flame_strike",
@@ -4677,7 +5131,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p132:flame_strike"
+      "source_ref": "srd-5.2.1:p132:flame_strike",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "geas",
@@ -4698,7 +5154,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "30 days",
-      "source_ref": "srd-5.2.1:p135:geas"
+      "source_ref": "srd-5.2.1:p135:geas",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "greater_restoration",
@@ -4721,7 +5179,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p137:greater_restoration"
+      "source_ref": "srd-5.2.1:p137:greater_restoration",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "hallow",
@@ -4740,7 +5200,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Until dispelled",
-      "source_ref": "srd-5.2.1:p138:hallow"
+      "source_ref": "srd-5.2.1:p138:hallow",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "hold_monster",
@@ -4762,7 +5224,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p140:hold_monster"
+      "source_ref": "srd-5.2.1:p140:hold_monster",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "insect_plague",
@@ -4783,7 +5247,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p143:insect_plague"
+      "source_ref": "srd-5.2.1:p143:insect_plague",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "legend_lore",
@@ -4804,7 +5270,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p144:legend_lore"
+      "source_ref": "srd-5.2.1:p144:legend_lore",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "mass_cure_wounds",
@@ -4824,7 +5292,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p147:mass_cure_wounds"
+      "source_ref": "srd-5.2.1:p147:mass_cure_wounds",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "mislead",
@@ -4843,7 +5313,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p150:mislead"
+      "source_ref": "srd-5.2.1:p150:mislead",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "modify_memory",
@@ -4862,7 +5334,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p150:modify_memory"
+      "source_ref": "srd-5.2.1:p150:modify_memory",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "passwall",
@@ -4881,7 +5355,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p151:passwall"
+      "source_ref": "srd-5.2.1:p151:passwall",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "planar_binding",
@@ -4904,7 +5380,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "24 hours",
-      "source_ref": "srd-5.2.1:p152:planar_binding"
+      "source_ref": "srd-5.2.1:p152:planar_binding",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "raise_dead",
@@ -4925,7 +5403,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p157:raise_dead"
+      "source_ref": "srd-5.2.1:p157:raise_dead",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "reincarnate",
@@ -4944,7 +5424,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p158:reincarnate"
+      "source_ref": "srd-5.2.1:p158:reincarnate",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "scrying",
@@ -4967,7 +5449,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p160:scrying"
+      "source_ref": "srd-5.2.1:p160:scrying",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "seeming",
@@ -4987,7 +5471,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "8 hours",
-      "source_ref": "srd-5.2.1:p160:seeming"
+      "source_ref": "srd-5.2.1:p160:seeming",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "summon_dragon",
@@ -5006,7 +5492,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p166:summon_dragon"
+      "source_ref": "srd-5.2.1:p166:summon_dragon",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "telekinesis",
@@ -5025,7 +5513,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p167:telekinesis"
+      "source_ref": "srd-5.2.1:p167:telekinesis",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "telepathic_bond",
@@ -5045,7 +5535,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p168:telepathic_bond"
+      "source_ref": "srd-5.2.1:p168:telepathic_bond",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "teleportation_circle",
@@ -5066,7 +5558,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 round",
-      "source_ref": "srd-5.2.1:p168:teleportation_circle"
+      "source_ref": "srd-5.2.1:p168:teleportation_circle",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "tree_stride",
@@ -5085,7 +5579,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p170:tree_stride"
+      "source_ref": "srd-5.2.1:p170:tree_stride",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "wall_of_force",
@@ -5104,7 +5600,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p172:wall_of_force"
+      "source_ref": "srd-5.2.1:p172:wall_of_force",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "wall_of_stone",
@@ -5125,7 +5623,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p173:wall_of_stone"
+      "source_ref": "srd-5.2.1:p173:wall_of_stone",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "blade_barrier",
@@ -5143,7 +5643,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p113:blade_barrier"
+      "source_ref": "srd-5.2.1:p113:blade_barrier",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "chain_lightning",
@@ -5163,7 +5665,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p114:chain_lightning"
+      "source_ref": "srd-5.2.1:p114:chain_lightning",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "circle_of_death",
@@ -5184,7 +5688,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p115:circle_of_death"
+      "source_ref": "srd-5.2.1:p115:circle_of_death",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "conjure_fey",
@@ -5202,7 +5708,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p118:conjure_fey"
+      "source_ref": "srd-5.2.1:p118:conjure_fey",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "contingency",
@@ -5221,7 +5729,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "10 days",
-      "source_ref": "srd-5.2.1:p119:contingency"
+      "source_ref": "srd-5.2.1:p119:contingency",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "create_undead",
@@ -5242,7 +5752,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p121:create_undead"
+      "source_ref": "srd-5.2.1:p121:create_undead",
+      "material_cost_specified": true,
+      "material_consumed": false
     },
     {
       "id": "disintegrate",
@@ -5262,7 +5774,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p124:disintegrate"
+      "source_ref": "srd-5.2.1:p124:disintegrate",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "eyebite",
@@ -5283,7 +5797,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p129:eyebite"
+      "source_ref": "srd-5.2.1:p129:eyebite",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "find_the_path",
@@ -5304,7 +5820,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 day",
-      "source_ref": "srd-5.2.1:p131:find_the_path"
+      "source_ref": "srd-5.2.1:p131:find_the_path",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "flesh_to_stone",
@@ -5325,7 +5843,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p133:flesh_to_stone"
+      "source_ref": "srd-5.2.1:p133:flesh_to_stone",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "forbiddance",
@@ -5344,7 +5864,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "1 day",
-      "source_ref": "srd-5.2.1:p133:forbiddance"
+      "source_ref": "srd-5.2.1:p133:forbiddance",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "freezing_sphere",
@@ -5364,7 +5886,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p134:freezing_sphere"
+      "source_ref": "srd-5.2.1:p134:freezing_sphere",
+      "material_cost_specified": true,
+      "material_consumed": false
     },
     {
       "id": "globe_of_invulnerability",
@@ -5384,7 +5908,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p136:globe_of_invulnerability"
+      "source_ref": "srd-5.2.1:p136:globe_of_invulnerability",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "guards_and_wards",
@@ -5404,7 +5930,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "24 hours",
-      "source_ref": "srd-5.2.1:p137:guards_and_wards"
+      "source_ref": "srd-5.2.1:p137:guards_and_wards",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "harm",
@@ -5422,7 +5950,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p139:harm"
+      "source_ref": "srd-5.2.1:p139:harm",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "heal",
@@ -5441,7 +5971,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p139:heal"
+      "source_ref": "srd-5.2.1:p139:heal",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "heroes_feast",
@@ -5462,7 +5994,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p140:heroes_feast"
+      "source_ref": "srd-5.2.1:p140:heroes_feast",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "instant_summons",
@@ -5481,7 +6015,9 @@
       "ritual": true,
       "concentration": false,
       "duration": "Until dispelled",
-      "source_ref": "srd-5.2.1:p143:instant_summons"
+      "source_ref": "srd-5.2.1:p143:instant_summons",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "irresistible_dance",
@@ -5499,7 +6035,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p143:irresistible_dance"
+      "source_ref": "srd-5.2.1:p143:irresistible_dance",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "magic_jar",
@@ -5518,7 +6056,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Until dispelled",
-      "source_ref": "srd-5.2.1:p146:magic_jar"
+      "source_ref": "srd-5.2.1:p146:magic_jar",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "mass_suggestion",
@@ -5538,7 +6078,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "24 hours",
-      "source_ref": "srd-5.2.1:p148:mass_suggestion"
+      "source_ref": "srd-5.2.1:p148:mass_suggestion",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "move_earth",
@@ -5559,7 +6101,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 2 hours",
-      "source_ref": "srd-5.2.1:p151:move_earth"
+      "source_ref": "srd-5.2.1:p151:move_earth",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "planar_ally",
@@ -5577,7 +6121,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p152:planar_ally"
+      "source_ref": "srd-5.2.1:p152:planar_ally",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "programmed_illusion",
@@ -5597,7 +6143,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Until dispelled",
-      "source_ref": "srd-5.2.1:p156:programmed_illusion"
+      "source_ref": "srd-5.2.1:p156:programmed_illusion",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "sunbeam",
@@ -5619,7 +6167,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p166:sunbeam"
+      "source_ref": "srd-5.2.1:p166:sunbeam",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "transport_via_plants",
@@ -5637,7 +6187,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 minute",
-      "source_ref": "srd-5.2.1:p170:transport_via_plants"
+      "source_ref": "srd-5.2.1:p170:transport_via_plants",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "true_seeing",
@@ -5660,7 +6212,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p171:true_seeing"
+      "source_ref": "srd-5.2.1:p171:true_seeing",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "wall_of_ice",
@@ -5679,7 +6233,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p172:wall_of_ice"
+      "source_ref": "srd-5.2.1:p172:wall_of_ice",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "wall_of_thorns",
@@ -5698,7 +6254,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p173:wall_of_thorns"
+      "source_ref": "srd-5.2.1:p173:wall_of_thorns",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "wind_walk",
@@ -5717,7 +6275,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "8 hours",
-      "source_ref": "srd-5.2.1:p174:wind_walk"
+      "source_ref": "srd-5.2.1:p174:wind_walk",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "word_of_recall",
@@ -5734,7 +6294,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p175:word_of_recall"
+      "source_ref": "srd-5.2.1:p175:word_of_recall",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "arcane_sword",
@@ -5754,7 +6316,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p110:arcane_sword"
+      "source_ref": "srd-5.2.1:p110:arcane_sword",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "conjure_celestial",
@@ -5772,7 +6336,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p118:conjure_celestial"
+      "source_ref": "srd-5.2.1:p118:conjure_celestial",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "delayed_blast_fireball",
@@ -5792,7 +6358,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p122:delayed_blast_fireball"
+      "source_ref": "srd-5.2.1:p122:delayed_blast_fireball",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "divine_word",
@@ -5809,7 +6377,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p125:divine_word"
+      "source_ref": "srd-5.2.1:p125:divine_word",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "etherealness",
@@ -5831,7 +6401,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Up to 8 hours",
-      "source_ref": "srd-5.2.1:p128:etherealness"
+      "source_ref": "srd-5.2.1:p128:etherealness",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "finger_of_death",
@@ -5851,7 +6423,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p131:finger_of_death"
+      "source_ref": "srd-5.2.1:p131:finger_of_death",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "fire_storm",
@@ -5871,7 +6445,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p132:fire_storm"
+      "source_ref": "srd-5.2.1:p132:fire_storm",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "forcecage",
@@ -5892,7 +6468,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p134:forcecage"
+      "source_ref": "srd-5.2.1:p134:forcecage",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "magnificent_mansion",
@@ -5912,7 +6490,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "24 hours",
-      "source_ref": "srd-5.2.1:p147:magnificent_mansion"
+      "source_ref": "srd-5.2.1:p147:magnificent_mansion",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "mirage_arcane",
@@ -5932,7 +6512,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "10 days",
-      "source_ref": "srd-5.2.1:p149:mirage_arcane"
+      "source_ref": "srd-5.2.1:p149:mirage_arcane",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "plane_shift",
@@ -5955,7 +6537,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p153:plane_shift"
+      "source_ref": "srd-5.2.1:p153:plane_shift",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "prismatic_spray",
@@ -5975,7 +6559,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p154:prismatic_spray"
+      "source_ref": "srd-5.2.1:p154:prismatic_spray",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "project_image",
@@ -5995,7 +6581,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 day",
-      "source_ref": "srd-5.2.1:p156:project_image"
+      "source_ref": "srd-5.2.1:p156:project_image",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "regenerate",
@@ -6016,7 +6604,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p158:regenerate"
+      "source_ref": "srd-5.2.1:p158:regenerate",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "resurrection",
@@ -6036,7 +6626,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p158:resurrection"
+      "source_ref": "srd-5.2.1:p158:resurrection",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "reverse_gravity",
@@ -6057,7 +6649,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p159:reverse_gravity"
+      "source_ref": "srd-5.2.1:p159:reverse_gravity",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "sequester",
@@ -6076,7 +6670,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Until dispelled",
-      "source_ref": "srd-5.2.1:p161:sequester"
+      "source_ref": "srd-5.2.1:p161:sequester",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "simulacrum",
@@ -6095,7 +6691,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Until dispelled",
-      "source_ref": "srd-5.2.1:p162:simulacrum"
+      "source_ref": "srd-5.2.1:p162:simulacrum",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "symbol",
@@ -6117,7 +6715,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Until dispelled or triggered",
-      "source_ref": "srd-5.2.1:p167:symbol"
+      "source_ref": "srd-5.2.1:p167:symbol",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "teleport",
@@ -6136,7 +6736,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p168:teleport"
+      "source_ref": "srd-5.2.1:p168:teleport",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "animal_shapes",
@@ -6154,7 +6756,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "24 hours",
-      "source_ref": "srd-5.2.1:p108:animal_shapes"
+      "source_ref": "srd-5.2.1:p108:animal_shapes",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "antimagic_field",
@@ -6174,7 +6778,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p109:antimagic_field"
+      "source_ref": "srd-5.2.1:p109:antimagic_field",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "antipathy_sympathy",
@@ -6217,7 +6823,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p112:befuddlement"
+      "source_ref": "srd-5.2.1:p112:befuddlement",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "clone",
@@ -6236,7 +6844,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p115:clone"
+      "source_ref": "srd-5.2.1:p115:clone",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "control_weather",
@@ -6257,7 +6867,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 8 hours",
-      "source_ref": "srd-5.2.1:p120:control_weather"
+      "source_ref": "srd-5.2.1:p120:control_weather",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "demiplane",
@@ -6276,7 +6888,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p122:demiplane"
+      "source_ref": "srd-5.2.1:p122:demiplane",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "dominate_monster",
@@ -6297,7 +6911,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p125:dominate_monster"
+      "source_ref": "srd-5.2.1:p125:dominate_monster",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "earthquake",
@@ -6318,7 +6934,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p127:earthquake"
+      "source_ref": "srd-5.2.1:p127:earthquake",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "glibness",
@@ -6336,7 +6954,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 hour",
-      "source_ref": "srd-5.2.1:p136:glibness"
+      "source_ref": "srd-5.2.1:p136:glibness",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "holy_aura",
@@ -6355,7 +6975,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p141:holy_aura"
+      "source_ref": "srd-5.2.1:p141:holy_aura",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "incendiary_cloud",
@@ -6375,7 +6997,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p142:incendiary_cloud"
+      "source_ref": "srd-5.2.1:p142:incendiary_cloud",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "maze",
@@ -6393,7 +7017,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
-      "source_ref": "srd-5.2.1:p148:maze"
+      "source_ref": "srd-5.2.1:p148:maze",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "mind_blank",
@@ -6412,7 +7038,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "24 hours",
-      "source_ref": "srd-5.2.1:p149:mind_blank"
+      "source_ref": "srd-5.2.1:p149:mind_blank",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "power_word_stun",
@@ -6432,7 +7060,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p154:power_word_stun"
+      "source_ref": "srd-5.2.1:p154:power_word_stun",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "sunburst",
@@ -6454,7 +7084,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p167:sunburst"
+      "source_ref": "srd-5.2.1:p167:sunburst",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "tsunami",
@@ -6472,7 +7104,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 6 rounds",
-      "source_ref": "srd-5.2.1:p171:tsunami"
+      "source_ref": "srd-5.2.1:p171:tsunami",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "astral_projection",
@@ -6493,7 +7127,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Until dispelled",
-      "source_ref": "srd-5.2.1:p111:astral_projection"
+      "source_ref": "srd-5.2.1:p111:astral_projection",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "foresight",
@@ -6515,7 +7151,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "8 hours",
-      "source_ref": "srd-5.2.1:p134:foresight"
+      "source_ref": "srd-5.2.1:p134:foresight",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "gate",
@@ -6537,7 +7175,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p135:gate"
+      "source_ref": "srd-5.2.1:p135:gate",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "imprisonment",
@@ -6557,7 +7197,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Until dispelled",
-      "source_ref": "srd-5.2.1:p142:imprisonment"
+      "source_ref": "srd-5.2.1:p142:imprisonment",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "mass_heal",
@@ -6575,7 +7217,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p147:mass_heal"
+      "source_ref": "srd-5.2.1:p147:mass_heal",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "meteor_swarm",
@@ -6594,7 +7238,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p149:meteor_swarm"
+      "source_ref": "srd-5.2.1:p149:meteor_swarm",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "power_word_heal",
@@ -6612,7 +7258,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p154:power_word_heal"
+      "source_ref": "srd-5.2.1:p154:power_word_heal",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "power_word_kill",
@@ -6632,7 +7280,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p154:power_word_kill"
+      "source_ref": "srd-5.2.1:p154:power_word_kill",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "prismatic_wall",
@@ -6651,7 +7301,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "10 minutes",
-      "source_ref": "srd-5.2.1:p155:prismatic_wall"
+      "source_ref": "srd-5.2.1:p155:prismatic_wall",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "shapechange",
@@ -6671,7 +7323,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p161:shapechange"
+      "source_ref": "srd-5.2.1:p161:shapechange",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "storm_of_vengeance",
@@ -6689,7 +7343,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p165:storm_of_vengeance"
+      "source_ref": "srd-5.2.1:p165:storm_of_vengeance",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "time_stop",
@@ -6707,7 +7363,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p169:time_stop"
+      "source_ref": "srd-5.2.1:p169:time_stop",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "true_polymorph",
@@ -6728,7 +7386,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p170:true_polymorph"
+      "source_ref": "srd-5.2.1:p170:true_polymorph",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "true_resurrection",
@@ -6748,7 +7408,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p170:true_resurrection"
+      "source_ref": "srd-5.2.1:p170:true_resurrection",
+      "material_cost_specified": true,
+      "material_consumed": true
     },
     {
       "id": "weird",
@@ -6767,7 +7429,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p174:weird"
+      "source_ref": "srd-5.2.1:p174:weird",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "wish",
@@ -6785,7 +7449,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "Instantaneous",
-      "source_ref": "srd-5.2.1:p175:wish"
+      "source_ref": "srd-5.2.1:p175:wish",
+      "material_cost_specified": false,
+      "material_consumed": false
     }
   ]
 }

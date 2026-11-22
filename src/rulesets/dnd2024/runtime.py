@@ -25,6 +25,7 @@ from src.adventures.graph_v2 import (
 from src.engine import progression
 from src.engine.legacy_game_projection import project_legacy_game_context
 from src.engine.modules import adventure_runtime_state, legacy_combat, ruleset_runtime
+from .forms import cr_cap, eligible_forms, known_form_count, validate_selection
 from src.engine.staged_transaction import fork_domain_state
 from src.rulesets.dnd2024.adventure_migrations import (
     apply_unreleased_adventure_binding_migration,
@@ -136,7 +137,7 @@ class Dnd2024Runtime:
     # 是 Spell Mastery 在长休研究法术书时换掉的那一项；recovery 是短休的恢复预算。
     rest_option_names = frozenset(
         {"attunement", "prepared_spells", "land_terrain", "free_cast", "recovery",
-         "hunter_options"}
+         "hunter_options", "wild_shape_forms"}
     )
     capabilities = RulesetCapabilities(
         experience_profile="dnd2024",
@@ -701,6 +702,22 @@ class Dnd2024Runtime:
         del rule
         choices = self._builder(draft).choices(draft)
         class_ref = str(draft.get("class_ref") or "")
+        if class_ref == "class:druid":
+            level = int(draft.get("level") or 1)
+            count = known_form_count(level)
+            # 1 级还没有 Wild Shape，不要在建卡页面摆出一堆选不了的形态。
+            if count:
+                bundle = self.load_bundle(str(draft.get("locale") or ""))
+                entries = [
+                    entry for catalog in bundle.list("monster_catalog")
+                    for entry in catalog.get("entries") or []
+                ]
+                choices["known_forms"] = {
+                    "count": count,
+                    "cr_cap": cr_cap(level),
+                    "options": eligible_forms(entries, level),
+                    "selected": list(draft.get("known_form_refs") or []),
+                }
         if class_ref:
             try:
                 choices["class_spells"] = Dnd2024SpellSelection(
@@ -724,7 +741,16 @@ class Dnd2024Runtime:
         _parsed, spell_errors = Dnd2024SpellSelection(
             bundle
         ).validate(class_ref, 1, draft.get("class_spell_choices"))
-        return [*errors, *spell_errors]
+        form_errors: list[str] = []
+        if class_ref == "class:druid":
+            entries = [
+                entry for catalog in bundle.list("monster_catalog")
+                for entry in catalog.get("entries") or []
+            ]
+            form_errors = validate_selection(
+                draft.get("known_form_refs") or [], int(draft.get("level") or 1), entries,
+            )
+        return [*errors, *spell_errors, *form_errors]
 
     def derive_character(self, rule: Any, draft: dict[str, Any]) -> dict[str, Any]:
         del rule
@@ -900,6 +926,7 @@ class Dnd2024Runtime:
         free_cast: dict[str, Any] | None = None,
         recovery: dict[str, Any] | None = None,
         hunter_options: dict[str, Any] | None = None,
+        wild_shape_forms: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         del rule
         canonical = character.get("ruleset_character")
@@ -924,6 +951,8 @@ class Dnd2024Runtime:
                 raise ValueError("land_terrain is only valid for a long rest")
             if free_cast is not None:
                 raise ValueError("free_cast is only valid for a long rest")
+            if wild_shape_forms is not None:
+                raise ValueError("wild shape forms are only replaced on a long rest")
             result = engine.complete_short_rest(
                 character, hit_die_rolls, attunement=attunement, recovery=recovery,
                 hunter_options=hunter_options,
@@ -943,6 +972,7 @@ class Dnd2024Runtime:
             result = engine.complete_long_rest(
                 character, land_terrain=land_terrain, prepared_spells=change,
                 free_cast=free_cast, hunter_options=hunter_options,
+                wild_shape_forms=wild_shape_forms,
             )
         else:
             raise ValueError("rest must be short or long")
@@ -1035,6 +1065,11 @@ class Dnd2024Runtime:
         # a Short or Long Rest"），所以这里只校验形状，不按休息种类拒绝。
         if "hunter_options" in options and not isinstance(options["hunter_options"], dict):
             raise ValueError("hunter_options must be an object keyed by feature id")
+        if "wild_shape_forms" in options:
+            if rest != "long":
+                raise ValueError("wild shape forms are only replaced on a long rest")
+            if not isinstance(options["wild_shape_forms"], dict):
+                raise ValueError("wild_shape_forms must be an object")
         checked = self.rest_option_names & set(options)
         if not checked:
             return

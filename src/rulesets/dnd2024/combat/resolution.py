@@ -18,6 +18,7 @@ from src.rulesets.dnd2024.features.resources import (
 )
 from ..character.attunement import AttunementError, canonical_item_ref
 from ..character.primitives import derived_save, derived_skill
+from ..forms import wild_shape_state
 from ..items.activation import (
     ItemActivationError,
     build_item_healing_event,
@@ -107,6 +108,15 @@ POTENT_SPELLCASTING_OWNERS = ("class:cleric", "class:druid")
 # event has to name the feature that rewrote its total.  The id lives here so
 # the audit trail and the catalog cannot drift apart.
 INDOMITABLE_MIGHT = "indomitable_might"
+
+
+def _equipment_modes(intent: dict[str, Any]) -> dict[str, str]:
+    """逐件模式：意图里给 `equipment_modes`，否则退回单个 `equipment_mode`。"""
+
+    raw = intent.get("equipment_modes")
+    if isinstance(raw, dict) and raw:
+        return {str(ref): str(mode) for ref, mode in raw.items()}
+    return {"*": str(intent.get("equipment_mode") or "merge")}
 
 
 def _proficiency_bonus_for_cr(cr: str) -> int:
@@ -565,7 +575,29 @@ class CombatResolutionMixin:
                 events.extend(self._perfect_focus_events(view, character))
             if chosen.get("persistent_rage"):
                 events.extend(self._persistent_rage_opening_events(view, character))
+            events.extend(self._evergreen_wild_shape_events(character, actor_id))
         return events
+
+    def _evergreen_wild_shape_events(
+        self, character: dict[str, Any], actor_id: str,
+    ) -> list[dict[str, Any]]:
+        """SRD p43：掷先攻且已无 Wild Shape 次数时恢复一次。
+
+        无骰、无动作、不受长休限制；`current > 0` 时什么都不做——所以每场战斗
+        最多补 1 次，不能靠连续开战刷次数。
+        """
+
+        if not self.features.has_feature(character, "archdruid"):
+            return []
+        state = (character.get("resources") or {}).get("class", {}).get("wild_shape")
+        if not isinstance(state, dict):
+            return []
+        if int(state.get("current", 0) or 0) != 0:
+            return []
+        return [{
+            "type": "dnd2024.class_resource.restored", "actor_id": actor_id,
+            "resource_id": "wild_shape", "amount": 1,
+        }]
 
     def _uncanny_metabolism_events(
         self, view: dict[str, Any], character: dict[str, Any], rng: Any,
@@ -1650,51 +1682,66 @@ class CombatResolutionMixin:
             if weapon is None:  # pragma: no cover - validation guards this
                 raise CombatIntentError("attack profile is not available to the actor")
             distance = self._distance(combat, actor_id, target_id)
-            # 属性与射程劣势都由共用函数判定：validation、掷骰后的预演和这里
-            # 读的是同一份规则，否则"面板显示敏捷、结算按力量"这种裂缝永远
-            # 只在某个分支上出现。
-            is_ranged_weapon = bool(weapon.get("ranged"))
-            ability = self.attack_ability(actor, weapon)
-            modifier = ability_modifier(actor["abilities"][ability])
-            if weapon.get("unarmed") or (
-                f"weapon_category:{weapon.get('category')}" in actor["weapon_category_refs"]
-            ):
-                # 徒手打击是每个 player-like actor 都会使用的天然攻击：熟练加值始终生效，
-                # 不依赖 weapon_category 熟练列表。
-                proficiency = actor["proficiency_bonus"]
+            # 形态攻击的加值来自 stat block（狼的 Bite 是 +4），不是由角色的
+            # 属性与熟练推出来的：变形后你就是用野兽的攻击表在打。
+            if weapon.get("source") == "form":
+                ability = ""
+                modifier = int(weapon.get("damage_modifier", 0) or 0)
+                attack_bonus = int(weapon.get("attack_bonus", 0) or 0)
+                # 形态攻击走 MM3 起统一的伤害段读取：catalog 的 beast 是
+                # damage: [{dice, type}]，旧存档与冒险包还是平坦字符串。
+                form_parts = attack_damage_parts(weapon)
+                damage_formula = str(form_parts[0]["dice"]) if form_parts else ""
+                damage_type = str(form_parts[0]["type"]) if form_parts else ""
+                is_ranged_weapon = bool(weapon.get("ranged"))
+                sacred_bonus = 0
+                range_disadvantage = self.attack_range_disadvantage(weapon, distance)
             else:
-                proficiency = 0
-            attack_bonus = modifier + proficiency
-            if is_ranged_weapon:
-                # 战斗风格专长的远程武器加值是特性投影字段：只在真远程武器
-                # 生效，投掷近战武器不适用（与上方 Thrown 语义划分一致）。
-                attack_bonus += int(actor.get("ranged_attack_bonus") or 0)
-            # 一次攻击的伤害是一到两段。玩家武器只有一段，形态（野兽的
-            # ``attacks[]``）可以带第二段；同一个读取函数让两条路都不用
-            # 关心数据形状。
-            parts = attack_damage_parts(weapon)
-            damage_formula = str(parts[0]["dice"]) if parts else ""
-            damage_type = str(parts[0]["type"]) if parts else ""
-            if intent.get("two_handed"):
-                # 两用武器双手持用换用更大的骰式；validation 已保证只有声明
-                # damage_two_handed 的武器才允许声明该意图。
-                damage_formula = str(weapon.get("damage_two_handed") or damage_formula)
-            # 神圣武器只祝福被绑定的那一把：加值是攻击检定上的独立加成，
-            # 不改属性、不改熟练，也不波及同名的另一把武器。
-            sacred_bonus = self._sacred_weapon_bonus(
-                actor, str(weapon.get("weapon_ref") or ""),
-            )
-            if not sacred_bonus and intent.get("activate_sacred_weapon"):
-                # 激活与首次攻击是同一个动作：绑定状态要到批次落地才存在，
-                # 但这一掷已经吃到了它的加值。
-                sacred_bonus, _ability = self._sacred_weapon_bonus_value(actor)
-            if sacred_bonus:
-                attack_bonus += sacred_bonus
-                if str(intent.get("sacred_weapon_damage") or "") == "radiant":
-                    # 选择只改本次该武器的伤害类型：武器骰不变、数量不变，
-                    # 也不会把别的 rider 的既定类型一起改写。
-                    damage_type = "radiant"
-            range_disadvantage = self.attack_range_disadvantage(weapon, distance)
+                # 属性与射程劣势都由共用函数判定：validation、掷骰后的预演和这里
+                # 读的是同一份规则，否则"面板显示敏捷、结算按力量"这种裂缝永远
+                # 只在某个分支上出现。
+                is_ranged_weapon = bool(weapon.get("ranged"))
+                ability = self.attack_ability(actor, weapon)
+                modifier = ability_modifier(actor["abilities"][ability])
+                if weapon.get("unarmed") or (
+                    f"weapon_category:{weapon.get('category')}" in actor["weapon_category_refs"]
+                ):
+                    # 徒手打击是每个 player-like actor 都会使用的天然攻击：熟练
+                    # 加值始终生效，不依赖 weapon_category 熟练列表。
+                    proficiency = actor["proficiency_bonus"]
+                else:
+                    proficiency = 0
+                attack_bonus = modifier + proficiency
+                if is_ranged_weapon:
+                    # 战斗风格专长的远程武器加值是特性投影字段：只在真远程武器
+                    # 生效，投掷近战武器不适用（与上方 Thrown 语义划分一致）。
+                    attack_bonus += int(actor.get("ranged_attack_bonus") or 0)
+                # 一次攻击的伤害是一到两段。玩家武器只有一段，形态（野兽的
+                # ``attacks[]``）可以带第二段；同一个读取函数让两条路都不用
+                # 关心数据形状。
+                parts = attack_damage_parts(weapon)
+                damage_formula = str(parts[0]["dice"]) if parts else ""
+                damage_type = str(parts[0]["type"]) if parts else ""
+                if intent.get("two_handed"):
+                    # 两用武器双手持用换用更大的骰式；validation 已保证只有声明
+                    # damage_two_handed 的武器才允许声明该意图。
+                    damage_formula = str(weapon.get("damage_two_handed") or damage_formula)
+                # 神圣武器只祝福被绑定的那一把：加值是攻击检定上的独立加成，
+                # 不改属性、不改熟练，也不波及同名的另一把武器。
+                sacred_bonus = self._sacred_weapon_bonus(
+                    actor, str(weapon.get("weapon_ref") or ""),
+                )
+                if not sacred_bonus and intent.get("activate_sacred_weapon"):
+                    # 激活与首次攻击是同一个动作：绑定状态要到批次落地才存在，
+                    # 但这一掷已经吃到了它的加值。
+                    sacred_bonus, _ability = self._sacred_weapon_bonus_value(actor)
+                if sacred_bonus:
+                    attack_bonus += sacred_bonus
+                    if str(intent.get("sacred_weapon_damage") or "") == "radiant":
+                        # 选择只改本次该武器的伤害类型：武器骰不变、数量不变，
+                        # 也不会把别的 rider 的既定类型一起改写。
+                        damage_type = "radiant"
+                range_disadvantage = self.attack_range_disadvantage(weapon, distance)
         else:
             weapon = next(item for item in actor["attacks"] if item["id"] == intent["attack_id"])
             modifier = int(weapon.get("damage_modifier", 0) or 0)
@@ -4407,6 +4454,111 @@ class CombatResolutionMixin:
         return "action"
 
     ABILITY_CHECK_COSTS = frozenset({"action", "bonus_action", "none"})
+
+    #: Wild Resurgence 的两种方向。
+    WILD_RESURGENCE_DIRECTIONS = ("slot_to_use", "use_to_slot")
+
+    def _wild_resurgence_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """SRD p42：法术位 ↔ Wild Shape 使用次数的两个单向换算。
+
+        两个方向各自记账：`slot_to_use` 每回合一次（economy 里的标记），
+        `use_to_slot` 两次长休之间一次（`wild_resurgence` 资源）。**不允许**
+        在同一声明里连续做两次——那不是换算，是免费资源。
+        """
+
+        actor_id = str(intent["actor_id"])
+        direction = str(intent.get("direction") or "")
+        if direction == "slot_to_use":
+            slot_level = int(intent.get("slot_level") or 0)
+            return [
+                # exchange=True：这次消耗法术位不算"这一回合已经用槽施法"，
+                # 否则 Wild Resurgence 会顺带吃掉本回合的施法额度。
+                {"type": "dnd2024.spell.slot_spent", "actor_id": actor_id,
+                 "slot_level": slot_level, "exchange": True},
+                {"type": "dnd2024.class_resource.restored", "actor_id": actor_id,
+                 "resource_id": "wild_shape", "amount": 1},
+                {"type": "dnd2024.wild_resurgence.used", "actor_id": actor_id,
+                 "direction": direction, "turn_limited": True},
+            ]
+        return [
+            {"type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+             "resource_id": "wild_shape", "amount": 1},
+            # 两次长休之间一次：必须真扣，否则这个方向可以无限续。
+            {"type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+             "resource_id": "wild_resurgence", "amount": 1},
+            {"type": "dnd2024.spell.font_slot_created", "actor_id": actor_id,
+             "slot_level": 1, "source": "wild_resurgence"},
+            {"type": "dnd2024.wild_resurgence.used", "actor_id": actor_id,
+             "direction": direction, "turn_limited": False},
+        ]
+
+    def _nature_magician_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """SRD p43：消耗 N 次 Wild Shape，换一个 2N 级的临时法术位。"""
+
+        actor_id = str(intent["actor_id"])
+        uses = int(intent.get("uses") or 0)
+        return [
+            {"type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+             "resource_id": "wild_shape", "amount": uses},
+            # 两次长休之间一次：与 Wild Resurgence 的 use_to_slot 分账。
+            {"type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+             "resource_id": "archdruid", "amount": 1},
+            {"type": "dnd2024.spell.font_slot_created", "actor_id": actor_id,
+             "slot_level": 2 * uses, "source": "archdruid_nature_magician"},
+        ]
+
+    def _form_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """变成某个形态，或变回来。
+
+        面板怎么合成不在这里——那是 ``forms.panel`` 的策略表。这里只做变形这个
+        动作本身的三件事：付附赠动作、扣一次 Wild Shape、按德鲁伊等级给临时 HP。
+        """
+
+        actor_id = str(intent["actor_id"])
+        character = self._canonical_for_actor(instance, actor_id)
+        level = declaring_class_level(character, "druid")
+        if str(intent.get("type")) == "form.revert":
+            return [
+                {"type": "dnd2024.action.spent", "actor_id": actor_id,
+                 "resource": "bonus_action", "amount": 1},
+                {"type": "dnd2024.form.reverted", "actor_id": actor_id,
+                 "reason": str(intent.get("reason") or "voluntary")},
+            ]
+        entry = self._statblock_by_ref(str(intent.get("form_ref") or ""))
+        if entry is None:  # pragma: no cover - validation guards this
+            raise CombatIntentError("form reference is not available")
+        state = wild_shape_state(
+            entry,
+            druid_level=level,
+            beast_spells=self.features.has_feature(character, "beast_spells"),
+            equipment_modes=_equipment_modes(intent),
+            assumed_at_turn=int(combat.get("round", 0) or 0),
+            assumed_at_minute=self._logical_minutes(instance),
+        )
+        events: list[dict[str, Any]] = []
+        if isinstance(character.get("forms"), dict) and character["forms"].get("active"):
+            # 再次变形先原子结束旧形态：不结束就换面板等于"免费续时"。
+            events.append({"type": "dnd2024.form.reverted", "actor_id": actor_id,
+                           "reason": "reshaped"})
+        events.extend([
+            {"type": "dnd2024.action.spent", "actor_id": actor_id,
+             "resource": "bonus_action", "amount": 1},
+            {"type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+             "resource_id": "wild_shape", "amount": 1},
+            # Temporary HP 等于德鲁伊等级（SRD p43）；"保留较高值"由 reducer 决定，
+            # 这里只声明这次变形给了多少。
+            {"type": "resource.changed", "target_id": actor_id,
+             "resource": "temp_hp", "amount": max(0, int(level))},
+            {"type": "dnd2024.form.assumed", "actor_id": actor_id,
+             "form": state.as_payload()},
+        ])
+        return events
 
     def _ability_check_events(
         self, combat: dict[str, Any], intent: dict[str, Any], actor: dict[str, Any],
