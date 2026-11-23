@@ -252,6 +252,47 @@ def test_form_state_round_trips_through_a_save_payload() -> None:
     assert "abilities" not in state.as_payload()
 
 
+def test_legacy_form_payload_keeps_the_single_equipment_mode() -> None:
+    restored = FormState.from_payload({
+        "effect_id": "wild_shape",
+        "form_ref": "wolf",
+        "equipment_mode": "merge",
+    })
+
+    assert restored.equipment_modes == {"*": "merge"}
+
+
+def test_reverting_a_legacy_active_form_preserves_known_forms() -> None:
+    from src.engine.modules import ruleset_runtime
+
+    engine, instance = _combat()
+    canonical = instance.get_character_sheet("gm")["ruleset_character"]
+    canonical["forms"] = {
+        "known": {"wild_shape": ["wolf"]},
+        "active": {
+            "effect_id": "wild_shape",
+            "form_ref": "wolf",
+            "equipment_mode": "merge",
+        },
+    }
+    state = ruleset_runtime.state(instance)
+    batch = {
+        "batch_id": "batch_legacy_form_revert",
+        "intent_id": "legacy-form-revert",
+        "intent_type": "form.revert",
+        "expected_version": state["version"],
+        "result_version": state["version"] + 1,
+        "events": [{
+            "type": "dnd2024.form.reverted", "actor_id": "player:gm",
+        }],
+    }
+    engine.apply_batch(instance, batch)
+
+    restored = instance.get_character_sheet("gm")["ruleset_character"]
+    assert restored["forms"]["known"]["wild_shape"] == ["wolf"]
+    assert "active" not in restored["forms"]
+
+
 def test_an_unknown_effect_or_mode_is_rejected_on_load() -> None:
     with pytest.raises(FormStateError, match="unknown shape-shift effect"):
         FormState.from_payload({"effect_id": "polymorph_self", "form_ref": "wolf"})
@@ -473,6 +514,41 @@ def test_a_druid_can_assume_a_beast_form() -> None:
     assert int(character["resources"].get("temp_hp", 0) or 0) == 2
 
 
+def test_legacy_druid_without_known_form_state_uses_the_safe_bootstrap() -> None:
+    engine, instance, rng = _druid_combat(2)
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    character.setdefault("forms", {}).pop("known", None)
+    state = __import__("src.engine.modules", fromlist=["ruleset_runtime"]).ruleset_runtime.state(instance)
+
+    result = engine.resolve_intent(instance, {
+        "intent_id": "legacy-shape", "type": "form.assume",
+        "expected_version": state["version"], "submitted_by": "gm",
+        "actor_id": "player:gm", "form_ref": "wolf",
+    }, rng([]))
+
+    assert result["ok"] is True, result.get("error")
+
+
+def test_available_intents_exposes_assume_and_revert_controls() -> None:
+    engine, instance, rng = _druid_combat(2)
+    actions = engine.available_intents(instance, "gm")
+    assume = next(action for action in actions if action["type"] == "form.assume")
+    assert {row["ref"] for row in assume["forms"]} >= {"wolf"}
+
+    state = __import__("src.engine.modules", fromlist=["ruleset_runtime"]).ruleset_runtime.state(instance)
+    result = engine.resolve_intent(instance, {
+        "intent_id": "shape-ui", "type": "form.assume",
+        "expected_version": state["version"], "submitted_by": "gm",
+        "actor_id": "player:gm", "form_ref": "wolf",
+    }, rng([]))
+    assert result["ok"] is True
+    engine.apply_batch(instance, result["event_batch"])
+    state = __import__("src.engine.modules", fromlist=["ruleset_runtime"]).ruleset_runtime.state(instance)
+    state["combat"]["economy"]["bonus_action"] = 1
+    actions = engine.available_intents(instance, "gm")
+    assert any(action["type"] == "form.revert" for action in actions), actions
+
+
 def test_wild_shape_refuses_a_form_above_the_level_cap() -> None:
     engine, instance, rng = _druid_combat(2)
     from src.engine.modules import ruleset_runtime
@@ -510,6 +586,55 @@ def test_reverting_requires_an_active_form() -> None:
     }, rng([]))
     assert result["ok"] is False
     assert "no shape" in result["error"]
+
+
+def test_new_incapacitation_is_seen_by_the_same_batch_shape_exit_sweep() -> None:
+    engine, instance, _rng_factory = _shaped_druid(2)
+    from src.engine.modules import ruleset_runtime
+
+    combat = ruleset_runtime.state(instance)["combat"]
+    exits = engine._shape_exit_events(instance, combat, [{
+        "type": "condition.applied", "target_id": "player:gm",
+        "condition": "stunned", "source_actor_id": "enemy:goblin",
+    }])
+
+    assert [event["reason"] for event in exits] == ["incapacitated"]
+
+
+def test_save_action_half_damage_only_applies_on_a_successful_save(monkeypatch) -> None:
+    engine, instance = _combat()
+    from src.engine.modules import ruleset_runtime
+
+    state = ruleset_runtime.state(instance)
+    enemies = state["combat"]["enemies"]
+    enemy_id = next(iter(enemies))
+    enemies[enemy_id]["actions"] = [{
+        "id": "save-test", "kind": "save_action", "ability": "dex", "dc": 10,
+        "on_fail": [{"damage": [{"dice": "2d6", "type": "fire", "half": True}]}],
+    }]
+    seen_half: list[bool] = []
+
+    def fake_save(self, *args, **kwargs):
+        return {"type": "check.resolved", "success": False}
+
+    def fake_damage(self, dice, damage_type, target, critical, rng, *, half=False):
+        seen_half.append(half)
+        return None, 0
+
+    monkeypatch.setattr(type(engine), "_saving_throw_check", fake_save)
+    monkeypatch.setattr(type(engine), "_damage_instance_event", fake_damage)
+    engine._save_action_events(
+        instance,
+        state["combat"],
+        {
+            "actor_id": f"enemy:{enemy_id}",
+            "target_id": "player:gm",
+            "action_id": "save-test",
+        },
+        _rng(),
+    )
+
+    assert seen_half == [False]
 
 
 # ---------------------------------------------------------------------------

@@ -28,6 +28,8 @@ from src.rulesets.dnd2024.features import (
     Dnd2024ClassFeatureResolver,
 )
 from src.rulesets.dnd2024.features.resources import resource_state
+from src.rulesets.dnd2024.forms import bootstrap_known_forms
+from src.rulesets.dnd2024.spells.font_of_magic import declaring_class_level
 from src.rulesets.dnd2024.items.activation import (
     ItemActivationError,
     validate_activation_declaration,
@@ -229,6 +231,64 @@ class Dnd2024CombatEngine(
             usable.append(view)
         return tuple(usable)
 
+    def _available_form_intents(
+        self, instance: Any, actor: dict[str, Any], economy: dict[str, Any],
+        version: int,
+    ) -> list[dict[str, Any]]:
+        """Project the normal UI entries for Wild Shape's form intents."""
+
+        if actor.get("kind") != "player":
+            return []
+        feature_character = self._feature_character(actor)
+        if not self.features.has_feature(feature_character, "wild_shape"):
+            return []
+        _kind, raw_id = _actor_kind(str(actor.get("actor_id") or ""))
+        character = _canonical(instance.get_character_sheet(raw_id))
+        forms = character.get("forms")
+        forms = forms if isinstance(forms, dict) else {}
+        active = forms.get("active")
+        known = forms.get("known")
+        known = known.get("wild_shape") if isinstance(known, dict) else known
+        if not isinstance(known, list) or not known:
+            entries = [
+                entry
+                for catalog in self.bundle.list("monster_catalog")
+                for entry in catalog.get("entries") or []
+            ]
+            level = declaring_class_level(character, "druid")
+            known = bootstrap_known_forms(entries, int(level))
+        form_options: list[dict[str, Any]] = []
+        for form_ref in known:
+            entry = self._statblock_by_ref(str(form_ref))
+            if entry is None:
+                continue
+            form_options.append({
+                "ref": str(entry.get("id") or ""),
+                "name": str(entry.get("name") or entry.get("id") or ""),
+                "cr": str(entry.get("cr") or "0"),
+            })
+        actions: list[dict[str, Any]] = []
+        if isinstance(active, dict):
+            if int(economy.get("bonus_action", 0) or 0) > 0:
+                actions.append({
+                    "type": "form.revert",
+                    "label": "Revert form",
+                    "actor_id": actor["actor_id"],
+                    "expected_version": version,
+                })
+        if form_options and (
+            int(economy.get("bonus_action", 0) or 0) > 0
+            and int((resource_state(character, "wild_shape") or {}).get("current", 0) or 0) > 0
+        ):
+            actions.append({
+                "type": "form.assume",
+                "label": "Wild Shape",
+                "actor_id": actor["actor_id"],
+                "expected_version": version,
+                "forms": form_options,
+            })
+        return actions
+
     def available_intents(self, instance: Any, actor_id: str) -> list[dict[str, Any]]:
         state = self.initialize_state(instance)
         combat = state["combat"]
@@ -362,6 +422,7 @@ class Dnd2024CombatEngine(
             }]
         economy = combat.get("economy", {})
         actions: list[dict[str, Any]] = []
+        actions.extend(self._available_form_intents(instance, actor, combat.get("economy", {}), version))
         if int(economy.get("action", 0) or 0) > 0 or int(
             economy.get("attacks_remaining", 0) or 0
         ) > 0 or int(economy.get("surge_action", 0) or 0) > 0:
@@ -1194,7 +1255,7 @@ class Dnd2024CombatEngine(
         events.extend(self._incapacitation_cleanup_events(instance, combat, events))
         events.extend(self._source_incapacitation_events(instance, combat, events))
         events.extend(self._timed_condition_expiry_events(instance, combat))
-        events.extend(self._shape_exit_events(instance, combat))
+        events.extend(self._shape_exit_events(instance, combat, events))
         # 世界时钟驱动的到期：一场在一分钟内结束的战斗会把效果留在身上，
         # 只要之后还有任何战斗意图或时钟越过那一分钟就会被清掉。end_turn
         # 由回合推进处统一查两个上限，这里不能重复发同一条移除事件。
@@ -1405,6 +1466,7 @@ class Dnd2024CombatEngine(
 
     def _shape_exit_events(
         self, instance: Any, combat: dict[str, Any],
+        pending_events: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """变形在失能、死亡或到期时结束。
 
@@ -1414,8 +1476,16 @@ class Dnd2024CombatEngine(
         """
 
         events: list[dict[str, Any]] = []
+        pending_events = pending_events or []
+        already_reverted = {
+            str(event.get("actor_id") or "")
+            for event in pending_events
+            if event.get("type") == "dnd2024.form.reverted"
+        }
         now = self._logical_minutes(instance)
         for actor_id in self._combat_actor_ids(instance, combat):
+            if actor_id in already_reverted:
+                continue
             try:
                 view = self._actor_view(instance, combat, actor_id)
             except CombatIntentError:  # pragma: no cover - came from combat
@@ -1423,7 +1493,38 @@ class Dnd2024CombatEngine(
             form = view.get("form_ref")
             if not form:
                 continue
-            conditions = view.get("conditions") or {}
+            conditions = deepcopy(view.get("conditions") or {})
+            hp = int(view.get("hp", 0) or 0)
+            temp_hp = int(view.get("temp_hp", 0) or 0)
+            for event in pending_events:
+                if str(event.get("target_id") or "") != actor_id:
+                    continue
+                event_type = str(event.get("type") or "")
+                if event_type == "condition.applied":
+                    conditions[str(event.get("condition") or "")] = {}
+                elif event_type == "condition.removed":
+                    conditions.pop(str(event.get("condition") or ""), None)
+                elif event_type == "resource.changed":
+                    resource = str(event.get("resource") or "hp")
+                    if resource == "temp_hp":
+                        temp_hp = max(temp_hp, int(event.get("amount", 0) or 0))
+                        continue
+                    delta = int(event.get("delta", 0) or 0)
+                    if delta < 0 and temp_hp > 0 and not event.get("healing"):
+                        absorbed = min(temp_hp, -delta)
+                        temp_hp -= absorbed
+                        delta += absorbed
+                    hp = max(0, min(int(view.get("max_hp", hp) or hp), hp + delta))
+                    if hp <= 0:
+                        conditions["unconscious"] = {}
+                    elif delta > 0:
+                        conditions.pop("unconscious", None)
+                        conditions.pop("stable", None)
+                elif event_type == "dnd2024.death_save.resolved":
+                    if event.get("dead"):
+                        conditions["dead"] = {}
+                    elif event.get("stable"):
+                        conditions["stable"] = {}
             if "dead" in conditions:
                 reason = "death"
             elif any(
