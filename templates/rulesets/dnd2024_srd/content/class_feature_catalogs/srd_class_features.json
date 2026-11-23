@@ -2323,6 +2323,22 @@
           "minimum_level": 20,
           "source_ref": "srd-5.2.1:p72:eldritch-master",
           "summary": "When you use your Magical Cunning feature, you regain all your expended Pact Magic spell slots instead of half of them."
+        },
+        {
+          "id": "hurl_through_hell",
+          "owner": "subclass:fiend_patron",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p76:hurl-through-hell",
+          "summary": "Once per turn when you hit a creature with an attack roll, you can force it to make a Charisma saving throw against your spell save DC. On a failure, the target takes 8d10 Psychic damage if it isn't a Fiend and has the Incapacitated condition until the end of your next turn. Once you use this feature, you can't use it again until you finish a Long Rest, unless you expend a Pact Magic spell slot (no action required) to restore it.",
+          "parameters": {
+            "save_ability": "cha",
+            "damage_dice": "8d10",
+            "damage_type": "psychic",
+            "damage_exempt_creature_types": ["fiend"],
+            "condition": "incapacitated",
+            "condition_turns": 1,
+            "uses_per_long_rest": 1
+          }
         }
       ]
     },

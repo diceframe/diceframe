@@ -382,3 +382,74 @@ def test_a_hit_can_start_the_vibration_and_spend_four_focus(open_hand17) -> None
     assert applied[0]["effect"]["detail"]["target_id"] == "enemy:goblin-1"
     spend = _of_type(events, "dnd2024.class_resource.spent")
     assert [row["amount"] for row in spend] == [4]
+
+
+WARLOCK_ABILITIES = {"str": 8, "dex": 14, "con": 13, "int": 10, "wis": 12, "cha": 15}
+WARLOCK_SKILLS = ["skill:arcana", "skill:deception"]
+
+
+def _fiend(bundle, level: int) -> dict:
+    return _build(
+        Dnd2024Runtime(), bundle, "class:warlock", level,
+        WARLOCK_ABILITIES, WARLOCK_SKILLS,
+        "equipment_package:warlock_a",
+        "subclass:fiend_patron" if level >= 3 else "",
+    )
+
+
+@pytest.fixture(scope="module")
+def fiend14(bundle):
+    return _fiend(bundle, 14)
+
+
+def test_hurl_through_hell_needs_level_fourteen(bundle) -> None:
+    from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+
+    features = Dnd2024ClassFeatureResolver(bundle)
+    low = _fiend(bundle, 13)["ruleset_character"]
+    high = _fiend(bundle, 14)["ruleset_character"]
+    assert not features.has_feature(low, "hurl_through_hell")
+    assert features.has_feature(high, "hurl_through_hell")
+
+
+def test_a_failed_save_hurls_the_target_through_hell(fiend14) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _attack
+
+    engine, instance = _setup(fiend14)
+    _start(engine, instance, enemies=_two_enemies())
+
+    events, _decisions = _attack(
+        engine, instance, "item:dagger", dice=[20, 1, 1] + [6] * 8, hurl_through_hell=True,
+    )
+
+    check = [row for row in _of_type(events, "check.resolved") if row.get("ability") == "cha"][0]
+    assert check["success"] is False
+    damage = [
+        row for row in _of_type(events, "resource.changed")
+        if row.get("damage_type") == "psychic"
+    ][0]
+    assert damage["delta"] <= -8
+    applied = _of_type(events, "condition.applied")[0]
+    assert applied["condition"] == "incapacitated"
+    assert applied["banishment"] == "guided"
+    assert _of_type(events, "dnd2024.feature.used")
+
+
+def test_a_successful_save_still_spends_the_use(fiend14) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _attack
+
+    engine, instance = _setup(fiend14)
+    _start(engine, instance, enemies=_two_enemies())
+
+    events, _decisions = _attack(
+        engine, instance, "item:dagger", dice=[20, 1, 1, 20], hurl_through_hell=True,
+    )
+
+    check = [row for row in _of_type(events, "check.resolved") if row.get("ability") == "cha"][0]
+    assert check["success"] is True
+    assert not [
+        row for row in _of_type(events, "resource.changed")
+        if row.get("damage_type") == "psychic"
+    ]
+    assert not _of_type(events, "condition.applied")
+    assert _of_type(events, "dnd2024.feature.used")

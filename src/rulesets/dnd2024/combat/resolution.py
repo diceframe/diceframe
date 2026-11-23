@@ -54,6 +54,7 @@ from .primitives import (
     roll,
     ABJURE_FOES_DURATION,
     INTIMIDATING_PRESENCE_DURATION,
+    HURL_THROUGH_HELL_DURATION,
     world_minutes,
     INITIATIVE_CHOICES,
     PERSISTENT_RAGE_DURATION,
@@ -2774,6 +2775,33 @@ class CombatResolutionMixin:
                     ),
                 })
 
+        if intent.get("hurl_through_hell") and self.features.has_feature(
+            character, "hurl_through_hell",
+        ) and not self._feature_used_this_turn(combat, str(actor["actor_id"]), "hurl_through_hell"):
+            declarations.append({
+                "kind": "hurl_through_hell",
+                "feature_id": "hurl_through_hell",
+                "save_ability": str(
+                    parameter("hurl_through_hell", "save_ability") or "cha"
+                ),
+                "damage_dice": str(
+                    parameter("hurl_through_hell", "damage_dice") or "8d10"
+                ),
+                "damage_type": str(
+                    parameter("hurl_through_hell", "damage_type") or "psychic"
+                ),
+                "exempt_types": list(
+                    parameter("hurl_through_hell", "damage_exempt_creature_types")
+                    or ["fiend"]
+                ),
+                "condition": str(
+                    parameter("hurl_through_hell", "condition") or "incapacitated"
+                ),
+                "turns": int(
+                    parameter("hurl_through_hell", "condition_turns") or 1
+                ),
+            })
+
         if intent.get("quivering_palm") and bool(weapon.get("unarmed")):
             declarations.append({
                 "kind": "quivering_palm",
@@ -2862,6 +2890,49 @@ class CombatResolutionMixin:
                 events.extend(self._open_hand_events(
                     instance, combat, attacker_id, target, row, dc, rng,
                 ))
+                continue
+            if row.get("kind") == "hurl_through_hell":
+                # 每回合一次：先记账，再掷豁免。成功也消耗这次使用。
+                events.append({
+                    "type": "dnd2024.feature.used", "actor_id": attacker_id,
+                    "feature_id": "hurl_through_hell",
+                    "round": int((combat.get("economy") or {}).get("round", 0) or 0),
+                    "turn_index": int(
+                        (combat.get("economy") or {}).get("turn_index", 0) or 0
+                    ),
+                })
+                dc = int(attacker.get("spell_save_dc", 0) or 0)
+                ability = str(row.get("save_ability") or "cha")
+                check = self._saving_throw_check(
+                    instance, combat, target, str(target["actor_id"]),
+                    ability, dc, attacker_id, events, rng,
+                )
+                check["source_feature"] = "hurl_through_hell"
+                events.append(check)
+                if check["success"]:
+                    continue
+                exempt = {str(code).lower() for code in row.get("exempt_types") or ()}
+                creature_type = str(target.get("creature_type") or "").lower()
+                if creature_type not in exempt:
+                    amount, _rolled = roll(str(row.get("damage_dice") or "8d10"), rng)
+                    events.append({
+                        "type": "resource.changed", "resource": "hp",
+                        "target_id": str(target["actor_id"]), "delta": -amount,
+                        "damage_type": str(row.get("damage_type") or "psychic"),
+                        "feature_id": "hurl_through_hell",
+                        "source_actor_id": attacker_id,
+                    })
+                events.append({
+                    "type": "condition.applied",
+                    "target_id": str(target["actor_id"]),
+                    "condition": str(row.get("condition") or "incapacitated"),
+                    "duration": HURL_THROUGH_HELL_DURATION,
+                    "turns_remaining": int(row.get("turns") or 1) * 10,
+                    "source_actor_id": attacker_id,
+                    "feature_id": "hurl_through_hell",
+                    # 消失与返回需要战场坐标之外的语义；这里只落失能与时长。
+                    "banishment": "guided",
+                })
                 continue
             if row.get("kind") == "quivering_palm":
                 # 无需豁免：命中即成立，随后由"结束"动作触发体质豁免。

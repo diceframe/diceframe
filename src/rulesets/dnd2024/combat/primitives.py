@@ -75,7 +75,9 @@ def world_minutes(instance: Any) -> int:
 
     minutes = clock_to_minutes(world_clock(getattr(instance, "world_state", None)))
     return minutes if isinstance(minutes, int) and minutes >= 0 else 0
+HURL_THROUGH_HELL_DURATION = "hurl_through_hell"
 TURNS_SCOPED_DURATIONS = frozenset({
+    HURL_THROUGH_HELL_DURATION,
     TURN_UNDEAD_DURATION, ABJURE_FOES_DURATION, INTIMIDATING_PRESENCE_DURATION,
 })
 # 只有世界时钟能结束的效果：它们不参与回合域到期，也不随战斗结束消失。
