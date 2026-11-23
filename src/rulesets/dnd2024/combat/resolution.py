@@ -2774,6 +2774,16 @@ class CombatResolutionMixin:
                     ),
                 })
 
+        if intent.get("quivering_palm") and bool(weapon.get("unarmed")):
+            declarations.append({
+                "kind": "quivering_palm",
+                "feature_id": "quivering_palm",
+                "focus_cost": int(parameter("quivering_palm", "focus_cost") or 4),
+                "duration_minutes": int(
+                    (character.get("build") or {}).get("level", 1) or 1
+                ) * 1440,
+            })
+
         if not intent.get("stunning_strike"):
             return declarations
         if not self.features.has_feature(character, "stunning_strike"):
@@ -2852,6 +2862,27 @@ class CombatResolutionMixin:
                 events.extend(self._open_hand_events(
                     instance, combat, attacker_id, target, row, dc, rng,
                 ))
+                continue
+            if row.get("kind") == "quivering_palm":
+                # 无需豁免：命中即成立，随后由"结束"动作触发体质豁免。
+                cost = int(row.get("focus_cost") or 0)
+                if cost:
+                    events.append({
+                        "type": "dnd2024.class_resource.spent",
+                        "actor_id": attacker_id,
+                        "resource_id": "focus_points", "amount": cost,
+                    })
+                events.append({
+                    "type": "dnd2024.long_effect.applied",
+                    "actor_id": attacker_id,
+                    "effect_id": "quivering_palm",
+                    "effect": {
+                        "feature_id": "quivering_palm",
+                        "expires_at": world_minutes(instance)
+                        + int(row.get("duration_minutes") or 0),
+                        "detail": {"target_id": str(target["actor_id"])},
+                    },
+                })
                 continue
             if row.get("kind") != "stunning_strike":
                 continue

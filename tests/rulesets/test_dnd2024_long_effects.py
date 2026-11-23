@@ -365,3 +365,20 @@ def test_ending_without_a_vibration_is_refused(open_hand17) -> None:
     resolved = _capability(engine, instance, "quivering_palm_end", [1])
 
     assert resolved["ok"] is False
+
+
+def test_a_hit_can_start_the_vibration_and_spend_four_focus(open_hand17) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _attack
+
+    engine, instance = _setup(open_hand17)
+    _start(engine, instance, enemies=_two_enemies())
+
+    events, _decisions = _attack(
+        engine, instance, "unarmed_strike", dice=[20, 5], quivering_palm=True,
+    )
+
+    applied = _of_type(events, "dnd2024.long_effect.applied")
+    assert applied[0]["effect_id"] == "quivering_palm"
+    assert applied[0]["effect"]["detail"]["target_id"] == "enemy:goblin-1"
+    spend = _of_type(events, "dnd2024.class_resource.spent")
+    assert [row["amount"] for row in spend] == [4]
