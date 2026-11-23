@@ -56,8 +56,21 @@ SRD p76：
 | 条件支持持续、回合边界、重复豁免与失能级联 | `combat/resolution.py::_save_repeat_events`、`_end_turn_events`；`combat/reducer.py::_reduce_event` |
 | 位置、敌人回合开始、光环与资源支付已有入口 | `combat/engine.py::_distance`、`_fresh_economy`；`combat/resolution.py::_start_combat_event` |
 | 长休恢复职业资源和法术位，短休语义独立 | `resting/engine.py::complete_short_rest`、`complete_long_rest` |
-| 基线 `src/rulesets/dnd2024` 没有 plane、sunlight、bright_light、swim_speed 或 truesight 的权威运行时字段 | 基线源码定点扫描；不得据此虚构系统 |
+| 世界逻辑时钟已存在 | `src/engine/world_state.py`：`clock`（日/时/分）、`clock_to_minutes`、`clock_from_minutes`、`advance_time` 操作（1..`MAX_ADVANCE_MINUTES`）；`instance.world_state` 持有 |
+| 休息会推进时钟 | `src/webui/services/ruleset_rest.py`：`_rest_tick` 读绝对分钟、`_rest_duration` 用运行时声明、`_advance_rest_time` 推进（同一提交内结算到期事件） |
+| 规则集侧有飞行/攀爬/游泳的派生位，但没有 `fly_speed` | `character/derivation.py::derive_movement_profile` 只出 `climb_speed` / `swim_speed` |
+| `bright_light_radius` 已存在 | `combat/resolution.py`、`character/derivation.py`；`sunlight` 与 `plane` 仍无权威字段 |
 | 探索与战斗各有事件入口，跨日效果不能只存在战斗内存 | `exploration/engine.py::resolve_intent`、`apply_batch`；`combat/reducer.py` |
+
+## 4.0 时间基准
+
+所有长时效果以**世界时钟的绝对分钟**为准，不新造时间系统：
+
+- 施加时记录 `expires_at_minutes = clock_to_minutes(world_clock(instance.world_state)) + duration`；
+- 读取（投影、`available_intents`、结算）时与当前绝对分钟比较，到期即视为不存在；
+- 休息本就推进时钟（`_advance_rest_time`），因此「10 分钟 / 1 小时 / N 天」在休息后自然到期，不需要后台定时器；
+- 时钟未设置（`world_clock` 为空）时按 `0` 处理，与 `_rest_tick` 的既有约定一致；
+- 不往 `scheduled_events` 里塞效果到期：那条通道的结算仍标注为未实现，本片只做惰性判定。
 
 ## 4. 精确实现契约
 
