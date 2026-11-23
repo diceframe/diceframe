@@ -50,6 +50,10 @@ from src.commands.narrative_application import (
     apply_narrative_effects,
     apply_parsed_data_to_response,
 )
+from src.commands.narrative_quality import (
+    inspect_narrative_output,
+    quality_repair_instruction as build_quality_repair_instruction,
+)
 from src.commands.round_llm import (
     append_multistep_analysis,
     call_llm_with_tag_retry,
@@ -365,6 +369,21 @@ class RoundProcessor:
         return ruleset_registry.get(
             runtime_id, minimum_version=int(binding.get("version", 1) or 1),
         )
+
+    @staticmethod
+    def _allowed_narrative_player_uids(instance: GameInstance) -> set[str] | None:
+        """Return the server-owned player authority boundary for this round."""
+
+        if len(instance.players) <= 1:
+            return None
+        allowed = {
+            str(action.get("user_id"))
+            for action in instance.action_queue
+            if action.get("user_id") in instance.players
+        }
+        if str(module_hooks.combat_view(instance)["combat_state"] or "none") != "none":
+            allowed |= set(instance.alive_players)
+        return allowed
 
     def _deferred_check_indexes(self, instance: GameInstance) -> set[int]:
         runtime = self._ruleset_runtime(instance)
@@ -1545,11 +1564,30 @@ class RoundProcessor:
 
         context = await append_multistep_analysis(
             self.llm_client, instance, gm_prompt, context, actions_text, self.analysis_max_tokens)
+        runtime = self._ruleset_runtime(instance)
+        allowed_uids = self._allowed_narrative_player_uids(instance)
+
+        def quality_gate(response_candidate: Any, data_candidate: dict) -> list[str]:
+            if isinstance(runtime, NarrativeStatePolicyRuntime):
+                data_candidate["state_update"] = runtime.filter_narrative_state_update(
+                    instance, dict(data_candidate.get("state_update") or {}),
+                )
+            return inspect_narrative_output(
+                response_candidate,
+                data_candidate,
+                allowed_player_uids=allowed_uids,
+            )
+
         response, data = await call_llm_with_tag_retry(
             self.llm_client, instance, gm_prompt, context, combat_model,
             dice_block, self.narrative_max_tokens, actions_text,
             on_delta=on_delta, on_reset=on_reset,
-            public_narration_context=_build_recent_public_narration_context(instance))
+            public_narration_context=_build_recent_public_narration_context(instance),
+            quality_gate=quality_gate,
+            quality_repair_instruction=lambda issues: build_quality_repair_instruction(
+                instance.language, issues,
+            ),
+        )
         current_instance = self.registry.get(instance.game_key)
         if (
             current_instance is not instance
@@ -1568,11 +1606,6 @@ class RoundProcessor:
             # 叙事已作废（回滚/重置/运行替换），本轮不会提交：必须让调用方
             # 知道"没有处理"，而不是收到一个空正文的成功回合。
             raise RoundNotProcessed("stale")
-        runtime = self._ruleset_runtime(instance)
-        if isinstance(runtime, NarrativeStatePolicyRuntime):
-            data["state_update"] = runtime.filter_narrative_state_update(
-                instance, dict(data.get("state_update") or {}),
-            )
         director_proposal_data: dict[str, Any] = {}
         if authoritative_combat and isinstance(runtime, NarrativeDirectorRuntime):
             try:
@@ -1678,17 +1711,8 @@ class RoundProcessor:
         round_pre_combat_snapshot = module_hooks.read_value(instance, module_hooks.COMBAT_EXTENSION_SNAPSHOT)
 
         queued_proposals: list[dict[str, Any]] = []
-        allowed_uids: set | None = None
         if response.state_update:
             # 多人局权威白名单：状态标签只允许作用于本轮行动者/参战者。
-            if len(instance.players) > 1:
-                allowed_uids = {
-                    str(action.get("user_id"))
-                    for action in instance.action_queue
-                    if action.get("user_id") in instance.players
-                }
-                if str(module_hooks.combat_view(instance)["combat_state"] or "none") != "none":
-                    allowed_uids |= set(instance.alive_players)
             queued_proposals = self._state_applier.apply_state_update(
                 instance, response.state_update, allowed_player_uids=allowed_uids,
             )
