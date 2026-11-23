@@ -6249,6 +6249,25 @@ class CombatResolutionMixin:
         check["repeat_save"] = True
         return check
 
+    def _holy_ward_applies(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        source_actor_id: str,
+    ) -> bool:
+        """Whether the aura holder is being forced to save by a Fiend or Undead."""
+
+        if not source_actor_id:
+            return False
+        character = self._feature_character(actor)
+        if long_effect_active(
+            character, "holy_nimbus", world_minutes(instance),
+        ) is None:
+            return False
+        try:
+            source = self._actor_view(instance, combat, source_actor_id)
+        except Exception:  # noqa: BLE001 - 来源可能是已离场的叙事对象
+            return False
+        return str(source.get("creature_type") or "").lower() in {"fiend", "undead"}
+
     def _saving_throw_check(
         self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
         actor_id: str, ability: str, dc: int, source_actor_id: str,
@@ -6281,6 +6300,10 @@ class CombatResolutionMixin:
         save_sources = self._saving_throw_sources(
             actor, ability, against_spell=against_spell,
         )
+        if self._holy_ward_applies(instance, combat, actor, source_actor_id):
+            # Holy Ward：光环持有者被邪魔或亡灵迫使的豁免有优势。来源生物
+            # 类型来自权威视图，不由客户端声明。
+            save_sources.append({"code": "holy_nimbus", "mode": "advantage"})
         traits = actor.get("traits")
         if against_spell and "magic_resistance" in trait_ids(traits):
             save_sources.append({"code": "magic_resistance", "mode": "advantage"})

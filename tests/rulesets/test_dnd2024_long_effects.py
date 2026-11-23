@@ -453,3 +453,41 @@ def test_a_successful_save_still_spends_the_use(fiend14) -> None:
     ]
     assert not _of_type(events, "condition.applied")
     assert _of_type(events, "dnd2024.feature.used")
+
+
+def test_holy_ward_grants_advantage_against_a_fiend(devotion20) -> None:
+    from src.engine.modules import ruleset_runtime as _rt
+    from tests.rulesets.test_dnd2024_channel_control import SequenceRng, _enemy
+
+    engine, instance = _setup(devotion20)
+    _start(engine, instance, enemies=[_enemy(creature_type="fiend")])
+    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
+
+    combat = _rt.state(instance)["combat"]
+    actor = engine._actor_view(instance, combat, "player:gm")
+    check = engine._saving_throw_check(
+        instance, combat, actor, "player:gm", "wis", 15, "enemy:goblin-1",
+        [], SequenceRng([5, 6]),
+    )
+
+    codes = [row.get("code") for row in check.get("advantage_sources") or []]
+    assert "holy_nimbus" in codes
+
+
+def test_holy_ward_ignores_a_humanoid_source(devotion20) -> None:
+    from src.engine.modules import ruleset_runtime as _rt
+    from tests.rulesets.test_dnd2024_channel_control import SequenceRng, _enemy
+
+    engine, instance = _setup(devotion20)
+    _start(engine, instance, enemies=[_enemy(creature_type="humanoid")])
+    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
+
+    combat = _rt.state(instance)["combat"]
+    actor = engine._actor_view(instance, combat, "player:gm")
+    check = engine._saving_throw_check(
+        instance, combat, actor, "player:gm", "wis", 15, "enemy:goblin-1",
+        [], SequenceRng([5]),
+    )
+
+    codes = [row.get("code") for row in check.get("advantage_sources") or []]
+    assert "holy_nimbus" not in codes
