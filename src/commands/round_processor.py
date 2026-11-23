@@ -73,6 +73,7 @@ from src.engine.economy import (
     filter_unconfirmed_purchase_grants,
     has_pending_identical_purchase,
     item_names_match,
+    purchase_grant_ambiguity_snapshot,
 )
 from src.engine import combat_narrative, module_hooks, progression
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
@@ -1462,6 +1463,7 @@ class RoundProcessor:
         # but proposals created afterwards must invalidate the response.
         expected_economy_fingerprint = economy_fingerprint(instance)
         protected_purchase_items = purchase_grant_protection_snapshot(instance)
+        protected_ambiguous_payers = purchase_grant_ambiguity_snapshot(instance)
         # 只保留最近一轮的短期展示状态，避免旧提示或战斗结果常驻。
         instance.begin_round_processing()
         pending_combat_event_ids = combat_narrative.pending_event_ids(instance)
@@ -1662,6 +1664,7 @@ class RoundProcessor:
             instance, data,
             unpriced_purchase_intents=unpriced_purchase_intents,
             protected_purchase_items=protected_purchase_items,
+            protected_ambiguous_payers=protected_ambiguous_payers,
         )
         if any(
             _unpriced_without_explicit_free_grant(intent)

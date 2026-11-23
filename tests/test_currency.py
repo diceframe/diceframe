@@ -9,6 +9,7 @@ import pytest
 
 from src.engine.currency import (
     CurrencySystemError,
+    declared_currency_display_label,
     format_currency_amount,
     legacy_currency_spec,
     parse_currency_amount,
@@ -606,6 +607,18 @@ def test_versionless_system_stays_legacy():
     assert declares_currency_schema({"schema_version": None})
     with pytest.raises(CurrencySystemError):
         validate_declared_currency_system({"schema_version": None})
+
+
+def test_declared_currency_display_label_uses_the_display_unit_name():
+    assert declared_currency_display_label({
+        "schema_version": 2,
+        "base_unit": "copper",
+        "display_unit": "yuan",
+        "units": [
+            {"id": "copper", "name": "铜元", "rate": 1},
+            {"id": "yuan", "name": "法币", "rate": 100},
+        ],
+    }) == "法币"
 
 
 @pytest.mark.parametrize("version", ["abc", 3])

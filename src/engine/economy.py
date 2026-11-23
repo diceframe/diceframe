@@ -688,16 +688,19 @@ _ITEM_QUANTITY = (
 )
 _ITEM_NAME_QUANTITY_HEAD_RE = re.compile(rf"^{_ITEM_QUANTITY}")
 _ITEM_NAME_QUANTITY_TAIL_RE = re.compile(rf"{_ITEM_QUANTITY}$")
+_ITEM_NAME_QUANTITY_SUFFIX_RE = re.compile(r"[x×][0-9]+$", re.IGNORECASE)
 
 
 def normalized_item_name(value: Any) -> str:
     """Normalize display formatting while preserving the item identity text."""
 
-    text = _ITEM_NAME_NOISE_RE.sub("", str(value or "").strip().casefold())
+    text = _ITEM_NAME_NOISE_RE.sub(" ", str(value or "").strip().casefold())
+    text = re.sub(r"\s+", " ", text).strip()
     if not text:
         return ""
-    stripped = _ITEM_NAME_QUANTITY_HEAD_RE.sub("", text)
-    stripped = _ITEM_NAME_QUANTITY_TAIL_RE.sub("", stripped)
+    stripped = _ITEM_NAME_QUANTITY_HEAD_RE.sub("", text).strip()
+    stripped = _ITEM_NAME_QUANTITY_TAIL_RE.sub("", stripped).strip()
+    stripped = _ITEM_NAME_QUANTITY_SUFFIX_RE.sub("", stripped).strip()
     return stripped or text
 
 
@@ -707,10 +710,24 @@ def item_names_match(names: set[str], key: str) -> bool:
     normalized_key = normalized_item_name(key)
     if not normalized_key:
         return False
+    def contains_name(container: str, candidate: str) -> bool:
+        start = container.find(candidate)
+        while start >= 0:
+            end = start + len(candidate)
+            left = container[start - 1] if start else ""
+            right = container[end] if end < len(container) else ""
+            left_is_ascii_word = left.isascii() and left.isalnum()
+            right_is_ascii_word = right.isascii() and right.isalnum()
+            if not left_is_ascii_word and not right_is_ascii_word:
+                return True
+            start = container.find(candidate, start + 1)
+        return False
+
     for name in names:
         normalized_name = normalized_item_name(name)
         if normalized_name and (
-            normalized_name in normalized_key or normalized_key in normalized_name
+            contains_name(normalized_name, normalized_key)
+            or contains_name(normalized_key, normalized_name)
         ):
             return True
     return False
@@ -841,12 +858,29 @@ def purchase_grant_protection_snapshot(instance: Any) -> dict[str, set[str]]:
     return protected
 
 
+def purchase_grant_ambiguity_snapshot(instance: Any) -> set[str]:
+    """Capture payers whose pending purchase target is intentionally generic."""
+
+    return {
+        str(proposal.get("payer_uid") or proposal.get("uid") or "")
+        for proposal in economy_state.state(instance).get("proposals", [])
+        if (
+            isinstance(proposal, dict)
+            and proposal.get("status") == "pending"
+            and str(proposal.get("kind") or "") == "purchase"
+            and proposal.get("ambiguous_target") is True
+            and str(proposal.get("payer_uid") or proposal.get("uid") or "")
+        )
+    }
+
+
 def filter_unconfirmed_purchase_grants(
     instance: Any,
     data: dict[str, Any],
     *,
     unpriced_purchase_intents: list[dict[str, Any]] | None = None,
     protected_purchase_items: dict[str, set[str]] | None = None,
+    protected_ambiguous_payers: set[str] | None = None,
 ) -> int:
     """Strip model grants for items that are part of an unconfirmed charge.
 
@@ -893,17 +927,10 @@ def filter_unconfirmed_purchase_grants(
     # 第一层：待确认扣款提案（payment/purchase）。FREE_GRANT 无权绕过——
     # 否则物品先免费发放、付款人之后仍可能确认扣款，形成双重状态错误。
     pending_purchase_items = purchase_grant_protection_snapshot(instance)
-    ambiguous_pending_payers = {
-        str(proposal.get("payer_uid") or proposal.get("uid") or "")
-        for proposal in economy_state.state(instance).get("proposals", [])
-        if (
-            isinstance(proposal, dict)
-            and proposal.get("status") == "pending"
-            and str(proposal.get("kind") or "") == "purchase"
-            and proposal.get("ambiguous_target") is True
-            and str(proposal.get("payer_uid") or proposal.get("uid") or "")
-        )
-    }
+    ambiguous_pending_payers = purchase_grant_ambiguity_snapshot(instance)
+    ambiguous_pending_payers.update(
+        str(uid or "") for uid in (protected_ambiguous_payers or ()) if str(uid or "")
+    )
     # A response may have started while these proposals were pending, then
     # observed a decline/rejection before its state update is applied.  Keep
     # the detached start-of-generation ownership as an additional block.

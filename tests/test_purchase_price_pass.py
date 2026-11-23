@@ -36,6 +36,8 @@ from src.commands.economy_effects import unpriced_purchase_notice
 from src.engine.economy import (
     filter_unconfirmed_purchase_grants,
     has_pending_identical_purchase,
+    purchase_grant_ambiguity_snapshot,
+    purchase_grant_protection_snapshot,
     queue_purchase_offer,
     resolve_proposal,
 )
@@ -291,6 +293,73 @@ def test_generic_unpriced_intent_blocks_unresolved_item_grants() -> None:
     assert data["state_update"]["loot"] == [
         {"player": "p2", "item": "护符", "qty": 1},
     ]
+
+
+def test_specific_unpriced_target_does_not_match_an_ascii_substring() -> None:
+    instance = _instance()
+    data = {"state_update": {"loot": [
+        {"player": "p1", "item": "spring", "qty": 1},
+    ]}}
+    removed = filter_unconfirmed_purchase_grants(
+        instance,
+        data,
+        unpriced_purchase_intents=[{
+            "payer_uid": "p1", "target": "ring", "quantity": 1,
+        }],
+    )
+
+    assert removed == 0
+    assert data["state_update"]["loot"] == [
+        {"player": "p1", "item": "spring", "qty": 1},
+    ]
+
+
+def test_specific_target_matches_a_descriptive_item_name_at_a_word_boundary() -> None:
+    instance = _instance()
+    data = {"state_update": {"loot": [
+        {"player": "p1", "item": "today's newspaper", "qty": 1},
+    ]}}
+
+    removed = filter_unconfirmed_purchase_grants(
+        instance,
+        data,
+        unpriced_purchase_intents=[{
+            "payer_uid": "p1", "target": "newspaper", "quantity": 1,
+        }],
+    )
+
+    assert removed == 1
+    assert data["state_update"]["loot"] == []
+
+
+def test_ambiguous_pending_snapshot_stays_fail_closed_after_resolution() -> None:
+    instance = _instance()
+    proposal = queue_purchase_offer(
+        instance,
+        payer_uid="p1",
+        amount=50,
+        items=["商品"],
+        source="table_offer",
+        ambiguous_target=True,
+    )
+    protected_items = purchase_grant_protection_snapshot(instance)
+    protected_payers = purchase_grant_ambiguity_snapshot(instance)
+    assert resolve_proposal(
+        instance, proposal["id"], actor_uid="p1", accepted=False,
+    )["ok"] is True
+
+    data = {"state_update": {"loot": [
+        {"player": "p1", "item": "报纸", "qty": 1},
+    ]}}
+    removed = filter_unconfirmed_purchase_grants(
+        instance,
+        data,
+        protected_purchase_items=protected_items,
+        protected_ambiguous_payers=protected_payers,
+    )
+
+    assert removed == 1
+    assert data["state_update"]["loot"] == []
 
 
 def test_unpriced_intents_are_never_persisted() -> None:

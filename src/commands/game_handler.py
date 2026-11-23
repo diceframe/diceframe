@@ -47,6 +47,7 @@ from src.content_modules.projection import ContentProjectionService
 from src.rulesets.builtin import build_default_ruleset_registry
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.rules.rule_system import RuleSystem
+from src.engine.currency.validation import declared_currency_display_label
 
 logger = logging.getLogger("trpg")
 
@@ -226,7 +227,14 @@ class GameHandler:
             if plugin_rule is not None and not had_existing_instance:
                 game_config.replace_currency_context(
                     instance,
-                    str(plugin_template.get("currency") or plugin_rule.currency),
+                    str(
+                        plugin_template.get("currency")
+                        or declared_currency_display_label(
+                            plugin_template.get("currency_system"),
+                            plugin_rule.currency,
+                        )
+                        or plugin_rule.currency
+                    ),
                     plugin_template.get("currency_system") or plugin_rule.currency_system,
                 )
             # 非 UI 建图路径（bot/种子码/API）可能尚未触发 list_worlds 同步，

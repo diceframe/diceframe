@@ -9,6 +9,7 @@ from src.engine.currency.codec import format_currency_amount, parse_currency_amo
 from src.engine.currency.models import CurrencySpec, CurrencyUnit
 from src.engine.currency.validation import (
     CurrencySystemError,
+    declared_currency_display_label,
     declares_currency_schema,
     is_v2_currency_system,
     legacy_currency_spec,
@@ -21,6 +22,7 @@ __all__ = [
     "CurrencySystemError",
     "CurrencyUnit",
     "declares_currency_schema",
+    "declared_currency_display_label",
     "validate_declared_currency_system",
     "format_currency_amount",
     "is_v2_currency_system",

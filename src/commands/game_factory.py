@@ -15,7 +15,10 @@ from src.engine.world_template import load_world_template
 from src.lorebook.bootstrap import ensure_world_from_template
 from src.rules.loader import RuleBundleLoader
 from src.rules.rule_system import RuleSystem
-from src.engine.currency.validation import validate_declared_currency_system
+from src.engine.currency.validation import (
+    declared_currency_display_label,
+    validate_declared_currency_system,
+)
 
 logger = logging.getLogger("trpg")
 
@@ -89,6 +92,9 @@ class GameFactory:
             if declared is not None:
                 validate_declared_currency_system(declared)
                 currency_system = declared
+                currency_label = declared_currency_display_label(
+                    declared, currency_label,
+                )
             if isinstance(world_data.get("currency"), str) and world_data["currency"].strip():
                 currency_label = world_data["currency"].strip()
         if not is_new:
