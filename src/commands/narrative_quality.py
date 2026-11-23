@@ -12,7 +12,10 @@ import logging
 from collections.abc import Iterable
 from typing import Any
 
+from src.engine import module_hooks
 from src.engine.language import normalize_language
+from src.engine.health import record_health_event
+from src.engine.modules import narrative_quality_metrics
 
 logger = logging.getLogger("trpg")
 
@@ -22,6 +25,32 @@ _SEMANTIC_ISSUE_LABELS = {
     "semantic:repeated_previous_turn": "无理由重复上一轮",
     "semantic:unsupported_thread_closure": "没有依据地结束未完成剧情线",
 }
+
+
+class BufferedNarrativeStream:
+    """Hold complex-turn deltas until deterministic and semantic checks pass."""
+
+    def __init__(self, sink: Any):
+        self._sink = sink
+        self._deltas: list[str] = []
+        self._story: dict[str, Any] | None = None
+
+    async def __call__(self, text: str) -> None:
+        self._deltas.append(str(text or ""))
+
+    async def story_update(self, story: dict[str, Any]) -> None:
+        self._story = story
+
+    def clear(self) -> None:
+        self._deltas.clear()
+        self._story = None
+
+    async def flush(self) -> None:
+        if self._deltas:
+            await self._sink("".join(self._deltas))
+        if self._story is not None and hasattr(self._sink, "story_update"):
+            await self._sink.story_update(self._story)
+        self.clear()
 
 
 class NarrativeQualityError(RuntimeError):
@@ -106,6 +135,38 @@ def quality_repair_instruction(language: str, issues: Iterable[str]) -> str:
     )
 
 
+def build_narrative_review_state(instance: Any) -> dict[str, Any]:
+    """Build a bounded canonical snapshot for the semantic reviewer."""
+
+    scene = str(module_hooks.narrative_view(instance)["scene"] or "")
+    players = {
+        str(uid): {
+            "character_name": str(player.get("character_name") or uid),
+            "hp": player.get("hp"),
+            "gold": player.get("gold"),
+        }
+        for uid, player in (getattr(instance, "players", {}) or {}).items()
+        if isinstance(player, dict)
+    }
+    npcs = {
+        str(uid): {
+            "name": str(npc.get("character_name") or npc.get("name") or uid),
+            "status": npc.get("status"),
+        }
+        for uid, npc in (getattr(instance, "npcs", {}) or {}).items()
+        if isinstance(npc, dict)
+    }
+    plot = getattr(instance, "plot_tracker", None)
+    plot_data = plot.to_dict() if plot is not None and hasattr(plot, "to_dict") else {}
+    return {
+        "scene": scene[:2000],
+        "players": players,
+        "npcs": npcs,
+        "world_state": getattr(instance, "world_state", {}) or {},
+        "plot": plot_data,
+    }
+
+
 async def review_narrative_semantics(
     llm_client: Any,
     instance: Any,
@@ -114,6 +175,7 @@ async def review_narrative_semantics(
     narration: str,
     state_update: Any,
     recent_public_narration: str = "",
+    canonical_state: Any = None,
     max_tokens: int = 256,
 ) -> list[str]:
     """Ask a bounded reviewer for semantic issues on complex turns.
@@ -142,8 +204,9 @@ async def review_narrative_semantics(
         "language": locale,
         "current_actions": str(actions_text or "")[:5000],
         "narration": str(narration or "")[:5000],
-        "state_update": state_update,
+        "state_update": json.dumps(state_update, ensure_ascii=False, default=str)[:4000],
         "recent_public_narration": str(recent_public_narration or "")[:3000],
+        "canonical_state": json.dumps(canonical_state or {}, ensure_ascii=False, default=str)[:7000],
     }
     try:
         result = await llm_client.call(
@@ -155,6 +218,16 @@ async def review_narrative_semantics(
         raw = str(getattr(result, "content", "") or getattr(result, "narration", "") or "")
         payload = json.loads(raw.strip().strip("`").removeprefix("json").strip())
     except Exception:
+        narrative_quality_metrics.record(instance, reviewer_unavailable=True)
+        record_health_event(
+            instance,
+            component="narrative_quality",
+            code="SEMANTIC_REVIEW_UNAVAILABLE",
+            severity="info",
+            title="语义质量评审不可用",
+            message="复杂回合未能完成语义评审，本轮继续使用确定性质量门。",
+            fallback="deterministic_gate",
+        )
         logger.info("语义质量评审不可用，本轮仅使用确定性质量门", exc_info=True)
         return []
     if not isinstance(payload, dict) or payload.get("pass") is not False:
@@ -177,6 +250,8 @@ async def review_narrative_semantics(
 
 __all__ = [
     "NarrativeQualityError",
+    "BufferedNarrativeStream",
+    "build_narrative_review_state",
     "inspect_narrative_output",
     "quality_repair_instruction",
     "review_narrative_semantics",

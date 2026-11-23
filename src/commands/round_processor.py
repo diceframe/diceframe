@@ -51,6 +51,8 @@ from src.commands.narrative_application import (
     apply_parsed_data_to_response,
 )
 from src.commands.narrative_quality import (
+    BufferedNarrativeStream,
+    build_narrative_review_state,
     inspect_narrative_output,
     quality_repair_instruction as build_quality_repair_instruction,
     review_narrative_semantics,
@@ -67,7 +69,7 @@ from src.commands.round_actions import (
     format_check_results_constraint,
     initialize_puzzles_from_lorebook,
 )
-from src.commands.round_helpers import should_multi_step
+from src.commands.round_helpers import should_semantic_review
 from src.commands.state_recap import snapshot_public_player_state
 from src.commands.state_update_applier import discard_unresolved_player_damage
 from src.commands.tag_summary import summarize_tags
@@ -80,6 +82,7 @@ from src.engine import combat_narrative, module_hooks, progression
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.engine.module_state import ModuleStateError
 from src.engine.modules import adventure_runtime_state, checks, progression_state, round_safety, ruleset_runtime, session_stats
+from src.engine.modules import narrative_quality_metrics
 from src.engine.language import localized_text
 from src.engine.world_events import advance_world_time
 from src.engine.world.memory_projection import queue_world_memory
@@ -1568,10 +1571,27 @@ class RoundProcessor:
             self.llm_client, instance, gm_prompt, context, actions_text, self.analysis_max_tokens)
         runtime = self._ruleset_runtime(instance)
         allowed_uids = self._allowed_narrative_player_uids(instance)
-        semantic_review_enabled = should_multi_step(instance, actions_text)
+        semantic_review_enabled = should_semantic_review(instance, actions_text)
         public_narration_context = _build_recent_public_narration_context(instance)
+        narrative_quality_metrics.record(
+            instance,
+            turn=True,
+            complex_turn=semantic_review_enabled,
+        )
+        repair_requested = False
+        buffered_stream = (
+            BufferedNarrativeStream(on_delta)
+            if semantic_review_enabled and on_delta is not None else None
+        )
+
+        async def quality_reset() -> None:
+            if buffered_stream is not None:
+                buffered_stream.clear()
+            if on_reset is not None:
+                await on_reset()
 
         async def quality_gate(response_candidate: Any, data_candidate: dict) -> list[str]:
+            nonlocal repair_requested
             if isinstance(runtime, NarrativeStatePolicyRuntime):
                 data_candidate["state_update"] = runtime.filter_narrative_state_update(
                     instance, dict(data_candidate.get("state_update") or {}),
@@ -1582,26 +1602,43 @@ class RoundProcessor:
                 allowed_player_uids=allowed_uids,
             )
             if structural_issues or not semantic_review_enabled:
-                return structural_issues
-            return await review_narrative_semantics(
-                self.llm_client,
-                instance,
-                actions_text=actions_text,
-                narration=str(getattr(response_candidate, "narration", "") or ""),
-                state_update=data_candidate.get("state_update", {}),
-                recent_public_narration=public_narration_context,
-            )
+                issues = structural_issues
+            else:
+                issues = await review_narrative_semantics(
+                    self.llm_client,
+                    instance,
+                    actions_text=actions_text,
+                    narration=str(getattr(response_candidate, "narration", "") or ""),
+                    state_update=data_candidate.get("state_update", {}),
+                    recent_public_narration=public_narration_context,
+                    canonical_state=build_narrative_review_state(instance),
+                )
+            if issues:
+                narrative_quality_metrics.record(
+                    instance,
+                    rejection=True,
+                    repair_attempt=not repair_requested,
+                )
+                repair_requested = True
+                return issues
+            if repair_requested:
+                narrative_quality_metrics.record(instance, repair_success=True)
+                repair_requested = False
+            return []
 
         response, data = await call_llm_with_tag_retry(
             self.llm_client, instance, gm_prompt, context, combat_model,
             dice_block, self.narrative_max_tokens, actions_text,
-            on_delta=on_delta, on_reset=on_reset,
+            on_delta=buffered_stream or on_delta,
+            on_reset=quality_reset if buffered_stream is not None else on_reset,
             public_narration_context=public_narration_context,
             quality_gate=quality_gate,
             quality_repair_instruction=lambda issues: build_quality_repair_instruction(
                 instance.language, issues,
             ),
         )
+        if buffered_stream is not None:
+            await buffered_stream.flush()
         current_instance = self.registry.get(instance.game_key)
         if (
             current_instance is not instance

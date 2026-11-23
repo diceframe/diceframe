@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.commands.narrative_quality import (
+    BufferedNarrativeStream,
     NarrativeQualityError,
     inspect_narrative_output,
     quality_repair_instruction,
@@ -170,3 +171,20 @@ async def test_semantic_reviewer_failure_is_fail_open() -> None:
         narration="门开了。",
         state_update={},
     ) == []
+
+
+@pytest.mark.asyncio
+async def test_complex_turn_stream_is_flushed_only_after_review() -> None:
+    received: list[str] = []
+
+    async def sink(text: str) -> None:
+        received.append(text)
+
+    buffered = BufferedNarrativeStream(sink)
+    await buffered("第一段")
+    await buffered("第二段")
+    assert received == []
+
+    await buffered.flush()
+
+    assert received == ["第一段第二段"]

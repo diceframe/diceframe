@@ -23,6 +23,12 @@ def should_multi_step(instance: GameInstance, actions_text: str) -> bool:
     """
     if game_config.entry_point(instance) != "web":
         return False
+    return should_semantic_review(instance, actions_text)
+
+
+def should_semantic_review(instance: GameInstance, actions_text: str) -> bool:
+    """Return whether this turn has enough active complexity for semantic review."""
+
     if instance.puzzle_manager and instance.puzzle_manager.get_active_puzzles():
         return True
     if any(kw in actions_text for kw in COMBAT_INTENT_KEYWORDS):
