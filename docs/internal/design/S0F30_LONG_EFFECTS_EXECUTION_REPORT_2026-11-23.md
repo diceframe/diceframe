@@ -114,3 +114,32 @@ mypy                                           102 source files, no issues
 2. 任务书 §4.4.3 原写 `fly_speed` 落 `derivation.py`；`derive()` 是建卡时的一次性计算，拿不到运行时状态，改为角色级 `long_effects` + 统一读取函数，任务书已修订。
 3. `sunlight` 无消费者，本片不声明；`plane` 与 `banishment` 标 `guided`。
 
+
+## 10. 独立审核（2026-11-23 晚）
+
+由独立审查者按任务书 §4–§7 与 `docs/ENGINEERING_RULES.md` 审 `dc34bd84..HEAD`，结论"不能合入"，列 9 处阻塞。逐条核实后：
+
+### 已修（8）
+
+| 编号 | 问题 | 修法 |
+|---|---|---|
+| 1 | Quivering Palm 的命中声明没有 `has_feature`，伪造 intent 即可用 | 补拥有、每回合一次、无既有振动三道检查 |
+| 2 | 第二次施加静默覆盖，`max_targets` 无读者 | 有振动时拒绝施加 |
+| 3 | 失能写成 `turns*10`（一分钟），规则是"到你的下回合结束" | 改为回合数 |
+| 5 | 三条新伤害绕过 `_damage_instance_event`，抗性全部失效 | 改走同一伤害实例函数 |
+| 6 | reducer 不校验 `expires_at`；重放旧事件可续期 | 缺失即拒绝；旧到期时间不覆盖新的 |
+| 7 | Intimidating Presence 漏了 Rage 恢复（资源 id 是 `rages` 不是 `rage`） | 补 `restore_resource` 与能力 |
+| 9 | 视图原样投出 `long_effects`，过期项不过滤 | 按 `now_minutes` 过滤 |
+| 白名单 | `world_minutes` 放在 `primitives.py`（§5 未允许） | 迁到 `features/resources.py` |
+
+### 改判定（1）
+
+阻塞 4（"标 `guided` 但照常结算"）：原先既贴标签又打满伤害，等于偷偷默认成功。现改为**显式断言**——调用方不在 intent 里写 `same_plane: true` 就拒绝，事件记 `plane_asserted`。没有权威位面系统这件事因此写在契约里，而不是藏在标签后面。
+
+### 未修（明确列出）
+
+1. **Quivering Palm 的第二个致命入口**（Attack action 中放弃一次攻击）未实现；测试 5 仍靠注入 `long_effect` 构造状态。
+2. **Hurl 的"消失/返回"**未实现，失能直接施加在原位目标上；`banishment: guided` 只是标注，不改变"目标仍在原地"的事实。按 §7 这本是停止条件，需产品侧决定是补位置语义还是整特性下线。
+3. **探索侧未接**：`exploration/engine.py` 没有 `class_capability` 入口，Dragon Wings / Holy Nimbus 只能在战斗内激活；`fly_speed` 目前只展示、不参与移动结算。§6.12 不成立。
+4. **若干"应该改"**：Quivering Palm 的豁免未走 `_saving_throw_check`（无 auto-fail / 光环 / 掩护）；恢复入口不校验槽位余额；`holy_ward_creature_types`、`max_targets`、`duration_days_per_level`、`damage_type` 是死参数；Hurl 在次数耗尽时静默不给错。
+5. **测试缺口**（§6 的 3/4/6/9/13/14/15/16/17）未逐条补齐；`assert damage["delta"] <= -8` 是安慰剂断言。
