@@ -535,6 +535,34 @@ class CombatReducerMixin:
             except ClassFeatureError as exc:
                 raise EventBatchError(str(exc)) from exc
             return
+        if event_type == "dnd2024.feature_usage.restored":
+            # 恢复走独立事件：``feature_usage.changed`` 只允许 +1（它描述的是
+            # "又用了一次"），把减少塞进去会让两条语义共用一个校验。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError(
+                    "only player/companion feature usage is canonical"
+                )
+            character = self._canonical_of(snapshot, kind, raw_id)
+            owner = str(event["owner"])
+            feature_id = str(event["feature_id"])
+            scope = str(event["scope"])
+            before = int(event["before_count"])
+            try:
+                current = feature_usage_count(character, owner, feature_id, scope)
+                if current != before:
+                    raise EventBatchError(
+                        f"feature usage for {owner}.{feature_id} moved: "
+                        f"expected {before}, found {current}"
+                    )
+                if before < 1:
+                    raise EventBatchError("feature usage has nothing to restore")
+                set_feature_usage_count(
+                    character, owner, feature_id, scope, before - 1,
+                )
+            except ClassFeatureError as exc:
+                raise EventBatchError(str(exc)) from exc
+            return
         if event_type == "dnd2024.feature_state.set":
             # 角色特性状态（Relentless Rage 的下一 DC）不是资源计数器，也不
             # 属于任何条件：它写在既有 ``features`` 结构里，键集合是闭集，

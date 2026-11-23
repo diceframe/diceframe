@@ -1313,6 +1313,19 @@ class CombatValidationMixin:
         if capability is not None:
             # 特性自身的使用次数：这里的拒绝与资源不足同形，客户端拿到的
             # 是 ok=false 而不是运行期异常。
+            if any(
+                action.kind == "restore_feature_use"
+                for action in capability.actions
+            ):
+                # 没有已用次数时"恢复"是无意义的支付：拒绝而不是白扣一格槽。
+                used = feature_usage_count(
+                    self._feature_character(actor), capability.feature_id,
+                    capability.feature_id,
+                )
+                if used < 1:
+                    raise CombatIntentError(
+                        "this feature has no use left to restore"
+                    )
             if capability.uses_per_long_rest:
                 used = feature_usage_count(
                     self._feature_character(actor), capability.feature_id,

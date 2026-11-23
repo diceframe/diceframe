@@ -43,6 +43,7 @@ ACTION_KINDS = frozenset({
     # intent 里的字段猜是哪一种。
     "intimidating_presence",
     "dragon_wings", "end_long_effect", "holy_nimbus", "quivering_palm_end",
+    "restore_feature_use",
     # Channel Divinity 的效果各自是一个封闭 kind：它们的成本同为一次引导，
     # 但目标数量、是否要豁免、以及"分配一个预算"这三件事没有任何共同形状，
     # 合成一个 kind 只会让结算按 intent 字段猜分支。

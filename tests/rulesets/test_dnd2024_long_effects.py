@@ -491,3 +491,95 @@ def test_holy_ward_ignores_a_humanoid_source(devotion20) -> None:
 
     codes = [row.get("code") for row in check.get("advantage_sources") or []]
     assert "holy_nimbus" not in codes
+
+
+def test_holy_nimbus_is_restored_by_spending_a_level_five_slot(devotion20) -> None:
+    engine, instance = _setup(devotion20)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
+
+    events = _apply(
+        engine, instance, _capability(engine, instance, "holy_nimbus_restore"),
+    )
+
+    slot = _of_type(events, "dnd2024.spell.slot_spent")
+    assert slot[0]["slot_level"] == 5
+    usage = _of_type(events, "dnd2024.feature_usage.restored")
+    assert usage[0]["before_count"] == 1
+    # 恢复后同一次战斗里还能再点亮（先过一回合拿回附赠动作）。
+    _next_turn(engine, instance, "player:gm")
+    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
+
+
+def test_restoring_without_a_use_is_refused(devotion20) -> None:
+    engine, instance = _setup(devotion20)
+    _start(engine, instance, enemies=_two_enemies())
+
+    resolved = _capability(engine, instance, "holy_nimbus_restore")
+
+    assert resolved["ok"] is False
+    assert "no use" in resolved["error"]
+
+
+def test_dragon_wings_is_restored_with_three_sorcery_points(draconic) -> None:
+    engine, instance = _setup(draconic)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply(engine, instance, _capability(engine, instance, "dragon_wings"))
+
+    events = _apply(
+        engine, instance, _capability(engine, instance, "dragon_wings_restore"),
+    )
+
+    spend = _of_type(events, "dnd2024.class_resource.spent")
+    assert [(row["resource_id"], row["amount"]) for row in spend] == [
+        ("sorcery_points", 3),
+    ]
+    _next_turn(engine, instance, "player:gm")
+    _apply(engine, instance, _capability(engine, instance, "dragon_wings"))
+
+
+def test_hurl_is_restored_by_spending_a_pact_slot(fiend14) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _attack
+
+    engine, instance = _setup(fiend14)
+    _start(engine, instance, enemies=_two_enemies())
+    _attack(engine, instance, "item:dagger", dice=[20, 1, 1], hurl_through_hell=True)
+
+    events = _apply(
+        engine, instance,
+        _capability(engine, instance, "hurl_through_hell_restore"),
+    )
+
+    slot = _of_type(events, "dnd2024.spell.slot_spent")
+    assert slot[0]["slot_level"] == 5
+    assert _of_type(events, "dnd2024.feature_usage.restored")
+
+
+def test_dragon_wings_can_be_dismissed_without_an_action(draconic) -> None:
+    engine, instance = _setup(draconic)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply(engine, instance, _capability(engine, instance, "dragon_wings"))
+    assert _fly_speed(instance) == 60
+
+    events = _apply(
+        engine, instance, _capability(engine, instance, "dragon_wings_end"),
+    )
+
+    assert _of_type(events, "dnd2024.long_effect.ended")
+    assert _fly_speed(instance) == 0
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    assert "dragon_wings" not in (character.get("long_effects") or {})
+
+
+def test_holy_nimbus_can_be_dismissed_without_an_action(devotion20) -> None:
+    from src.engine.modules import ruleset_runtime as _rt
+
+    engine, instance = _setup(devotion20)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
+
+    _apply(engine, instance, _capability(engine, instance, "holy_nimbus_end"))
+
+    combat = _rt.state(instance)["combat"]
+    rows = engine._projected_auras(instance, combat)
+    assert "holy_nimbus" not in [row["definition"].id for row in rows]

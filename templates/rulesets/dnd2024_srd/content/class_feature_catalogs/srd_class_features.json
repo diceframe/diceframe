@@ -916,7 +916,10 @@
             "duration_minutes": 10,
             "turn_start_aura_damage": "radiant",
             "aura_damage_ability": "cha",
-            "holy_ward_creature_types": ["fiend", "undead"],
+            "holy_ward_creature_types": [
+              "fiend",
+              "undead"
+            ],
             "restore_slot_level": 5
           },
           "capabilities": [
@@ -929,6 +932,26 @@
               "actions": [
                 {
                   "kind": "holy_nimbus",
+                  "count": 1
+                }
+              ]
+            },
+            {
+              "id": "holy_nimbus_restore",
+              "cost": {},
+              "actions": [
+                {
+                  "kind": "restore_feature_use",
+                  "count": 1
+                }
+              ]
+            },
+            {
+              "id": "holy_nimbus_end",
+              "cost": {},
+              "actions": [
+                {
+                  "kind": "end_long_effect",
                   "count": 1
                 }
               ]
@@ -971,7 +994,8 @@
               ]
             }
           ]
-        },        {
+        },
+        {
           "id": "tactical_shift",
           "minimum_level": 5,
           "source_ref": "srd-5.2.1:p48:tactical-shift",
@@ -980,7 +1004,6 @@
             "rider_move": "tactical_shift"
           }
         },
-
         {
           "id": "weapon_mastery",
           "minimum_level": 1,
@@ -2140,7 +2163,9 @@
           "summary": "As a Bonus Action, you sprout dragon wings for 1 hour or until you dismiss them (no action required). For the duration you have a Fly Speed of 60 feet. Once you use this feature, you can't use it again until you finish a Long Rest, unless you spend 3 Sorcery Points (no action required) to restore it.",
           "parameters": {
             "fly_speed_ft": 60,
-            "duration_minutes": 60
+            "duration_minutes": 60,
+            "restore_resource": "sorcery_points",
+            "restore_resource_amount": 3
           },
           "capabilities": [
             {
@@ -2152,6 +2177,26 @@
               "actions": [
                 {
                   "kind": "dragon_wings",
+                  "count": 1
+                }
+              ]
+            },
+            {
+              "id": "dragon_wings_restore",
+              "cost": {},
+              "actions": [
+                {
+                  "kind": "restore_feature_use",
+                  "count": 1
+                }
+              ]
+            },
+            {
+              "id": "dragon_wings_end",
+              "cost": {},
+              "actions": [
+                {
+                  "kind": "end_long_effect",
                   "count": 1
                 }
               ]
@@ -2334,11 +2379,26 @@
             "save_ability": "cha",
             "damage_dice": "8d10",
             "damage_type": "psychic",
-            "damage_exempt_creature_types": ["fiend"],
+            "damage_exempt_creature_types": [
+              "fiend"
+            ],
             "condition": "incapacitated",
             "condition_turns": 1,
-            "uses_per_long_rest": 1
-          }
+            "uses_per_long_rest": 1,
+            "restore_slot_level": 5
+          },
+          "capabilities": [
+            {
+              "id": "hurl_through_hell_restore",
+              "cost": {},
+              "actions": [
+                {
+                  "kind": "restore_feature_use",
+                  "count": 1
+                }
+              ]
+            }
+          ]
         }
       ]
     },

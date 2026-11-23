@@ -48,7 +48,10 @@ from .action_adapter import (
     roll_damage_node,
     spell_formula_node,
 )
-from ..features.resources import long_effect_active
+from ..features.resources import (
+    feature_usage_count,
+    long_effect_active,
+)
 from ..character.derivation import proficiency_bonus
 from .primitives import (
     roll,
@@ -2777,7 +2780,11 @@ class CombatResolutionMixin:
 
         if intent.get("hurl_through_hell") and self.features.has_feature(
             character, "hurl_through_hell",
-        ) and not self._feature_used_this_turn(combat, str(actor["actor_id"]), "hurl_through_hell"):
+        ) and not self._feature_used_this_turn(
+            combat, str(actor["actor_id"]), "hurl_through_hell",
+        ) and feature_usage_count(
+            character, "hurl_through_hell", "hurl_through_hell",
+        ) < int(parameter("hurl_through_hell", "uses_per_long_rest") or 1):
             declarations.append({
                 "kind": "hurl_through_hell",
                 "feature_id": "hurl_through_hell",
@@ -2900,6 +2907,20 @@ class CombatResolutionMixin:
                     "turn_index": int(
                         (combat.get("economy") or {}).get("turn_index", 0) or 0
                     ),
+                })
+                long_rest_used = feature_usage_count(
+                    self._feature_character(attacker), "hurl_through_hell",
+                    "hurl_through_hell",
+                )
+                events.append({
+                    "type": "dnd2024.feature_usage.changed",
+                    "actor_id": attacker_id,
+                    "owner": "hurl_through_hell",
+                    "feature_id": "hurl_through_hell",
+                    "scope": USAGE_SCOPE_LONG_REST,
+                    "before_count": long_rest_used,
+                    "after_count": long_rest_used + 1,
+                    "use_index": long_rest_used + 1,
                 })
                 dc = int(attacker.get("spell_save_dc", 0) or 0)
                 ability = str(row.get("save_ability") or "cha")
@@ -5016,6 +5037,19 @@ class CombatResolutionMixin:
                 events.extend(self._turn_undead_events(
                     instance, combat, actor_id, actor, capability, intent, rng,
                 ))
+            elif action.kind == "end_long_effect":
+                # 主动结束不花任何经济：声明成空成本的能力，只是为了让
+                # "结束"也有一个可审计的意图入口。
+                events.append({
+                    "type": "dnd2024.long_effect.ended",
+                    "actor_id": actor_id,
+                    "effect_id": capability.feature_id,
+                    "reason": "dismissed",
+                })
+            elif action.kind == "restore_feature_use":
+                events.extend(self._restore_feature_use_events(
+                    instance, actor_id, actor, capability,
+                ))
             elif action.kind == "quivering_palm_end":
                 events.extend(self._quivering_palm_end_events(
                     instance, combat, actor_id, actor, capability, rng,
@@ -5651,6 +5685,51 @@ class CombatResolutionMixin:
                 if self._last_hostile_defeated(combat, target, amount):
                     # 灼烧亡灵是这次驱散的实际伤害来源：它同样可以结束战斗。
                     events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
+        return events
+
+    def _restore_feature_use_events(
+        self, instance: Any, actor_id: str, actor: dict[str, Any],
+        capability: Any,
+    ) -> list[dict[str, Any]]:
+        """Pay a real slot or resource to regain one use of a feature.
+
+        与 ``font_of_inspiration`` 同形：扣的是权威槽表里的一格（``exchange``
+        标记让它不占本回合的施法位），回的是长休作用域的使用计数。拒绝条件
+        在校验层：没有已用次数、或槽位不够，都不该走到这里。
+        """
+
+        character = self._feature_character(actor)
+        feature_id = capability.feature_id
+        slot_level = int(self.features.feature_value(
+            character, feature_id, "restore_slot_level", 0,
+        ) or 0)
+        resource_id = str(self.features.feature_value(
+            character, feature_id, "restore_resource", "",
+        ) or "")
+        amount = int(self.features.feature_value(
+            character, feature_id, "restore_resource_amount", 0,
+        ) or 0)
+        events: list[dict[str, Any]] = []
+        if slot_level:
+            events.append({
+                "type": "dnd2024.spell.slot_spent", "actor_id": actor_id,
+                "slot_level": slot_level, "exchange": True,
+            })
+        if resource_id:
+            events.append({
+                "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+                "resource_id": resource_id, "amount": amount,
+            })
+        before = feature_usage_count(
+            character, feature_id, feature_id, USAGE_SCOPE_LONG_REST,
+        )
+        events.append({
+            "type": "dnd2024.feature_usage.restored", "actor_id": actor_id,
+            "owner": feature_id, "feature_id": feature_id,
+            "scope": USAGE_SCOPE_LONG_REST,
+            "before_count": before,
+            "reason": "restored",
+        })
         return events
 
     def _quivering_palm_end_events(
