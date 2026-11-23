@@ -300,8 +300,9 @@ def test_the_dnd2024_runtime_declares_its_rest_options() -> None:
     # ``prepared_spells`` 是长休时的一次准备替换，``free_cast`` 是 Spell Mastery
     # 研究的那一项，``recovery`` 是短休的恢复预算，``hunter_options`` 是 Hunter
     # 每次休息时可以替换的那一项（Colossus Slayer / Horde Breaker 之类）；
+    # ``wild_shape_forms`` 是德鲁伊长休时换一个已知形态（S0-F25）。
     # 通用休息服务转发它们，只因运行时声明了它们。
     assert build_default_ruleset_registry().get(RUNTIME_ID).rest_option_names == frozenset(
         {"attunement", "prepared_spells", "land_terrain", "free_cast", "recovery",
-         "hunter_options"}
+         "hunter_options", "wild_shape_forms"}
     )
