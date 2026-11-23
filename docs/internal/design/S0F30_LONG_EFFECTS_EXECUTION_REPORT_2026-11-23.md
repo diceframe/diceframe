@@ -4,7 +4,7 @@
 |---|---|
 | 切片 | S0-F30（五个特性：Intimidating Presence / Quivering Palm / Holy Nimbus / Dragon Wings / Hurl Through Hell） |
 | 基线 | `dc34bd84` 之后的 `feat/dnd2024-s0f30-long-effects` |
-| 状态 | 五个特性的核心机制完成；**两处资源恢复入口未做**（见 §5） |
+| 状态 | 五个特性全部完成，含资源恢复与主动结束 |
 
 ## 1. 交付
 
@@ -16,7 +16,8 @@
 | 特性自身使用次数 | `FeatureCapability.uses_per_long_rest` + validation 拒绝 |
 | 光环的激活门控 | `combat/engine.py::_projected_auras` 读 `requires_long_effect` |
 | 五特性定义 | `class_feature_catalogs/srd_class_features.json` + zh-CN 标签 |
-| 用例 | `tests/rulesets/test_dnd2024_long_effects.py`（23 条） |
+| 通用恢复/结束 | `restore_feature_use`（扣槽或资源、回使用计数）与 `end_long_effect`（无成本） |
+| 用例 | `tests/rulesets/test_dnd2024_long_effects.py`（29 条） |
 
 ## 2. 为什么是"角色级效果"而不是条件
 
@@ -64,17 +65,27 @@
 ## 4. 验证
 
 ```
-pytest tests/rulesets/test_dnd2024_long_effects.py   23 passed
+pytest tests/rulesets/test_dnd2024_long_effects.py   29 passed
 pytest tests/rulesets -n 6                           见 §7
 ruff / mypy                                          干净
 ```
 
-## 5. 未完成（明确列出）
+## 5. 资源恢复与主动结束
 
-1. **Holy Nimbus 的 level 5 法术位恢复**：需要"消耗一个 5 环位"的权威入口，现有法术位扣减散在施法路径里，没有可复用的 capability 接口；本片不做，避免在通用路径上开一个只为一条特性存在的洞。
-2. **Hurl 的"契约法术位恢复"**：同上，且要求"普通槽不可替代"。
-3. **Dragon Wings 的 3 点术士点恢复**：`sorcery_points` 资源存在，但恢复入口同样未接。
-4. Holy Nimbus 的主动结束（无动作）、Dragon Wings 的主动结束：需要"按效果 id 结束"的通用入口，与恢复入口一并留待下一片。
+初版报告把这几项列为"未做"，理由是"没有可复用的槽位接口"——**这个判断是错的**。`dnd2024.spell.slot_spent` 就是通用路径，`font_of_inspiration` 早就在用它做"花一个槽换回一次使用"。补齐如下：
+
+| 入口 | 支付 | 恢复 |
+|---|---|---|
+| Holy Nimbus | 一个 5 环位（`exchange: true`，不占施法位） | 长休使用计数 -1 |
+| Dragon Wings | 3 点术士点 | 同上 |
+| Hurl Through Hell | 一个 5 环契约槽 | 同上 |
+| 主动结束（Holy Nimbus / Dragon Wings） | 无成本 | 发 `long_effect.ended` |
+
+两条纪律：
+
+- **恢复走独立事件 `feature_usage.restored`**：`feature_usage.changed` 只允许 +1，那是"又用了一次"的语义；把减少塞进去会让两条语义共用一个校验。
+- **没有已用次数时在校验层拒绝**，不白扣一格槽。
+- Hurl 的命中 rider 补上了长休记账：之前只记"每回合一次"，恢复入口因此永远看不到已用次数。
 
 ## 6. 与 F29 同一类判断：没有消费者的字段不做
 
@@ -83,14 +94,14 @@ ruff / mypy                                          干净
 ## 7. 全量结果
 
 ```
-pytest tests/rulesets -n 6 --dist loadfile    2818 passed（16m03s）
+pytest tests/rulesets -n 6 --dist loadfile    2824 passed（13m44s）
 ruff check src/ tests/                         All checks passed
 mypy                                           102 source files, no issues
 ```
 
 ## 8. 自查清单（本项目固定六条）
 
-- **等价性**：既有 2818 条全绿；玩家侧派生未改，`fly_speed` 是新增字段而非改写 `speed`。
+- **等价性**：既有 2824 条全绿；玩家侧派生未改，`fly_speed` 是新增字段而非改写 `speed`。
 - **多消费者一致性**：`world_minutes` 与 `ruleset_rest._rest_tick` 同一口径；`long_effect_active` 是唯一的到期判定，视图、光环门控、结束入口都走它。
 - **跨特性交互**：光环门控只读 `requires_long_effect`，没有光环的特性不受影响；形态与条件系统未被改动。
 - **递归/回路**：`long_effects` 只由事件写入、由读取函数消费，没有自我触发路径。
