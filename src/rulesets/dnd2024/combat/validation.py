@@ -21,6 +21,7 @@ from ..character.attunement import (
 from .action_adapter import is_supported_damage_formula
 from ..features.models import ClassFeatureError
 from ..features.resources import (
+    long_effect_active,
     OVERCHANNEL_FEATURE_ID,
     OVERCHANNEL_OWNER,
     OVERCHANNEL_SPELL_CLASS,
@@ -48,6 +49,7 @@ from ..spells.font_of_magic import (
 from .cover import COVER_LEVELS
 from .obscurement import OBSCUREMENT_LEVELS
 from .primitives import (
+    world_minutes,
     CONDITION_CODES,
     DICE_RE,
     INITIATIVE_CHOICES,
@@ -1333,6 +1335,14 @@ class CombatValidationMixin:
                     f"{self.features.catalog.label(capability_id, capability_id)} cannot be "
                     f"used while {self.features.catalog.label(forbidden, forbidden)} is active"
                 )
+        if capability_id == "quivering_palm_end":
+            # 结束振动必须先有振动：放在校验层，客户端拿到 ok=false 而不是
+            # 运行期异常。
+            if long_effect_active(
+                self._feature_character(actor), "quivering_palm",
+                world_minutes(instance),
+            ) is None:
+                raise CombatIntentError("no creature is under Quivering Palm")
         if capability_id == "steady_aim":
             if self.has_moved_this_turn(combat, str(actor["actor_id"])):
                 raise CombatIntentError("you have already moved this turn")

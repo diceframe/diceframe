@@ -48,8 +48,10 @@ from .action_adapter import (
     roll_damage_node,
     spell_formula_node,
 )
+from ..features.resources import long_effect_active
 from ..character.derivation import proficiency_bonus
 from .primitives import (
+    roll,
     ABJURE_FOES_DURATION,
     INTIMIDATING_PRESENCE_DURATION,
     world_minutes,
@@ -4912,6 +4914,10 @@ class CombatResolutionMixin:
                 events.extend(self._turn_undead_events(
                     instance, combat, actor_id, actor, capability, intent, rng,
                 ))
+            elif action.kind == "quivering_palm_end":
+                events.extend(self._quivering_palm_end_events(
+                    instance, combat, actor_id, actor, capability, rng,
+                ))
             elif action.kind == "holy_nimbus":
                 events.extend(self._holy_nimbus_events(
                     instance, actor_id, actor, capability,
@@ -5544,6 +5550,79 @@ class CombatResolutionMixin:
                     # 灼烧亡灵是这次驱散的实际伤害来源：它同样可以结束战斗。
                     events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         return events
+
+    def _quivering_palm_end_events(
+        self, instance: Any, combat: dict[str, Any], actor_id: str,
+        actor: dict[str, Any], capability: Any, rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Quivering Palm: ending the vibrations is its own action.
+
+        目标与到期都存在角色级 `long_effects` 里：振动可能持续好几天，跨战斗、
+        跨存档。"同一位面"没有权威系统，这个入口**不判定**——不默认成功，
+        也不假装知道；文档与测试都按 `guided` 记录。
+        """
+
+        character = self._feature_character(actor)
+        feature_id = capability.feature_id
+        effect = long_effect_active(
+            character, "quivering_palm", world_minutes(instance),
+        )
+        if effect is None:
+            raise CombatIntentError("no creature is under Quivering Palm")
+        detail = effect.get("detail") or {}
+        target_id = str(detail.get("target_id") or "")
+        if not target_id:
+            raise CombatIntentError("the vibration has no recorded target")
+        save_ability = str(self.features.feature_value(
+            character, feature_id, "save_ability", "con",
+        ) or "con")
+        dc_ability = str(self.features.feature_value(
+            character, feature_id, "dc_ability", "wis",
+        ) or "wis")
+        dice = str(self.features.feature_value(
+            character, feature_id, "damage_dice", "10d12",
+        ) or "10d12")
+        abilities = actor.get("abilities") or {}
+        level = int((character.get("build") or {}).get("level", 1) or 1)
+        dc = (
+            8
+            + (int(abilities.get(dc_ability, 10) or 10) - 10) // 2
+            + proficiency_bonus(level)
+        )
+        target = self._actor_view(instance, combat, target_id)
+        natural = int(rng.randint(1, 20))
+        modifier = int((target.get("saving_throws") or {}).get(save_ability, 0) or 0)
+        total = natural + modifier
+        total, replacement = self._strength_total_replacement(
+            target, save_ability, total,
+        )
+        saved = total >= dc
+        amount, _rolled = roll(dice, rng)
+        if saved:
+            amount //= 2
+        return [
+            {
+                "type": "check.resolved", "kind": "saving_throw",
+                "actor_id": target_id, "ability": save_ability,
+                "rolls": [natural], "natural": natural, "modifier": modifier,
+                "total": total, "target": dc, "success": saved,
+                "feature_id": feature_id, "channel_effect": "quivering_palm",
+                "plane_check": "guided",
+                **replacement,
+            },
+            {
+                "type": "dnd2024.long_effect.ended",
+                "actor_id": actor_id,
+                "effect_id": "quivering_palm",
+                "reason": "ended",
+            },
+            {
+                "type": "resource.changed", "resource": "hp",
+                "target_id": target_id, "delta": -amount,
+                "damage_type": "force", "feature_id": feature_id,
+                "source_actor_id": actor_id, "reason": "quivering_palm",
+            },
+        ]
 
     def _holy_nimbus_events(
         self, instance: Any, actor_id: str, actor: dict[str, Any], capability: Any,

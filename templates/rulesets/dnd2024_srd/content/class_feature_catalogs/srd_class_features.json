@@ -615,6 +615,36 @@
             "ability_bonus_wis": 4,
             "ability_score_cap": 25
           }
+        },
+        {
+          "id": "quivering_palm",
+          "owner": "subclass:warrior_of_the_open_hand",
+          "minimum_level": 17,
+          "source_ref": "srd-5.2.1:p52:quivering-palm",
+          "summary": "When you hit a creature with an Unarmed Strike, you can expend 4 Focus Points to start imperceptible vibrations that last a number of days equal to your Monk level. You can end them harmlessly (no action required), or take an action to end them: the target then makes a Constitution saving throw, taking 10d12 Force damage on a failure or half as much on a success. You and the target must be on the same plane. You can have only one creature under this effect at a time.",
+          "parameters": {
+            "focus_cost": 4,
+            "damage_dice": "10d12",
+            "damage_type": "force",
+            "save_ability": "con",
+            "dc_ability": "wis",
+            "duration_days_per_level": true,
+            "max_targets": 1
+          },
+          "capabilities": [
+            {
+              "id": "quivering_palm_end",
+              "cost": {
+                "action": 1
+              },
+              "actions": [
+                {
+                  "kind": "quivering_palm_end",
+                  "count": 1
+                }
+              ]
+            }
+          ]
         }
       ]
     },

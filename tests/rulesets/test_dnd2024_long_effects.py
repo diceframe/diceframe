@@ -284,3 +284,84 @@ def test_the_aura_stops_when_the_world_clock_passes_ten_minutes(devotion20) -> N
     assert long_effect_active(
         character, "holy_nimbus", world_minutes(instance),
     ) is None
+
+
+MONK_ABILITIES = {"str": 12, "dex": 15, "con": 13, "int": 8, "wis": 14, "cha": 10}
+MONK_SKILLS = ["skill:acrobatics", "skill:stealth"]
+
+
+def _open_hand(bundle, level: int) -> dict:
+    return _build(
+        Dnd2024Runtime(), bundle, "class:monk", level,
+        MONK_ABILITIES, MONK_SKILLS,
+        "equipment_package:monk_a",
+        "subclass:warrior_of_the_open_hand" if level >= 3 else "",
+    )
+
+
+@pytest.fixture(scope="module")
+def open_hand17(bundle):
+    return _open_hand(bundle, 17)
+
+
+def _apply_vibration(engine, instance, target_id: str = "enemy:goblin-1") -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _inject
+
+    _inject(engine, instance, [{
+        "type": "dnd2024.long_effect.applied",
+        "actor_id": "player:gm",
+        "effect_id": "quivering_palm",
+        "effect": {
+            "feature_id": "quivering_palm",
+            "expires_at": 10**9,
+            "detail": {"target_id": target_id},
+        },
+    }])
+
+
+def test_quivering_palm_arrives_at_level_seventeen(bundle) -> None:
+    assert "quivering_palm_end" not in _capability_ids(bundle, _open_hand(bundle, 16))
+    assert "quivering_palm_end" in _capability_ids(bundle, _open_hand(bundle, 17))
+
+
+def test_ending_the_vibration_deals_ten_d12_force_on_a_failed_save(open_hand17) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _inject  # noqa: F401
+
+    engine, instance = _setup(open_hand17)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply_vibration(engine, instance)
+
+    events = _apply(engine, instance, _capability(
+        engine, instance, "quivering_palm_end", [1] + [6] * 10,
+    ))
+
+    check = _of_type(events, "check.resolved")[0]
+    assert check["ability"] == "con"
+    assert check["success"] is False
+    assert check["plane_check"] == "guided"
+    damage = _of_type(events, "resource.changed")[0]
+    assert damage["delta"] == -60
+    assert damage["damage_type"] == "force"
+    assert _of_type(events, "dnd2024.long_effect.ended")
+
+
+def test_a_successful_save_halves_the_damage(open_hand17) -> None:
+    engine, instance = _setup(open_hand17)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply_vibration(engine, instance)
+
+    events = _apply(engine, instance, _capability(
+        engine, instance, "quivering_palm_end", [20] + [6] * 10,
+    ))
+
+    damage = _of_type(events, "resource.changed")[0]
+    assert damage["delta"] == -30
+
+
+def test_ending_without_a_vibration_is_refused(open_hand17) -> None:
+    engine, instance = _setup(open_hand17)
+    _start(engine, instance, enemies=_two_enemies())
+
+    resolved = _capability(engine, instance, "quivering_palm_end", [1])
+
+    assert resolved["ok"] is False
