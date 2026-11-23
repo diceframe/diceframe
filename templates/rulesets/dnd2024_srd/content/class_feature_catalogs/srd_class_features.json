@@ -2070,6 +2070,32 @@
             "max_hp_bonus_first": 3,
             "max_hp_bonus_per_level_after": 1
           }
+        },
+        {
+          "id": "dragon_wings",
+          "owner": "subclass:draconic_sorcery",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p70:dragon-wings",
+          "summary": "As a Bonus Action, you sprout dragon wings for 1 hour or until you dismiss them (no action required). For the duration you have a Fly Speed of 60 feet. Once you use this feature, you can't use it again until you finish a Long Rest, unless you spend 3 Sorcery Points (no action required) to restore it.",
+          "parameters": {
+            "fly_speed_ft": 60,
+            "duration_minutes": 60
+          },
+          "capabilities": [
+            {
+              "id": "dragon_wings",
+              "cost": {
+                "bonus_action": 1
+              },
+              "uses_per_long_rest": 1,
+              "actions": [
+                {
+                  "kind": "dragon_wings",
+                  "count": 1
+                }
+              ]
+            }
+          ]
         }
       ]
     },

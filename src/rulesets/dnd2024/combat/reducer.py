@@ -284,6 +284,33 @@ class CombatReducerMixin:
                     })
                     del history[:-64]
             return
+        if event_type in {"dnd2024.long_effect.applied",
+            "dnd2024.long_effect.ended",
+        }:
+            # 与形态同层：角色级状态，跨战斗、跨存档。战斗结束会清掉按回合
+            # 计时的条件，所以"10 分钟""1 小时"这类事实必须住在这里。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind != "player" or raw_id not in snapshot["characters"]:
+                raise EventBatchError(
+                    "only an existing player can hold a long-lived effect"
+                )
+            character = snapshot["characters"][raw_id]
+            effect_id = str(event.get("effect_id") or "")
+            if not effect_id:
+                raise EventBatchError(f"{event_type} needs an effect id")
+            effects = character.setdefault("long_effects", {})
+            if event_type == "dnd2024.long_effect.ended":
+                effects.pop(effect_id, None)
+                if not effects:
+                    character.pop("long_effects", None)
+                return
+            payload = event.get("effect") or {}
+            if not isinstance(payload, dict) or not payload:
+                raise EventBatchError(
+                    "long_effect.applied needs an effect payload"
+                )
+            effects[effect_id] = dict(payload)
+            return
         if event_type in {"dnd2024.form.assumed", "dnd2024.form.reverted"}:
             # 变形是**角色级**状态而不是战斗状态：Wild Shape 持续等级/2 小时，
             # 跨遭遇、跨存档。写进 combat 会在下一场战斗里凭空变回原形。

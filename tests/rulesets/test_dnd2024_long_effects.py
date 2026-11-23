@@ -133,3 +133,71 @@ def test_a_successful_save_leaves_no_condition(berserker) -> None:
     assert _of_type(events, "check.resolved")[0]["success"] is True
     assert not _of_type(events, "condition.applied")
     assert "frightened" not in (_conditions(instance, "enemy:goblin-1") or {})
+
+
+SORCERER_ABILITIES = {"str": 8, "dex": 14, "con": 15, "int": 10, "wis": 12, "cha": 13}
+SORCERER_SKILLS = ["skill:arcana", "skill:deception"]
+
+
+def _sorcerer(bundle, level: int) -> dict:
+    return _build(
+        Dnd2024Runtime(), bundle, "class:sorcerer", level,
+        SORCERER_ABILITIES, SORCERER_SKILLS,
+        "equipment_package:sorcerer_a",
+        "subclass:draconic_sorcery" if level >= 3 else "",
+    )
+
+
+@pytest.fixture(scope="module")
+def draconic(bundle):
+    return _sorcerer(bundle, 14)
+
+
+def _fly_speed(instance) -> int:
+    from src.rulesets.dnd2024.combat.primitives import world_minutes
+    from src.rulesets.dnd2024.features.resources import fly_speed_from
+
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    return fly_speed_from(character, world_minutes(instance))
+
+
+def test_dragon_wings_arrives_at_level_fourteen(bundle) -> None:
+    assert "dragon_wings" not in _capability_ids(bundle, _sorcerer(bundle, 13))
+    assert "dragon_wings" in _capability_ids(bundle, _sorcerer(bundle, 14))
+
+
+def test_dragon_wings_grants_a_fly_speed_that_survives_the_battle(draconic) -> None:
+    engine, instance = _setup(draconic)
+    _start(engine, instance, enemies=_two_enemies())
+
+    events = _apply(engine, instance, _capability(engine, instance, "dragon_wings"))
+
+    applied = _of_type(events, "dnd2024.long_effect.applied")
+    assert applied[0]["effect"]["detail"] == {"fly_speed": 60}
+    assert _fly_speed(instance) == 60
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    assert "dragon_wings" in character["long_effects"]
+
+
+def test_dragon_wings_expires_on_the_world_clock(draconic) -> None:
+    from src.engine.world_state import clock_from_minutes
+
+    engine, instance = _setup(draconic)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply(engine, instance, _capability(engine, instance, "dragon_wings"))
+
+    instance.world_state["clock"] = clock_from_minutes(61)
+
+    assert _fly_speed(instance) == 0
+
+
+def test_a_second_activation_needs_a_long_rest(draconic) -> None:
+    engine, instance = _setup(draconic)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply(engine, instance, _capability(engine, instance, "dragon_wings"))
+
+    _next_turn(engine, instance, "player:gm")
+    resolved = _capability(engine, instance, "dragon_wings")
+
+    assert resolved["ok"] is False
+    assert "long rest" in resolved["error"]

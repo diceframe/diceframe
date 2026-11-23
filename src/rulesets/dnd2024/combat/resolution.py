@@ -51,6 +51,7 @@ from .action_adapter import (
 from .primitives import (
     ABJURE_FOES_DURATION,
     INTIMIDATING_PRESENCE_DURATION,
+    world_minutes,
     INITIATIVE_CHOICES,
     PERSISTENT_RAGE_DURATION,
     RELENTLESS_RAGE_DECISION,
@@ -4910,6 +4911,10 @@ class CombatResolutionMixin:
                 events.extend(self._turn_undead_events(
                     instance, combat, actor_id, actor, capability, intent, rng,
                 ))
+            elif action.kind == "dragon_wings":
+                events.extend(self._dragon_wings_events(
+                    instance, actor_id, actor, capability,
+                ))
             elif action.kind == "intimidating_presence":
                 events.extend(self._intimidating_presence_events(
                     instance, combat, actor_id, actor, capability, intent, rng,
@@ -5534,6 +5539,34 @@ class CombatResolutionMixin:
                     # 灼烧亡灵是这次驱散的实际伤害来源：它同样可以结束战斗。
                     events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         return events
+
+    def _dragon_wings_events(
+        self, instance: Any, actor_id: str, actor: dict[str, Any], capability: Any,
+    ) -> list[dict[str, Any]]:
+        """Dragon Wings: a one-hour Fly Speed as a character-level effect.
+
+        住在 `long_effects` 而不是条件里：战斗结束会清掉按回合计时的条件，
+        而这是一小时的物理事实。到期按世界时钟的绝对分钟判定。
+        """
+
+        character = self._feature_character(actor)
+        feature_id = capability.feature_id
+        minutes = int(self.features.feature_value(
+            character, feature_id, "duration_minutes", 60,
+        ) or 60)
+        fly = int(self.features.feature_value(
+            character, feature_id, "fly_speed_ft", 60,
+        ) or 60)
+        return [{
+            "type": "dnd2024.long_effect.applied",
+            "actor_id": actor_id,
+            "effect_id": feature_id,
+            "effect": {
+                "feature_id": feature_id,
+                "expires_at": world_minutes(instance) + minutes,
+                "detail": {"fly_speed": fly},
+            },
+        }]
 
     def _intimidating_presence_events(
         self, instance: Any, combat: dict[str, Any], actor_id: str,
