@@ -826,6 +826,10 @@ class CombatReducerMixin:
             zone_id = str(event["zone_id"])
             zones[zone_id] = {
                 "kind": str(event.get("kind") or "sphere"),
+                # 形状与尺寸：sphere 用半径，cube 用边长；一维下 cube 的成员是
+                # |pos - origin| <= 边长/2（投影，不是几何真值）。
+                "shape": str(event.get("shape") or "sphere"),
+                "size_ft": int(event.get("size_ft", event.get("radius_ft", 0)) or 0),
                 "level": str(event.get("level") or "heavily"),
                 "origin": int(event.get("origin", 0) or 0),
                 "radius_ft": int(event.get("radius_ft", 0) or 0),
@@ -833,8 +837,30 @@ class CombatReducerMixin:
                 "spell_ref": str(event.get("spell_ref") or ""),
                 "caster_id": str(event.get("caster_id") or ""),
                 "concentration": bool(event.get("concentration")),
-                "rounds_left": int(event.get("rounds_left", 10) or 10),
+                # 0 = 由世界时钟裁剪（Sanctuary 的一分钟）；>0 才是按回合。
+                "rounds_left": int(event.get("rounds_left", 10) or 0),
+                "ward_type": str(event.get("ward_type") or ""),
+                "owner_id": str(event.get("owner_id") or event.get("caster_id") or ""),
+                "beneficiaries": str(event.get("beneficiaries") or "all"),
+                "half_cover": bool(event.get("half_cover")),
+                "resistance_from_owner": bool(event.get("resistance_from_owner")),
+                "expires_at_minute": event.get("expires_at_minute"),
+                "ends_on_owner_incapacitated": bool(
+                    event.get("ends_on_owner_incapacitated")
+                ),
+                "feature_id": str(event.get("feature_id") or ""),
+                "projection": str(event.get("projection") or "theater_1d"),
             }
+            return
+        if event_type == "dnd2024.zone.removed":
+            (combat.get("zones") or {}).pop(str(event["zone_id"]), None)
+            return
+        if event_type == "dnd2024.zone.moved":
+            zone = (combat.get("zones") or {}).get(str(event["zone_id"]))
+            if not isinstance(zone, dict):
+                raise EventBatchError("zone does not exist")
+            zone["origin"] = int(event["origin"])
+            # 移动不重建区域、不刷新时长：只改原点。
             return
         if event_type == "dnd2024.obscurement.declared":
             obscurement = combat.setdefault("obscurement", {})
@@ -848,6 +874,10 @@ class CombatReducerMixin:
                     "level": level,
                     "source": str(event.get("source") or "gm"),
                 }
+            return
+        if event_type == "condition.blocked":
+            # 免疫拦截是一条**审计事件**，不是状态：它存在的意义是让 ledger
+            # 记得"有人试图施加、被谁挡下"，所以 reducer 既不写状态也不报错。
             return
         if event_type == "condition.applied":
             conditions = self._conditions(snapshot, combat, str(event["target_id"]))
@@ -1020,7 +1050,10 @@ class CombatReducerMixin:
             combat["turn_index"] = int(event["turn_index"])
             zones = combat.get("zones") or {}
             for zone_id, zone in list(zones.items()):
-                left = int(zone.get("rounds_left", 0) or 0) - 1
+                rounds = int(zone.get("rounds_left", 0) or 0)
+                if rounds <= 0:
+                    continue
+                left = rounds - 1
                 if left <= 0:
                     zones.pop(zone_id, None)
                     combat.setdefault("expired_zones", []).append(zone_id)

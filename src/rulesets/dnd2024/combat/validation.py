@@ -808,6 +808,8 @@ class CombatValidationMixin:
         if intent_type not in INTENT_TYPES:
             raise CombatIntentError("intent type is not supported")
         state = self.initialize_state(instance)
+        if intent_type in {"land_aid", "nature_sanctuary"}:
+            self._validate_land_feature(instance, intent, state)
         if intent_type in {"wild_resurgence", "nature_magician"}:
             self._validate_druid_conversion(instance, intent, state)
         if intent_type in {"form.assume", "form.revert"}:
@@ -1494,6 +1496,70 @@ class CombatValidationMixin:
         except FormStateError:  # pragma: no cover - reducer guarantees the shape
             return False
         return mode_for(state, str(item_ref)) == "merge"
+
+    def _validate_land_feature(
+        self, instance: Any, intent: dict[str, Any], state: dict[str, Any],
+    ) -> None:
+        """Circle of the Land 的主动能力：谁能不能用、够不够付、点在哪。
+
+        一维投影下"点"就是坐标线上的一个位置：客户端给的 origin 必须落在
+        60/120 尺之内，超出即拒绝，不做静默截断。
+        """
+
+        actor_id = str(intent.get("actor_id") or "")
+        kind, raw_id = _actor_kind(actor_id)
+        if kind != "player":
+            raise CombatIntentError("only a player can use a land feature")
+        character = _canonical(instance.get_character_sheet(raw_id))
+        intent_type = str(intent.get("type"))
+        feature_id = "natures_sanctuary" if intent_type == "nature_sanctuary" else "lands_aid"
+        if not self.features.has_feature(character, feature_id):
+            raise CombatIntentError(f"{feature_id} is not granted to this character")
+        economy = (state.get("combat") or {}).get("economy") or {}
+        mode = str(intent.get("mode") or "create")
+        if feature_id == "natures_sanctuary" and mode == "move":
+            if int(economy.get("bonus_action", 0) or 0) < 1:
+                raise CombatIntentError("the bonus action has already been spent")
+            zone = (state.get("combat") or {}).get("zones", {}).get(
+                str(intent.get("zone_id") or "")
+            )
+            if not isinstance(zone, dict) or str(zone.get("owner_id") or "") != actor_id:
+                raise CombatIntentError("that sanctuary is not yours")
+            return
+        if int(economy.get("action", 0) or 0) < 1:
+            raise CombatIntentError("the action has already been spent")
+        uses = self._class_resource_state(character, "wild_shape")
+        if uses["current"] < 1:
+            raise CombatIntentError("no Wild Shape uses left")
+        position = int((state.get("combat") or {}).get("positions", {}).get(actor_id, 0) or 0)
+        origin = intent.get("origin")
+        if isinstance(origin, bool) or not isinstance(origin, int):
+            raise CombatIntentError("origin must be an integer position")
+        limit = 60 if feature_id == "lands_aid" else 120
+        if abs(origin - position) > limit:
+            raise CombatIntentError(f"origin must be within {limit} feet of you")
+        if feature_id == "natures_sanctuary":
+            zone = (state.get("combat") or {}).get("zones", {}).get(
+                str(intent.get("zone_id") or "")
+            ) if mode == "move" else None
+            if mode == "move" and isinstance(zone, dict):
+                current = int(zone.get("origin", 0) or 0)
+                if abs(origin - current) > 60:
+                    raise CombatIntentError("the sanctuary can move at most 60 feet")
+            return
+        positions = (state.get("combat") or {}).get("positions") or {}
+        inside = {
+            actor for actor, pos in positions.items()
+            if abs(int(pos) - origin) <= 10
+        }
+        for target in intent.get("damage_targets") or []:
+            if str(target) not in inside:
+                raise CombatIntentError("a damage target is outside the sphere")
+        heal_target = str(intent.get("heal_target") or "")
+        if heal_target and heal_target not in inside:
+            raise CombatIntentError("the healing target is outside the sphere")
+        if not (intent.get("damage_targets") or intent.get("heal_target")) and inside:
+            raise CombatIntentError("the sphere contains creatures; choose targets")
 
 
     def _validate_turn_choice(

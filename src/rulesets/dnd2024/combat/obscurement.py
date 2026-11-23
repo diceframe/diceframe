@@ -86,6 +86,30 @@ def zone_covers(combat_row: dict, origin: int, position: int) -> bool:
     return abs(int(origin) - int(position)) <= radius
 
 
+def zone_members(
+    combat: dict, zone: dict, positions: dict[str, int], predicate,
+) -> list[str]:
+    """Who is inside this area, in a stable order.
+
+    The area is a one-dimensional projection: an origin plus a size.  Members
+    are ``|position - origin| <= reach``; ``predicate(actor_id)`` filters for
+    the abilities that only cover allies (Nature's Sanctuary).
+    """
+
+    shape = str(zone.get("shape") or "sphere")
+    size = int(zone.get("size_ft") or zone.get("radius_ft") or 0)
+    reach = size // 2 if shape == "cube" else size
+    origin = int(zone.get("origin", 0) or 0)
+    members: list[str] = []
+    for actor_id, position in sorted(positions.items()):
+        if abs(int(position) - origin) > reach:
+            continue
+        if predicate is not None and not predicate(actor_id):
+            continue
+        members.append(str(actor_id))
+    return members
+
+
 def zone_row(zone_id: str, zone: dict) -> dict:
     """One zone as a source row: the level plus where it came from."""
 

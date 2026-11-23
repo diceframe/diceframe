@@ -1163,6 +1163,10 @@ class Dnd2024CombatEngine(
             events.extend(self._basic_action_events(combat, intent_type, str(intent["actor_id"])))
         elif intent_type == "hide":
             events.extend(self._hide_events(instance, combat, intent, rng))
+        elif intent_type == "land_aid":
+            events.extend(self._land_aid_events(instance, combat, intent, rng))
+        elif intent_type == "nature_sanctuary":
+            events.extend(self._nature_sanctuary_events(instance, combat, intent))
         elif intent_type == "wild_resurgence":
             events.extend(self._wild_resurgence_events(instance, combat, intent))
         elif intent_type == "nature_magician":
@@ -1195,6 +1199,7 @@ class Dnd2024CombatEngine(
         events.extend(self._source_incapacitation_events(instance, combat, events))
         events.extend(self._timed_condition_expiry_events(instance, combat))
         events.extend(self._shape_exit_events(instance, combat))
+        events.extend(self._zone_expiry_events(instance, combat))
         # 世界时钟驱动的到期：一场在一分钟内结束的战斗会把效果留在身上，
         # 只要之后还有任何战斗意图或时钟越过那一分钟就会被清掉。end_turn
         # 由回合推进处统一查两个上限，这里不能重复发同一条移除事件。
@@ -1202,6 +1207,7 @@ class Dnd2024CombatEngine(
             events.extend(self._superior_defense_expiry_events(instance, combat))
         # S0-MM1：条件免疫是 stat block 事实，拦在"产出侧"一处，覆盖所有生产者。
         events = self._statblock_immunity_events(combat, events)
+
         batch = {
             "batch_id": stable_batch_id(intent, expected),
             "intent_id": intent_id,
@@ -1245,6 +1251,50 @@ class Dnd2024CombatEngine(
                         "source_actor_id": str(event.get("source_actor_id") or ""),
                     })
                     continue
+            filtered.append(event)
+        return filtered
+
+    def _feature_immunity_events(
+        self, instance: Any, combat: dict[str, Any], events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Turn an immune ``condition.applied`` into a block, for party actors too.
+
+        ``_statblock_immunity_events`` covers enemies because their immunity is
+        data.  A player's immunity is a *feature* (Nature's Ward, Mindless Rage),
+        and those producers are many -- spells, riders, terrain.  Checking here,
+        once per intent, is the same trade the statblock branch already made:
+        immunity belongs to the target, so every producer inherits the answer.
+        """
+
+        if not any(
+            isinstance(event, dict) and event.get("type") == "condition.applied"
+            for event in events
+        ):
+            return events
+        filtered: list[dict[str, Any]] = []
+        for event in events:
+            if event.get("type") == "condition.applied":
+                target_id = str(event.get("target_id") or "")
+                kind, raw_id = _actor_kind(target_id)
+                if kind in {"player", "companion"}:
+                    try:
+                        target = self._actor_view(instance, combat, target_id)
+                    except CombatIntentError:  # pragma: no cover - left the fight
+                        target = None
+                    if target is not None:
+                        blocker = self._condition_immunity_blocker(
+                            instance, combat, target, str(event.get("condition") or ""),
+                        )
+                        if blocker is not None:
+                            filtered.append({
+                                "type": "condition.blocked",
+                                "target_id": target_id,
+                                "condition": str(event.get("condition") or ""),
+                                "reason": "immune",
+                                "blocked_by": str(blocker.get("feature_id") or ""),
+                                "source_actor_id": str(event.get("source_actor_id") or ""),
+                            })
+                            continue
             filtered.append(event)
         return filtered
 
@@ -1597,6 +1647,13 @@ class Dnd2024CombatEngine(
         # 死亡清理是 reducer 的副作用，不是客户端提交的事件；记录死亡前后的
         # 绑定差异，把一次死亡对应的解绑事件补进权威 ledger 与返回批次。
         before_characters = deepcopy(snapshot["characters"])
+        # 特性免疫（Nature's Ward / Mindless Rage）在这里统一过滤：免疫是目标的
+        # 属性，任何生产者（法术、rider、地形、GM 声明）都该得到同一个答案。
+        combat_state = (state.get("combat") or {})
+        if combat_state.get("status") == "active":
+            filtered = self._feature_immunity_events(instance, combat_state, batch["events"])
+            if filtered is not batch["events"]:
+                batch = {**batch, "events": filtered}
         updated, ledger, duplicate = apply_event_batch(
             snapshot, ruleset_runtime.event_ledger(instance), batch, self._reduce_event,
         )
@@ -2375,6 +2432,63 @@ class Dnd2024CombatEngine(
             for row in combat.get("mark_damage_history") or []
         )
 
+    def _zone_expiry_events(
+        self, instance: Any, combat: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """区域到期：一分钟的时钟，或持有者失能/死亡。
+
+        与回合数无关——Sanctuary 写的是"1 分钟"，按回合计会让它在一场
+        慢节奏战斗里提前消失，也会在战斗结束后永远留着。
+        """
+
+        now = self._logical_minutes(instance)
+        events: list[dict[str, Any]] = []
+        for zone_id, zone in sorted((combat.get("zones") or {}).items()):
+            if not isinstance(zone, dict):
+                continue
+            reason = ""
+            expires = zone.get("expires_at_minute")
+            if isinstance(expires, int) and not isinstance(expires, bool) and now >= expires:
+                reason = "expired"
+            elif zone.get("ends_on_owner_incapacitated"):
+                owner_id = str(zone.get("owner_id") or "")
+                if owner_id:
+                    try:
+                        owner = self._actor_view(instance, combat, owner_id)
+                    except CombatIntentError:  # pragma: no cover - left the fight
+                        owner = None
+                    if owner is not None:
+                        flagged = condition_flags(
+                            self.catalog.conditions, owner.get("conditions") or {},
+                        )["incapacitated"]
+                        if flagged or owner.get("hp", 1) <= 0:
+                            reason = "owner_incapacitated"
+            if reason:
+                events.append({
+                    "type": "dnd2024.zone.removed", "zone_id": zone_id,
+                    "reason": reason,
+                })
+        return events
+
+    def _zone_cover_level(
+        self, combat: dict[str, Any], actor_id: str, side: str,
+    ) -> str:
+        """The best Half Cover an area gives this creature right now."""
+
+        if not actor_id:
+            return "none"
+        position = int((combat.get("positions") or {}).get(actor_id, 0) or 0)
+        level = "none"
+        for zone in (combat.get("zones") or {}).values():
+            if not isinstance(zone, dict) or not zone.get("half_cover"):
+                continue
+            if not zone_covers(zone, int(zone.get("origin", 0) or 0), position):
+                continue
+            if str(zone.get("beneficiaries") or "all") == "allies" and side != "party":
+                continue
+            level = "half"
+        return level
+
     def _cover_record(
         self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
     ) -> dict[str, Any]:
@@ -2399,6 +2513,12 @@ class Dnd2024CombatEngine(
             # 声明优先：桌子说了"他躲在箱子后面"，任何派生来源都不该悄悄反对。
             source = str(declared.get("source") or "gm")
             return cover_row(str(declared.get("level") or "none"), [f"gm:{source}"])
+        # 区域提供的掩护：Nature's Sanctuary 的 Cube 只保护持有者与盟友，
+        # 所以受益者由区域自己声明，而不是"在区域里就算"。
+        zone_cover = self._zone_cover_level(combat, target_id, str(target.get("side") or ""))
+        if zone_cover != "none":
+            # 与 GM 声明同一条路径：区域掩护也直接 return 完整的 cover_row。
+            return cover_row(zone_cover, ["zone:sanctuary"])
         empty = cover_row("none")
         if not target_id or str(target.get("side") or "") != "party":
             return empty
