@@ -53,6 +53,7 @@ from src.commands.narrative_application import (
 from src.commands.narrative_quality import (
     inspect_narrative_output,
     quality_repair_instruction as build_quality_repair_instruction,
+    review_narrative_semantics,
 )
 from src.commands.round_llm import (
     append_multistep_analysis,
@@ -66,6 +67,7 @@ from src.commands.round_actions import (
     format_check_results_constraint,
     initialize_puzzles_from_lorebook,
 )
+from src.commands.round_helpers import should_multi_step
 from src.commands.state_recap import snapshot_public_player_state
 from src.commands.state_update_applier import discard_unresolved_player_damage
 from src.commands.tag_summary import summarize_tags
@@ -1566,23 +1568,35 @@ class RoundProcessor:
             self.llm_client, instance, gm_prompt, context, actions_text, self.analysis_max_tokens)
         runtime = self._ruleset_runtime(instance)
         allowed_uids = self._allowed_narrative_player_uids(instance)
+        semantic_review_enabled = should_multi_step(instance, actions_text)
+        public_narration_context = _build_recent_public_narration_context(instance)
 
-        def quality_gate(response_candidate: Any, data_candidate: dict) -> list[str]:
+        async def quality_gate(response_candidate: Any, data_candidate: dict) -> list[str]:
             if isinstance(runtime, NarrativeStatePolicyRuntime):
                 data_candidate["state_update"] = runtime.filter_narrative_state_update(
                     instance, dict(data_candidate.get("state_update") or {}),
                 )
-            return inspect_narrative_output(
+            structural_issues = inspect_narrative_output(
                 response_candidate,
                 data_candidate,
                 allowed_player_uids=allowed_uids,
+            )
+            if structural_issues or not semantic_review_enabled:
+                return structural_issues
+            return await review_narrative_semantics(
+                self.llm_client,
+                instance,
+                actions_text=actions_text,
+                narration=str(getattr(response_candidate, "narration", "") or ""),
+                state_update=data_candidate.get("state_update", {}),
+                recent_public_narration=public_narration_context,
             )
 
         response, data = await call_llm_with_tag_retry(
             self.llm_client, instance, gm_prompt, context, combat_model,
             dice_block, self.narrative_max_tokens, actions_text,
             on_delta=on_delta, on_reset=on_reset,
-            public_narration_context=_build_recent_public_narration_context(instance),
+            public_narration_context=public_narration_context,
             quality_gate=quality_gate,
             quality_repair_instruction=lambda issues: build_quality_repair_instruction(
                 instance.language, issues,

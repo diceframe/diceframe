@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from src.commands.narrative_application import apply_parsed_data_to_response as _apply_parsed
@@ -538,7 +539,7 @@ async def call_llm_with_tag_retry(
     on_delta=None,
     on_reset=None,
     public_narration_context: str = "",
-    quality_gate: Callable[[Any, dict], Sequence[str]] | None = None,
+    quality_gate: Callable[[Any, dict], Sequence[str] | Awaitable[Sequence[str]]] | None = None,
     quality_repair_instruction: Callable[[Sequence[str]], str] | None = None,
 ) -> tuple[Any, dict]:
     """调用 LLM、解析标签并执行有界的协议/质量修复。
@@ -696,8 +697,11 @@ async def call_llm_with_tag_retry(
             continue
 
         if quality_gate is not None:
+            gate_result = quality_gate(response, data)
+            if inspect.isawaitable(gate_result):
+                gate_result = await gate_result
             quality_issues = [
-                str(issue) for issue in quality_gate(response, data)
+                str(issue) for issue in gate_result
                 if str(issue).strip()
             ]
             if quality_issues:

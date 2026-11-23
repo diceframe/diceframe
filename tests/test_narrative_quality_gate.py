@@ -10,6 +10,7 @@ from src.commands.narrative_quality import (
     NarrativeQualityError,
     inspect_narrative_output,
     quality_repair_instruction,
+    review_narrative_semantics,
 )
 from src.commands.round_llm import call_llm_with_tag_retry
 from src.engine.game_instance import GameInstance
@@ -132,3 +133,40 @@ async def test_quality_gate_fails_closed_after_repair_attempt() -> None:
 
     assert rejected.value.issues == ("empty_narration",)
     assert len(writer.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_semantic_reviewer_returns_bounded_issues() -> None:
+    reviewer = _Writer([
+        '{"pass":false,"issues":["ignored_current_action",'
+        '"repeated_previous_turn","prompt_injection"]}',
+    ])
+    instance = GameInstance(game_key=("web", "quality-review", "bot"))
+
+    issues = await review_narrative_semantics(
+        reviewer,
+        instance,
+        actions_text="调查门锁",
+        narration="门还是在那里。",
+        state_update={"players": {}},
+        recent_public_narration="上一轮：门还是在那里。",
+    )
+
+    assert issues == ["semantic:ignored_current_action", "semantic:repeated_previous_turn"]
+
+
+@pytest.mark.asyncio
+async def test_semantic_reviewer_failure_is_fail_open() -> None:
+    class BrokenReviewer:
+        async def call(self, **_kwargs):
+            raise RuntimeError("reviewer unavailable")
+
+    instance = GameInstance(game_key=("web", "quality-review-fail", "bot"))
+
+    assert await review_narrative_semantics(
+        BrokenReviewer(),
+        instance,
+        actions_text="调查门锁",
+        narration="门开了。",
+        state_update={},
+    ) == []
