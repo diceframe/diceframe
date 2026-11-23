@@ -51,6 +51,7 @@ from .action_adapter import (
 from ..features.resources import (
     feature_usage_count,
     long_effect_active,
+    world_minutes,
 )
 from ..character.derivation import proficiency_bonus
 from .primitives import (
@@ -58,7 +59,6 @@ from .primitives import (
     ABJURE_FOES_DURATION,
     INTIMIDATING_PRESENCE_DURATION,
     HURL_THROUGH_HELL_DURATION,
-    world_minutes,
     INITIATIVE_CHOICES,
     PERSISTENT_RAGE_DURATION,
     RELENTLESS_RAGE_DECISION,
@@ -2073,6 +2073,7 @@ class CombatResolutionMixin:
                 "turn_index": int(combat.get("turn_index", 0)),
             })
         riders = self._hit_rider_declarations(
+            instance,
             actor, weapon, intent, combat, damage_type=damage_type, check=check,
         )
         if riders:
@@ -2080,6 +2081,7 @@ class CombatResolutionMixin:
             # 把命中改判落空时，不给这些骰子白掷一次的机会。
             damage_event["hit_riders"] = riders
         conditions = self._hit_condition_declarations(
+            instance,
             actor, weapon, intent, combat, granted_by,
         )
         if conditions:
@@ -2129,7 +2131,7 @@ class CombatResolutionMixin:
         )
 
     def _hit_rider_declarations(
-        self, actor: dict[str, Any], weapon: dict[str, Any],
+        self, instance: Any, actor: dict[str, Any], weapon: dict[str, Any],
         intent: dict[str, Any], combat: dict[str, Any], *,
         damage_type: str = "", check: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
@@ -2727,7 +2729,7 @@ class CombatResolutionMixin:
         return event, damage
 
     def _hit_condition_declarations(
-        self, actor: dict[str, Any], weapon: dict[str, Any],
+        self, instance: Any, actor: dict[str, Any], weapon: dict[str, Any],
         intent: dict[str, Any], combat: dict[str, Any], granted_by: str = "",
     ) -> list[dict[str, Any]]:
         """Hit-triggered conditions this attack declares (Stunning Strike).
@@ -2809,7 +2811,17 @@ class CombatResolutionMixin:
                 ),
             })
 
-        if intent.get("quivering_palm") and bool(weapon.get("unarmed")):
+        if (
+            intent.get("quivering_palm")
+            and bool(weapon.get("unarmed"))
+            and self.features.has_feature(character, "quivering_palm")
+            and not self._feature_used_this_turn(
+                combat, str(actor["actor_id"]), "quivering_palm",
+            )
+            and long_effect_active(
+                character, "quivering_palm", world_minutes(instance),
+            ) is None
+        ):
             declarations.append({
                 "kind": "quivering_palm",
                 "feature_id": "quivering_palm",
@@ -2935,20 +2947,21 @@ class CombatResolutionMixin:
                 exempt = {str(code).lower() for code in row.get("exempt_types") or ()}
                 creature_type = str(target.get("creature_type") or "").lower()
                 if creature_type not in exempt:
-                    amount, _rolled = roll(str(row.get("damage_dice") or "8d10"), rng)
-                    events.append({
-                        "type": "resource.changed", "resource": "hp",
-                        "target_id": str(target["actor_id"]), "delta": -amount,
-                        "damage_type": str(row.get("damage_type") or "psychic"),
-                        "feature_id": "hurl_through_hell",
-                        "source_actor_id": attacker_id,
-                    })
+                    damage, _total = self._damage_instance_event(
+                        str(row.get("damage_dice") or "8d10"),
+                        str(row.get("damage_type") or "psychic"),
+                        target, False, rng,
+                    )
+                    if damage is not None:
+                        damage["feature_id"] = "hurl_through_hell"
+                        damage["source_actor_id"] = attacker_id
+                        events.append(damage)
                 events.append({
                     "type": "condition.applied",
                     "target_id": str(target["actor_id"]),
                     "condition": str(row.get("condition") or "incapacitated"),
                     "duration": HURL_THROUGH_HELL_DURATION,
-                    "turns_remaining": int(row.get("turns") or 1) * 10,
+                    "turns_remaining": max(1, int(row.get("turns") or 1)),
                     "source_actor_id": attacker_id,
                     "feature_id": "hurl_through_hell",
                     # 消失与返回需要战场坐标之外的语义；这里只落失能与时长。
@@ -5778,32 +5791,33 @@ class CombatResolutionMixin:
             target, save_ability, total,
         )
         saved = total >= dc
-        amount, _rolled = roll(dice, rng)
-        if saved:
-            amount //= 2
-        return [
-            {
-                "type": "check.resolved", "kind": "saving_throw",
-                "actor_id": target_id, "ability": save_ability,
-                "rolls": [natural], "natural": natural, "modifier": modifier,
-                "total": total, "target": dc, "success": saved,
-                "feature_id": feature_id, "channel_effect": "quivering_palm",
-                "plane_check": "guided",
-                **replacement,
-            },
-            {
-                "type": "dnd2024.long_effect.ended",
-                "actor_id": actor_id,
-                "effect_id": "quivering_palm",
-                "reason": "ended",
-            },
-            {
-                "type": "resource.changed", "resource": "hp",
-                "target_id": target_id, "delta": -amount,
-                "damage_type": "force", "feature_id": feature_id,
-                "source_actor_id": actor_id, "reason": "quivering_palm",
-            },
-        ]
+        events: list[dict[str, Any]] = [{
+            "type": "check.resolved", "kind": "saving_throw",
+            "actor_id": target_id, "ability": save_ability,
+            "rolls": [natural], "natural": natural, "modifier": modifier,
+            "total": total, "target": dc, "success": saved,
+            "feature_id": feature_id, "channel_effect": "quivering_palm",
+            # 位面由调用方断言，不由引擎判定：没有权威系统时，把这条事实
+            # 原样写进事件，让日志能看出它来自哪里。
+            "plane_asserted": True,
+            **replacement,
+        }]
+        events.append({
+            "type": "dnd2024.long_effect.ended",
+            "actor_id": actor_id,
+            "effect_id": "quivering_palm",
+            "reason": "ended",
+        })
+        # 抗性与免疫走与其它伤害同一个实例函数：力场抗性必须生效。
+        damage, _total = self._damage_instance_event(
+            dice, "force", target, False, rng, half=saved,
+        )
+        if damage is not None:
+            damage["feature_id"] = feature_id
+            damage["source_actor_id"] = actor_id
+            damage["reason"] = "quivering_palm"
+            events.append(damage)
+        return events
 
     def _holy_nimbus_events(
         self, instance: Any, actor_id: str, actor: dict[str, Any], capability: Any,

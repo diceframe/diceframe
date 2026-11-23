@@ -17,6 +17,7 @@ from src.rulesets.dnd2024.features.resources import (
     OVERCHANNEL_OWNER,
     OVERCHANNEL_SPELL_CLASS,
     fly_speed_from,
+    world_minutes,
 )
 from src.rulesets.dnd2024.spells.casting import spell_caster, spellcasting_projection
 
@@ -24,7 +25,6 @@ from .check_modes import marked_target_id, sense_declarations
 from .check_windows import LUCKY_RESOURCE
 from .primitives import (
     DIVINE_SENSE_CONDITION,
-    world_minutes,
     FEATURE_STATE_KEYS,
     CombatIntentError,
     UNARMED_STRIKE_REF,
@@ -368,7 +368,18 @@ class CombatViewMixin:
             # 飞行不住在静态派生里：它来自 long_effects（每个来源取最高），
             # 到期按世界时钟的绝对分钟判定。
             "fly_speed": fly_speed_from(character, now_minutes),
-            "long_effects": deepcopy(character.get("long_effects") or {}),
+            # 过期项不投出去：同一份视图里 fly_speed 已按到期判定归零，
+            # long_effects 若原样搬出去，两个字段会互相矛盾。
+            "long_effects": {
+                effect_id: deepcopy(effect)
+                for effect_id, effect in (character.get("long_effects") or {}).items()
+                if not (
+                    isinstance(effect, dict)
+                    and isinstance(effect.get("expires_at"), int)
+                    and not isinstance(effect.get("expires_at"), bool)
+                    and now_minutes >= effect["expires_at"]
+                )
+            },
             "armor_training": deepcopy(
                 character.get("derived", {}).get("armor_training") or {}
             ),

@@ -22,6 +22,7 @@ from .action_adapter import is_supported_damage_formula
 from ..features.models import ClassFeatureError
 from ..features.resources import (
     long_effect_active,
+    world_minutes,
     OVERCHANNEL_FEATURE_ID,
     OVERCHANNEL_OWNER,
     OVERCHANNEL_SPELL_CLASS,
@@ -49,7 +50,6 @@ from ..spells.font_of_magic import (
 from .cover import COVER_LEVELS
 from .obscurement import OBSCUREMENT_LEVELS
 from .primitives import (
-    world_minutes,
     CONDITION_CODES,
     DICE_RE,
     INITIATIVE_CHOICES,
@@ -1356,6 +1356,13 @@ class CombatValidationMixin:
                 world_minutes(instance),
             ) is None:
                 raise CombatIntentError("no creature is under Quivering Palm")
+            # 规则要求持有者与目标同处一个位面。仓库没有权威位面系统，所以
+            # 这里要求调用方**显式断言**，而不是默认成立——默认成立等于偷偷
+            # 替玩家做了一个它无法验证的判断。
+            if intent.get("same_plane") is not True:
+                raise CombatIntentError(
+                    "Quivering Palm requires an explicit same-plane assertion"
+                )
         if capability_id == "steady_aim":
             if self.has_moved_this_turn(combat, str(actor["actor_id"])):
                 raise CombatIntentError("you have already moved this turn")

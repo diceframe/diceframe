@@ -309,6 +309,23 @@ class CombatReducerMixin:
                 raise EventBatchError(
                     "long_effect.applied needs an effect payload"
                 )
+            expires = payload.get("expires_at")
+            if isinstance(expires, bool) or not isinstance(expires, int):
+                # 缺失或非整数的到期时间会让 _expired 永远判"未过期"，
+                # 效果就此永生。宁可拒绝一个形状不对的载荷。
+                raise EventBatchError(
+                    "long_effect.applied needs an integer expires_at"
+                )
+            if not isinstance(effects, dict):
+                raise EventBatchError("long_effects is not an object")
+            existing = effects.get(effect_id)
+            if isinstance(existing, dict):
+                # 重放同一条 applied 不能续期：到期时间只能由新的、更晚的
+                # 施加推进，否则回放历史事件就能让效果原地续命。
+                previous = existing.get("expires_at")
+                if isinstance(previous, int) and not isinstance(previous, bool):
+                    if expires <= previous:
+                        return
             effects[effect_id] = dict(payload)
             return
         if event_type in {"dnd2024.form.assumed", "dnd2024.form.reverted"}:

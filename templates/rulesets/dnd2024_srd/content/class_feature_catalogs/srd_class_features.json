@@ -1431,7 +1431,9 @@
             "dc_ability": "str",
             "condition": "frightened",
             "condition_minutes": 1,
-            "repeat_save": true
+            "repeat_save": true,
+            "restore_resource": "rages",
+            "restore_resource_amount": 1
           },
           "capabilities": [
             {
@@ -1444,6 +1446,16 @@
               "actions": [
                 {
                   "kind": "intimidating_presence",
+                  "count": 1
+                }
+              ]
+            },
+            {
+              "id": "intimidating_presence_restore",
+              "cost": {},
+              "actions": [
+                {
+                  "kind": "restore_feature_use",
                   "count": 1
                 }
               ]

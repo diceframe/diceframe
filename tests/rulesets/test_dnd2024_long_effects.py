@@ -155,7 +155,7 @@ def draconic(bundle):
 
 
 def _fly_speed(instance) -> int:
-    from src.rulesets.dnd2024.combat.primitives import world_minutes
+    from src.rulesets.dnd2024.features.resources import world_minutes
     from src.rulesets.dnd2024.features.resources import fly_speed_from
 
     character = instance.get_character_sheet("gm")["ruleset_character"]
@@ -269,7 +269,7 @@ def test_an_enemy_outside_the_aura_is_untouched(devotion20) -> None:
 
 def test_the_aura_stops_when_the_world_clock_passes_ten_minutes(devotion20) -> None:
     from src.engine.world_state import clock_from_minutes
-    from src.rulesets.dnd2024.combat.primitives import world_minutes
+    from src.rulesets.dnd2024.features.resources import world_minutes
     from src.rulesets.dnd2024.features.resources import long_effect_active
 
     engine, instance = _setup(devotion20)
@@ -333,12 +333,13 @@ def test_ending_the_vibration_deals_ten_d12_force_on_a_failed_save(open_hand17) 
 
     events = _apply(engine, instance, _capability(
         engine, instance, "quivering_palm_end", [1] + [6] * 10,
+        same_plane=True,
     ))
 
     check = _of_type(events, "check.resolved")[0]
     assert check["ability"] == "con"
     assert check["success"] is False
-    assert check["plane_check"] == "guided"
+    assert check["plane_asserted"] is True
     damage = _of_type(events, "resource.changed")[0]
     assert damage["delta"] == -60
     assert damage["damage_type"] == "force"
@@ -352,6 +353,7 @@ def test_a_successful_save_halves_the_damage(open_hand17) -> None:
 
     events = _apply(engine, instance, _capability(
         engine, instance, "quivering_palm_end", [20] + [6] * 10,
+        same_plane=True,
     ))
 
     damage = _of_type(events, "resource.changed")[0]
@@ -583,3 +585,77 @@ def test_holy_nimbus_can_be_dismissed_without_an_action(devotion20) -> None:
     combat = _rt.state(instance)["combat"]
     rows = engine._projected_auras(instance, combat)
     assert "holy_nimbus" not in [row["definition"].id for row in rows]
+
+
+def test_intimidating_presence_is_restored_with_a_rage_use(berserker) -> None:
+    engine, instance = _setup(berserker)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply(engine, instance, _capability(
+        engine, instance, "intimidating_presence", [1],
+        target_ids=["enemy:goblin-1"],
+    ))
+
+    events = _apply(engine, instance, _capability(
+        engine, instance, "intimidating_presence_restore",
+    ))
+
+    spend = _of_type(events, "dnd2024.class_resource.spent")
+    assert [(row["resource_id"], row["amount"]) for row in spend] == [("rages", 1)]
+    assert _of_type(events, "dnd2024.feature_usage.restored")
+
+
+def test_a_long_effect_without_an_expiry_is_rejected(berserker) -> None:
+    from src.rulesets.events import EventBatchError
+    from tests.rulesets.test_dnd2024_channel_control import _inject
+
+    engine, instance = _setup(berserker)
+    _start(engine, instance, enemies=_two_enemies())
+
+    with pytest.raises(EventBatchError):
+        _inject(engine, instance, [{
+            "type": "dnd2024.long_effect.applied",
+            "actor_id": "player:gm",
+            "effect_id": "dragon_wings",
+            "effect": {"feature_id": "dragon_wings"},
+        }])
+
+
+def test_replaying_an_earlier_expiry_does_not_extend_it(draconic) -> None:
+    engine, instance = _setup(draconic)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply(engine, instance, _capability(engine, instance, "dragon_wings"))
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    original = character["long_effects"]["dragon_wings"]["expires_at"]
+
+    from tests.rulesets.test_dnd2024_channel_control import _inject
+
+    _inject(engine, instance, [{
+        "type": "dnd2024.long_effect.applied",
+        "actor_id": "player:gm",
+        "effect_id": "dragon_wings",
+        "effect": {
+            "feature_id": "dragon_wings",
+            "expires_at": original - 1000,
+            "detail": {"fly_speed": 60},
+        },
+    }])
+
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    assert character["long_effects"]["dragon_wings"]["expires_at"] == original
+
+
+def test_the_view_stops_showing_an_expired_effect(draconic) -> None:
+    from src.engine.modules import ruleset_runtime as _rt
+
+    engine, instance = _setup(draconic)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply(engine, instance, _capability(engine, instance, "dragon_wings"))
+
+    from src.engine.world_state import clock_from_minutes
+
+    instance.world_state["clock"] = clock_from_minutes(61)
+    combat = _rt.state(instance)["combat"]
+    view = engine._actor_view(instance, combat, "player:gm")
+
+    assert view["fly_speed"] == 0
+    assert "dragon_wings" not in (view.get("long_effects") or {})

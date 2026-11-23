@@ -59,9 +59,11 @@ from .check_windows import (
     LUCKY_RESOURCE,
 )
 from .obscurement import best_obscurement, effective_level, obscurement_row, zone_covers
-from src.rulesets.dnd2024.features.resources import long_effect_active
-from .primitives import (
+from src.rulesets.dnd2024.features.resources import (
+    long_effect_active,
     world_minutes,
+)
+from .primitives import (
     INTENT_TYPES,
     PERSISTENT_RAGE_DURATION,
     RAGE_MAX_ROUNDS,
