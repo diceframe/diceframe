@@ -20,6 +20,7 @@ from tests.rulesets.test_dnd2024_channel_control import (
     _setup,
     _start,
     _next_turn,
+    _to_turn,
     _two_enemies,
 )
 
@@ -201,3 +202,85 @@ def test_a_second_activation_needs_a_long_rest(draconic) -> None:
 
     assert resolved["ok"] is False
     assert "long rest" in resolved["error"]
+
+
+PALADIN_ABILITIES = {"str": 12, "dex": 13, "con": 14, "int": 8, "wis": 10, "cha": 15}
+PALADIN_SKILLS = ["skill:athletics", "skill:persuasion"]
+
+
+def _devotion(bundle, level: int) -> dict:
+    return _build(
+        Dnd2024Runtime(), bundle, "class:paladin", level,
+        PALADIN_ABILITIES, PALADIN_SKILLS,
+        "equipment_package:paladin_a",
+        "subclass:oath_of_devotion" if level >= 3 else "",
+    )
+
+
+@pytest.fixture(scope="module")
+def devotion20(bundle):
+    return _devotion(bundle, 20)
+
+
+def test_holy_nimbus_arrives_at_level_twenty(bundle) -> None:
+    assert "holy_nimbus" not in _capability_ids(bundle, _devotion(bundle, 19))
+    assert "holy_nimbus" in _capability_ids(bundle, _devotion(bundle, 20))
+
+
+def test_an_enemy_that_starts_inside_takes_radiant_damage(devotion20) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _hp, _positions
+
+    engine, instance = _setup(devotion20)
+    _start(engine, instance, enemies=_two_enemies())
+    _positions(instance, **{"enemy:goblin-1": 10})
+    before = _hp(instance, "enemy:goblin-1")
+
+    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    assert "holy_nimbus" in (character.get("long_effects") or {})
+    _to_turn(engine, instance, "player:gm")
+    _to_turn(engine, instance, "enemy:goblin-1")
+
+    from src.engine.modules import ruleset_runtime as _rt
+
+    combat_state = _rt.state(instance)["combat"]
+    rows = engine._projected_auras(instance, combat_state)
+    assert "holy_nimbus" in [row["definition"].id for row in rows]
+    expected = (int(character["abilities"]["cha"]) - 10) // 2 + int(
+        character["derived"]["proficiency_bonus"]
+    )
+    assert before - _hp(instance, "enemy:goblin-1") == expected
+
+
+def test_an_enemy_outside_the_aura_is_untouched(devotion20) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _hp, _positions
+
+    engine, instance = _setup(devotion20)
+    _start(engine, instance, enemies=_two_enemies())
+    _positions(instance, **{"enemy:goblin-1": 40})
+    before = _hp(instance, "enemy:goblin-1")
+
+    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
+    _to_turn(engine, instance, "player:gm")
+    _to_turn(engine, instance, "enemy:goblin-1")
+
+    assert _hp(instance, "enemy:goblin-1") == before
+
+
+def test_the_aura_stops_when_the_world_clock_passes_ten_minutes(devotion20) -> None:
+    from src.engine.world_state import clock_from_minutes
+    from src.rulesets.dnd2024.combat.primitives import world_minutes
+    from src.rulesets.dnd2024.features.resources import long_effect_active
+
+    engine, instance = _setup(devotion20)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
+
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    assert long_effect_active(character, "holy_nimbus", world_minutes(instance))
+
+    instance.world_state["clock"] = clock_from_minutes(11)
+
+    assert long_effect_active(
+        character, "holy_nimbus", world_minutes(instance),
+    ) is None

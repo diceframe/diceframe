@@ -48,6 +48,7 @@ from .action_adapter import (
     roll_damage_node,
     spell_formula_node,
 )
+from ..character.derivation import proficiency_bonus
 from .primitives import (
     ABJURE_FOES_DURATION,
     INTIMIDATING_PRESENCE_DURATION,
@@ -511,7 +512,7 @@ class CombatResolutionMixin:
                 for uid in (intent.get("mounted_player_ids") or [])
                 if str(uid)
             },
-        }, *refills, *opening, *self._turn_start_events(first, rng)]
+        }, *refills, *opening, *self._turn_start_events(instance, None, first, rng)]
 
     @staticmethod
     def _initiative_choices(intent: dict[str, Any]) -> dict[str, dict[str, bool]]:
@@ -4911,6 +4912,10 @@ class CombatResolutionMixin:
                 events.extend(self._turn_undead_events(
                     instance, combat, actor_id, actor, capability, intent, rng,
                 ))
+            elif action.kind == "holy_nimbus":
+                events.extend(self._holy_nimbus_events(
+                    instance, actor_id, actor, capability,
+                ))
             elif action.kind == "dragon_wings":
                 events.extend(self._dragon_wings_events(
                     instance, actor_id, actor, capability,
@@ -5539,6 +5544,35 @@ class CombatResolutionMixin:
                     # 灼烧亡灵是这次驱散的实际伤害来源：它同样可以结束战斗。
                     events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         return events
+
+    def _holy_nimbus_events(
+        self, instance: Any, actor_id: str, actor: dict[str, Any], capability: Any,
+    ) -> list[dict[str, Any]]:
+        """Holy Nimbus: a ten-minute emanation, recorded as a long effect.
+
+        光环的范围与伤害由特性参数声明（`aura_range_ft` + `turn_start_aura_damage`），
+        这里只负责"它现在生效"这个事实。住在 long_effects 而不是条件里：
+        十分钟会跨战斗。
+        """
+
+        character = self._feature_character(actor)
+        feature_id = capability.feature_id
+        minutes = int(self.features.feature_value(
+            character, feature_id, "duration_minutes", 10,
+        ) or 10)
+        radius = int(self.features.feature_value(
+            character, feature_id, "aura_range_ft", 30,
+        ) or 30)
+        return [{
+            "type": "dnd2024.long_effect.applied",
+            "actor_id": actor_id,
+            "effect_id": feature_id,
+            "effect": {
+                "feature_id": feature_id,
+                "expires_at": world_minutes(instance) + minutes,
+                "detail": {"bright_light_radius": radius},
+            },
+        }]
 
     def _dragon_wings_events(
         self, instance: Any, actor_id: str, actor: dict[str, Any], capability: Any,
@@ -6330,7 +6364,7 @@ class CombatResolutionMixin:
                 "previous_actor_id": previous_actor,
                 "economy": self._fresh_economy(next_view),
             },
-            *self._turn_start_events(next_view, rng),
+            *self._turn_start_events(instance, combat, next_view, rng),
         ]
 
     def _superior_defense_expiry_events(
@@ -6395,7 +6429,8 @@ class CombatResolutionMixin:
         return combat_turn_slots(combat)
 
     def _turn_start_events(
-        self, actor: dict[str, Any], rng: Any,
+        self, instance: Any, combat: dict[str, Any],
+        actor: dict[str, Any], rng: Any,
     ) -> list[dict[str, Any]]:
         """Everything a turn beginning does, in registration order.
 
@@ -6409,7 +6444,57 @@ class CombatResolutionMixin:
             *self._turn_start_regen_events(actor),
             *self._turn_start_heroic_events(actor),
             *self._turn_start_recharge_events(actor, rng),
+            *self._turn_start_aura_damage_events(instance, combat, actor),
         ]
+
+    def _turn_start_aura_damage_events(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Holy Nimbus: an enemy that starts its turn inside takes radiant damage.
+
+        只在敌人的回合开始、只在光环内、每个敌人每回合一次。友军与持有者
+        自己不触发；伤害量是持有者的魅力调整 + 熟练，来源记在事件里，
+        重放不会重复结算。
+        """
+
+        # 战斗开始的那一刻还没有 combat 聚合：首个角色的回合开始不结算
+        # 光环伤害，等第一次 advance 之后才有位置与回合。
+        if combat is None or str(actor.get("side") or "") != "enemy":
+            return []
+        events: list[dict[str, Any]] = []
+        for row in self._projected_auras(instance, combat):
+            definition = row["definition"]
+            damage_type = str(
+                definition.parameters.get("turn_start_aura_damage") or ""
+            )
+            if not damage_type:
+                continue
+            holder_id = str(row["holder_id"])
+            if self._distance(combat, holder_id, str(actor["actor_id"])) > int(
+                row["range_ft"]
+            ):
+                continue
+            character = row["character"]
+            ability = str(definition.parameters.get("aura_damage_ability") or "cha")
+            abilities = character.get("abilities") or {}
+            amount = (int(abilities.get(ability, 10) or 10) - 10) // 2
+            # ``_feature_character`` 的切片不含 derived：等级在 build 里，
+            # 熟练加值从等级算，别去读一个不存在的字段。
+            level = int((character.get("build") or {}).get("level", 1) or 1)
+            amount += proficiency_bonus(level)
+            if amount <= 0:
+                continue
+            events.append({
+                "type": "resource.changed",
+                "resource": "hp",
+                "target_id": str(actor["actor_id"]),
+                "delta": -amount,
+                "damage_type": damage_type,
+                "feature_id": definition.id,
+                "source_actor_id": holder_id,
+                "reason": "holy_nimbus",
+            })
+        return events
 
     @staticmethod
     def _turn_start_recharge_events(

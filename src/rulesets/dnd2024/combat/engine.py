@@ -59,7 +59,9 @@ from .check_windows import (
     LUCKY_RESOURCE,
 )
 from .obscurement import best_obscurement, effective_level, obscurement_row, zone_covers
+from src.rulesets.dnd2024.features.resources import long_effect_active
 from .primitives import (
+    world_minutes,
     INTENT_TYPES,
     PERSISTENT_RAGE_DURATION,
     RAGE_MAX_ROUNDS,
@@ -2077,6 +2079,17 @@ class Dnd2024CombatEngine(
             character = self._feature_character(actor)
             owned = self.features.active_features_for(character)
             for definition in owned:
+                # 有些光环不是"拥有就一直开着"：Holy Nimbus 要先花附赠
+                # 动作点亮十分钟，它生效与否由 long effect 决定。
+                required_effect = str(
+                    definition.parameters.get("requires_long_effect") or ""
+                )
+                if required_effect:
+                    character_row = self._feature_character(actor)
+                    if long_effect_active(
+                        character_row, required_effect, world_minutes(instance),
+                    ) is None:
+                        continue
                 declared = definition.parameters.get("aura_range_ft")
                 if (
                     isinstance(declared, bool) or not isinstance(declared, int)

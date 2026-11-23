@@ -66,6 +66,15 @@ ABJURE_FOES_DURATION = "abjure_foes"
 #: S0-F30：恐惧来自 Berserker 的特性而不是圣武士的引导神力，时长同为一分钟，
 #: 但解除条件与免疫来源不同，所以它是自己的 duration 而不是复用上面那条。
 INTIMIDATING_PRESENCE_DURATION = "intimidating_presence"
+
+
+def world_minutes(instance: Any) -> int:
+    """The world clock as an absolute minute; 0 when unset."""
+
+    from src.engine.world_state import clock_to_minutes, world_clock
+
+    minutes = clock_to_minutes(world_clock(getattr(instance, "world_state", None)))
+    return minutes if isinstance(minutes, int) and minutes >= 0 else 0
 TURNS_SCOPED_DURATIONS = frozenset({
     TURN_UNDEAD_DURATION, ABJURE_FOES_DURATION, INTIMIDATING_PRESENCE_DURATION,
 })
