@@ -1309,6 +1309,17 @@ class CombatValidationMixin:
             self._feature_character(actor), capability_id,
         )
         if capability is not None:
+            # 特性自身的使用次数：这里的拒绝与资源不足同形，客户端拿到的
+            # 是 ok=false 而不是运行期异常。
+            if capability.uses_per_long_rest:
+                used = feature_usage_count(
+                    self._feature_character(actor), capability.feature_id,
+                    capability.feature_id,
+                )
+                if used >= capability.uses_per_long_rest:
+                    raise CombatIntentError(
+                        "this feature has no use left until a long rest"
+                    )
             conditions = actor.get("conditions") or {}
             required = capability.requires_condition
             if required and required not in conditions:

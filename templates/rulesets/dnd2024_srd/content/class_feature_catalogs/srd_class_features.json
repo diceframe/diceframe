@@ -1334,6 +1334,37 @@
             "ability_bonus_con": 4,
             "ability_score_cap": 25
           }
+        },
+        {
+          "id": "intimidating_presence",
+          "owner": "subclass:path_of_the_berserker",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p30:intimidating-presence",
+          "summary": "As a Bonus Action, each creature of your choice in a 30-foot Emanation originating from you must make a Wisdom saving throw (DC 8 + your Strength modifier + Proficiency Bonus). On a failed save, it has the Frightened condition for 1 minute, and repeats the save at the end of each of its turns. Once you use this feature, you can't use it again until you finish a Long Rest, unless you expend a use of your Rage (no action required) to restore it.",
+          "parameters": {
+            "target_range_ft": 30,
+            "save_ability": "wis",
+            "dc_ability": "str",
+            "condition": "frightened",
+            "condition_minutes": 1,
+            "repeat_save": true
+          },
+          "capabilities": [
+            {
+              "id": "intimidating_presence",
+              "target_kind": "creature",
+              "uses_per_long_rest": 1,
+              "cost": {
+                "bonus_action": 1
+              },
+              "actions": [
+                {
+                  "kind": "intimidating_presence",
+                  "count": 1
+                }
+              ]
+            }
+          ]
         }
       ]
     },

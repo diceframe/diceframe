@@ -50,6 +50,7 @@ from .action_adapter import (
 )
 from .primitives import (
     ABJURE_FOES_DURATION,
+    INTIMIDATING_PRESENCE_DURATION,
     INITIATIVE_CHOICES,
     PERSISTENT_RAGE_DURATION,
     RELENTLESS_RAGE_DECISION,
@@ -4807,6 +4808,29 @@ class CombatResolutionMixin:
         if capability is None:  # pragma: no cover - validation guards this
             raise CombatIntentError("class capability is not available to this actor")
         events: list[dict[str, Any]] = []
+        # 特性自身的使用次数（每长休）。资源条表达不了"这个特性还剩几次"：
+        # 账记在 feature_usage，长休由 resting 统一清零。
+        if capability.uses_per_long_rest:
+            character = self._feature_character(actor)
+            before = feature_usage_count(
+                character, capability.feature_id, capability.feature_id,
+                USAGE_SCOPE_LONG_REST,
+            )
+            if before >= capability.uses_per_long_rest:
+                raise CombatIntentError(
+                    "this feature has no use left until a long rest"
+                )
+            events.append({
+                "type": "dnd2024.feature_usage.changed",
+                "actor_id": actor_id,
+                "owner": capability.feature_id,
+                "feature_id": capability.feature_id,
+                "scope": USAGE_SCOPE_LONG_REST,
+                "before_count": before,
+                "after_count": before + 1,
+                "use_index": before + 1,
+                "feature_kind": "intimidating_presence",
+            })
         via_fleet_step = bool(intent.get("via_fleet_step"))
         if capability.cost.action and not via_fleet_step:
             events.append({
@@ -4884,6 +4908,10 @@ class CombatResolutionMixin:
                 ))
             elif action.kind == "turn_undead":
                 events.extend(self._turn_undead_events(
+                    instance, combat, actor_id, actor, capability, intent, rng,
+                ))
+            elif action.kind == "intimidating_presence":
+                events.extend(self._intimidating_presence_events(
                     instance, combat, actor_id, actor, capability, intent, rng,
                 ))
             elif action.kind == "abjure_foes":
@@ -5505,6 +5533,91 @@ class CombatResolutionMixin:
                 if self._last_hostile_defeated(combat, target, amount):
                     # 灼烧亡灵是这次驱散的实际伤害来源：它同样可以结束战斗。
                     events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
+        return events
+
+    def _intimidating_presence_events(
+        self, instance: Any, combat: dict[str, Any], actor_id: str,
+        actor: dict[str, Any], capability: Any, intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Intimidating Presence: a 30-foot emanation, one Wisdom save each.
+
+        DC 是 8 + 力量调整 + 熟练，不是法术 DC——这条特性由蛮子的威压而不是
+        施法能力驱动。范围在服务端按距离判定：客户端可以把任意 id 塞进
+        target_ids，"我觉得他在 30 尺内"不是事实。
+
+        失败者恐惧一分钟，并在自己每个回合末重复豁免；成功只结束自己的效果，
+        不影响同一次使用里的其他目标。
+        """
+
+        character = self._feature_character(actor)
+        feature_id = capability.feature_id
+        save_ability = str(self.features.feature_value(
+            character, feature_id, "save_ability", "wis",
+        ) or "wis")
+        condition = str(self.features.feature_value(
+            character, feature_id, "condition", "frightened",
+        ) or "frightened")
+        minutes = int(self.features.feature_value(
+            character, feature_id, "condition_minutes", 1,
+        ) or 1)
+        range_ft = int(self.features.feature_value(
+            character, feature_id, "target_range_ft", 30,
+        ) or 30)
+        dc_ability = str(self.features.feature_value(
+            character, feature_id, "dc_ability", "str",
+        ) or "str")
+        abilities = actor.get("abilities") or {}
+        dc = (
+            8
+            + ability_modifier(int(abilities.get(dc_ability, 10) or 10))
+            + int(actor.get("proficiency_bonus", 0) or 0)
+        )
+        events: list[dict[str, Any]] = []
+        for target_id in [str(item) for item in (intent.get("target_ids") or [])]:
+            if target_id == actor_id:
+                continue
+            if self._distance(combat, actor_id, target_id) > range_ft:
+                continue
+            target = self._actor_view(instance, combat, target_id)
+            roll = int(rng.randint(1, 20))
+            modifier = int(
+                (target.get("saving_throws") or {}).get(save_ability, 0) or 0
+            )
+            total = roll + modifier
+            total, replacement = self._strength_total_replacement(
+                target, save_ability, total,
+            )
+            saved = total >= dc
+            check_index = len(events)
+            events.append({
+                "type": "check.resolved", "kind": "saving_throw",
+                "actor_id": target_id, "ability": save_ability,
+                "rolls": [roll], "natural": roll, "modifier": modifier,
+                "total": total, "target": dc, "success": saved,
+                "feature_id": feature_id, "channel_effect": "intimidating_presence",
+                **replacement,
+            })
+            if saved:
+                continue
+            blocker = self._condition_immunity_blocker(
+                instance, combat, target, condition,
+            )
+            if blocker is not None:
+                scope = str(blocker.get("scope") or "")
+                events[check_index]["blocked_condition"] = condition
+                events[check_index][
+                    "blocked_by_aura" if scope == "aura" else "blocked_by_feature"
+                ] = {key: value for key, value in blocker.items() if key != "scope"}
+                continue
+            events.append({
+                "type": "condition.applied", "target_id": target_id,
+                "condition": condition,
+                "duration": INTIMIDATING_PRESENCE_DURATION,
+                "turns_remaining": minutes * 10,
+                "source_actor_id": actor_id, "feature_id": feature_id,
+                "channel_effect": "intimidating_presence",
+                "save_repeat": {"ability": save_ability, "dc": dc},
+            })
         return events
 
     def _abjure_foes_events(

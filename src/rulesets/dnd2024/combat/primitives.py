@@ -63,7 +63,12 @@ SMITE_OF_PROTECTION_DURATION = "actor_turn_start"
 # 的限制。一分钟在回合制里同样是十个自己的回合，所以和 Turn Undead 共用同一套
 # 计数逻辑，而不是另立一个计时器。
 ABJURE_FOES_DURATION = "abjure_foes"
-TURNS_SCOPED_DURATIONS = frozenset({TURN_UNDEAD_DURATION, ABJURE_FOES_DURATION})
+#: S0-F30：恐惧来自 Berserker 的特性而不是圣武士的引导神力，时长同为一分钟，
+#: 但解除条件与免疫来源不同，所以它是自己的 duration 而不是复用上面那条。
+INTIMIDATING_PRESENCE_DURATION = "intimidating_presence"
+TURNS_SCOPED_DURATIONS = frozenset({
+    TURN_UNDEAD_DURATION, ABJURE_FOES_DURATION, INTIMIDATING_PRESENCE_DURATION,
+})
 # 只有世界时钟能结束的效果：它们不参与回合域到期，也不随战斗结束消失。
 WORLD_CLOCK_DURATIONS = frozenset({DIVINE_SENSE_DURATION, SACRED_WEAPON_DURATION})
 
