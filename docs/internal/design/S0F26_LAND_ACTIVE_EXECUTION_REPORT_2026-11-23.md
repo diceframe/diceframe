@@ -4,7 +4,7 @@
 |---|---|
 | 任务书 | `S0F26_LAND_ACTIVE_TASK_SPEC_2026-11-07.md` + 修订稿 `S0F26_SPEC_REVISION_2026-11-23.md` |
 | 状态 | 工作树，未提交、未开 PR（按要求） |
-| 验证 | 全量 `tests/rulesets` **2722 passed**（11:48）；`ruff` / `mypy` 干净；`test_dnd2024_land_active.py` **9 passed** |
+| 验证 | 全量 `tests/rulesets` **2723 passed**（16:02）；`ruff` / `mypy` 干净；`test_dnd2024_land_active.py` **10 passed** |
 
 ## 1. 交付
 
@@ -45,6 +45,19 @@
 1. **Ward 的 Poisoned 免疫**：`natures_ward` 声明 `parameters.immune_conditions = ["poisoned"]`，并新增 `_feature_immunity_events()` 在 `apply_batch` 统一拦截 —— 免疫是**目标属性**，法术/rider/地形/GM 声明任何生产者都得到同一答案。
    - 顺带修掉一个既有缺陷：`condition.blocked` 事件从未被 reducer 接受，任何免疫拦截到达落账时都会抛 `unsupported event type`（等于敌人 stat block 免疫也走不通）。
 2. **区域存读往返**：`combat.zones` 经 JSON 序列化→`replace_state` 后仍在，Cube 的 `shape/half_cover/ward_type` 与「区域掩护 = half」都被用例钉住。
+
+## 4a. 行动面（本轮补的后端入口）
+
+引擎有意图不等于玩家能用——#836 就是栽在这里：`form.assume` 能走 API，但 `available_intents` 不暴露，玩家点不到；维护者另开 #838 才补上。
+
+F26 的两个能力同样存在这个洞，本轮补了**后端入口**：
+
+- `_land_feature_actions()`：`land_aid`（动作 + 有 Wild Shape 次数）、`nature_sanctuary`（未有区域时"放置"，已有区域时"移动"且只吃附赠动作）；判据与 `_validate_land_feature` 完全一致，付不起就不出现。
+- 用例 `test_the_two_abilities_are_offered_to_the_player_as_actions`：入口出现、次数用光后消失。
+
+**前端不做**：#838 正在改 `Dnd2024CombatPanel.vue`，另开一节会形成两块并行 UI。land 的按钮交给同一面板的所有者，本片只保证"后端点得到"。
+
+**#838 与本片的关系**：已核对，`#838` 里 `form.assume` 出现 26 次、`land_aid`/`nature_sanctuary` 出现 0 次——它补的是 Wild Shape 的洞，不覆盖 F26。两片都改 `available_intents`，因此 **#838 合并后 #839 需 rebase 一次**。
 
 ## 4b. 未完成（明确记录）
 

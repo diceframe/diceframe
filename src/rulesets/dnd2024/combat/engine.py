@@ -466,6 +466,7 @@ class Dnd2024CombatEngine(
             if capability.requires_hostile_target:
                 entry["targets"] = self._hostile_targets(instance, combat, current)
             actions.append(entry)
+        actions.extend(self._land_feature_actions(instance, combat, current, actor))
         if int(economy.get("movement", 0) or 0) > 0:
             actions.append({
                 "type": "move", "label": "Move", "actor_id": current,
@@ -2431,6 +2432,67 @@ class Dnd2024CombatEngine(
             and int(row.get("turn_index", 0) or 0) == turn_index
             for row in combat.get("mark_damage_history") or []
         )
+
+    def _land_feature_actions(
+        self, instance: Any, combat: dict[str, Any], actor_id: str,
+        actor: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Circle of the Land 的入口：只在真的能付得起时出现。
+
+        引擎里有意图 ≠ 玩家能用。这里的判据与 validation 完全一致（特性、
+        动作/附赠动作、Wild Shape 次数、自己回合），差别只是"能不能付"而不是
+        "提交后会不会被拒"。
+        """
+
+        if str(actor.get("kind") or "") != "player":
+            return []
+        character = self._feature_character(actor)
+        state = self.initialize_state(instance)
+        combat_state = state.get("combat") or {}
+        if str(combat_state.get("status") or "") != "active":
+            return []
+        economy = combat_state.get("economy") or {}
+        version = int(state.get("version", 0) or 0)
+        actions: list[dict[str, Any]] = []
+        if (
+            self.features.has_feature(character, "lands_aid")
+            and int(economy.get("action", 0) or 0) > 0
+        ):
+            uses = self._class_resource_current(character, "wild_shape")
+            if uses >= 1:
+                actions.append({
+                    "type": "land_aid", "label": "Land's Aid", "actor_id": actor_id,
+                    "expected_version": version, "origin_limit_ft": 60,
+                    "radius_ft": 10, "wild_shape_uses": uses,
+                    "targets": self._all_targets(instance, combat),
+                })
+        if self.features.has_feature(character, "natures_sanctuary"):
+            zone_id = f"sanctuary:{actor_id}"
+            existing = (combat_state.get("zones") or {}).get(zone_id)
+            if isinstance(existing, dict) and int(economy.get("bonus_action", 0) or 0) > 0:
+                actions.append({
+                    "type": "nature_sanctuary", "label": "Move the sanctuary",
+                    "mode": "move", "zone_id": zone_id, "actor_id": actor_id,
+                    "expected_version": version, "origin_limit_ft": 120,
+                    "move_limit_ft": 60,
+                })
+            elif (
+                int(economy.get("action", 0) or 0) > 0
+                and self._class_resource_current(character, "wild_shape") >= 1
+            ):
+                actions.append({
+                    "type": "nature_sanctuary", "label": "Nature's Sanctuary",
+                    "mode": "create", "actor_id": actor_id,
+                    "expected_version": version, "origin_limit_ft": 120,
+                    "size_ft": 15,
+                })
+        return actions
+
+    def _class_resource_current(self, character: dict[str, Any], resource_id: str) -> int:
+        state = (character.get("resources") or {}).get("class", {}).get(resource_id)
+        if not isinstance(state, dict):
+            return 0
+        return int(state.get("current", 0) or 0)
 
     def _zone_expiry_events(
         self, instance: Any, combat: dict[str, Any],

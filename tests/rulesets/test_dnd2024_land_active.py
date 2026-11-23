@@ -309,3 +309,25 @@ def test_zones_survive_a_state_round_trip() -> None:
     assert zone["shape"] == "cube" and zone["half_cover"] is True
     assert zone["ward_type"] in {"", "fire", "cold", "lightning", "poison"}
     assert engine.cover_level(instance, after["combat"], "player:gm") == "half"
+
+
+def test_the_two_abilities_are_offered_to_the_player_as_actions() -> None:
+    """引擎里有意图 ≠ 玩家能用：入口必须出现在 `available_intents` 里。"""
+
+    engine, instance = _land_druid(14)
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    character.setdefault("resources", {}).setdefault("class", {})["wild_shape"] = {
+        "current": 2, "maximum": 2,
+    }
+    actions = engine.available_intents(instance, "gm")
+    types = {str(action.get("type")) for action in actions}
+    assert "land_aid" in types, types
+    assert "nature_sanctuary" in types, types
+    sanctuary = next(a for a in actions if a["type"] == "nature_sanctuary")
+    assert sanctuary["mode"] == "create"
+
+    # 次数用光后入口消失：面板不该给一个按下去必被拒的按钮。
+    character["resources"]["class"]["wild_shape"]["current"] = 0
+    types = {str(a.get("type")) for a in engine.available_intents(instance, "gm")}
+    assert "land_aid" not in types
+    assert "nature_sanctuary" not in types
