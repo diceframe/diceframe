@@ -270,6 +270,51 @@ def test_game_currency_context_round_trips_through_save():
     assert game_config.currency_system(restored)["display_unit"] == "yuan"
 
 
+def test_uninterpretable_stored_currency_snapshot_is_kept_and_rejected():
+    """A snapshot this runtime cannot read must not fall back to the rule default.
+
+    Dropping it on load would silently reinterpret every balance of that game
+    under the rule file's currency.  The stored value is kept verbatim and the
+    read path refuses instead.
+    """
+    instance = GameInstance(("web", "currency", "bot"))
+    instance.configure_game(
+        world_id="republican",
+        rule_id="freeform_coc",
+        world_name="民国",
+        group_name="测试",
+        seed_code="seed",
+        difficulty="标准",
+        language="zh-CN",
+        currency_label="法币",
+        currency_system={
+            "schema_version": 2,
+            "base_unit": "copper",
+            "display_unit": "yuan",
+            "units": [
+                {"id": "copper", "name": "铜元", "rate": 1},
+                {"id": "yuan", "name": "元", "rate": 100},
+            ],
+        },
+    )
+    stored = instance.to_dict()
+    stored["modules"]["game_config"]["currency_system"]["schema_version"] = 99
+
+    restored = GameInstance.from_dict(stored)
+
+    slot = restored.to_dict()["modules"]["game_config"]
+    assert slot["currency_system"]["schema_version"] == 99
+    assert slot["currency_label"] == "法币"
+    with pytest.raises(CurrencySystemError):
+        game_config.currency_system(restored)
+
+    # A value of the wrong shape is refused the same way; it is not "no snapshot".
+    stored["modules"]["game_config"]["currency_system"] = "copper"
+    restored = GameInstance.from_dict(stored)
+    with pytest.raises(CurrencySystemError):
+        game_config.currency_system(restored)
+
+
 def test_rule_system_rejects_invalid_v2_currency_system(tmp_path):
     (tmp_path / "bad_rule.json").write_text(json.dumps({
         "rule_id": "bad_rule",

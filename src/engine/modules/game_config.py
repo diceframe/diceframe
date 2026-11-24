@@ -4,7 +4,8 @@ from __future__ import annotations
 import copy
 from typing import Any
 from src.engine.module_state import ModuleStateError, ModuleStateSpec, get_module_state, register_module_state
-from src.engine.currency.validation import validate_declared_currency_system
+from src.engine.currency.validation import CurrencySystemError, validate_declared_currency_system
+from src.localization.messages import t
 
 MODULE_NAME = "game_config"
 SCHEMA_VERSION = 1
@@ -38,13 +39,10 @@ def ensure(raw: Any) -> dict[str, Any]:
         raw['entry_point'] = defaults['entry_point']
     if not isinstance(raw.get("currency_label"), str):
         raw["currency_label"] = defaults["currency_label"]
-    currency_system = raw.get("currency_system")
-    if currency_system is not None:
-        try:
-            validate_declared_currency_system(currency_system)
-        except ValueError:
-            raw["currency_system"] = None
-            raw["currency_label"] = ""
+    # ``currency_system`` is left exactly as stored, including a value this
+    # runtime cannot interpret.  Dropping it here would silently reinterpret
+    # every balance of that game under the rule's default currency; the read
+    # path below rejects it instead.
     return raw
 
 
@@ -94,8 +92,20 @@ def currency_label(instance: Any) -> str:
 
 
 def currency_system(instance: Any) -> dict[str, Any] | None:
+    """The game's currency snapshot, or ``None`` for a legacy save.
+
+    A stored snapshot this runtime cannot interpret is an error rather than a
+    fallback: treating it as "no snapshot" would read the balances of that game
+    under another currency system.
+    """
+
     value = get_module_state(instance, MODULE_NAME).get("currency_system")
-    return copy.deepcopy(value) if isinstance(value, dict) else None
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise CurrencySystemError(t("engine.currency.validation.not_object"))
+    validate_declared_currency_system(value)
+    return copy.deepcopy(value)
 
 
 def replace_currency_context(
