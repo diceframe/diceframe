@@ -2127,6 +2127,7 @@ class CombatResolutionMixin:
             return [{"type": "dnd2024.decision.pending", **(reaction or damage_window or offer)}]
         return self._resolve_committed_hit(
             instance, combat, actor_id, target, damage_event, damage, rng,
+            intent=intent,
         )
 
     def _hit_rider_declarations(
@@ -2779,49 +2780,6 @@ class CombatResolutionMixin:
                     ),
                 })
 
-        if intent.get("hurl_through_hell"):
-            # 要求了却不满足条件时**直接失败**：静默降级成一次普通命中，
-            # 会让客户端以为能力已经生效。
-            if not self.features.has_feature(character, "hurl_through_hell"):
-                raise CombatIntentError(
-                    "Hurl Through Hell is not available to this actor"
-                )
-            if self._feature_used_this_turn(
-                combat, str(actor["actor_id"]), "hurl_through_hell",
-            ):
-                raise CombatIntentError(
-                    "Hurl Through Hell was already used this turn"
-                )
-            if feature_usage_count(
-                character, "hurl_through_hell", "hurl_through_hell",
-            ) >= int(parameter("hurl_through_hell", "uses_per_long_rest") or 1):
-                raise CombatIntentError(
-                    "Hurl Through Hell has no use left until a long rest"
-                )
-            declarations.append({
-                "kind": "hurl_through_hell",
-                "feature_id": "hurl_through_hell",
-                "save_ability": str(
-                    parameter("hurl_through_hell", "save_ability") or "cha"
-                ),
-                "damage_dice": str(
-                    parameter("hurl_through_hell", "damage_dice") or "8d10"
-                ),
-                "damage_type": str(
-                    parameter("hurl_through_hell", "damage_type") or "psychic"
-                ),
-                "exempt_types": list(
-                    parameter("hurl_through_hell", "damage_exempt_creature_types")
-                    or ["fiend"]
-                ),
-                "condition": str(
-                    parameter("hurl_through_hell", "condition") or "incapacitated"
-                ),
-                "turns": int(
-                    parameter("hurl_through_hell", "condition_turns") or 1
-                ),
-            })
-
         if (
             intent.get("quivering_palm")
             and bool(weapon.get("unarmed"))
@@ -2919,67 +2877,6 @@ class CombatResolutionMixin:
                 events.extend(self._open_hand_events(
                     instance, combat, attacker_id, target, row, dc, rng,
                 ))
-                continue
-            if row.get("kind") == "hurl_through_hell":
-                # 每回合一次：先记账，再掷豁免。成功也消耗这次使用。
-                events.append({
-                    "type": "dnd2024.feature.used", "actor_id": attacker_id,
-                    "feature_id": "hurl_through_hell",
-                    "round": int((combat.get("economy") or {}).get("round", 0) or 0),
-                    "turn_index": int(
-                        (combat.get("economy") or {}).get("turn_index", 0) or 0
-                    ),
-                })
-                long_rest_used = feature_usage_count(
-                    self._feature_character(attacker), "hurl_through_hell",
-                    "hurl_through_hell",
-                )
-                events.append({
-                    "type": "dnd2024.feature_usage.changed",
-                    "actor_id": attacker_id,
-                    "owner": "hurl_through_hell",
-                    "feature_id": "hurl_through_hell",
-                    "scope": USAGE_SCOPE_LONG_REST,
-                    "before_count": long_rest_used,
-                    "after_count": long_rest_used + 1,
-                    "use_index": long_rest_used + 1,
-                })
-                dc = int(attacker.get("spell_save_dc", 0) or 0)
-                ability = str(row.get("save_ability") or "cha")
-                check = self._saving_throw_check(
-                    instance, combat, target, str(target["actor_id"]),
-                    ability, dc, attacker_id, events, rng,
-                )
-                check["source_feature"] = "hurl_through_hell"
-                events.append(check)
-                if check["success"]:
-                    continue
-                exempt = {str(code).lower() for code in row.get("exempt_types") or ()}
-                creature_type = str(target.get("creature_type") or "").lower()
-                if creature_type not in exempt:
-                    damage, _total = self._damage_instance_event(
-                        str(row.get("damage_dice") or "8d10"),
-                        str(row.get("damage_type") or "psychic"),
-                        target, False, rng,
-                    )
-                    if damage is not None:
-                        damage["feature_id"] = "hurl_through_hell"
-                        damage["source_actor_id"] = attacker_id
-                        events.append(damage)
-                events.append({
-                    "type": "condition.applied",
-                    "target_id": str(target["actor_id"]),
-                    "condition": str(row.get("condition") or "incapacitated"),
-                    # "until the end of your next turn" 里的 your 是邪术师：
-                    # 归属是施法者，不是被失能的目标自己。两跳刚好覆盖
-                    # "本回合结束（存续）→ 下回合结束（清除）"。
-                    "duration": "caster_next_turn_end",
-                    "turns_remaining": 2,
-                    "source_actor_id": attacker_id,
-                    "feature_id": "hurl_through_hell",
-                    # 消失与返回需要战场坐标之外的语义；这里只落失能与时长。
-                    "banishment": "guided",
-                })
                 continue
             if row.get("kind") == "quivering_palm":
                 # 无需豁免：命中即成立，随后由"结束"动作触发体质豁免。
@@ -3385,6 +3282,7 @@ class CombatResolutionMixin:
     def _resolve_committed_hit(
         self, instance: Any, combat: dict[str, Any], attacker_id: str,
         target: dict[str, Any], damage_event: dict[str, Any], damage: int, rng: Any,
+        *, intent: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Submit a final hit's damage and run its trailing consequences."""
 
@@ -3406,11 +3304,135 @@ class CombatResolutionMixin:
         events.extend(self._hit_condition_events(
             instance, combat, attacker_id, target, damage_event, rng,
         ))
+        # 命中成立之后的一切"攻击命中触发"效果都在这里统一处理：它不跟着
+        # 武器/法术两条判定分叉，也正因为如此，只写一次就两条路都生效。
+        # 反应窗收尾（Cutting Words 之后）拿不到原始 intent，那条路径上
+        # 就不触发——它已经越过了"命中成立"的那一刻。
+        if intent is not None:
+            events.extend(self._attack_hit_events(
+                instance, combat, self._actor_view(instance, combat, attacker_id),
+                target, intent, rng,
+            ))
         events.extend(self._enemy_zero_hp_feature_events(
             instance, combat, attacker_id, target, total_damage,
         ))
         if self._last_hostile_defeated(combat, target, total_damage):
             events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
+        return events
+
+    def _attack_hit_events(
+        self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
+        target: dict[str, Any], intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Everything that triggers on "you hit a creature with an attack roll".
+
+        The two hit resolutions are deliberately separate -- a weapon rolls
+        ``attack_bonus`` and a spell rolls ``spell_attack_bonus`` -- but what
+        happens **after** a hit lands should not fork with them: the rule text
+        says "with an attack roll", not "with a weapon".  Both funnels end
+        their success branch here, so a new on-hit effect is written once.
+
+        Today the only subscriber is Hurl Through Hell.  A "replace one attack"
+        Grapple or Shove would subscribe here too.
+        """
+
+        events: list[dict[str, Any]] = []
+        if intent.get("hurl_through_hell"):
+            events.extend(self._hurl_through_hell_hit_events(
+                instance, combat, attacker, target, rng,
+            ))
+        return events
+
+    def _hurl_through_hell_hit_events(
+        self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
+        target: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Once per turn: a failed Charisma save hurls the target through Hell.
+
+        要求了却不满足条件时直接失败——静默降级成一次普通命中会让客户端
+        以为能力已经生效。
+        """
+
+        feature_id = "hurl_through_hell"
+        character = self._feature_character(attacker)
+        attacker_id = str(attacker["actor_id"])
+        if not self.features.has_feature(character, feature_id):
+            raise CombatIntentError(
+                "Hurl Through Hell is not available to this actor"
+            )
+        if self._feature_used_this_turn(combat, attacker_id, feature_id):
+            raise CombatIntentError(
+                "Hurl Through Hell was already used this turn"
+            )
+        used = feature_usage_count(character, feature_id, feature_id)
+        limit = int(self.features.feature_value(
+            character, feature_id, "uses_per_long_rest", 1,
+        ) or 1)
+        if used >= limit:
+            raise CombatIntentError(
+                "Hurl Through Hell has no use left until a long rest"
+            )
+        events: list[dict[str, Any]] = [{
+            "type": "dnd2024.feature.used", "actor_id": attacker_id,
+            "feature_id": feature_id,
+            "round": int((combat.get("economy") or {}).get("round", 0) or 0),
+            "turn_index": int(
+                (combat.get("economy") or {}).get("turn_index", 0) or 0
+            ),
+        }]
+        events.append({
+            "type": "dnd2024.feature_usage.changed",
+            "actor_id": attacker_id,
+            "owner": feature_id, "feature_id": feature_id,
+            "scope": USAGE_SCOPE_LONG_REST,
+            "before_count": used, "after_count": used + 1,
+            "use_index": used + 1,
+        })
+        ability = str(self.features.feature_value(
+            character, feature_id, "save_ability", "cha",
+        ) or "cha")
+        dc = int(attacker.get("spell_save_dc", 0) or 0)
+        check = self._saving_throw_check(
+            instance, combat, target, str(target["actor_id"]),
+            ability, dc, attacker_id, events, rng,
+        )
+        check["source_feature"] = feature_id
+        events.append(check)
+        if check["success"]:
+            return events
+        declared = self.features.feature_value(
+            character, feature_id, "damage_exempt_creature_types", None,
+        )
+        exempt = {str(code).lower() for code in (declared or ["fiend"])}
+        creature_type = str(target.get("creature_type") or "").lower()
+        if creature_type not in exempt:
+            damage_type = str(self.features.feature_value(
+                character, feature_id, "damage_type", "psychic",
+            ) or "psychic")
+            dice = str(self.features.feature_value(
+                character, feature_id, "damage_dice", "8d10",
+            ) or "8d10")
+            damage, _total = self._damage_instance_event(
+                dice, damage_type, target, False, rng,
+            )
+            if damage is not None:
+                damage["feature_id"] = feature_id
+                damage["source_actor_id"] = attacker_id
+                events.append(damage)
+        events.append({
+            "type": "condition.applied",
+            "target_id": str(target["actor_id"]),
+            "condition": str(self.features.feature_value(
+                character, feature_id, "condition", "incapacitated",
+            ) or "incapacitated"),
+            # "until the end of your next turn" 里的 your 是邪术师：归属是
+            # 施法者，不是被失能的目标自己。
+            "duration": "caster_next_turn_end",
+            "turns_remaining": 2,
+            "source_actor_id": attacker_id,
+            "feature_id": feature_id,
+            "banishment": "guided",
+        })
         return events
 
     def _hit_tail_events(
@@ -3822,6 +3844,11 @@ class CombatResolutionMixin:
                         events.extend(self._enemy_zero_hp_feature_events(
                             instance, combat, actor_id, target, total_dealt,
                         ))
+                    # 法术攻击同样是一次"用攻击检定命中"：命中触发效果在这里
+                    # 走同一入口，不在两条判定里各写一份。
+                    events.extend(self._attack_hit_events(
+                        instance, combat, actor, target, intent, rng,
+                    ))
                 consumed_events = self._consume_attack_conditions(
                     actor_id, target_id, visible_actor, visible_target,
                 )

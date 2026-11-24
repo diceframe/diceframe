@@ -218,3 +218,29 @@ mypy                                           102 source files, no issues
 - Quivering Palm 结束时的目标若已不在本场战斗，`_actor_view` 会抛异常而非 `ok=false`。
 - `_TURN_SCOPED_DURATIONS` 与 `TURNS_SCOPED_DURATIONS` 已漂移（前者不含后者的新成员）。
 - `resource.py` 的 `feature_kind: "intimidating_presence"` 写死在通用记账里，Holy Nimbus / Dragon Wings 的使用事件都会带这个错标签（当前无消费者）。
+
+## 13. "攻击命中"这个抽象（2026-11-24 补）
+
+第二轮审核指出 Hurl 触发不了法术攻击。查完两条路径后确认：**武器攻击与法术攻击在命中之后完全分叉**，没有共享的"命中"点。
+
+- 武器：`_attack_events` → `_hit_settlement_events` → `_hit_tail_events`（rider 与 stat-block rider）
+- 法术：`_spell_events` 的 `if succeeded:` 自己组 `damage_node` 算伤害，不回骑乘链路
+
+`_hit_tail_events` 的 docstring 写着"every path that can land a hit calls this"，但它只有一个调用点——那句注释是假的。
+
+### 做法
+
+新增 `_attack_hit_events(instance, combat, attacker, target, intent, rng)`：**"用攻击检定命中"之后的一切触发效果**都写在这里，两条路径各自的命中分支各调一次。
+
+- 武器路径：`_resolve_committed_hit`（`_hit_settlement_events` 的收尾，Shield 之后才走到）
+- 法术路径：`_spell_events` 的 `if succeeded:` 分支
+
+Hurl 是第一个订阅者（`_hurl_through_hell_hit_events`），但入口本身不认识它：`_attack_hit_events` 只按 `intent` 分派，新增一个"命中触发"效果不需要再碰两条路径。
+
+顺带把 Hurl 从 `_hit_condition_declarations` / `_hit_rider_events` 里摘干净——它本来就不该住在"武器命中附加伤害"那套机制里。
+
+### 验证
+
+`test_a_spell_attack_goes_through_the_shared_hit_entry` 用 spy 盯入口是否被法术路径调用（效果本身由武器路径的用例覆盖，同一份实现）。
+
+没做的是"Eldritch Blast 的完整端到端 Hurl 战斗"：`srd_combat_core.json` 里 `eldritch_blast` 的 effect 只有 `damage: "1d10"`、没有分束定义，骰子序列怎么排都不稳；这一条留给"EB 分束"单独处理。

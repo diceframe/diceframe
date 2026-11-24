@@ -847,3 +847,37 @@ def test_no_light_kind_is_declared_for_the_aura(devotion20) -> None:
     assert "sunlight" not in view
     applied = instance.get_character_sheet("gm")["ruleset_character"]["long_effects"]
     assert "light_kind" not in applied["holy_nimbus"]["detail"]
+
+
+def test_a_spell_attack_goes_through_the_shared_hit_entry(
+    fiend14, monkeypatch,
+) -> None:
+    """法术攻击与武器攻击在"命中之后"走同一个入口。
+
+    Hurl 只是这个入口的第一个订阅者：规则说的是"用攻击检定命中"，不是
+    "用武器命中"。这里直接盯入口有没有被调用，比追踪骰子序列更能说明
+    这件事——效果本身由武器路径的用例覆盖（同一份实现）。
+    """
+
+    from tests.rulesets.test_dnd2024_channel_control import SequenceRng, _intent
+
+    engine, instance = _setup(fiend14)
+    _start(engine, instance, enemies=_two_enemies())
+    seen: list[str] = []
+    original = type(engine)._attack_hit_events
+
+    def spy(self, instance_, combat, attacker, target, intent, rng):
+        seen.append(str(intent.get("type") or ""))
+        return original(self, instance_, combat, attacker, target, intent, rng)
+
+    monkeypatch.setattr(type(engine), "_attack_hit_events", spy)
+
+    resolved = engine.resolve_intent(instance, _intent(
+        instance, actor_id="player:gm", type="cast_spell",
+        spell_ref="spell:eldritch_blast", target_ids=["enemy:goblin-1"],
+        slot_level=0,
+    ), SequenceRng([20, 5]))
+    assert resolved["ok"] is True, resolved
+    _apply(engine, instance, resolved)
+
+    assert seen == ["cast_spell"]
