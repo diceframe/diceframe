@@ -7,7 +7,35 @@
   },
   "fields": {
     "labels": {
-      "unarmed_strike": "徒手打击"
+      "unarmed_strike": "徒手打击",
+      "condition.blinded": "目盲",
+      "condition.blinded.summary": "看不见：自己的攻击有劣势，打向你的攻击有优势。",
+      "condition.charmed": "魅惑",
+      "condition.charmed.summary": "不能攻击施加魅惑的生物。",
+      "condition.deafened": "耳聋",
+      "condition.deafened.summary": "听不见：依赖听觉的检定无法进行。",
+      "condition.frightened": "恐慌",
+      "condition.frightened.summary": "自己的攻击有劣势，且不能主动靠近恐惧来源。",
+      "condition.grappled": "被擒",
+      "condition.grappled.summary": "速度降为 0。",
+      "condition.incapacitated": "失能",
+      "condition.incapacitated.summary": "无法行动，也无法执行反应。",
+      "condition.invisible": "隐形",
+      "condition.invisible.summary": "看不见：自己的攻击有优势，打向你的攻击有劣势。",
+      "condition.paralyzed": "麻痹",
+      "condition.paralyzed.summary": "失能、速度 0；力量与敏捷豁免自动失败，5 尺内的攻击视为重击。",
+      "condition.petrified": "石化",
+      "condition.petrified.summary": "失能、速度 0；力量与敏捷豁免自动失败，并获得伤害抗性。",
+      "condition.poisoned": "中毒",
+      "condition.poisoned.summary": "中毒：攻击掷骰与属性检定有劣势。",
+      "condition.prone": "倒地",
+      "condition.prone.summary": "倒地：自己的攻击有劣势；起身要花一半移动力。",
+      "condition.restrained": "束缚",
+      "condition.restrained.summary": "速度 0；自己的攻击有劣势，打向你的攻击有优势，敏捷豁免有劣势。",
+      "condition.stunned": "震慑",
+      "condition.stunned.summary": "失能；力量与敏捷豁免自动失败，打向你的攻击有优势。",
+      "condition.unconscious": "昏迷",
+      "condition.unconscious.summary": "失能、速度 0；力量与敏捷豁免自动失败，5 尺内的攻击视为重击。"
     }
   }
 }

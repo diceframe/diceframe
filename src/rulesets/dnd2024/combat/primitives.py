@@ -66,6 +66,12 @@ ABJURE_FOES_DURATION = "abjure_foes"
 TURNS_SCOPED_DURATIONS = frozenset({TURN_UNDEAD_DURATION, ABJURE_FOES_DURATION})
 # 只有世界时钟能结束的效果：它们不参与回合域到期，也不随战斗结束消失。
 WORLD_CLOCK_DURATIONS = frozenset({DIVINE_SENSE_DURATION, SACRED_WEAPON_DURATION})
+# GM 用裁定原语施加的状态没有"来源生物"，也不带额外的回合计数，所以只认
+# 不依赖这两样东西的时长标记。带来源的（caster_turn_end、attacker_next_turn_start）
+# 对它永远不会到期，认计数器的（TURNS_SCOPED / WORLD_CLOCK）则会立刻或永不结束。
+GM_CONDITION_DURATIONS = frozenset({
+    "combat", "actor_turn_start", "target_turn_start", "target_turn_end",
+})
 
 
 def combat_turn_slots(combat: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -123,6 +129,9 @@ INTENT_TYPES = frozenset({
     # C2A：GM 声明某个目标当前处于什么掩护等级（剧场模式）。
     "combat.set_cover",
     "combat.set_obscurement",
+    # G16：GM 裁定原语——施加/移除规则书里的状态。法术/特性/物品自己产生的
+    # 效应不在施加范围内，但 GM 可以移除它们（清理动作）。
+    "gm_condition",
     "attack", "cast_spell", "activate_item", "move", "dash", "dodge", "disengage", "hide", "end_turn",
     "death_save", "stabilize", "decision.resolve",
     # 一次裸属性检定。成本由调用方声明（可能是动作、附赠动作或免费）：
