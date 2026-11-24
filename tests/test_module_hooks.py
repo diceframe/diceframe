@@ -177,7 +177,12 @@ def test_without_health_events_are_not_kept() -> None:
         event = record_health_event(instance, "llm", "TIMEOUT", "error", "LLM timed out")
         assert event["code"] == "TIMEOUT"
         assert not mark_health_event(instance, event["id"], resolved=True)
-        assert health_payload(instance) == {"ok": True, "status": {}, "events": [], "total": 0}
+        payload = health_payload(instance)
+        # The payload also carries unrelated sections (narrative quality
+        # metrics); the contract here is that no health event is kept.
+        assert {key: payload[key] for key in ("ok", "status", "events", "total")} == {
+            "ok": True, "status": {}, "events": [], "total": 0,
+        }
         assert health.health_events(instance) == []
     finally:
         for point, handler in removed.items():
