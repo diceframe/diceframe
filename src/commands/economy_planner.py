@@ -66,12 +66,37 @@ def append_unpriced_purchase_intent(
     unpriced.append(entry)
 
 
+#: Characters of scripts that are written without spaces between words (kana,
+#: Han ideographs, Hangul syllables).
+_LOGOGRAPHIC_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]")
+
+
 def _is_generic_purchase_target(target: str, language: str) -> bool:
+    """Whether a purchase target names a class of goods rather than one item.
+
+    The target is model output, so "newspaper" and "a newspaper" must get the
+    same answer.  Spaced scripts are judged by their head word (the last one);
+    unspaced scripts only by a suffix of two or more characters, so a
+    one-character generic such as Japanese ``物`` cannot swallow real items
+    like ``飲み物``.
+    """
+
+    text = str(target or "").strip().casefold()
+    if not text:
+        return False
     generic = {
         str(value or "").strip().casefold()
         for value in purchase_generic_target_terms(language or "zh-CN")
     }
-    return str(target or "").strip().casefold() in generic
+    if text in generic:
+        return True
+    words = re.findall(r"\w+", text)
+    if len(words) > 1 and words[-1] in generic:
+        return True
+    return any(
+        len(term) >= 2 and _LOGOGRAPHIC_RE.search(term) and text.endswith(term)
+        for term in generic
+    )
 
 
 def _infer_explicit_currency_unit(

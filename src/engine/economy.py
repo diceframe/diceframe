@@ -678,7 +678,8 @@ def queue_proposal(
 PURCHASE_OFFER_SOURCES = frozenset({"gm_manual", "table_offer", "player_self"})
 
 # Purchase authority compares item identities across narrative formatting. The
-# normalization is deliberately limited to punctuation and quantity phrases.
+# normalization is deliberately limited to punctuation, quantity phrases and
+# regular English plurals, so it never rewrites the identity text itself.
 _ITEM_NAME_NOISE_RE = re.compile(
     r"[\s《》〈〉「」『』【】\[\]()（）\"'“”‘’·、，,。.：:；;！!?？—_\-]+"
 )
@@ -689,6 +690,33 @@ _ITEM_QUANTITY = (
 _ITEM_NAME_QUANTITY_HEAD_RE = re.compile(rf"^{_ITEM_QUANTITY}")
 _ITEM_NAME_QUANTITY_TAIL_RE = re.compile(rf"{_ITEM_QUANTITY}$")
 _ITEM_NAME_QUANTITY_SUFFIX_RE = re.compile(r"[x×][0-9]+$", re.IGNORECASE)
+_ITEM_NAME_PLURAL_ES_RE = re.compile(r"(?:ches|shes|sses|xes|zes)$")
+# A compound token ("longsword") names the same gear as one of its parts
+# ("sword") only when both halves are long enough to be words.  Shorter stems
+# inside longer words ("ring" in "spring", "pier" in "rapier") stay distinct.
+_ITEM_NAME_COMPOUND_MIN_PARTS = 3
+
+
+def _singular_ascii_token(token: str) -> str:
+    """Fold a regular English plural ("arrows") onto its singular ("arrow").
+
+    Only ASCII words are touched: the gate must not rewrite names in scripts
+    whose plurals it does not understand.  Endings that are usually not
+    plurals ("glass", "status", "iris") are left alone, and irregular plurals
+    simply do not fold.
+    """
+
+    if not token.isascii() or not token.isalpha():
+        return token
+    if token.endswith(("ss", "us", "is")):
+        return token
+    if token.endswith("xe") and len(token) >= 3:
+        return token[:-1]
+    if _ITEM_NAME_PLURAL_ES_RE.search(token):
+        return token[:-2]
+    if token.endswith("s") and len(token) >= 4:
+        return token[:-1]
+    return token
 
 
 def normalized_item_name(value: Any) -> str:
@@ -701,7 +729,28 @@ def normalized_item_name(value: Any) -> str:
     stripped = _ITEM_NAME_QUANTITY_HEAD_RE.sub("", text).strip()
     stripped = _ITEM_NAME_QUANTITY_TAIL_RE.sub("", stripped).strip()
     stripped = _ITEM_NAME_QUANTITY_SUFFIX_RE.sub("", stripped).strip()
-    return stripped or text
+    text = stripped or text
+    return " ".join(_singular_ascii_token(token) for token in text.split(" "))
+
+
+def _compound_names_match(left: str, right: str) -> bool:
+    """Whether two single-word names are the same gear written as one word.
+
+    The comparison is a fallback for whole-word matching: an unconfirmed
+    "sword" must still protect a narrative "Longsword" grant, while the two
+    halves being real words keeps "ring" and "spring" apart.
+    """
+
+    shorter, longer = sorted((left, right), key=len)
+    return (
+        shorter.isascii()
+        and longer.isascii()
+        and shorter.isalpha()
+        and longer.isalpha()
+        and len(shorter) >= _ITEM_NAME_COMPOUND_MIN_PARTS
+        and len(longer) - len(shorter) >= _ITEM_NAME_COMPOUND_MIN_PARTS
+        and (longer.startswith(shorter) or longer.endswith(shorter))
+    )
 
 
 def item_names_match(names: set[str], key: str) -> bool:
@@ -725,9 +774,17 @@ def item_names_match(names: set[str], key: str) -> bool:
 
     for name in names:
         normalized_name = normalized_item_name(name)
-        if normalized_name and (
+        if not normalized_name:
+            continue
+        if (
             contains_name(normalized_name, normalized_key)
             or contains_name(normalized_key, normalized_name)
+        ):
+            return True
+        if any(
+            _compound_names_match(name_token, key_token)
+            for name_token in normalized_name.split(" ")
+            for key_token in normalized_key.split(" ")
         ):
             return True
     return False
