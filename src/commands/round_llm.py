@@ -680,10 +680,8 @@ async def call_llm_with_tag_retry(
                 )
 
         narration = response.narration or response.content
-        if dice_block and not validate_dice_constraint(dice_block, narration):
-            if dice_retry >= 1:
-                logger.error("骰子约束连续2次矛盾，接受最后输出 (round=%d)", progression_state.round_value(instance))
-                break
+        dice_conflict = bool(dice_block) and not validate_dice_constraint(dice_block, narration)
+        if dice_conflict and dice_retry < 1:
             dice_retry += 1
             retry_kind = "dice"
             logger.warning(
@@ -695,6 +693,10 @@ async def call_llm_with_tag_retry(
             if on_reset:
                 await on_reset()
             continue
+        if dice_conflict:
+            # 骰子矛盾到第二次就接受，但质量门不能一并跳过：规则集的状态过滤、
+            # 玩家白名单和结构校验对这份输出同样生效。
+            logger.error("骰子约束连续2次矛盾，接受最后输出 (round=%d)", progression_state.round_value(instance))
 
         if quality_gate is not None:
             gate_result = quality_gate(response, data)

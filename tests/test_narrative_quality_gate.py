@@ -9,12 +9,14 @@ import pytest
 from src.commands.narrative_quality import (
     BufferedNarrativeStream,
     NarrativeQualityError,
+    build_quality_gate,
     inspect_narrative_output,
     quality_repair_instruction,
     review_narrative_semantics,
 )
 from src.commands.round_llm import call_llm_with_tag_retry
 from src.engine.game_instance import GameInstance
+from src.engine.modules import narrative_quality_metrics
 from src.llm.client import LLMResponse
 
 
@@ -188,3 +190,85 @@ async def test_complex_turn_stream_is_flushed_only_after_review() -> None:
     await buffered.flush()
 
     assert received == ["第一段第二段"]
+
+
+@pytest.mark.asyncio
+async def test_quality_gate_still_runs_when_a_dice_conflict_is_accepted() -> None:
+    """接受骰子矛盾的输出不等于豁免质量门。
+
+    第二次仍与骰子约束矛盾时输出会被接受，但规则集的状态过滤、玩家白名单和
+    结构校验都必须在这份输出上照常执行。
+    """
+    writer = _Writer([
+        "你没能在门上打出洞。\n---\nNONE",
+        "你依然无法打开门。\n---\nNONE",
+    ])
+    instance = GameInstance(game_key=("web", "quality-dice", "bot"))
+    gate_calls: list[dict] = []
+
+    async def gate(candidate, parsed):
+        gate_calls.append(dict(parsed))
+        return []
+
+    response, _data = await call_llm_with_tag_retry(
+        writer,
+        instance,
+        "GM",
+        "context",
+        "hp_based",
+        "【系统检定·必须遵循】大成功",
+        512,
+        quality_gate=gate,
+        quality_repair_instruction=lambda issues: "rewrite",
+    )
+
+    assert len(writer.calls) == 2
+    assert len(gate_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_gate_applies_the_ruleset_policy_and_counts_the_turn() -> None:
+    class _PolicyRuntime:
+        def filter_narrative_state_update(self, instance, update):
+            return {**update, "scene_change": ""}
+
+    instance = GameInstance(game_key=("web", "quality-policy", "bot"))
+    gate = build_quality_gate(
+        instance,
+        None,
+        runtime=_PolicyRuntime(),
+        actions_text="调查门锁",
+        semantic_review=False,
+    )
+    candidate = {"state_update": {"scene_change": "酒馆", "players": {}}}
+
+    assert await gate(SimpleNamespace(narration="门后的灯亮了"), candidate) == []
+
+    assert candidate["state_update"]["scene_change"] == ""
+    assert narrative_quality_metrics.metrics(instance) == {
+        "turns": 1, "complex_turns": 0, "gate_rejections": 0, "repair_attempts": 0,
+        "repair_successes": 0, "reviewer_unavailable": 0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("language", "expected"),
+    [
+        ("zh-CN", "质量门修复"),
+        ("en", "QUALITY GATE REPAIR"),
+        ("ja", "品質ゲート修正"),
+        ("de", "QUALITÄTSGATE-KORREKTUR"),
+    ],
+)
+def test_repair_instruction_reaches_every_supported_language(language: str, expected: str) -> None:
+    instruction = quality_repair_instruction(language, ["empty_narration"])
+
+    assert expected in instruction
+    assert "empty_narration" in instruction
+
+
+def test_semantic_issue_labels_are_only_added_for_chinese() -> None:
+    issue = "semantic:ignored_current_action"
+
+    assert "当前行动没有被回应" in quality_repair_instruction("zh-CN", [issue])
+    assert issue in quality_repair_instruction("en", [issue])

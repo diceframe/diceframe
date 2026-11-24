@@ -52,10 +52,8 @@ from src.commands.narrative_application import (
 )
 from src.commands.narrative_quality import (
     BufferedNarrativeStream,
-    build_narrative_review_state,
-    inspect_narrative_output,
+    build_quality_gate,
     quality_repair_instruction as build_quality_repair_instruction,
-    review_narrative_semantics,
 )
 from src.commands.round_llm import (
     append_multistep_analysis,
@@ -82,7 +80,6 @@ from src.engine import combat_narrative, module_hooks, progression
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.engine.module_state import ModuleStateError
 from src.engine.modules import adventure_runtime_state, checks, progression_state, round_safety, ruleset_runtime, session_stats
-from src.engine.modules import narrative_quality_metrics
 from src.engine.language import localized_text
 from src.engine.world_events import advance_world_time
 from src.engine.world.memory_projection import queue_world_memory
@@ -114,7 +111,6 @@ from src.rulesets.contracts import (
     NarrativeCheckPolicyRuntime,
     NarrativeDirectorPlanningRuntime,
     NarrativeDirectorRuntime,
-    NarrativeStatePolicyRuntime,
 )
 from src.rulesets.automation import apply_director_automation, summarize_automation_batches
 from src.rulesets.narrative_checks import resolve_planned_checks, resolver_for
@@ -1573,12 +1569,15 @@ class RoundProcessor:
         allowed_uids = self._allowed_narrative_player_uids(instance)
         semantic_review_enabled = should_semantic_review(instance, actions_text)
         public_narration_context = _build_recent_public_narration_context(instance)
-        narrative_quality_metrics.record(
+        quality_gate = build_quality_gate(
             instance,
-            turn=True,
-            complex_turn=semantic_review_enabled,
+            self.llm_client,
+            runtime=runtime,
+            actions_text=actions_text,
+            semantic_review=semantic_review_enabled,
+            public_narration_context=public_narration_context,
+            allowed_player_uids=allowed_uids,
         )
-        repair_requested = False
         buffered_stream = (
             BufferedNarrativeStream(on_delta)
             if semantic_review_enabled and on_delta is not None else None
@@ -1589,42 +1588,6 @@ class RoundProcessor:
                 buffered_stream.clear()
             if on_reset is not None:
                 await on_reset()
-
-        async def quality_gate(response_candidate: Any, data_candidate: dict) -> list[str]:
-            nonlocal repair_requested
-            if isinstance(runtime, NarrativeStatePolicyRuntime):
-                data_candidate["state_update"] = runtime.filter_narrative_state_update(
-                    instance, dict(data_candidate.get("state_update") or {}),
-                )
-            structural_issues = inspect_narrative_output(
-                response_candidate,
-                data_candidate,
-                allowed_player_uids=allowed_uids,
-            )
-            if structural_issues or not semantic_review_enabled:
-                issues = structural_issues
-            else:
-                issues = await review_narrative_semantics(
-                    self.llm_client,
-                    instance,
-                    actions_text=actions_text,
-                    narration=str(getattr(response_candidate, "narration", "") or ""),
-                    state_update=data_candidate.get("state_update", {}),
-                    recent_public_narration=public_narration_context,
-                    canonical_state=build_narrative_review_state(instance),
-                )
-            if issues:
-                narrative_quality_metrics.record(
-                    instance,
-                    rejection=True,
-                    repair_attempt=not repair_requested,
-                )
-                repair_requested = True
-                return issues
-            if repair_requested:
-                narrative_quality_metrics.record(instance, repair_success=True)
-                repair_requested = False
-            return []
 
         response, data = await call_llm_with_tag_retry(
             self.llm_client, instance, gm_prompt, context, combat_model,

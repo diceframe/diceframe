@@ -1,21 +1,24 @@
-"""Deterministic acceptance checks for generated narrative turns.
+"""Acceptance checks for generated narrative turns.
 
 The writer may produce prose and structured tags in one response, but the
-round pipeline must accept them as one contract. This module owns the small,
-side-effect-free gate used before any state applier or narrative effect runs.
+round pipeline must accept them as one contract. This module owns the gate the
+round processor runs before any state applier or narrative effect: the
+side-effect-free structural checks, the bounded semantic review, and the
+per-run counters that record what the gate decided.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 
 from src.engine import module_hooks
-from src.engine.language import normalize_language
+from src.engine.language import localized_text, normalize_language
 from src.engine.health import record_health_event
 from src.engine.modules import narrative_quality_metrics
+from src.rulesets.contracts import NarrativeStatePolicyRuntime
 
 logger = logging.getLogger("trpg")
 
@@ -115,24 +118,43 @@ def inspect_narrative_output(
 def quality_repair_instruction(language: str, issues: Iterable[str]) -> str:
     """Build a compact writer-only repair instruction for one retry."""
 
+    # 问题码本身是稳定契约；只有中文提示为它附上可读标签。
+    labels = _SEMANTIC_ISSUE_LABELS if str(language or "").lower().startswith("zh") else {}
     issue_lines = "\n".join(
-        f"- {_SEMANTIC_ISSUE_LABELS.get(issue, issue)}"
+        f"- {labels.get(issue, issue)}"
         for issue in list(issues)[:8]
     )
-    if str(language or "").lower().startswith("en"):
-        return (
+    return localized_text(language, {
+        "en": (
             "QUALITY GATE REPAIR REQUIRED. Rewrite the complete response once.\n"
             "Fix every listed contract issue, keep the narration grounded in the supplied context, "
             "and emit the required `---` state-tag separator. Use only authorized roster IDs in player "
             "updates. Keep every structured section as the required JSON/list shape.\n"
             f"Issues:\n{issue_lines}"
-        )
-    return (
-        "【质量门修复】请完整重写本次回复。\n"
-        "修复下面列出的全部契约问题，正文必须基于给定上下文，必须输出 `---` 状态标签分隔线。"
-        "玩家状态只能使用本轮允许的角色 ID，所有结构化区块必须保持既定的对象/列表形状。\n"
-        f"问题：\n{issue_lines}"
-    )
+        ),
+        "zh-CN": (
+            "【质量门修复】请完整重写本次回复。\n"
+            "修复下面列出的全部契约问题，正文必须基于给定上下文，必须输出 `---` 状态标签分隔线。"
+            "玩家状态只能使用本轮允许的角色 ID，所有结构化区块必须保持既定的对象/列表形状。\n"
+            f"问题：\n{issue_lines}"
+        ),
+        "ja": (
+            "【品質ゲート修正】今回の応答を一度だけ書き直してください。\n"
+            "挙げられた契約上の問題をすべて修正し、本文は与えられた文脈に基づいて書き、"
+            "必ず `---` の状態タグ区切りを出力してください。プレイヤー状態には今回許可された"
+            "キャラクター ID のみを使い、各構造化セクションは定められたオブジェクト／リストの形を"
+            "保ってください。\n"
+            f"問題：\n{issue_lines}"
+        ),
+        "de": (
+            "QUALITÄTSGATE-KORREKTUR. Schreibe die vollständige Antwort einmal neu.\n"
+            "Behebe jedes der aufgelisteten Vertragsprobleme, halte die Erzählung im gelieferten "
+            "Kontext verankert und gib unbedingt das `---`-Trennzeichen für die Status-Tags aus. "
+            "Verwende in Spieleraktualisierungen nur die für diese Runde zugelassenen Charakter-IDs "
+            "und behalte in jedem strukturierten Abschnitt die vorgeschriebene Objekt-/Listenform bei.\n"
+            f"Probleme:\n{issue_lines}"
+        ),
+    })
 
 
 def build_narrative_review_state(instance: Any) -> dict[str, Any]:
@@ -248,10 +270,68 @@ async def review_narrative_semantics(
     ]
 
 
+def build_quality_gate(
+    instance: Any,
+    llm_client: Any,
+    *,
+    runtime: Any,
+    actions_text: str,
+    semantic_review: bool,
+    public_narration_context: str = "",
+    allowed_player_uids: set[str] | None = None,
+) -> Callable[[Any, dict[str, Any]], Awaitable[list[str]]]:
+    """Build the gate the writer loop runs before it accepts a response.
+
+    One gate belongs to one narration call.  It counts the turn, applies the
+    ruleset's narrative state policy to every candidate, and decides whether a
+    candidate is accepted, rewritten once, or finally rejected.
+    """
+
+    repair_requested = False
+    narrative_quality_metrics.record(
+        instance, turn=True, complex_turn=semantic_review,
+    )
+
+    async def gate(response_candidate: Any, data_candidate: dict[str, Any]) -> list[str]:
+        nonlocal repair_requested
+        if isinstance(runtime, NarrativeStatePolicyRuntime):
+            data_candidate["state_update"] = runtime.filter_narrative_state_update(
+                instance, dict(data_candidate.get("state_update") or {}),
+            )
+        structural_issues = inspect_narrative_output(
+            response_candidate, data_candidate, allowed_player_uids=allowed_player_uids,
+        )
+        if structural_issues or not semantic_review:
+            issues = structural_issues
+        else:
+            issues = await review_narrative_semantics(
+                llm_client,
+                instance,
+                actions_text=actions_text,
+                narration=str(getattr(response_candidate, "narration", "") or ""),
+                state_update=data_candidate.get("state_update", {}),
+                recent_public_narration=public_narration_context,
+                canonical_state=build_narrative_review_state(instance),
+            )
+        if issues:
+            narrative_quality_metrics.record(
+                instance, rejection=True, repair_attempt=not repair_requested,
+            )
+            repair_requested = True
+            return issues
+        if repair_requested:
+            narrative_quality_metrics.record(instance, repair_success=True)
+            repair_requested = False
+        return []
+
+    return gate
+
+
 __all__ = [
     "NarrativeQualityError",
     "BufferedNarrativeStream",
     "build_narrative_review_state",
+    "build_quality_gate",
     "inspect_narrative_output",
     "quality_repair_instruction",
     "review_narrative_semantics",
