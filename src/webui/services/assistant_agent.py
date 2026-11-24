@@ -19,7 +19,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from src.application_actions import ActionRegistry, ApplicationAction as AgentTool
+from src.application_actions import (
+    ActionRegistry, ApplicationAction as AgentTool, visible_domain,
+)
 from src.application_action_execution import ActionExecutionContext, ActionExecutionStopped
 from src.assistant_agent_limits import DEFAULT_RUN_STEPS, DEFAULT_TASK_MAX_TOKENS
 from src.tool_arguments import validate_arguments
@@ -297,6 +299,9 @@ class AgentDependencies:
     task_max_tokens: int = DEFAULT_TASK_MAX_TOKENS
     # Creator 工程状态卡的数据源；测试与轻量部署可缺省。
     creator_projects: Any = None
+    # 本会话可见的规则域。返回空集 = 当前页面对局解析不到规则；None = 调用方
+    # 不启用作用域（既有测试与轻量部署保持原行为）。
+    ruleset_scope: Callable[[str, dict], frozenset[str]] | None = None
 
 
 @dataclass
@@ -344,11 +349,29 @@ class AgentRuntime:
     def tools(self):
         return {tool.name: tool for tool in self.registry.values()}
 
-    def capabilities(self, owner: str, query: str = '', domain: str = '', offset: int = 0) -> dict:
+    def capabilities(self, owner: str, query: str = '', domain: str = '', offset: int = 0,
+                     *, game_key: str = '') -> dict:
         if not isinstance(owner, str) or not owner:
             raise PermissionError('Owner session required')
         self.registry.refresh_sources()
-        return self.registry.search(query, domain, offset=offset)
+        scope = self._ruleset_scope(owner, {'game_key': game_key})
+        return self.registry.search(query, domain, offset=offset, visible_domains=scope)
+
+    def _ruleset_scope(self, owner: str, context: dict) -> frozenset[str]:
+        """Which ruleset domains this session may see, resolved server-side.
+
+        The page context only *names* a game; membership is proven here.  A
+        failed lookup or an unresolvable runtime yields the empty set — never
+        "no scope", which would mean "show every rule's tools".
+        """
+
+        resolve = self.deps.ruleset_scope
+        if resolve is None:
+            return frozenset()
+        try:
+            return frozenset(resolve(owner, context if isinstance(context, dict) else {}))
+        except Exception:  # noqa: BLE001 - 解析失败等于没有规则能力，绝不放大可见面
+            return frozenset()
 
     def authorize(self, owner, session_id='', mode='suggest', scope=None, domains=None, max_steps=32):
         session = self._session(owner, session_id)
@@ -646,6 +669,7 @@ class AgentRuntime:
                      'excerpt': str(a['content'])[:600]}
                     for a in (session.data.get('attachments') or [])]
 
+                scope_domains = self._ruleset_scope(owner, context)
                 loaded = {tool.name for tool in self.registry.values() if tool.domain == 'application'}
                 initial_grant = current_authorization(session.data, self.deps.clock())
                 active_domains = set((initial_grant or {}).get('domains', []))
@@ -653,6 +677,8 @@ class AgentRuntime:
                                 'worlds': {'worlds', 'lorebook'}, 'library': {'lorebook', 'worlds', 'adventures'},
                                 'settings': {'settings'}, 'plugins': {'plugins'}, 'creator': {'creator'}}
                 active_domains.update(page_domains.get(context.get('route'), set()))
+                # 规则域来自"本会话看的对局属于哪条规则"，不来自页面或授权列表。
+                active_domains.update(scope_domains)
                 loaded.update(tool.name for tool in self.registry.values() if tool.domain in active_domains)
                 loaded.update({'search_capabilities', 'describe_capability'})
                 if session_attachments:
@@ -662,12 +688,14 @@ class AgentRuntime:
 
                 async def search(args, actor):
                     result = self.registry.search(args.get('query', ''), args.get('domain', ''),
-                                                  limit=20, offset=args.get('offset', 0))
+                                                  limit=20, offset=args.get('offset', 0),
+                                                  visible_domains=scope_domains)
                     loaded.update(item['name'] for item in result['capabilities'])
                     return result
 
                 async def describe(args, actor):
-                    descriptor = self.registry.describe(args['name'])
+                    descriptor = self.registry.describe(
+                        args['name'], visible_domains=scope_domains)
                     loaded.add(args['name'])
                     return descriptor
 
@@ -726,6 +754,10 @@ class AgentRuntime:
                             if tool.name not in {'search_capabilities', 'describe_capability', 'read_attachment'} and (
                                     current is None or current.contract_digest != tool.contract_digest):
                                 raise ValueError('Capability changed; discover it again')
+                            # 发现面过滤过一次，调用面必须再校一次：否则
+                            # "搜不到但能直接调"会把可见性做成半套。
+                            if current is not None and not visible_domain(current.domain, scope_domains):
+                                raise ValueError('This capability is not available in the current game')
                             if tool.authorize:
                                 if await _invoke(tool.authorize, args, owner) is False:
                                     raise PermissionError('Action is not authorized')
@@ -855,7 +887,7 @@ class AgentRuntime:
                 # 初始 payload 只带短索引：search 返回全量页，由首条消息的
                 # 结构化压缩压到 ≤20 条并标注 omitted_count（有界索引契约，
                 # 全量目录靠 search_capabilities / describe_capability 分页）。
-                catalog = self.registry.search(limit=160)
+                catalog = self.registry.search(limit=160, visible_domains=scope_domains)
                 catalog['capabilities'] = [{key: item[key] for key in
                     ('name', 'label', 'domain', 'effect', 'version', 'requires_confirmation')}
                     for item in catalog['capabilities']]
@@ -865,7 +897,12 @@ class AgentRuntime:
                     "titles": [i["name"] for i in v.get("draft", {}).get("items", [])]} for k, v in session.data["drafts"].items()},
                     "receipts": [creator_receipt_observation(receipt) for receipt in session.data["receipts"][-4:]],
                     'execution_policy': current_authorization(session.data, self.deps.clock()),
-                    'capability_domains': sorted({tool.domain for tool in self.registry.values()})})
+                    # 域名列表同样过作用域：只藏目录、却在 payload 里报出"存在哪些域"，
+                    # 等于把不可见工具的存在性告诉了模型。
+                    'capability_domains': sorted({
+                        tool.domain for tool in self.registry.values()
+                        if visible_domain(tool.domain, scope_domains)
+                    })})
                 if memory_card is not None:
                     payload['memory_card'] = memory_card
                 if project_card is not None:
