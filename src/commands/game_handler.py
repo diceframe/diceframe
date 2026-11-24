@@ -38,7 +38,7 @@ from src.commands.state_recap import (
 from src.commands.story_recap import StoryRecapGenerator
 from src.commands.swipe_generator import SwipeGenerator
 from src.engine.language import DEFAULT_LANGUAGE
-from src.engine.modules import adventure_runtime_state
+from src.engine.modules import adventure_runtime_state, game_config
 from src.gameplays.builtin import DEFAULT_GAMEPLAYS
 from src.gameplays.contracts import TURN_DRIVER_NARRATIVE_ROUND, TurnDriverRegistry
 
@@ -46,6 +46,11 @@ from src.lorebook.retrieval import LoreRetriever
 from src.content_modules.projection import ContentProjectionService
 from src.rulesets.builtin import build_default_ruleset_registry
 from src.rulesets.registry import RulesetRuntimeRegistry
+from src.rules.rule_system import RuleSystem
+from src.engine.currency.validation import (
+    declared_currency_display_label,
+    validate_declared_currency_system,
+)
 
 logger = logging.getLogger("trpg")
 
@@ -106,7 +111,9 @@ class GameHandler:
             content_projection=self.content_projection,
             embedding_client_provider=self._embedding_client,
         )
-        self._factory = GameFactory(self.registry, self.lorebook_store, self.worlds_dir)
+        self._factory = GameFactory(
+            self.registry, self.lorebook_store, self.worlds_dir, self.rules_dir,
+        )
         self._state_applier = StateUpdateApplier(
             self.rules_dir, self.worlds_dir, self._load_world_template,
             ruleset_registry=self.ruleset_registry,
@@ -205,6 +212,7 @@ class GameHandler:
         fresh_instance: bool = False,
     ) -> GameInstance:
         """兼容旧入口；实际逻辑已拆到 GameFactory。"""
+        had_existing_instance = self.registry.get(game_key) is not None and not fresh_instance
         plugin_template = None
         if self._plugin_host and not self._factory.load_world_template(world_id):
             plugin_template = self._plugin_host.load_world_template(world_id, language)
@@ -216,6 +224,30 @@ class GameHandler:
         )
         if plugin_template:
             instance.rule_id = str(rule_id or plugin_template.get("default_rule") or "freeform_fantasy")
+            plugin_rule = RuleSystem.load_for_world(
+                plugin_template, self.rules_dir, language,
+            )
+            if plugin_rule is not None and not had_existing_instance:
+                declared_currency_system = plugin_template.get("currency_system")
+                if declared_currency_system is not None:
+                    validate_declared_currency_system(declared_currency_system)
+                currency_system = (
+                    declared_currency_system
+                    if declared_currency_system is not None
+                    else plugin_rule.currency_system
+                )
+                currency_label = str(
+                    plugin_template.get("currency")
+                    or declared_currency_display_label(
+                        declared_currency_system, plugin_rule.currency,
+                    )
+                    or plugin_rule.currency
+                )
+                game_config.replace_currency_context(
+                    instance,
+                    currency_label,
+                    currency_system,
+                )
             # 非 UI 建图路径（bot/种子码/API）可能尚未触发 list_worlds 同步，
             # 这里先幂等 sync 一遍，保证插件世界书已带标记灌入；再用带标记的 id
             # 覆盖 init_world_from_template 的无标记初始化，避免产生无法按插件清理的副本。

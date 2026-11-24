@@ -159,6 +159,18 @@ class GameLifecycle:
             gm_uid=source.gm_uid,
             economy_reward_policy=dict(economy_state.reward_policy(source) or {}),
         )
+        source_currency_system = game_config.currency_system(source)
+        if source_currency_system is not None:
+            game_config.replace_currency_context(
+                candidate,
+                game_config.currency_label(source),
+                source_currency_system,
+            )
+        else:
+            # A legacy save has no game-scoped currency snapshot. Keep its
+            # historical rule fallback instead of adopting a later world edit
+            # during restart.
+            game_config.clear_currency_context(candidate)
         # Perspective, GM style, luck timeout and dice reveal mode; the old
         # field-by-field copy dropped dice_reveal_mode.
 

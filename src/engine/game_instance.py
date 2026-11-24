@@ -439,6 +439,8 @@ class GameInstance:
         difficulty: str,
         language: str,
         state: GameState = GameState.WAITING,
+        currency_label: str = "",
+        currency_system: dict[str, Any] | None = None,
     ) -> None:
         from src.engine import game_configuration
 
@@ -452,6 +454,8 @@ class GameInstance:
             difficulty=difficulty,
             language=language,
             state=state,
+            currency_label=currency_label,
+            currency_system=currency_system,
         )
 
     def configure_session(

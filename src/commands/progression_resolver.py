@@ -7,9 +7,10 @@ from pathlib import Path
 
 from src.engine.character_utils import set_hp
 from src.engine.game_instance import GameInstance
+from src.engine.modules import game_config
 from src.engine.world_template import world_template_path
 from src.rules.loader import RuleBundleLoader
-from src.rules.rule_system import RuleSystem
+from src.rules.rule_system import RuleSystem, apply_currency_context
 
 logger = logging.getLogger("trpg")
 
@@ -27,15 +28,30 @@ class ProgressionResolver:
         if rule_id:
             core = self.rules_dir / f"{rule_id}.json"
             if core.exists():
-                return RuleSystem(RuleBundleLoader().load_rule(self.rules_dir, rule_id, getattr(instance, "language", "")))
+                rule = RuleSystem(RuleBundleLoader().load_rule(self.rules_dir, rule_id, getattr(instance, "language", "")))
+                return apply_currency_context(
+                    rule,
+                    game_config.currency_label(instance),
+                    game_config.currency_system(instance),
+                )
             rule_path = RuleSystem.path_for(
                 self.rules_dir, rule_id, getattr(instance, "language", "")
             )
             if rule_path.exists():
-                return RuleSystem.load(rule_path)
+                rule = RuleSystem.load(rule_path)
+                return apply_currency_context(
+                    rule,
+                    game_config.currency_label(instance),
+                    game_config.currency_system(instance),
+                )
         if instance.world_id and self.worlds_dir:
             world_path = world_template_path(self.worlds_dir, instance.world_id)
-            return RuleSystem.load_for_world_path(world_path, self.rules_dir)
+            rule = RuleSystem.load_for_world_path(world_path, self.rules_dir)
+            return apply_currency_context(
+                rule,
+                game_config.currency_label(instance),
+                game_config.currency_system(instance),
+            )
         return None
 
     @staticmethod

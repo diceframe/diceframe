@@ -9,9 +9,16 @@ from typing import Any
 from collections.abc import Callable
 
 from src.engine.game_instance import GameInstance, GameRegistry, GameState
+from src.engine.modules import game_config
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
 from src.engine.world_template import load_world_template
 from src.lorebook.bootstrap import ensure_world_from_template
+from src.rules.loader import RuleBundleLoader
+from src.rules.rule_system import RuleSystem
+from src.engine.currency.validation import (
+    declared_currency_display_label,
+    validate_declared_currency_system,
+)
 
 logger = logging.getLogger("trpg")
 
@@ -44,10 +51,17 @@ def generate_seed_code() -> str:
 class GameFactory:
     """负责创建 GameInstance，并按世界模板初始化世界书。"""
 
-    def __init__(self, registry: GameRegistry, lorebook_store: Any, worlds_dir: Path):
+    def __init__(
+        self,
+        registry: GameRegistry,
+        lorebook_store: Any,
+        worlds_dir: Path,
+        rules_dir: Path | None = None,
+    ):
         self.registry = registry
         self.lorebook_store = lorebook_store
         self.worlds_dir = worlds_dir
+        self.rules_dir = rules_dir
         self._defaults_provider: Callable[[], dict] = lambda: {}
 
     def set_defaults_provider(self, provider: Callable[[], dict]) -> None:
@@ -66,6 +80,26 @@ class GameFactory:
         if world_data:
             rule_id = rule_id or world_data.get("default_rule", "")
         rule_id = rule_id or "freeform_fantasy"
+        currency_label = ""
+        currency_system: dict[str, Any] | None = None
+        if self.rules_dir:
+            rule = self._load_rule(rule_id, language)
+            if rule is not None:
+                currency_label = rule.currency
+                currency_system = rule.currency_system
+        if isinstance(world_data, dict):
+            declared = world_data.get("currency_system")
+            if declared is not None:
+                validate_declared_currency_system(declared)
+                currency_system = declared
+                currency_label = declared_currency_display_label(
+                    declared, currency_label,
+                )
+            if isinstance(world_data.get("currency"), str) and world_data["currency"].strip():
+                currency_label = world_data["currency"].strip()
+        if not is_new:
+            currency_label = game_config.currency_label(instance)
+            currency_system = game_config.currency_system(instance)
         async with instance._lock:
             instance.configure_game(
                 world_id=world_id,
@@ -76,6 +110,8 @@ class GameFactory:
                 seed_code=seed_code or generate_seed_code(),
                 difficulty=difficulty,
                 language=normalize_language(language),
+                currency_label=currency_label,
+                currency_system=currency_system,
             )
             if is_new:
                 from src.engine.game_preferences import apply
@@ -89,6 +125,15 @@ class GameFactory:
             await self.init_world_from_template(world_id, canonical_world)
 
         return instance
+
+    def _load_rule(self, rule_id: str, language: str) -> RuleSystem | None:
+        if self.rules_dir is None:
+            return None
+        core = self.rules_dir / f"{rule_id}.json"
+        if core.exists():
+            return RuleSystem(RuleBundleLoader().load_rule(self.rules_dir, rule_id, language))
+        localized = RuleSystem.path_for(self.rules_dir, rule_id, language)
+        return RuleSystem.load(localized) if localized.exists() else None
 
     def load_world_template(self, world_id: str, language: str = "") -> dict | None:
         """加载世界模板 JSON 文件。"""

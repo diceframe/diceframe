@@ -48,6 +48,7 @@ def append_unpriced_purchase_intent(
     uid: str,
     target: str,
     quantity: int,
+    ambiguous_target: bool = False,
 ) -> None:
     """Record one deduplicated unpriced purchase intent (round memory only)."""
 
@@ -55,11 +56,47 @@ def append_unpriced_purchase_intent(
     if key in seen:
         return
     seen.add(key)
-    unpriced.append({
+    entry = {
         "payer_uid": uid,
         "target": target,
         "quantity": quantity,
-    })
+    }
+    if ambiguous_target:
+        entry["ambiguous_target"] = True
+    unpriced.append(entry)
+
+
+#: Characters of scripts that are written without spaces between words (kana,
+#: Han ideographs, Hangul syllables).
+_LOGOGRAPHIC_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]")
+
+
+def _is_generic_purchase_target(target: str, language: str) -> bool:
+    """Whether a purchase target names a class of goods rather than one item.
+
+    The target is model output, so "newspaper" and "a newspaper" must get the
+    same answer.  Spaced scripts are judged by their head word (the last one);
+    unspaced scripts only by a suffix of two or more characters, so a
+    one-character generic such as Japanese ``物`` cannot swallow real items
+    like ``飲み物``.
+    """
+
+    text = str(target or "").strip().casefold()
+    if not text:
+        return False
+    generic = {
+        str(value or "").strip().casefold()
+        for value in purchase_generic_target_terms(language or "zh-CN")
+    }
+    if text in generic:
+        return True
+    words = re.findall(r"\w+", text)
+    if len(words) > 1 and words[-1] in generic:
+        return True
+    return any(
+        len(term) >= 2 and _LOGOGRAPHIC_RE.search(term) and text.endswith(term)
+        for term in generic
+    )
 
 
 def _infer_explicit_currency_unit(
@@ -150,6 +187,8 @@ def normalize_economy_actions(
     unit id；服务端经 CurrencyCodec 转成 canonical base-unit 整数，模型绝不
     自行换算。price_source=none 或缺价时安全跳过（没有人说出价格就不产生
     扣款提案），有效的意图以 ``unpriced`` 形式返回，供本轮 LOOT 拦截使用；
+    泛称商品会标记为 ``ambiguous_target``，在无法确认具体商品时对该付款人的
+    物品授予 fail closed。
     它们只存在于回合内存中，从不入库，也从不产生金额。amount 存在则
     price_source 必须是明确的转述来源。单条无效不影响同批。
 
@@ -164,12 +203,14 @@ def normalize_economy_actions(
     unpriced: list[dict[str, Any]] = []
     errors: list[str] = []
     seen_unpriced: set[tuple[str, str, int]] = set()
+    target_is_ambiguous = False
 
     def downgrade_to_unpriced(index: int, reason: str) -> None:
         errors.append(f"economy_actions[{index}] {reason}；已降级为 unpriced purchase intent")
         append_unpriced_purchase_intent(
             unpriced, seen_unpriced,
             uid=uid, target=target, quantity=quantity,
+            ambiguous_target=target_is_ambiguous,
         )
 
     for index, raw in enumerate(raw_actions[:8]):
@@ -187,6 +228,7 @@ def normalize_economy_actions(
         if not target:
             errors.append(f"economy_actions[{index}] target 为空")
             continue
+        target_is_ambiguous = _is_generic_purchase_target(target, instance.language)
         quantity = 1
         if raw.get("quantity") is not None:
             try:
@@ -207,6 +249,7 @@ def normalize_economy_actions(
             append_unpriced_purchase_intent(
                 unpriced, seen_unpriced,
                 uid=uid, target=target, quantity=quantity,
+                ambiguous_target=target_is_ambiguous,
             )
             continue
         amount_scope = str(raw.get("amount_scope") or "total").strip()
@@ -290,6 +333,8 @@ def normalize_economy_actions(
             offer["evidence"] = evidence
         if max_total is not None:
             offer["max_total"] = max_total
+        if target_is_ambiguous:
+            offer["ambiguous_target"] = True
         if initial_due is not None:
             offer["initial_due"] = initial_due
             offer["remaining_due"] = total_amount - initial_due
@@ -475,6 +520,12 @@ def _recover_purchase_intents_from_player_actions(
             "payer_uid": str(intent.actor_uid),
             "target": target,
             "quantity": quantity,
+            **(
+                {"ambiguous_target": True}
+                if _is_generic_purchase_target(
+                    target, str(getattr(instance, "language", "") or ""),
+                ) else {}
+            ),
         })
         known.add(key)
     priced_keys = {

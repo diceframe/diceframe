@@ -18,7 +18,7 @@
   "purchase_target_connector": ["もう一度", "また", "そして"],
   "purchase_target_suffix": ["を"],
   "purchase_quantity_classifier": ["個", "本", "枚", "つ"],
-  "purchase_generic_target": ["これ", "それ", "それを"],
+  "purchase_generic_target": ["これ", "それ", "それを", "新聞", "商品", "物", "品物"],
   "purchase_quantity_word": ["一=1", "二=2", "三=3", "四=4", "五=5", "六=6", "七=7", "八=8"],
   "purchase_balance": ["残高", "所持", "持って", "予算", "上限"],
   "purchase_confirm": [

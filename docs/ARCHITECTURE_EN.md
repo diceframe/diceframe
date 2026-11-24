@@ -2706,6 +2706,13 @@ amount / 100
 float(amount)
 ```
 
+The default `CurrencySpec` may come from a rule or a world template, while a new
+game snapshots the resolved currency context into `game_config`. Balance reads,
+quote parsing, prompt construction and the frontend `rule_meta` for that game use
+the snapshot. Legacy saves without a snapshot keep their existing rule path, so
+later world-template edits do not reinterpret their balances. Restarting a game
+prefers the source game's existing snapshot.
+
 ---
 
 ## 17.3 Unknown Price != Free
@@ -2725,7 +2732,10 @@ Instead it records for the current round:
 round_unpriced_purchase_intents
 ```
 
-and blocks the related item grant.
+and blocks the related item grant. A specific target blocks only matching grants.
+Generic targets such as `newspaper`, `item` or `goods` are marked ambiguous and
+block same-round item grants for that payer until the server has a concrete item
+identity. An explicit `FREE_GRANT` is required to release that gate.
 
 ---
 
