@@ -127,16 +127,78 @@ def test_old_prose_falls_back_without_guessing_speakers_and_prompt_is_bounded():
     assert "new:" in prompt and "secret_traitor_001" not in prompt
 
 
-def test_trim_preserves_speaker_attribution_and_segment_schema():
+def test_trim_drops_whole_trailing_beats_and_keeps_speaker_attribution():
     instance = game()
     story = parse_story(instance, wire(
         {"kind": "narration", "text": "雨落下。"},
+        {"kind": "dialogue", "speaker": "new:1", "name": "艾琳", "text": "跟我来。"},
         {"kind": "dialogue", "speaker": "new:1", "name": "艾琳", "text": "很长的台词。" * 100},
+        {"kind": "narration", "text": "门在身后关上。"},
     ))
     trimmed = trim_story(story, 80)
-    assert len(story_text(trimmed)) <= 90
-    assert trimmed["segments"][-1]["speaker_id"] == story["segments"][-1]["speaker_id"]
-    assert trimmed["segments"][-1]["text"].endswith("…")
+    # Kept beats are a verbatim prefix: nothing is rewritten mid-sentence.
+    assert trimmed["segments"] == story["segments"][:2]
+    assert story_text(trimmed) == "雨落下。\n\n艾琳：跟我来。"
+    assert trim_story(story, 627) == story
+    assert trim_story(story, 626)["segments"] == story["segments"][:3]
+
+
+def test_trim_cuts_an_oversized_first_beat_at_a_sentence_end():
+    instance = game()
+    text = "他说：“走吧。”" + "雨还在下。" * 100
+    story = parse_story(instance, wire({"kind": "dialogue", "speaker": "new:1", "name": "艾琳", "text": text}))
+
+    cut = trim_story(story, 15)["segments"][0]
+    assert cut["speaker_name"] == "艾琳" and cut["text"] == "他说：“走吧。”"
+
+    aligned = trim_story(story, 26)["segments"][0]
+    assert aligned["text"] == "他说：“走吧。”" + "雨还在下。" * 3
+
+    english = parse_story(instance, wire({"kind": "narration", "text": "The rain keeps falling. The wind rises. " * 20}))
+    assert trim_story(english, 30)["segments"][0]["text"] == "The rain keeps falling."
+
+    unbroken = parse_story(instance, wire({"kind": "narration", "text": "雨还在下" * 100}))
+    marked = trim_story(unbroken, 21)
+    assert marked["segments"][0]["text"] == "雨还在下" * 5 + "…"
+    assert len(story_text(marked)) <= 21
+
+
+def test_bound_story_response_only_shortens_runaway_stories():
+    from types import SimpleNamespace
+    from src.commands.story_output import bound_story_response, story_limit
+
+    instance = game()
+
+    def reply(*rows):
+        story = public_story(instance, parse_story(instance, wire(*rows)))
+        text = story_text(story)
+        return SimpleNamespace(story=story, narration=text, content=text + "\n---\nQUICK_ACTIONS:追问|离开")
+
+    limit = story_limit("zh-CN")
+    # Longer than the old 500-character trigger, with the check result in the last beat.
+    regular = reply({"kind": "narration", "text": "雨落下。"},
+                    {"kind": "dialogue", "speaker": "new:1", "name": "艾琳", "text": "很长的台词。" * 90},
+                    {"kind": "narration", "text": "图书馆使用检定成功：赵启明认出纸上的笔迹与退稿一致。"})
+    assert len(regular.narration) > 500
+    data = {"quick_actions": ["追问", "离开"]}
+    before = deepcopy(data)
+    assert bound_story_response(regular, data, limit=limit) is False
+    assert regular.narration.endswith("笔迹与退稿一致。") and data == before
+
+    runaway = reply({"kind": "dialogue", "speaker": "new:1", "name": "艾琳", "text": "很长的台词。" * 400})
+    assert bound_story_response(runaway, data, limit=limit) is True
+    assert len(runaway.narration) <= limit and runaway.narration.endswith("。")
+    assert runaway.story["segments"][0]["speaker_name"] == "艾琳"
+    assert data["quick_actions"] == []
+    assert runaway.content == runaway.narration + "\n---\nQUICK_ACTIONS:追问|离开"
+
+
+def test_story_limit_scales_by_language_and_falls_back():
+    from src.commands.story_output import story_limit
+    assert story_limit("zh-CN") == 1500
+    assert story_limit("EN_us") == 3600
+    assert story_limit("ru") == 3600
+    assert story_limit("") == story_limit("zh-CN")
 
 
 def test_story_capability_detaches_without_changing_core_gameplay():

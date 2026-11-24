@@ -90,6 +90,35 @@ const featureChoiceRequirements = computed(() => (
 ))
 const featureSelections = ref<Record<string, string[]>>({})
 
+// Wild Shape 的已知形态：与其它槽位共用 requirements 通道，只是提交键不同
+// （后端读 choices.known_form_refs）。数量、CR 上限、候选都由内容给出。
+const knownFormsRequirement = computed<JsonObject | null>(() => (
+  requirements.value.find(item => item.kind === 'known_forms') as JsonObject | undefined
+) || null
+)
+const knownForms = ref<string[]>([])
+
+function knownFormLimit(): number {
+  return Number(knownFormsRequirement.value?.count || 0)
+}
+
+function knownFormIsPicked(ref: string): boolean {
+  return knownForms.value.includes(ref)
+}
+
+function syncKnownForms(): void {
+  if (knownForms.value.length) choices.value.known_form_refs = [...knownForms.value]
+  else delete choices.value.known_form_refs
+}
+
+function toggleKnownForm(ref: string): void {
+  const index = knownForms.value.indexOf(ref)
+  if (index >= 0) knownForms.value.splice(index, 1)
+  else if (knownForms.value.length < knownFormLimit()) knownForms.value.push(ref)
+  syncKnownForms()
+  void refresh()
+}
+
 const FEATURE_CHOICE_NAMES: Record<string, [string, string]> = {
   additional_fighting_style: ['额外战斗风格', 'Additional Fighting Style'],
   expertise: ['专精', 'Expertise'],
@@ -517,6 +546,8 @@ onMounted(() => {
       <fieldset><legend>{{ text('生命值成长方式', 'Hit Point method') }}</legend><label><input v-model="choices.hp_method" type="radio" value="fixed" @change="refresh"> {{ text('采用职业固定值（推荐）', 'Use class fixed value (recommended)') }}</label><label><input v-model="choices.hp_method" type="radio" value="rolled" @change="refresh"> {{ text('掷职业生命骰', 'Roll the class Hit Die') }}</label><input v-if="choices.hp_method === 'rolled'" v-model.number="choices.hp_roll" type="number" min="1" :max="20" @change="refresh"></fieldset>
 
       <fieldset v-if="subclassRequirement"><legend>{{ text('选择子职', 'Choose subclass') }}</legend><select :value="choices.subclass_ref || ''" @change="setChoice('subclass_ref', ($event.target as HTMLSelectElement).value)"><option value="" disabled>{{ text('请选择', 'Choose') }}</option><option v-for="option in (subclassRequirement.options as JsonObject[])" :key="String(option.value)" :value="option.value">{{ option.name }}</option></select></fieldset>
+
+      <fieldset v-if="knownFormsRequirement"><legend>{{ text('已知野兽形态', 'Known beast forms') }}</legend><p class="spell-help">{{ text(`Wild Shape 在 2 级开始，本级要选满 ${knownFormLimit()} 个形态；CR 上限 ${knownFormsRequirement.cr_cap}，8 级前不能选带飞行速度的形态。长休时可以用一个替换其中一个。`, `Wild Shape starts at level 2; choose ${knownFormLimit()} forms now. CR cap ${knownFormsRequirement.cr_cap}, and no flying forms before level 8. A long rest can swap one of them.`) }}</p><p class="spell-help"><b>{{ text(`已选 ${knownForms.length} / 需要 ${knownFormLimit()}`, `${knownForms.length} selected / ${knownFormLimit()} required`) }}</b></p><div class="feat-grid"><label v-for="option in (knownFormsRequirement.options as JsonObject[])" :key="String(option.value)"><input type="checkbox" :disabled="!knownFormIsPicked(String(option.value)) && knownForms.length >= knownFormLimit()" :checked="knownFormIsPicked(String(option.value))" @change="toggleKnownForm(String(option.value))"><span><b>{{ option.name || option.value }}</b><small>CR {{ option.cr }}</small></span></label></div></fieldset>
 
       <fieldset v-for="spec in featureChoiceRequirements" :key="String(spec.id)"><legend>{{ featureChoiceTitle(spec) }}</legend><p class="spell-help">{{ text(`本级需要选择 ${spec.count} 项。标灰的选项写着不可选的原因：本规则集尚未实现的专长会一直无法选中，前置条件不足的补齐后即可。`, `Choose ${spec.count} for this level. Greyed options name their reason: feats this ruleset does not implement stay unavailable, while unmet prerequisites become selectable once satisfied.`) }}</p><div class="feat-grid"><label v-for="option in (spec.options as JsonObject[])" :key="String(option.value)" :class="{ unavailable: option.available === false }"><input :type="Number(spec.count || 1) > 1 ? 'checkbox' : 'radio'" :name="String(spec.id)" :disabled="option.available === false || (!featureChoiceIsPicked(spec, String(option.value)) && featureChoiceAtLimit(spec))" :checked="featureChoiceIsPicked(spec, String(option.value))" @change="toggleFeatureChoice(spec, String(option.value))"><span><b>{{ option.name || option.value }}</b><small v-if="option.available === false">{{ unavailableLabel(option) }}</small><code v-if="option.source_ref">{{ option.source_ref }}</code></span></label></div></fieldset>
 

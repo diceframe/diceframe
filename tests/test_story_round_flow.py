@@ -94,12 +94,49 @@ async def test_bad_story_format_retries_then_degrades_to_public_narration():
 
 
 @pytest.mark.asyncio
-async def test_long_story_is_bounded_without_flattening_speakers():
+async def test_regular_multi_beat_story_is_kept_whole_without_resetting_the_stream():
+    # Replies longer than 500 characters used to be cut to 400 mid-sentence,
+    # silently dropping the trailing beats that narrated the check result.
+    instance, sink = game(), Sink()
+    rows = [
+        {"kind": "narration", "text": "投稿登记员把台灯拧亮了些，从抽屉里摸出一只黄铜放大镜。他没有急着说话，先把稿纸举到灯下，"
+                                      "沿着页边一寸一寸地看过去，又用指腹在墨迹上轻轻压了压，看它会不会晕开。"},
+        {"kind": "narration", "text": "窗外的雾又厚了一层，编辑部里只剩钟摆和暖气片的声音。他把你的原稿和另一份旧稿并排摊在柜台上，"
+                                      "两份纸对着光比了半天，眉头一点点松开来。他又取过一份旧档案，逐行核对署名和年份，"
+                                      "翻页的动作很慢，像是怕惊动纸上的什么东西。"},
+        {"kind": "narration", "text": "他把信封翻过来，对着窗。里面那张白纸还在原处，纸上一个墨点也没有。街上的钟敲了四点整，"
+                                      "雾散后窗玻璃上落着一层灰白的天光。柜台上那摞邮件被穿堂风吹得掀起一角。"},
+        {"kind": "narration", "text": "学院街二十二号门厅里，伊迪丝的手一直插在围裙口袋里，那团灰布被她捏出棱角。"},
+        {"kind": "narration", "text": "门厅里的座钟走着，钟摆声一下一下敲在耳朵里。你没有急着上楼，先看了一眼门边的衣帽架，"
+                                      "上面那件灰呢外套的袖口磨得发亮。"},
+        {"kind": "dialogue", "speaker": "new:edith", "name": "伊迪丝·霍尔西",
+         "text": "门开的时候，一股干气先冲出来。他就那么仰在床上，一只手垂在床沿外头。"},
+        {"kind": "narration", "text": "图书馆使用检定成功：赵启明一眼认出，纸上的署名年份与档案里那篇退稿的笔迹完全一致，"
+                                      "这是同一个抄写员的手笔。他把这个发现指给登记员看，对方点了点头。"},
+        {"kind": "dialogue", "speaker": "new:clerk", "name": "投稿登记员",
+         "text": "你眼睛挺尖。这份东西不是他自己写的，是有人照着他的手笔誊的。"},
+    ]
+    content = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n---\nQUICK_ACTIONS:追问登记员|收好原稿离开"
+    expected = story_text(parse_story(instance, content.split("---")[0]))
+    assert 500 < len(expected) < 1500 and expected.endswith("照着他的手笔誊的。")
+    # The check result sits past the old 400-character cut and used to vanish with it.
+    assert expected.index("图书馆使用检定成功") > 400
+    response, data = await call_llm_with_tag_retry(
+        Model([content]), instance, "GM", "context", "narrative", "", 1024, on_delta=sink, on_reset=sink.reset)
+    assert response.narration == expected
+    assert len(response.story["segments"]) == len(rows)
+    assert data["quick_actions"] == ["追问登记员", "收好原稿离开"]
+    assert sink.resets == 0 and sink.text == expected
+    assert sink.stories[-1] == response.story
+
+
+@pytest.mark.asyncio
+async def test_runaway_story_is_bounded_whole_without_flattening_speakers():
     instance = game()
-    model = Model([wire("很长的台词。" * 200)])
+    model = Model([wire("很长的台词。" * 400)])
     response, data = await call_llm_with_tag_retry(model, instance, "GM", "context", "narrative", "", 1024)
     assert response.story["segments"][0]["kind"] == "dialogue"
-    assert len(response.narration) <= 400
+    assert len(response.narration) <= 1500 and response.narration.endswith("。")
     assert response.narration == story_text(response.story)
     assert data["quick_actions"] == []
 

@@ -71,3 +71,36 @@ async def test_opening_turn_swipe_save_reload_and_player_projection(web_api, mon
     player_log = api.get_log(key, include_internal=False)
     assert "story" in player_log["log"][-1]
     assert "swipe_stories" not in player_log["log"][-1]
+
+
+@pytest.mark.asyncio
+async def test_opening_turn_and_swipe_keep_a_long_story_whole(web_api, monkeypatch):
+    # The opening, an ordinary turn and a rewrite share one ceiling. A reply that
+    # only exceeds the old 500/400-character cut must survive intact in all three.
+    api, _, registry, model, _ = web_api
+    line = "雨打着窗，他把信封翻过来，对着灯又看了一遍。" * 24
+    assert len(line) > 500
+    speaker = ["new:innkeeper"]
+
+    async def long_reply(**kwargs):
+        return response(line, speaker[0])
+
+    monkeypatch.setattr(model, "call", long_reply)
+    created = await api.create_game(
+        "template_world", "story-long", story_mode="dialogue",
+        players=[{"character_name": "玩家", "class": "游侠", "attributes": {"str": 12}}],
+    )
+    assert created["ok"] is True
+    key = created["game_key"]
+    instance = api.get_game_instance(key)
+    assert instance.log[0]["story"]["segments"][1]["text"] == line
+    speaker[0] = instance.log[0]["story"]["segments"][1]["speaker_id"]
+
+    instance.state = GameState.ACTIVE_JUDGMENT
+    instance.action_queue = [{"user_id": next(iter(instance.players)), "text": "打听消息"}]
+    await api._handler.process_round(instance)
+    assert instance.log[-1]["story"]["segments"][1]["text"] == line
+    target_round = instance.log[-1]["round"]
+
+    assert line in await api._handler.generate_swipe(instance, target_round)
+    assert registry.get(instance.game_key).log[-1]["story"]["segments"][1]["text"] == line

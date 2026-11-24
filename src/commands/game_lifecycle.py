@@ -159,6 +159,18 @@ class GameLifecycle:
             gm_uid=source.gm_uid,
             economy_reward_policy=dict(economy_state.reward_policy(source) or {}),
         )
+        source_currency_system = game_config.currency_system(source)
+        if source_currency_system is not None:
+            game_config.replace_currency_context(
+                candidate,
+                game_config.currency_label(source),
+                source_currency_system,
+            )
+        else:
+            # A legacy save has no game-scoped currency snapshot. Keep its
+            # historical rule fallback instead of adopting a later world edit
+            # during restart.
+            game_config.clear_currency_context(candidate)
         # Perspective, GM style, luck timeout and dice reveal mode; the old
         # field-by-field copy dropped dice_reveal_mode.
 
@@ -426,7 +438,7 @@ class GameLifecycle:
                 max_tokens=self.narrative_max_tokens,
             )
             response.content = normalize_tag_protocol(response.content)
-            from src.commands.story_output import ensure_story_response, bound_story_response
+            from src.commands.story_output import ensure_story_response, bound_story_response, story_limit
             response = await ensure_story_response(
                 instance, response, self.llm_client, system_prompt=gm_prompt,
                 user_message=welcome_context, max_tokens=self.narrative_max_tokens, round_number=0,
@@ -438,9 +450,7 @@ class GameLifecycle:
             # 开场标签同样需要落地到 instance：NPC 登记、场景、首次战利品等。
             start_data = parse_tag_state(response.content, rule_ctx.combat_model)
             if getattr(response, "story", None):
-                bound_story_response(response, start_data,
-                                     trigger=500 if instance.language == "zh-CN" else 1200,
-                                     limit=400 if instance.language == "zh-CN" else 1100)
+                bound_story_response(response, start_data, limit=story_limit(instance.language))
                 opening_story = response.story
                 narration = response.narration
         except Exception:

@@ -7,7 +7,35 @@
   },
   "fields": {
     "labels": {
-      "unarmed_strike": "Unarmed Strike"
+      "unarmed_strike": "Unarmed Strike",
+      "condition.blinded": "Blinded",
+      "condition.blinded.summary": "Can't see: your attacks have disadvantage, attacks against you have advantage.",
+      "condition.charmed": "Charmed",
+      "condition.charmed.summary": "You can't attack the creature that charmed you.",
+      "condition.deafened": "Deafened",
+      "condition.deafened.summary": "Can't hear: checks that rely on hearing fail.",
+      "condition.frightened": "Frightened",
+      "condition.frightened.summary": "Your attacks have disadvantage and you can't willingly move closer to the source.",
+      "condition.grappled": "Grappled",
+      "condition.grappled.summary": "Your speed is 0.",
+      "condition.incapacitated": "Incapacitated",
+      "condition.incapacitated.summary": "You can't take actions or reactions.",
+      "condition.invisible": "Invisible",
+      "condition.invisible.summary": "Unseen: your attacks have advantage, attacks against you have disadvantage.",
+      "condition.paralyzed": "Paralyzed",
+      "condition.paralyzed.summary": "Incapacitated, speed 0; Str and Dex saves auto-fail; hits within 5 feet are critical.",
+      "condition.petrified": "Petrified",
+      "condition.petrified.summary": "Incapacitated, speed 0; Str and Dex saves auto-fail; you have resistance to damage.",
+      "condition.poisoned": "Poisoned",
+      "condition.poisoned.summary": "Poisoned: disadvantage on attack rolls and ability checks.",
+      "condition.prone": "Prone",
+      "condition.prone.summary": "Prone: your attacks have disadvantage; standing up costs half your speed.",
+      "condition.restrained": "Restrained",
+      "condition.restrained.summary": "Speed 0; your attacks have disadvantage, attacks against you have advantage, Dex saves have disadvantage.",
+      "condition.stunned": "Stunned",
+      "condition.stunned.summary": "Incapacitated; Str and Dex saves auto-fail; attacks against you have advantage.",
+      "condition.unconscious": "Unconscious",
+      "condition.unconscious.summary": "Incapacitated, speed 0; Str and Dex saves auto-fail; hits within 5 feet are critical."
     }
   }
 }

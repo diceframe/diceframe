@@ -883,6 +883,15 @@ class CharacterDerivationMixin:
             },
             # 新角色从未同调过任何物品；容量是派生值（基础 3 + 特性加槽）。
             "attunement": {"refs": []},
+            # S0-F25：已知形态是**角色级**选择，跨变形、跨战斗存在。这里只落
+            # 建卡/升级时选好的 ref；没有选择时留空，校验层按推荐形态兜底。
+            "forms": {
+                "known": {
+                    "wild_shape": [
+                        str(ref) for ref in draft.get("known_form_refs") or []
+                    ],
+                },
+            },
             "features": {
                 "feat_refs": feat_refs,
                 "feat_choice_answers": feat_choice_answers,

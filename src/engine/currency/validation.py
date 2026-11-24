@@ -197,3 +197,20 @@ def legacy_currency_spec(
         display_unit=_LEGACY_BASE_UNIT_ID,
         units=(unit,),
     )
+
+
+def declared_currency_display_label(raw: Any, fallback: str = "") -> str:
+    """Return the declared display unit name without inventing a label."""
+
+    if not isinstance(raw, dict):
+        return str(fallback or "").strip()
+    try:
+        spec = (
+            validate_currency_system(raw)
+            if is_v2_currency_system(raw)
+            else legacy_currency_spec("", raw)
+        )
+    except CurrencySystemError:
+        return str(fallback or "").strip()
+    unit = spec.unit(spec.display_unit)
+    return str(unit.name if unit is not None else fallback or "").strip()

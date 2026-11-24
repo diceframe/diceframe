@@ -50,6 +50,11 @@ from src.commands.narrative_application import (
     apply_narrative_effects,
     apply_parsed_data_to_response,
 )
+from src.commands.narrative_quality import (
+    BufferedNarrativeStream,
+    build_quality_gate,
+    quality_repair_instruction as build_quality_repair_instruction,
+)
 from src.commands.round_llm import (
     append_multistep_analysis,
     call_llm_with_tag_retry,
@@ -62,6 +67,7 @@ from src.commands.round_actions import (
     format_check_results_constraint,
     initialize_puzzles_from_lorebook,
 )
+from src.commands.round_helpers import should_semantic_review
 from src.commands.state_recap import snapshot_public_player_state
 from src.commands.state_update_applier import discard_unresolved_player_damage
 from src.commands.tag_summary import summarize_tags
@@ -69,7 +75,12 @@ from src.engine.economy import (
     has_blocking_economy_decision,
     queue_effect_group,
 )
-from src.engine.economy import filter_unconfirmed_purchase_grants, has_pending_identical_purchase
+from src.engine.economy import (
+    filter_unconfirmed_purchase_grants,
+    has_pending_identical_purchase,
+    item_names_match,
+    purchase_grant_ambiguity_snapshot,
+)
 from src.engine import combat_narrative, module_hooks, progression
 from src.engine.game_instance import GameInstance, GameState, _snapshot_players
 from src.engine.module_state import ModuleStateError
@@ -105,7 +116,6 @@ from src.rulesets.contracts import (
     NarrativeCheckPolicyRuntime,
     NarrativeDirectorPlanningRuntime,
     NarrativeDirectorRuntime,
-    NarrativeStatePolicyRuntime,
 )
 from src.rulesets.automation import apply_director_automation, summarize_automation_batches
 from src.rulesets.narrative_checks import resolve_planned_checks, resolver_for
@@ -366,6 +376,21 @@ class RoundProcessor:
             runtime_id, minimum_version=int(binding.get("version", 1) or 1),
         )
 
+    @staticmethod
+    def _allowed_narrative_player_uids(instance: GameInstance) -> set[str] | None:
+        """Return the server-owned player authority boundary for this round."""
+
+        if len(instance.players) <= 1:
+            return None
+        allowed = {
+            str(action.get("user_id"))
+            for action in instance.action_queue
+            if action.get("user_id") in instance.players
+        }
+        if str(module_hooks.combat_view(instance)["combat_state"] or "none") != "none":
+            allowed |= set(instance.alive_players)
+        return allowed
+
     def _deferred_check_indexes(self, instance: GameInstance) -> set[int]:
         runtime = self._ruleset_runtime(instance)
         if not isinstance(runtime, NarrativeCheckPolicyRuntime):
@@ -545,6 +570,7 @@ class RoundProcessor:
                             if offer.get("remaining_due") is not None else None
                         ),
                         quote_evidence=str(offer.get("evidence") or ""),
+                        ambiguous_target=bool(offer.get("ambiguous_target")),
                         source_ref=(
                             f"ai:{instance.run_id}:{progression_state.round_value(instance)}:"
                             f"{offer['payer_uid']}:{offer['target']}:{quantity}:"
@@ -1457,6 +1483,7 @@ class RoundProcessor:
         # but proposals created afterwards must invalidate the response.
         expected_economy_fingerprint = economy_fingerprint(instance)
         protected_purchase_items = purchase_grant_protection_snapshot(instance)
+        protected_ambiguous_payers = purchase_grant_ambiguity_snapshot(instance)
         # 只保留最近一轮的短期展示状态，避免旧提示或战斗结果常驻。
         instance.begin_round_processing()
         pending_combat_event_ids = combat_narrative.pending_event_ids(instance)
@@ -1545,11 +1572,43 @@ class RoundProcessor:
 
         context = await append_multistep_analysis(
             self.llm_client, instance, gm_prompt, context, actions_text, self.analysis_max_tokens)
+        runtime = self._ruleset_runtime(instance)
+        allowed_uids = self._allowed_narrative_player_uids(instance)
+        semantic_review_enabled = should_semantic_review(instance, actions_text)
+        public_narration_context = _build_recent_public_narration_context(instance)
+        quality_gate = build_quality_gate(
+            instance,
+            self.llm_client,
+            runtime=runtime,
+            actions_text=actions_text,
+            semantic_review=semantic_review_enabled,
+            public_narration_context=public_narration_context,
+            allowed_player_uids=allowed_uids,
+        )
+        buffered_stream = (
+            BufferedNarrativeStream(on_delta)
+            if semantic_review_enabled and on_delta is not None else None
+        )
+
+        async def quality_reset() -> None:
+            if buffered_stream is not None:
+                buffered_stream.clear()
+            if on_reset is not None:
+                await on_reset()
+
         response, data = await call_llm_with_tag_retry(
             self.llm_client, instance, gm_prompt, context, combat_model,
             dice_block, self.narrative_max_tokens, actions_text,
-            on_delta=on_delta, on_reset=on_reset,
-            public_narration_context=_build_recent_public_narration_context(instance))
+            on_delta=buffered_stream or on_delta,
+            on_reset=quality_reset if buffered_stream is not None else on_reset,
+            public_narration_context=public_narration_context,
+            quality_gate=quality_gate,
+            quality_repair_instruction=lambda issues: build_quality_repair_instruction(
+                instance.language, issues,
+            ),
+        )
+        if buffered_stream is not None:
+            await buffered_stream.flush()
         current_instance = self.registry.get(instance.game_key)
         if (
             current_instance is not instance
@@ -1568,11 +1627,6 @@ class RoundProcessor:
             # 叙事已作废（回滚/重置/运行替换），本轮不会提交：必须让调用方
             # 知道"没有处理"，而不是收到一个空正文的成功回合。
             raise RoundNotProcessed("stale")
-        runtime = self._ruleset_runtime(instance)
-        if isinstance(runtime, NarrativeStatePolicyRuntime):
-            data["state_update"] = runtime.filter_narrative_state_update(
-                instance, dict(data.get("state_update") or {}),
-            )
         director_proposal_data: dict[str, Any] = {}
         if authoritative_combat and isinstance(runtime, NarrativeDirectorRuntime):
             try:
@@ -1637,14 +1691,18 @@ class RoundProcessor:
 
         def _unpriced_without_explicit_free_grant(intent: dict[str, Any]) -> bool:
             uid = str(intent.get("payer_uid") or "").strip()
-            target = str(intent.get("target") or "").strip().casefold()
+            target = str(intent.get("target") or "").strip()
             if not uid or not target:
                 return False
+            if intent.get("ambiguous_target") is True:
+                return not any(
+                    str(marker.get("player") or "").strip() == uid
+                    for marker in free_grant_markers
+                )
             return not any(
                 str(marker.get("player") or "").strip() == uid
-                and (
-                    target in str(marker.get("item") or "").strip().casefold()
-                    or str(marker.get("item") or "").strip().casefold() in target
+                and item_names_match(
+                    {str(marker.get("item") or "").strip()}, target,
                 )
                 for marker in free_grant_markers
             )
@@ -1653,6 +1711,7 @@ class RoundProcessor:
             instance, data,
             unpriced_purchase_intents=unpriced_purchase_intents,
             protected_purchase_items=protected_purchase_items,
+            protected_ambiguous_payers=protected_ambiguous_payers,
         )
         if any(
             _unpriced_without_explicit_free_grant(intent)
@@ -1678,17 +1737,8 @@ class RoundProcessor:
         round_pre_combat_snapshot = module_hooks.read_value(instance, module_hooks.COMBAT_EXTENSION_SNAPSHOT)
 
         queued_proposals: list[dict[str, Any]] = []
-        allowed_uids: set | None = None
         if response.state_update:
             # 多人局权威白名单：状态标签只允许作用于本轮行动者/参战者。
-            if len(instance.players) > 1:
-                allowed_uids = {
-                    str(action.get("user_id"))
-                    for action in instance.action_queue
-                    if action.get("user_id") in instance.players
-                }
-                if str(module_hooks.combat_view(instance)["combat_state"] or "none") != "none":
-                    allowed_uids |= set(instance.alive_players)
             queued_proposals = self._state_applier.apply_state_update(
                 instance, response.state_update, allowed_player_uids=allowed_uids,
             )

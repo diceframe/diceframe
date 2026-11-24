@@ -18,6 +18,7 @@ from src.rulesets.dnd2024.features.resources import (
 )
 from ..character.attunement import AttunementError, canonical_item_ref
 from ..character.primitives import derived_save, derived_skill
+from ..forms import wild_shape_state
 from ..items.activation import (
     ItemActivationError,
     build_item_healing_event,
@@ -38,6 +39,7 @@ from ..spells.font_of_magic import (
     parse_created_slot_costs,
     slot_to_points_plan,
 )
+from .obscurement import SANCTUARY_DURATION_ROUNDS, sanctuary_zone_id, zone_members
 from .action_adapter import (
     attack_damage_node,
     average_damage,
@@ -115,6 +117,15 @@ POTENT_SPELLCASTING_OWNERS = ("class:cleric", "class:druid")
 # event has to name the feature that rewrote its total.  The id lives here so
 # the audit trail and the catalog cannot drift apart.
 INDOMITABLE_MIGHT = "indomitable_might"
+
+
+def _equipment_modes(intent: dict[str, Any]) -> dict[str, str]:
+    """逐件模式：意图里给 `equipment_modes`，否则退回单个 `equipment_mode`。"""
+
+    raw = intent.get("equipment_modes")
+    if isinstance(raw, dict) and raw:
+        return {str(ref): str(mode) for ref, mode in raw.items()}
+    return {"*": str(intent.get("equipment_mode") or "merge")}
 
 
 def _proficiency_bonus_for_cr(cr: str) -> int:
@@ -387,7 +398,10 @@ class CombatResolutionMixin:
             actor_id = _player_actor(uid)
             if "dead" in (canonical.get("conditions") or {}):
                 dead_actor_ids.add(actor_id)
-            modifier = int(canonical.get("derived", {}).get("initiative", 0) or 0)
+            # 形态会跨战斗保留：带着狼形态进战斗，先攻就用狼的敏捷。
+            modifier = self._initiative_modifier(
+                canonical, self._initiative_view(instance, uid, canonical),
+            )
             initiatives.append({
                 "actor_id": actor_id, "modifier": modifier, "kind": "player",
                 **self._initiative_roll(canonical, modifier, rng),
@@ -573,7 +587,29 @@ class CombatResolutionMixin:
                 events.extend(self._perfect_focus_events(view, character))
             if chosen.get("persistent_rage"):
                 events.extend(self._persistent_rage_opening_events(view, character))
+            events.extend(self._evergreen_wild_shape_events(character, actor_id))
         return events
+
+    def _evergreen_wild_shape_events(
+        self, character: dict[str, Any], actor_id: str,
+    ) -> list[dict[str, Any]]:
+        """SRD p43：掷先攻且已无 Wild Shape 次数时恢复一次。
+
+        无骰、无动作、不受长休限制；`current > 0` 时什么都不做——所以每场战斗
+        最多补 1 次，不能靠连续开战刷次数。
+        """
+
+        if not self.features.has_feature(character, "archdruid"):
+            return []
+        state = (character.get("resources") or {}).get("class", {}).get("wild_shape")
+        if not isinstance(state, dict):
+            return []
+        if int(state.get("current", 0) or 0) != 0:
+            return []
+        return [{
+            "type": "dnd2024.class_resource.restored", "actor_id": actor_id,
+            "resource_id": "wild_shape", "amount": 1,
+        }]
 
     def _uncanny_metabolism_events(
         self, view: dict[str, Any], character: dict[str, Any], rng: Any,
@@ -1081,7 +1117,25 @@ class CombatResolutionMixin:
                 return amount // 2, condition_id
         if self._fiendish_resilience_type(target) == damage_type:
             return amount // 2, "fiendish_resilience"
+        ward = self._natures_ward_source(target, damage_type)
+        if ward:
+            return amount // 2, ward
         return amount, ""
+
+    def _natures_ward_source(self, target: dict[str, Any], damage_type: str) -> str:
+        """Nature's Ward, on the owner or shared inside their Sanctuary.
+
+        Resistance never stacks, so this is consulted after every condition
+        source declined and returns at most one source id.  Zone sharing is
+        positional: walking out of the Cube drops it on the next hit.
+        """
+
+        if target.get("kind") not in {"player", "companion"}:
+            return ""
+        ward_type = str(target.get("ward_resistance_type") or "")
+        if ward_type and ward_type == damage_type:
+            return "natures_ward"
+        return ""
 
     def _fiendish_resilience_type(self, target: dict[str, Any]) -> str:
         """The damage type this character re-chose at its last rest, or ``""``."""
@@ -1541,7 +1595,7 @@ class CombatResolutionMixin:
                     continue
                 event, _amount = self._damage_instance_event(
                     str(part["dice"]), str(part.get("type") or ""), target,
-                    False, rng, half=bool(part.get("half")),
+                    False, rng, half=bool(check["success"] and part.get("half")),
                 )
                 if event is not None:
                     events.append(event)
@@ -1658,51 +1712,66 @@ class CombatResolutionMixin:
             if weapon is None:  # pragma: no cover - validation guards this
                 raise CombatIntentError("attack profile is not available to the actor")
             distance = self._distance(combat, actor_id, target_id)
-            # 属性与射程劣势都由共用函数判定：validation、掷骰后的预演和这里
-            # 读的是同一份规则，否则"面板显示敏捷、结算按力量"这种裂缝永远
-            # 只在某个分支上出现。
-            is_ranged_weapon = bool(weapon.get("ranged"))
-            ability = self.attack_ability(actor, weapon)
-            modifier = ability_modifier(actor["abilities"][ability])
-            if weapon.get("unarmed") or (
-                f"weapon_category:{weapon.get('category')}" in actor["weapon_category_refs"]
-            ):
-                # 徒手打击是每个 player-like actor 都会使用的天然攻击：熟练加值始终生效，
-                # 不依赖 weapon_category 熟练列表。
-                proficiency = actor["proficiency_bonus"]
+            # 形态攻击的加值来自 stat block（狼的 Bite 是 +4），不是由角色的
+            # 属性与熟练推出来的：变形后你就是用野兽的攻击表在打。
+            if weapon.get("source") == "form":
+                ability = ""
+                modifier = int(weapon.get("damage_modifier", 0) or 0)
+                attack_bonus = int(weapon.get("attack_bonus", 0) or 0)
+                # 形态攻击走 MM3 起统一的伤害段读取：catalog 的 beast 是
+                # damage: [{dice, type}]，旧存档与冒险包还是平坦字符串。
+                form_parts = attack_damage_parts(weapon)
+                damage_formula = str(form_parts[0]["dice"]) if form_parts else ""
+                damage_type = str(form_parts[0]["type"]) if form_parts else ""
+                is_ranged_weapon = bool(weapon.get("ranged"))
+                sacred_bonus = 0
+                range_disadvantage = self.attack_range_disadvantage(weapon, distance)
             else:
-                proficiency = 0
-            attack_bonus = modifier + proficiency
-            if is_ranged_weapon:
-                # 战斗风格专长的远程武器加值是特性投影字段：只在真远程武器
-                # 生效，投掷近战武器不适用（与上方 Thrown 语义划分一致）。
-                attack_bonus += int(actor.get("ranged_attack_bonus") or 0)
-            # 一次攻击的伤害是一到两段。玩家武器只有一段，形态（野兽的
-            # ``attacks[]``）可以带第二段；同一个读取函数让两条路都不用
-            # 关心数据形状。
-            parts = attack_damage_parts(weapon)
-            damage_formula = str(parts[0]["dice"]) if parts else ""
-            damage_type = str(parts[0]["type"]) if parts else ""
-            if intent.get("two_handed"):
-                # 两用武器双手持用换用更大的骰式；validation 已保证只有声明
-                # damage_two_handed 的武器才允许声明该意图。
-                damage_formula = str(weapon.get("damage_two_handed") or damage_formula)
-            # 神圣武器只祝福被绑定的那一把：加值是攻击检定上的独立加成，
-            # 不改属性、不改熟练，也不波及同名的另一把武器。
-            sacred_bonus = self._sacred_weapon_bonus(
-                actor, str(weapon.get("weapon_ref") or ""),
-            )
-            if not sacred_bonus and intent.get("activate_sacred_weapon"):
-                # 激活与首次攻击是同一个动作：绑定状态要到批次落地才存在，
-                # 但这一掷已经吃到了它的加值。
-                sacred_bonus, _ability = self._sacred_weapon_bonus_value(actor)
-            if sacred_bonus:
-                attack_bonus += sacred_bonus
-                if str(intent.get("sacred_weapon_damage") or "") == "radiant":
-                    # 选择只改本次该武器的伤害类型：武器骰不变、数量不变，
-                    # 也不会把别的 rider 的既定类型一起改写。
-                    damage_type = "radiant"
-            range_disadvantage = self.attack_range_disadvantage(weapon, distance)
+                # 属性与射程劣势都由共用函数判定：validation、掷骰后的预演和这里
+                # 读的是同一份规则，否则"面板显示敏捷、结算按力量"这种裂缝永远
+                # 只在某个分支上出现。
+                is_ranged_weapon = bool(weapon.get("ranged"))
+                ability = self.attack_ability(actor, weapon)
+                modifier = ability_modifier(actor["abilities"][ability])
+                if weapon.get("unarmed") or (
+                    f"weapon_category:{weapon.get('category')}" in actor["weapon_category_refs"]
+                ):
+                    # 徒手打击是每个 player-like actor 都会使用的天然攻击：熟练
+                    # 加值始终生效，不依赖 weapon_category 熟练列表。
+                    proficiency = actor["proficiency_bonus"]
+                else:
+                    proficiency = 0
+                attack_bonus = modifier + proficiency
+                if is_ranged_weapon:
+                    # 战斗风格专长的远程武器加值是特性投影字段：只在真远程武器
+                    # 生效，投掷近战武器不适用（与上方 Thrown 语义划分一致）。
+                    attack_bonus += int(actor.get("ranged_attack_bonus") or 0)
+                # 一次攻击的伤害是一到两段。玩家武器只有一段，形态（野兽的
+                # ``attacks[]``）可以带第二段；同一个读取函数让两条路都不用
+                # 关心数据形状。
+                parts = attack_damage_parts(weapon)
+                damage_formula = str(parts[0]["dice"]) if parts else ""
+                damage_type = str(parts[0]["type"]) if parts else ""
+                if intent.get("two_handed"):
+                    # 两用武器双手持用换用更大的骰式；validation 已保证只有声明
+                    # damage_two_handed 的武器才允许声明该意图。
+                    damage_formula = str(weapon.get("damage_two_handed") or damage_formula)
+                # 神圣武器只祝福被绑定的那一把：加值是攻击检定上的独立加成，
+                # 不改属性、不改熟练，也不波及同名的另一把武器。
+                sacred_bonus = self._sacred_weapon_bonus(
+                    actor, str(weapon.get("weapon_ref") or ""),
+                )
+                if not sacred_bonus and intent.get("activate_sacred_weapon"):
+                    # 激活与首次攻击是同一个动作：绑定状态要到批次落地才存在，
+                    # 但这一掷已经吃到了它的加值。
+                    sacred_bonus, _ability = self._sacred_weapon_bonus_value(actor)
+                if sacred_bonus:
+                    attack_bonus += sacred_bonus
+                    if str(intent.get("sacred_weapon_damage") or "") == "radiant":
+                        # 选择只改本次该武器的伤害类型：武器骰不变、数量不变，
+                        # 也不会把别的 rider 的既定类型一起改写。
+                        damage_type = "radiant"
+                range_disadvantage = self.attack_range_disadvantage(weapon, distance)
         else:
             weapon = next(item for item in actor["attacks"] if item["id"] == intent["attack_id"])
             modifier = int(weapon.get("damage_modifier", 0) or 0)
@@ -4596,6 +4665,244 @@ class CombatResolutionMixin:
         return "action"
 
     ABILITY_CHECK_COSTS = frozenset({"action", "bonus_action", "none"})
+
+    #: Wild Resurgence 的两种方向。
+    WILD_RESURGENCE_DIRECTIONS = ("slot_to_use", "use_to_slot")
+
+    LAND_WARD_DAMAGE = {
+        "arid": "fire", "polar": "cold", "temperate": "lightning", "tropical": "poison",
+    }
+    LAND_AID_DICE = ((10, 2), (14, 3), (99, 4))
+
+    def _land_terrain(self, character: dict[str, Any]) -> str:
+        """The current land, from the slot F4 already writes."""
+
+        try:
+            stored = self.features.spell_grant_choices(character)
+        except Exception:  # pragma: no cover - resolver already validated
+            return ""
+        for block in (stored or {}).values():
+            if isinstance(block, dict) and block.get("terrain"):
+                return str(block["terrain"])
+        return ""
+
+    def _land_aid_dice(self, character: dict[str, Any]) -> int:
+        level = declaring_class_level(character, "druid")
+        for ceiling, count in self.LAND_AID_DICE:
+            if level < ceiling:
+                return count
+        return 4
+
+    def _land_aid_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Land's Aid: one damage roll, one save per target, one healing roll."""
+
+        actor_id = str(intent["actor_id"])
+        character = self._canonical_for_actor(instance, actor_id)
+        actor = self._actor_view(instance, combat, actor_id)
+        origin = int(intent.get("origin", 0) or 0)
+        inside = set(zone_members(
+            combat, {"shape": "sphere", "size_ft": 10, "origin": origin},
+            combat.get("positions") or {}, None,
+        ))
+        # 校验层已拒绝重复目标；这里再去一次重，"一个目标最多一段伤害"不依赖调用方。
+        targets = list(dict.fromkeys(
+            str(ref) for ref in intent.get("damage_targets") or [] if str(ref) in inside
+        ))
+        heal_target = str(intent.get("heal_target") or "")
+        events: list[dict[str, Any]] = [
+            {"type": "dnd2024.action.spent", "actor_id": actor_id,
+             "resource": "action", "amount": 1},
+            {"type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+             "resource_id": "wild_shape", "amount": 1},
+        ]
+        count = self._land_aid_dice(character)
+        dc = int(actor.get("spell_save_dc", 0) or 0)
+        if targets:
+            dice = [int(rng.randint(1, 6)) for _ in range(count)]
+            total = sum(dice)
+            for target_id in targets:
+                target = self._actor_view(instance, combat, target_id)
+                save = self._saving_throw_check(
+                    instance, combat, target, target_id, "con", dc, actor_id, events, rng,
+                )
+                events.append(save)
+                damage = total if not save["success"] else max(0, total // 2)
+                damage, resisted = self._resist_damage(target, damage, "necrotic")
+                extra = {"resisted": True, "resistance": resisted} if resisted else {}
+                events.append({
+                    "type": "resource.changed", "resource": "hp", "target_id": target_id,
+                    "delta": -damage, "amount": damage, "damage_type": "necrotic",
+                    "rolls": dice, **extra,
+                })
+        if heal_target:
+            heal_dice = [int(rng.randint(1, 6)) for _ in range(count)]
+            total_heal = sum(heal_dice)
+            heal_view = self._actor_view(instance, combat, heal_target)
+            blocked = "cannot_regain_hp" in (heal_view.get("conditions") or {})
+            events.append({
+                "type": "resource.changed", "resource": "hp", "target_id": heal_target,
+                "delta": 0 if blocked else total_heal,
+                "amount": 0 if blocked else total_heal,
+                "healing": True, "rolls": heal_dice, "source": "lands_aid",
+                **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
+            })
+        return events
+
+    def _land_ward_type(self, character: dict[str, Any]) -> str:
+        land = self._land_terrain(character)
+        return self.LAND_WARD_DAMAGE.get(land, "")
+
+    def _nature_sanctuary_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Nature's Sanctuary: place a 15-foot Cube, or move it as a Bonus Action."""
+
+        actor_id = str(intent["actor_id"])
+        # 区域 id 由服务端派生，不读意图里的值：reducer 按 id 存区域，客户端自报
+        # 的 id 会覆盖别人的区域（另一位德鲁伊的 Sanctuary、法术的遮蔽区）。
+        zone_id = sanctuary_zone_id(actor_id)
+        mode = str(intent.get("mode") or "create")
+        if mode == "move":
+            return [
+                {"type": "dnd2024.action.spent", "actor_id": actor_id,
+                 "resource": "bonus_action", "amount": 1},
+                {"type": "dnd2024.zone.moved",
+                 "zone_id": zone_id,
+                 "origin": int(intent.get("origin", 0) or 0)},
+            ]
+        character = self._canonical_for_actor(instance, actor_id)
+        return [
+            {"type": "dnd2024.action.spent", "actor_id": actor_id,
+             "resource": "action", "amount": 1},
+            {"type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+             "resource_id": "wild_shape", "amount": 1},
+            {
+                "type": "dnd2024.zone.created", "zone_id": zone_id,
+                "kind": "sanctuary", "shape": "cube", "size_ft": 15,
+                "level": "none", "origin": int(intent.get("origin", 0) or 0),
+                "radius_ft": 7, "magical": False, "concentration": False,
+                "rounds_left": 0,
+                "owner_id": actor_id, "caster_id": actor_id,
+                "beneficiaries": "allies", "half_cover": True,
+                "resistance_from_owner": True,
+                "expires_at_minute": self._logical_minutes(instance) + 1,
+                # 一分钟也是十个战斗回合：战斗不推进世界时钟，只记分钟的话
+                # 这个 Cube 会在整场战斗里一直在。
+                "expires_at_round": int(combat.get("round", 0) or 0) + SANCTUARY_DURATION_ROUNDS,
+                "ends_on_owner_incapacitated": True,
+                "feature_id": "natures_sanctuary",
+                "projection": "theater_1d",
+                # 一分钟内不会发生长休换 land，所以把建立时的类型写在区域上，
+                # 盟友在区域内按它取抗性；离开即失去。
+                "ward_type": self._land_ward_type(character),
+            },
+        ]
+
+    def _wild_resurgence_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """SRD p42：法术位 ↔ Wild Shape 使用次数的两个单向换算。
+
+        两个方向各自记账：`slot_to_use` 每回合一次（economy 里的标记），
+        `use_to_slot` 两次长休之间一次（`wild_resurgence` 资源）。**不允许**
+        在同一声明里连续做两次——那不是换算，是免费资源。
+        """
+
+        actor_id = str(intent["actor_id"])
+        direction = str(intent.get("direction") or "")
+        if direction == "slot_to_use":
+            slot_level = int(intent.get("slot_level") or 0)
+            return [
+                # exchange=True：这次消耗法术位不算"这一回合已经用槽施法"，
+                # 否则 Wild Resurgence 会顺带吃掉本回合的施法额度。
+                {"type": "dnd2024.spell.slot_spent", "actor_id": actor_id,
+                 "slot_level": slot_level, "exchange": True},
+                {"type": "dnd2024.class_resource.restored", "actor_id": actor_id,
+                 "resource_id": "wild_shape", "amount": 1},
+                {"type": "dnd2024.wild_resurgence.used", "actor_id": actor_id,
+                 "direction": direction, "turn_limited": True},
+            ]
+        return [
+            {"type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+             "resource_id": "wild_shape", "amount": 1},
+            # 两次长休之间一次：必须真扣，否则这个方向可以无限续。
+            {"type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+             "resource_id": "wild_resurgence", "amount": 1},
+            {"type": "dnd2024.spell.font_slot_created", "actor_id": actor_id,
+             "slot_level": 1, "source": "wild_resurgence"},
+            {"type": "dnd2024.wild_resurgence.used", "actor_id": actor_id,
+             "direction": direction, "turn_limited": False},
+        ]
+
+    def _nature_magician_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """SRD p43：消耗 N 次 Wild Shape，换一个 2N 级的临时法术位。"""
+
+        actor_id = str(intent["actor_id"])
+        uses = int(intent.get("uses") or 0)
+        return [
+            {"type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+             "resource_id": "wild_shape", "amount": uses},
+            # 两次长休之间一次：与 Wild Resurgence 的 use_to_slot 分账。
+            {"type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+             "resource_id": "archdruid", "amount": 1},
+            {"type": "dnd2024.spell.font_slot_created", "actor_id": actor_id,
+             "slot_level": 2 * uses, "source": "archdruid_nature_magician"},
+        ]
+
+    def _form_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """变成某个形态，或变回来。
+
+        面板怎么合成不在这里——那是 ``forms.panel`` 的策略表。这里只做变形这个
+        动作本身的三件事：付附赠动作、扣一次 Wild Shape、按德鲁伊等级给临时 HP。
+        """
+
+        actor_id = str(intent["actor_id"])
+        character = self._canonical_for_actor(instance, actor_id)
+        level = declaring_class_level(character, "druid")
+        if str(intent.get("type")) == "form.revert":
+            return [
+                {"type": "dnd2024.action.spent", "actor_id": actor_id,
+                 "resource": "bonus_action", "amount": 1},
+                # 原因由引擎决定：主动变回就是 voluntary。存客户端给的字符串等于
+                # 让它把"死亡""失能"写进权威事件流。
+                {"type": "dnd2024.form.reverted", "actor_id": actor_id,
+                 "reason": "voluntary"},
+            ]
+        entry = self._statblock_by_ref(str(intent.get("form_ref") or ""))
+        if entry is None:  # pragma: no cover - validation guards this
+            raise CombatIntentError("form reference is not available")
+        state = wild_shape_state(
+            entry,
+            druid_level=level,
+            beast_spells=self.features.has_feature(character, "beast_spells"),
+            equipment_modes=_equipment_modes(intent),
+            assumed_at_turn=int(combat.get("round", 0) or 0),
+            assumed_at_minute=self._logical_minutes(instance),
+        )
+        events: list[dict[str, Any]] = []
+        if isinstance(character.get("forms"), dict) and character["forms"].get("active"):
+            # 再次变形先原子结束旧形态：不结束就换面板等于"免费续时"。
+            events.append({"type": "dnd2024.form.reverted", "actor_id": actor_id,
+                           "reason": "reshaped"})
+        events.extend([
+            {"type": "dnd2024.action.spent", "actor_id": actor_id,
+             "resource": "bonus_action", "amount": 1},
+            {"type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+             "resource_id": "wild_shape", "amount": 1},
+            # Temporary HP 等于德鲁伊等级（SRD p43）；"保留较高值"由 reducer 决定，
+            # 这里只声明这次变形给了多少。
+            {"type": "resource.changed", "target_id": actor_id,
+             "resource": "temp_hp", "amount": max(0, int(level))},
+            {"type": "dnd2024.form.assumed", "actor_id": actor_id,
+             "form": state.as_payload()},
+        ])
+        return events
 
     def _ability_check_events(
         self, combat: dict[str, Any], intent: dict[str, Any], actor: dict[str, Any],

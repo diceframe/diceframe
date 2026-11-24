@@ -8,8 +8,11 @@ from .triggered_spells import free_cast_resource
 
 from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.features import CombatCapabilityView
+from ..character.builder import ability_modifier
+from ..character.derivation import derive_armor_class
 from ..forms import (
-    FormState, FormStateError, assume_form, panel_from_view, restrictions,
+    FormState, FormStateError, StatPanel, assume_form, merged_refs_for,
+    panel_from_view, restrictions,
 )
 from src.rulesets.dnd2024.features.combat import martial_arts_profile
 from src.rulesets.dnd2024.features.resources import (
@@ -21,6 +24,7 @@ from src.rulesets.dnd2024.features.resources import (
 from src.rulesets.dnd2024.spells.casting import spell_caster, spellcasting_projection
 
 from .check_modes import marked_target_id, sense_declarations
+from .obscurement import zone_covers
 from .check_windows import LUCKY_RESOURCE
 from .primitives import (
     world_minutes,
@@ -96,6 +100,9 @@ class CombatViewMixin:
             view = self._shaped_view(view, character)
             view["cover"] = cover
             view["obscurement"] = self.obscurement_row(combat, actor_id)
+            view["ward_resistance_type"] = self._ward_resistance_type(
+                combat, actor_id, character,
+            )
             self._attach_hunter_lore(instance, combat, actor_id, view)
             return view
         if kind == "companion":
@@ -108,6 +115,9 @@ class CombatViewMixin:
             view = self._with_hands(combat, view)
             view["cover"] = cover
             view["obscurement"] = self.obscurement_row(combat, actor_id)
+            view["ward_resistance_type"] = self._ward_resistance_type(
+                combat, actor_id, character,
+            )
             self._attach_hunter_lore(instance, combat, view["actor_id"], view)
             return view
         if kind == "enemy":
@@ -255,18 +265,29 @@ class CombatViewMixin:
             return view
         entry = self._statblock_by_ref(str(active.get("form_ref") or ""))
         if entry is None:
-            # 目录里找不到形态就 fail closed：宁可不换面板，也不能猜一份数值。
-            return view
+            # 找不到形态不能静默回退：那样"变形中"的角色会拿着人类面板继续打，
+            # 而所有消费者都以为他在野兽形态里。抛出来让人看见。
+            raise CombatIntentError(
+                f"active form is missing from the catalogue: {active.get('form_ref')!r}"
+            )
         try:
             state = FormState.from_payload(active)
-        except FormStateError:
-            return view
-        merged = assume_form(panel_from_view(view), entry, state)
+        except FormStateError as exc:
+            raise CombatIntentError(f"active form state is invalid: {exc}") from exc
+        equipment = character.get("equipment") or {}
+        merged_refs = merged_refs_for(state, equipment.get("item_refs") or [])
+        character_panel = panel_from_view(view)
+        if merged_refs:
+            # merged 装备在形态内没有任何效果，所以"你自己的 AC"要按**去掉它们**
+            # 重算，而不是把一个含护甲加值的数拿去和形态 AC 比高。
+            character_panel = StatPanel(
+                **{
+                    **character_panel.__dict__,
+                    "armor_class": self._armor_class_without(character, merged_refs),
+                }
+            )
+        merged = assume_form(character_panel, entry, state)
         limits = restrictions(state)
-        equipment_refs = (
-            list(view.get("equipment_refs") or [])
-            if limits["equipment_effects"] else []
-        )
         view = {
             **view,
             "abilities": dict(merged.abilities),
@@ -280,14 +301,22 @@ class CombatViewMixin:
             "size": merged.size,
             "creature_type": merged.creature_type,
             "form_ref": state.form_ref,
+            # 形态的特质是 stat block 的一部分：消费者（抗魔、集群战术、flyby…）
+            # 读的是同一个 traits 列表，不另开一份。
+            "traits": deepcopy(entry.get("traits") or []),
+            "form_assumed_at_minute": int(state.assumed_at_minute),
+            "form_duration_hours": int(state.duration_hours),
             "form_sources": dict(merged.sources),
             "spellcasting_allowed": bool(limits["spellcasting"]),
-            "equipment_refs": equipment_refs,
-            "hands": (
-                dict(view.get("hands") or {})
-                if limits["equipment_effects"] else {"left": None, "right": None}
-            ),
+            # merged 的装备在形态内**没有效果**：把 ref 投影出去，让 AC/攻击/
+            # 熟练的消费者排除它们，而不是从一个已含加值的数里减。
+            "merged_item_refs": merged_refs,
         }
+        # 装备与法术是两套独立投影：merged 的装备从装备面消失（不只是加值不算），
+        # 禁止施法时法术面整体清空——否则 UI 仍然列着可点的法术。
+        if not limits["equipment_effects"]:
+            view["equipment_refs"] = []
+            view["hands"] = {"left": None, "right": None}
         if not limits["spellcasting"]:
             view["spell_refs"] = []
             view["class_spell_refs"] = []
@@ -295,6 +324,95 @@ class CombatViewMixin:
             view["free_cast_slots"] = []
             view["slots"] = {}
         return view
+
+    def _armor_class_without(
+        self, character: dict[str, Any], merged_refs: list[str],
+    ) -> int:
+        """AC 重算：只排除 merged 装备，其余输入与角色派生一致。
+
+        无甲防御（武僧/野蛮人）的额外能力加值这里没有传：druid 没有它，而漏传
+        只会**低估**自己的 AC，绝不会让形态凭空变强（取高时更保守）。
+        """
+
+        equipment = character.get("equipment")
+        refs = [
+            str(ref) for ref in (equipment or {}).get("item_refs") or []
+            if str(ref) not in merged_refs
+        ]
+        proficiencies = character.get("proficiencies") or {}
+        return derive_armor_class(
+            character.get("abilities") or {}, refs, self.bundle,
+            armor_category_refs=proficiencies.get("armor_category_refs") or [],
+        )
+
+    def _ward_resistance_type(
+        self, combat: dict[str, Any], actor_id: str, character: dict[str, Any],
+    ) -> str:
+        """Nature's Ward 的伤害类型：自己有，或在盟友的 Sanctuary 里被分享。
+
+        分享是位置事实：走出 Cube 后下一次受伤就拿不到。区域上存的是**建立
+        时**持有者的 land 类型——一分钟内不可能完成一次长休换 land，所以这里
+        没有"当前 land 已变而区域还记着旧的"的窗口。
+        """
+
+        mapping = {"arid": "fire", "polar": "cold", "temperate": "lightning",
+                   "tropical": "poison"}
+        land = str(
+            (self.features.spell_grant_choices(character) or {}).get(
+                "circle_of_the_land_spells", {}
+            ).get("terrain") or ""
+        )
+        owns = any(
+            feature.id == "natures_ward" for feature in self.features.features_for(character)
+        )
+        if land and owns:
+            return mapping.get(land, "")
+        position = int((combat.get("positions") or {}).get(actor_id, 0) or 0)
+        for zone in (combat.get("zones") or {}).values():
+            if not isinstance(zone, dict) or not zone.get("resistance_from_owner"):
+                continue
+            if str(zone.get("beneficiaries") or "all") == "allies" and not actor_id.startswith(
+                ("player:", "companion:")
+            ):
+                continue
+            if not zone_covers(zone, int(zone.get("origin", 0) or 0), position):
+                continue
+            shared = str(zone.get("ward_type") or "")
+            if shared:
+                return shared
+        return ""
+    def _initiative_view(
+        self, instance: Any, uid: str, character: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """The character's view as shaped right now, or ``None`` if it cannot be composed.
+
+        Initiative is rolled before any intent of the fight has run, so an
+        unreadable stored shape cannot have been cleaned up yet.  Falling back
+        to the sheet is safe here: the common sweep ends that shape in the same
+        batch.
+        """
+
+        try:
+            return self._shaped_view(self._player_view(uid, character), character)
+        except CombatIntentError:
+            return None
+
+    def _initiative_modifier(
+        self, character: dict[str, Any], view: dict[str, Any] | None,
+    ) -> int:
+        """Initiative modifier of one player-like actor as it fights right now.
+
+        A shape replaces the physical scores, so a druid who walks into the
+        fight as a wolf rolls initiative with the wolf's Dexterity.  Whatever
+        the sheet's modifier owes to features rather than Dexterity is kept.
+        """
+
+        sheet = int(character.get("derived", {}).get("initiative", 0) or 0)
+        dex = ((view or {}).get("abilities") or {}).get("dex")
+        if dex is None:
+            return sheet
+        sheet_dex = ability_modifier(int((character.get("abilities") or {}).get("dex", 10) or 10))
+        return sheet - sheet_dex + ability_modifier(int(dex))
 
     def _statblock_by_ref(self, form_ref: str) -> dict[str, Any] | None:
         if not form_ref:
@@ -408,6 +526,13 @@ class CombatViewMixin:
                 character.get("derived", {}).get("spell_attack_bonus", 0) or 0
             ),
             "spell_save_dc": int(character.get("derived", {}).get("spell_save_dc", 0) or 0),
+            # 当前 land 属于角色而不是视图：投影出来，抗性这类"按 land 求值"
+            # 的规则才不必回头去拿 canonical 角色（视图里拿不到）。
+            "land_terrain": str(
+                (self.features.spell_grant_choices(character) or {}).get(
+                    "circle_of_the_land_spells", {}
+                ).get("terrain") or ""
+            ),
             "spell_ability": str(class_magic.get("ability") or ""),
             "concentration": deepcopy(
                 class_magic.get("concentration") if class_magic
@@ -572,6 +697,13 @@ class CombatViewMixin:
 
         if actor["kind"] == "enemy":
             return deepcopy(actor["attacks"])
+        if actor.get("form_ref"):
+            # 野兽形态的攻击来自 stat block：命中加值、伤害段、射程都在里面，
+            # 不能再和武器攻击混在一起（形态内武器已不可用）。
+            return [
+                {**deepcopy(attack), "source": "form"}
+                for attack in actor.get("attacks") or []
+            ]
         benefitting = {
             str(ref) for ref in actor.get("martial_arts_weapon_refs") or []
         }
@@ -735,6 +867,17 @@ class CombatViewMixin:
             attack_id = str(intent.get("attack_id") or "")
             return next(
                 (deepcopy(item) for item in actor["attacks"] if item.get("id") == attack_id),
+                None,
+            )
+        if actor.get("form_ref"):
+            attack_id = str(intent.get("attack_id") or intent.get("weapon_ref") or "")
+            return next(
+                (
+                    deepcopy(item)
+                    for item in self._available_attacks(actor)
+                    if str(item.get("id") or "") == attack_id
+                    or str(item.get("weapon_ref") or "") == attack_id
+                ),
                 None,
             )
         weapon_ref = str(intent.get("weapon_ref") or "")

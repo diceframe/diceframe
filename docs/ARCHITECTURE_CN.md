@@ -2649,6 +2649,11 @@ amount / 100
 float(amount)
 ```
 
+`CurrencySpec` 的默认来源可以是规则或世界模板，但新局会把解析后的货币
+上下文快照到 `game_config`。同一局后续读取余额、解析报价、构造提示词和生成
+前端 `rule_meta` 都使用该快照。旧存档没有快照时继续使用存档原有规则路径，
+世界模板后续修改不会自动重解释旧余额。重开同一局时优先复制原局快照。
+
 ---
 
 ## 17.3 Unknown Price != Free
@@ -2670,7 +2675,9 @@ float(amount)
 round_unpriced_purchase_intents
 ```
 
-并阻断相关物品 grant。
+并阻断相关物品 grant。具体商品只阻断匹配的授予，`报纸`、`商品`、`物品`
+这类泛称会标记为歧义，在服务端无法确认具体商品时阻断该付款人的同轮物品
+授予；明确的 `FREE_GRANT` 才能放行。
 
 ---
 
@@ -6444,6 +6451,8 @@ Agent 每次模型输出使用独立 `assistant_agent_max_tokens`（默认 4096�
 `assistant_agent.py` 持有会话、授权、计划和回执。owner 在 Agent 权限面板选择建议、自动处理日常或接管本次任务；服务器保存资源/领域范围、期限和步骤余量。日常仅自动执行明确标记的 guarded 普通修改，任务模式可执行范围内的普通修改及信息披露；资料册可见性由 prepared assessment 决定，低风险 GM 收窄可在 canonical target task 范围内自动执行，扩展 audience 则由封存多册计划具体确认。系统配置、游戏策略、通用规则指令、专业休息及原生插件操作仍需具体确认。展示偏好与成长决策权等策略分开注册，专业休息不得代填时间确认。聊天、文档和浏览器偏好不能自行扩权。运行时 compact capability catalog 最多返回 160 条并带 `has_more`、`domains`；`search_capabilities` 按当前页起点加返回数继续分页，完整 schema 通过 `describe_capability` 延迟加载，`library` 页面自动加载资料册、世界和冒险 domain，动作 instructions 自动进入工具描述。连续修改与人工确认复用同一 durable plan/receipt 边界，取消清理未派发计划，在开始通知和异步权限校验后再次检查；已派发写入完成记录，结果不确定时禁止重放。逐次累计服务商报告的 token 并在返回后检查预算，不能保证硬费用上限，领域生成工具保留独立预算。
 
 `assistant_authoring.py`、`assistant_gameplay_tools.py`、`assistant_world_tools.py`、`assistant_settings_tools.py` 和独立内容库/插件适配器接入所属服务。资料册可见性按实际 audience policy 处理：visibility-only 写入只提交实际行的 `visible_to` patch；普通 `write_lorebook_entries` 的 prepared payload 含待写正文并执行正常内容写入，拆分不能绕过审批。`set_lorebooks_visibility(book_ids, audience, ...)` 先从 live catalog 解析显式 1..128 个 canonical book IDs，每册最多 1000 条目；scope 绑定 owner 解析的每册 book target，`game_key` 只验证 live 角色，不构成 book 授权。低风险 GM 收窄可由覆盖目标的 task 执行，扩展到 public 或新增角色 audience 时由一个封存多册计划统一审批。计划签名绑定不可变 payload、assessment、版本和 contract digest，4 MiB 上限只作用于 `prepared.payload`；逐册报告 success/failure/unconfirmed/not-executed 并提供 `unconfirmed_count`，使用隐藏 `visibility_plan_book` 记录幂等协调 parent receipt，真正可撤销的子记录仍是 `kind=write_entries` 加 `visibility_only` marker。册间可取消但没有跨册事务。`POST /api/assistant/agent/resume` 是 owner 对原封存剩余目标的显式确认，复核 plan/contract/TTL 和每个未完成目标；原 automatic 执行还逐册重新检查 live task grant，不依赖已撤销 grant，并跳过已提交回执；重复确认返回存储响应且不重试部分写入，未知突变仍为 `recovery_required`。prepared visibility payload 不含授权正文，private-marker 只做 validation warning；恢复仅对 visibility-only 记录忽略派生 revision/time 字段。前端无目标 ID 时仍要求明确选择“全部”。世界事实走 World Runtime operations；休整、恢复、剧情、冒险及规则行动保留各自版本、身份与服务器骰权威。后续功能注册动作后可被发现，未注册功能仍需适配；完整契约见 [ADR-0011](adr/0011-application-actions-and-agent-delegation.md)。
+
+规则集自有的工具（首个是 D&D 2024 的 `set_cover` 掩护裁定）由 `assistant_ruleset_tools.py` 接入，同属一个 `ruleset-<runtime>` domain。它们的可见性取决于会话当前所看的对局：`_visible_ruleset_domains()` 要求 owner 是该对局的 GM 或玩家，并解析出该对局的 runtime，否则只剩全局能力；没有 game_key、未知对局或解析失败一律返回空集，而不是全部可见。初始目录、`search_capabilities`、`describe_capability`、HTTP capabilities 以及初始 payload 的域列表都按同一作用域过滤（过滤早于统计与分页），调用层再校一次，不可见与不存在返回同一个错误。规则域与其它域一样必须显式授予，“空列表 = 不限域”的既有含义不变。规则层适配器只把参数翻成结构化意图，经 `submit_ruleset_intent` 走与桌面相同的权威路径，GM 身份与机制仍由规则集校验。运行时登记目前在 composition root 显式列出，动作名全局唯一。见 [ADR-0011](adr/0011-application-actions-and-agent-delegation.md)。
 
 创作工坊 Agent 用 `creator_project_inspect` 获取无正文的分页文件目录；旧 `creator_project_read` 是首屏目录别名，不再提供全量源文件。`creator_project_read_file` 按 owner、工程、revision、路径及 Unicode 字符偏移读取精确片段；分页绑定 revision，变更后重新定位，不从缓存读取旧正文。历史压缩保留完整片段或明确省略正文的可重取引用；连续三次重复读取无新目录页、文件片段或版本时暂停。Agent 不应把截断内容当成完整替换文件，本轮仅部分读取的现有文件不能据此提交整文件替换。人工编辑 API、写入审批、`expected_revision` 与回执契约不变。
 

@@ -2,6 +2,8 @@
 export function combatCopy(locale: string) {
   return locale.startsWith('zh') ? {
   title: '战斗', authority: 'D&D 5E 2024 · 权威规则结算', rulesNote: '结算说明',
+  conditionTitle: '裁定状态', conditionTarget: '目标', conditionPick: '状态',
+  conditionApply: '施加', conditionRemove: '移除', conditionHint: '选中后先读定义，再决定是否施加。',
   loading: '正在同步战斗状态…', refresh: '刷新', start: '确认进入战斗',
   chooseEncounter: '选择当前遭遇', noCombat: '当前没有进行中的战斗。', noEncounter: '当前没有可用于正式对局的遭遇。',
   recommendedEncounter: 'AI GM 匹配的敌情', changeEncounter: '改用其他合法遭遇',
@@ -10,7 +12,7 @@ export function combatCopy(locale: string) {
   narrativeRequest: 'AI GM 已识别到交战态势。确认敌情后将直接进入先攻。',
   round: '轮次', current: '当前行动者', position: '位置', hp: '生命值', ac: '护甲等级',
   action: '动作', bonus: '附赠动作', movement: '移动', reaction: '反应',
-  attack: '攻击', cast: '施放法术', item: '物品', activateItem: '使用物品',
+  attack: '攻击', wildShape: '变形', assumeForm: '变形', revertForm: '恢复原形', chooseForm: '形态', noFormAvailable: '没有可用形态。', cast: '施放法术', item: '物品', activateItem: '使用物品',
   explorationItem: '非战斗使用物品',
   treasureTable: '随机宝物表', rollTreasure: '掷宝物表', treasureResultTitle: '掷表结果',
   treasureRolled: '宝物表', treasureItemFallback: '宝物', treasureCoins: '金币',
@@ -90,6 +92,8 @@ export function combatCopy(locale: string) {
   feedbackMiss: '未命中', feedbackHit: '命中', saveOk: '豁免成功', saveFail: '豁免失败', healBlocked: '无法恢复',
 } : {
   title: 'Combat', authority: 'D&D 5E 2024 · Authoritative resolution', rulesNote: 'Resolution rules',
+  conditionTitle: 'Adjudicate a condition', conditionTarget: 'Target', conditionPick: 'Condition',
+  conditionApply: 'Apply', conditionRemove: 'Remove', conditionHint: 'Read the definition before you apply it.',
   loading: 'Synchronizing combat…', refresh: 'Refresh', start: 'Confirm Combat',
   chooseEncounter: 'Select the encounter', noCombat: 'No combat is active.', noEncounter: 'No encounter is available for standard play.',
   recommendedEncounter: 'AI GM matched opposition', changeEncounter: 'Use another legal encounter',
@@ -98,7 +102,7 @@ export function combatCopy(locale: string) {
   narrativeRequest: 'The AI GM detected an engagement. Confirm the opposition to enter initiative.',
   round: 'Round', current: 'Current actor', position: 'Position', hp: 'HP', ac: 'Armor Class',
   action: 'Action', bonus: 'Bonus Action', movement: 'Movement', reaction: 'Reaction',
-  attack: 'Attack', cast: 'Cast Spell', item: 'Item', activateItem: 'Use Item',
+  attack: 'Attack', wildShape: 'Wild Shape', assumeForm: 'Assume Form', revertForm: 'Revert Form', chooseForm: 'Form', noFormAvailable: 'No known form is available.', cast: 'Cast Spell', item: 'Item', activateItem: 'Use Item',
   explorationItem: 'Use an item (exploration)',
   treasureTable: 'Random treasure table', rollTreasure: 'Roll treasure table', treasureResultTitle: 'Rolled result',
   treasureRolled: 'Treasure table', treasureItemFallback: 'Treasure item', treasureCoins: 'GP',

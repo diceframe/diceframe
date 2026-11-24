@@ -233,23 +233,52 @@ def story_text(story: dict[str, Any]) -> str:
     )
 
 
+_SENTENCE_ENDS = "。！？!?\n"
+_CLOSERS = "”’」』）》\"'"
+
+
+def _speaker_prefix(segment: dict[str, Any]) -> int:
+    """Characters ``story_text`` adds before a dialogue beat for its speaker."""
+    return len(segment.get("speaker_name", "")) + 1 if segment.get("kind") == "dialogue" else 0
+
+
+def _cut_at_sentence_end(text: str, room: int) -> str:
+    """Shorten one oversized beat at its last sentence end inside ``room``."""
+    if room <= 0:
+        return "…"
+    head = text[:room]
+    ends = [head.rfind(mark) for mark in _SENTENCE_ENDS]
+    ends += [head.rfind(". "), head.rfind(".\n"), len(head) - 1 if head.endswith(".") else -1]
+    index = max(ends)
+    if index < 0:
+        return text[:room - 1].rstrip() + "…"
+    end = index + 1
+    while end < len(head) and head[end] in _CLOSERS:
+        end += 1
+    return head[:end].rstrip()
+
+
 def trim_story(story: dict[str, Any], limit: int) -> dict[str, Any]:
-    """Bound overlong output without detaching a line from its speaker."""
+    """Bound overlong output on whole beats without detaching a line from its speaker.
+
+    Beats are kept in order while they fit. The first beat is always kept; when it
+    alone is oversized it is cut at a sentence end rather than mid-sentence.
+    """
     result: dict[str, Any] = {"version": STORY_VERSION, "segments": []}
-    remaining = max(0, limit)
+    used = 0
     for source in story.get("segments", []):
-        prefix = len(source.get("speaker_name", "")) + 1 if source.get("kind") == "dialogue" else 0
-        allowance = remaining - prefix - (2 if result["segments"] else 0)
-        if allowance <= 1:
-            break
         row = copy.deepcopy(source)
-        truncated = len(row["text"]) > allowance
-        if truncated:
-            row["text"] = row["text"][:allowance - 1].rstrip() + "…"
-        result["segments"].append(row)
-        remaining -= len(row["text"]) + prefix + (2 if len(result["segments"]) > 1 else 0)
-        if truncated:
+        gap = 2 if result["segments"] else 0
+        width = _speaker_prefix(row) + len(row["text"])
+        if result["segments"] and used + gap + width > limit:
             break
+        if not result["segments"]:
+            room = max(limit - _speaker_prefix(row), 0)
+            if len(row["text"]) > room:
+                row["text"] = _cut_at_sentence_end(row["text"], room)
+                width = _speaker_prefix(row) + len(row["text"])
+        result["segments"].append(row)
+        used += gap + width
     return result
 
 

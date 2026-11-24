@@ -28,6 +28,8 @@ from src.rulesets.dnd2024.features import (
     Dnd2024ClassFeatureResolver,
 )
 from src.rulesets.dnd2024.features.resources import resource_state
+from src.rulesets.dnd2024.forms import bootstrap_known_forms
+from src.rulesets.dnd2024.spells.font_of_magic import declaring_class_level
 from src.rulesets.dnd2024.items.activation import (
     ItemActivationError,
     validate_activation_declaration,
@@ -58,7 +60,16 @@ from .check_windows import (
     DAMAGE_WINDOW_DECISION,
     LUCKY_RESOURCE,
 )
-from .obscurement import best_obscurement, effective_level, obscurement_row, zone_covers
+from .obscurement import (
+    LAND_AID_RANGE_FT,
+    SANCTUARY_MOVE_LIMIT_FT,
+    SANCTUARY_RANGE_FT,
+    best_obscurement,
+    effective_level,
+    obscurement_row,
+    sanctuary_zone_id,
+    zone_covers,
+)
 from src.rulesets.dnd2024.features.resources import (
     long_effect_active,
 )
@@ -233,6 +244,69 @@ class Dnd2024CombatEngine(
             usable.append(view)
         return tuple(usable)
 
+    def _available_form_intents(
+        self, instance: Any, actor: dict[str, Any], economy: dict[str, Any],
+        version: int,
+    ) -> list[dict[str, Any]]:
+        """Project the normal UI entries for Wild Shape's form intents."""
+
+        if actor.get("kind") != "player":
+            return []
+        if condition_flags(
+            self.catalog.conditions, actor.get("conditions") or {},
+        )["incapacitated"]:
+            # 失能者不能执行附赠动作：校验层会拒绝，投影层就不该把入口摆出来。
+            return []
+        feature_character = self._feature_character(actor)
+        if not self.features.has_feature(feature_character, "wild_shape"):
+            return []
+        _kind, raw_id = _actor_kind(str(actor.get("actor_id") or ""))
+        character = _canonical(instance.get_character_sheet(raw_id))
+        forms = character.get("forms")
+        forms = forms if isinstance(forms, dict) else {}
+        active = forms.get("active")
+        known = forms.get("known")
+        known = known.get("wild_shape") if isinstance(known, dict) else known
+        if not isinstance(known, list) or not known:
+            entries = [
+                entry
+                for catalog in self.bundle.list("monster_catalog")
+                for entry in catalog.get("entries") or []
+            ]
+            level = declaring_class_level(character, "druid")
+            known = bootstrap_known_forms(entries, int(level))
+        form_options: list[dict[str, Any]] = []
+        for form_ref in known:
+            entry = self._statblock_by_ref(str(form_ref))
+            if entry is None:
+                continue
+            form_options.append({
+                "ref": str(entry.get("id") or ""),
+                "name": str(entry.get("name") or entry.get("id") or ""),
+                "cr": str(entry.get("cr") or "0"),
+            })
+        actions: list[dict[str, Any]] = []
+        if isinstance(active, dict):
+            if int(economy.get("bonus_action", 0) or 0) > 0:
+                actions.append({
+                    "type": "form.revert",
+                    "label": "Revert form",
+                    "actor_id": actor["actor_id"],
+                    "expected_version": version,
+                })
+        if form_options and (
+            int(economy.get("bonus_action", 0) or 0) > 0
+            and int((resource_state(character, "wild_shape") or {}).get("current", 0) or 0) > 0
+        ):
+            actions.append({
+                "type": "form.assume",
+                "label": "Wild Shape",
+                "actor_id": actor["actor_id"],
+                "expected_version": version,
+                "forms": form_options,
+            })
+        return actions
+
     def available_intents(self, instance: Any, actor_id: str) -> list[dict[str, Any]]:
         state = self.initialize_state(instance)
         combat = state["combat"]
@@ -366,6 +440,7 @@ class Dnd2024CombatEngine(
             }]
         economy = combat.get("economy", {})
         actions: list[dict[str, Any]] = []
+        actions.extend(self._available_form_intents(instance, actor, combat.get("economy", {}), version))
         if int(economy.get("action", 0) or 0) > 0 or int(
             economy.get("attacks_remaining", 0) or 0
         ) > 0 or int(economy.get("surge_action", 0) or 0) > 0:
@@ -470,6 +545,7 @@ class Dnd2024CombatEngine(
             if capability.requires_hostile_target:
                 entry["targets"] = self._hostile_targets(instance, combat, current)
             actions.append(entry)
+        actions.extend(self._land_feature_actions(instance, combat, current, actor))
         if int(economy.get("movement", 0) or 0) > 0:
             actions.append({
                 "type": "move", "label": "Move", "actor_id": current,
@@ -1107,6 +1183,29 @@ class Dnd2024CombatEngine(
                 "level": str(intent["level"]),
                 "source": "gm",
             })
+        elif intent_type == "gm_condition":
+            # GM 裁定原语：事件形状与法术/特性施加条件完全一致，所以 reducer、
+            # 投影与到期逻辑都不需要第二套写法。同一 id 是覆盖写——重复施加
+            # 即刷新来源，不叠加。
+            target_id = str(intent["target_id"])
+            condition_id = str(intent["condition"])
+            if str(intent.get("action") or "") == "apply":
+                event = {
+                    "type": "condition.applied",
+                    "target_id": target_id,
+                    "condition": condition_id,
+                    "source": "gm",
+                }
+                if intent.get("duration"):
+                    event["duration"] = str(intent["duration"])
+                events.append(event)
+            else:
+                events.append({
+                    "type": "condition.removed",
+                    "target_id": target_id,
+                    "condition": condition_id,
+                    "source": "gm",
+                })
         elif intent_type == "combat.message":
             events.append({
                 "type": "dnd2024.combat.message",
@@ -1167,6 +1266,16 @@ class Dnd2024CombatEngine(
             events.extend(self._basic_action_events(combat, intent_type, str(intent["actor_id"])))
         elif intent_type == "hide":
             events.extend(self._hide_events(instance, combat, intent, rng))
+        elif intent_type == "land_aid":
+            events.extend(self._land_aid_events(instance, combat, intent, rng))
+        elif intent_type == "nature_sanctuary":
+            events.extend(self._nature_sanctuary_events(instance, combat, intent))
+        elif intent_type == "wild_resurgence":
+            events.extend(self._wild_resurgence_events(instance, combat, intent))
+        elif intent_type == "nature_magician":
+            events.extend(self._nature_magician_events(instance, combat, intent))
+        elif intent_type in {"form.assume", "form.revert"}:
+            events.extend(self._form_events(instance, combat, intent))
         elif intent_type == "ability_check":
             events.extend(self._ability_check_events(
                 combat, intent, self._actor_view(instance, combat, str(intent["actor_id"])), rng,
@@ -1192,6 +1301,8 @@ class Dnd2024CombatEngine(
         events.extend(self._incapacitation_cleanup_events(instance, combat, events))
         events.extend(self._source_incapacitation_events(instance, combat, events))
         events.extend(self._timed_condition_expiry_events(instance, combat))
+        events.extend(self._shape_exit_events(instance, combat, events))
+        events.extend(self._zone_expiry_events(instance, combat))
         # 世界时钟驱动的到期：一场在一分钟内结束的战斗会把效果留在身上，
         # 只要之后还有任何战斗意图或时钟越过那一分钟就会被清掉。end_turn
         # 由回合推进处统一查两个上限，这里不能重复发同一条移除事件。
@@ -1199,6 +1310,7 @@ class Dnd2024CombatEngine(
             events.extend(self._superior_defense_expiry_events(instance, combat))
         # S0-MM1：条件免疫是 stat block 事实，拦在"产出侧"一处，覆盖所有生产者。
         events = self._statblock_immunity_events(combat, events)
+
         batch = {
             "batch_id": stable_batch_id(intent, expected),
             "intent_id": intent_id,
@@ -1242,6 +1354,50 @@ class Dnd2024CombatEngine(
                         "source_actor_id": str(event.get("source_actor_id") or ""),
                     })
                     continue
+            filtered.append(event)
+        return filtered
+
+    def _feature_immunity_events(
+        self, instance: Any, combat: dict[str, Any], events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Turn an immune ``condition.applied`` into a block, for party actors too.
+
+        ``_statblock_immunity_events`` covers enemies because their immunity is
+        data.  A player's immunity is a *feature* (Nature's Ward, Mindless Rage),
+        and those producers are many -- spells, riders, terrain.  Checking here,
+        once per intent, is the same trade the statblock branch already made:
+        immunity belongs to the target, so every producer inherits the answer.
+        """
+
+        if not any(
+            isinstance(event, dict) and event.get("type") == "condition.applied"
+            for event in events
+        ):
+            return events
+        filtered: list[dict[str, Any]] = []
+        for event in events:
+            if event.get("type") == "condition.applied":
+                target_id = str(event.get("target_id") or "")
+                kind, raw_id = _actor_kind(target_id)
+                if kind in {"player", "companion"}:
+                    try:
+                        target = self._actor_view(instance, combat, target_id)
+                    except CombatIntentError:  # pragma: no cover - left the fight
+                        target = None
+                    if target is not None:
+                        blocker = self._condition_immunity_blocker(
+                            instance, combat, target, str(event.get("condition") or ""),
+                        )
+                        if blocker is not None:
+                            filtered.append({
+                                "type": "condition.blocked",
+                                "target_id": target_id,
+                                "condition": str(event.get("condition") or ""),
+                                "reason": "immune",
+                                "blocked_by": str(blocker.get("feature_id") or ""),
+                                "source_actor_id": str(event.get("source_actor_id") or ""),
+                            })
+                            continue
             filtered.append(event)
         return filtered
 
@@ -1397,6 +1553,121 @@ class Dnd2024CombatEngine(
         )
         return ids
 
+    #: 结束形状的四个"非主动"原因。
+    _SHAPE_EXIT_REASONS = ("death", "incapacitated", "expired", "unavailable")
+
+    def _active_form_payload(self, instance: Any, actor_id: str) -> dict[str, Any] | None:
+        """The stored active shape of one player actor, read without composing a panel."""
+
+        kind, raw_id = _actor_kind(str(actor_id or ""))
+        if kind != "player" or raw_id not in (getattr(instance, "players", {}) or {}):
+            return None
+        forms = _canonical(instance.get_character_sheet(raw_id)).get("forms")
+        active = forms.get("active") if isinstance(forms, dict) else None
+        return active if isinstance(active, dict) else None
+
+    def _shape_exit_events(
+        self, instance: Any, combat: dict[str, Any],
+        pending_events: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        """变形在失能、死亡或到期时结束。
+
+        三个判定都可达：失能与死亡是 `condition.applied` 的结果，到期是逻辑时钟
+        的差。这里挂在**每条意图的公共收尾**上，所以不必等到回合末——SRD 明确
+        说失能/死亡立即结束，`end_turn` 才处理就晚了。
+        """
+
+        events: list[dict[str, Any]] = []
+        pending_events = pending_events or []
+        already_reverted = {
+            str(event.get("actor_id") or "")
+            for event in pending_events
+            if event.get("type") == "dnd2024.form.reverted"
+        }
+        now = self._logical_minutes(instance)
+        for actor_id in self._combat_actor_ids(instance, combat):
+            if actor_id in already_reverted:
+                continue
+            try:
+                view = self._actor_view(instance, combat, actor_id)
+            except CombatIntentError:
+                if self._active_form_payload(instance, actor_id) is not None:
+                    # 存档里的形态引用已经读不出 stat block（目录改名、内容包停用）。
+                    # 视图层按约定拒绝猜一份面板，但留着这条记录，这个角色就做不了
+                    # 任何意图——包括变回原形——轮到他时整桌都走不下去。这里结束它。
+                    events.append({
+                        "type": "dnd2024.form.reverted", "actor_id": actor_id,
+                        "reason": "unavailable",
+                    })
+                continue
+            form = view.get("form_ref")
+            if not form:
+                continue
+            conditions = deepcopy(view.get("conditions") or {})
+            hp = int(view.get("hp", 0) or 0)
+            temp_hp = int(view.get("temp_hp", 0) or 0)
+            for event in pending_events:
+                if str(event.get("target_id") or "") != actor_id:
+                    continue
+                event_type = str(event.get("type") or "")
+                if event_type == "condition.applied":
+                    conditions[str(event.get("condition") or "")] = {}
+                elif event_type == "condition.removed":
+                    conditions.pop(str(event.get("condition") or ""), None)
+                elif event_type == "resource.changed":
+                    resource = str(event.get("resource") or "hp")
+                    if resource == "temp_hp":
+                        temp_hp = max(temp_hp, int(event.get("amount", 0) or 0))
+                        continue
+                    delta = int(event.get("delta", 0) or 0)
+                    if delta < 0 and temp_hp > 0 and not event.get("healing"):
+                        absorbed = min(temp_hp, -delta)
+                        temp_hp -= absorbed
+                        delta += absorbed
+                    next_hp = max(0, min(int(view.get("max_hp", hp) or hp), hp + delta))
+                    if (
+                        next_hp <= 0
+                        and hp > 0
+                        and isinstance(event.get("relentless"), dict)
+                        and not event.get("relentless_deferred")
+                    ):
+                        # 与 reducer 一致：不屈狂暴把这次致命伤挂在决策上，HP 不动。
+                        # 预演若把它当成已经落地，形态会在 HP 根本没降时被结束。
+                        continue
+                    hp = next_hp
+                    if hp <= 0:
+                        conditions["unconscious"] = {}
+                    elif delta > 0:
+                        conditions.pop("unconscious", None)
+                        conditions.pop("stable", None)
+                elif event_type == "dnd2024.death_save.resolved":
+                    if event.get("dead"):
+                        conditions["dead"] = {}
+                    elif event.get("stable"):
+                        conditions["stable"] = {}
+            if "dead" in conditions:
+                reason = "death"
+            elif any(
+                self._condition_implies_incapacitated(str(condition_id))
+                for condition_id in conditions
+            ):
+                reason = "incapacitated"
+            else:
+                assumed = int(view.get("form_assumed_at_minute", 0) or 0)
+                hours = int(view.get("form_duration_hours", 0) or 0)
+                if hours <= 0 or now < assumed + hours * 60:
+                    continue
+                reason = "expired"
+            events.append({
+                "type": "dnd2024.form.reverted", "actor_id": actor_id,
+                "reason": reason,
+            })
+        return events
+
+    def _condition_implies_incapacitated(self, condition_id: str) -> bool:
+        row = (self.catalog.conditions or {}).get(condition_id) or {}
+        return bool(row.get("implies_incapacitated"))
+
     def _timed_condition_expiry_events(
         self, instance: Any, combat: dict[str, Any],
     ) -> list[dict[str, Any]]:
@@ -1453,7 +1724,9 @@ class Dnd2024CombatEngine(
         turn_index = int(combat.get("turn_index", 0) or 0)
         insert_index = max(0, min(len(order), turn_index + 1))
         canonical = _canonical(instance.get_character_sheet(str(user_id)))
-        modifier = int(canonical.get("derived", {}).get("initiative", 0) or 0)
+        modifier = self._initiative_modifier(
+            canonical, self._initiative_view(instance, str(user_id), canonical),
+        )
         roll = SystemRandom().randint(1, 20)
         expected_version = int(state.get("version", 0) or 0)
         intent = {
@@ -1547,6 +1820,13 @@ class Dnd2024CombatEngine(
         # 死亡清理是 reducer 的副作用，不是客户端提交的事件；记录死亡前后的
         # 绑定差异，把一次死亡对应的解绑事件补进权威 ledger 与返回批次。
         before_characters = deepcopy(snapshot["characters"])
+        # 特性免疫（Nature's Ward / Mindless Rage）在这里统一过滤：免疫是目标的
+        # 属性，任何生产者（法术、rider、地形、GM 声明）都该得到同一个答案。
+        combat_state = (state.get("combat") or {})
+        if combat_state.get("status") == "active":
+            filtered = self._feature_immunity_events(instance, combat_state, batch["events"])
+            if filtered is not batch["events"]:
+                batch = {**batch, "events": filtered}
         updated, ledger, duplicate = apply_event_batch(
             snapshot, ruleset_runtime.event_ledger(instance), batch, self._reduce_event,
         )
@@ -1685,6 +1965,11 @@ class Dnd2024CombatEngine(
                 "private_senses": (
                     self._divine_sense_projection(instance, combat, viewer_id)
                     if combat.get("status") == "active" else {}
+                ),
+                # G16：GM 的裁定面板要能"先读定义再施加"。玩家侧不给这份目录，
+                # 他们只需要看到自己身上贴了什么。
+                "condition_catalog": (
+                    self.catalog.condition_catalog() if viewer_is_gm else []
                 ),
                 "actors": actors,
             },
@@ -2336,6 +2621,136 @@ class Dnd2024CombatEngine(
             for row in combat.get("mark_damage_history") or []
         )
 
+    def _land_feature_actions(
+        self, instance: Any, combat: dict[str, Any], actor_id: str,
+        actor: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Circle of the Land 的入口：只在真的能付得起时出现。
+
+        引擎里有意图 ≠ 玩家能用。这里的判据与 validation 完全一致（特性、
+        动作/附赠动作、Wild Shape 次数、自己回合），差别只是"能不能付"而不是
+        "提交后会不会被拒"。
+        """
+
+        if str(actor.get("kind") or "") != "player":
+            return []
+        if condition_flags(
+            self.catalog.conditions, actor.get("conditions") or {},
+        )["incapacitated"]:
+            # 失能者不能执行动作：校验层会拒绝，投影层就不该把入口摆出来。
+            return []
+        character = self._feature_character(actor)
+        state = self.initialize_state(instance)
+        combat_state = state.get("combat") or {}
+        if str(combat_state.get("status") or "") != "active":
+            return []
+        economy = combat_state.get("economy") or {}
+        version = int(state.get("version", 0) or 0)
+        actions: list[dict[str, Any]] = []
+        if (
+            self.features.has_feature(character, "lands_aid")
+            and int(economy.get("action", 0) or 0) > 0
+        ):
+            uses = self._class_resource_current(character, "wild_shape")
+            if uses >= 1:
+                actions.append({
+                    "type": "land_aid", "label": "Land's Aid", "actor_id": actor_id,
+                    "expected_version": version, "origin_limit_ft": LAND_AID_RANGE_FT,
+                    "radius_ft": 10, "wild_shape_uses": uses,
+                    "targets": self._all_targets(instance, combat),
+                })
+        if self.features.has_feature(character, "natures_sanctuary"):
+            zone_id = sanctuary_zone_id(actor_id)
+            existing = (combat_state.get("zones") or {}).get(zone_id)
+            if isinstance(existing, dict) and int(economy.get("bonus_action", 0) or 0) > 0:
+                actions.append({
+                    "type": "nature_sanctuary", "label": "Move the sanctuary",
+                    "mode": "move", "zone_id": zone_id, "actor_id": actor_id,
+                    "expected_version": version, "origin_limit_ft": SANCTUARY_RANGE_FT,
+                    "move_limit_ft": SANCTUARY_MOVE_LIMIT_FT,
+                })
+            elif (
+                int(economy.get("action", 0) or 0) > 0
+                and self._class_resource_current(character, "wild_shape") >= 1
+            ):
+                actions.append({
+                    "type": "nature_sanctuary", "label": "Nature's Sanctuary",
+                    "mode": "create", "actor_id": actor_id,
+                    "expected_version": version, "origin_limit_ft": SANCTUARY_RANGE_FT,
+                    "size_ft": 15,
+                })
+        return actions
+
+    def _class_resource_current(self, character: dict[str, Any], resource_id: str) -> int:
+        state = (character.get("resources") or {}).get("class", {}).get(resource_id)
+        if not isinstance(state, dict):
+            return 0
+        return int(state.get("current", 0) or 0)
+
+    def _zone_expiry_events(
+        self, instance: Any, combat: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """区域到期：战斗内的回合上限、世界时钟的一分钟，或持有者失能/死亡。
+
+        两个时钟都记：一场战斗不推进世界时钟，一次长休也不推进回合数，先到
+        的那个结束效果。只记分钟的话，Sanctuary 会在整场战斗里一直在。
+        """
+
+        now = self._logical_minutes(instance)
+        round_now = int(combat.get("round", 0) or 0)
+        events: list[dict[str, Any]] = []
+        for zone_id, zone in sorted((combat.get("zones") or {}).items()):
+            if not isinstance(zone, dict):
+                continue
+            reason = ""
+            round_expires = zone.get("expires_at_round")
+            expires = zone.get("expires_at_minute")
+            if (
+                isinstance(round_expires, int) and not isinstance(round_expires, bool)
+                and round_now >= round_expires
+            ) or (
+                isinstance(expires, int) and not isinstance(expires, bool) and now >= expires
+            ):
+                reason = "expired"
+            elif zone.get("ends_on_owner_incapacitated"):
+                owner_id = str(zone.get("owner_id") or "")
+                if owner_id:
+                    try:
+                        owner = self._actor_view(instance, combat, owner_id)
+                    except CombatIntentError:  # pragma: no cover - left the fight
+                        owner = None
+                    if owner is not None:
+                        flagged = condition_flags(
+                            self.catalog.conditions, owner.get("conditions") or {},
+                        )["incapacitated"]
+                        if flagged or owner.get("hp", 1) <= 0:
+                            reason = "owner_incapacitated"
+            if reason:
+                events.append({
+                    "type": "dnd2024.zone.removed", "zone_id": zone_id,
+                    "reason": reason,
+                })
+        return events
+
+    def _zone_cover_level(
+        self, combat: dict[str, Any], actor_id: str, side: str,
+    ) -> str:
+        """The best Half Cover an area gives this creature right now."""
+
+        if not actor_id:
+            return "none"
+        position = int((combat.get("positions") or {}).get(actor_id, 0) or 0)
+        level = "none"
+        for zone in (combat.get("zones") or {}).values():
+            if not isinstance(zone, dict) or not zone.get("half_cover"):
+                continue
+            if not zone_covers(zone, int(zone.get("origin", 0) or 0), position):
+                continue
+            if str(zone.get("beneficiaries") or "all") == "allies" and side != "party":
+                continue
+            level = "half"
+        return level
+
     def _cover_record(
         self, instance: Any, combat: dict[str, Any], target: dict[str, Any],
     ) -> dict[str, Any]:
@@ -2360,6 +2775,12 @@ class Dnd2024CombatEngine(
             # 声明优先：桌子说了"他躲在箱子后面"，任何派生来源都不该悄悄反对。
             source = str(declared.get("source") or "gm")
             return cover_row(str(declared.get("level") or "none"), [f"gm:{source}"])
+        # 区域提供的掩护：Nature's Sanctuary 的 Cube 只保护持有者与盟友，
+        # 所以受益者由区域自己声明，而不是"在区域里就算"。
+        zone_cover = self._zone_cover_level(combat, target_id, str(target.get("side") or ""))
+        if zone_cover != "none":
+            # 与 GM 声明同一条路径：区域掩护也直接 return 完整的 cover_row。
+            return cover_row(zone_cover, ["zone:sanctuary"])
         empty = cover_row("none")
         if not target_id or str(target.get("side") or "") != "party":
             return empty
