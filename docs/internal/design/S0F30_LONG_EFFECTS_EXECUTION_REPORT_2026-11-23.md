@@ -138,7 +138,7 @@ mypy                                           102 source files, no issues
 
 ### 未修（明确列出）
 
-1. **Quivering Palm 的第二个致命入口**（Attack action 中放弃一次攻击）未实现；测试 5 仍靠注入 `long_effect` 构造状态。
+1. **Quivering Palm 的第二个致命入口**（Attack action 中放弃一次攻击）未实现，**已确认属于切片之外的重构**（见 §11）。测试 5 仍靠注入 `long_effect` 构造状态。
 2. **Hurl 的"消失/返回"**未实现，失能直接施加在原位目标上；`banishment: guided` 只是标注，不改变"目标仍在原地"的事实。按 §7 这本是停止条件，需产品侧决定是补位置语义还是整特性下线。
 3. **探索侧未接**：`exploration/engine.py` 没有 `class_capability` 入口，Dragon Wings / Holy Nimbus 只能在战斗内激活；`fly_speed` 目前只展示、不参与移动结算。§6.12 不成立。
 4. **若干"应该改"**：Quivering Palm 的豁免未走 `_saving_throw_check`（无 auto-fail / 光环 / 掩护）；恢复入口不校验槽位余额；`holy_ward_creature_types`、`max_targets`、`duration_days_per_level`、`damage_type` 是死参数；Hurl 在次数耗尽时静默不给错。
@@ -153,3 +153,44 @@ mypy                                           102 source files, no issues
 | Holy Ward 的生物类型与 Quivering Palm 的伤害类型写死在代码里 | 改读特性参数 |
 | Hurl 在"未拥有/本回合已用/账已满"时静默降级成普通命中 | 在校验层明确拒绝 |
 | `max_targets`、`duration_days_per_level` 无读者 | 删除，避免目录读者误以为生效 |
+
+## 11. 攻击经济：为什么"放弃一次攻击"没有在本片实现
+
+### 现状
+
+`economy` 是一组计数器：`action`、`bonus_action`、`reaction`、`surge_action`、`attacks_remaining`。`attacks_remaining` 只属于 Attack action，只在 `dnd2024.attack.spent` 里消费（`reducer.py:703`）：
+
+- `resource == "bonus_action"` 或额度已为 0 → 扣 `economy[resource]`，若扣的是 action 则把额度重置为 `attacks_per_action - 1`
+- 否则额度直接减一
+
+校验侧对应 `validation.py:1067`：`attack` 意图在 `attacks_remaining >= 1` 时不需要 `has_action`。`attacks_per_action` 来自 Extra Attack，多职业取最大。
+
+**这个事实是存在的，只是只有 `attack` 意图能消费它。**
+
+### 为什么本片容纳不下
+
+`CapabilityCost` 只有三种价格：`action`（字符串）、`resources`、`turn_start`。"一次攻击"既不是经济槽也不是资源，没有位置。
+
+三个候选结构：
+
+| 方案 | 优点 | 缺点 |
+|---|---|---|
+| attack 意图加 `substitute` | 复用额度与校验 | 要允许"没有 target 的 attack"；`second_target_of` 已是同类特例，会继续长 |
+| 独立 `attack_substitute` 意图 | 语义干净 | 额度消费要写第二份，两份规则迟早分叉 |
+| **`CapabilityCost` 支持一次攻击** | Grapple / Shove / Quivering Palm 共用同一套声明，是终局解 | 碰的是所有 capability 的最热路径 |
+
+### 尝试过，被更底层的问题挡住
+
+`CapabilityCost.action` 是**一个字符串同时承担两个语义**：既是成本种类，又被当成经济槽的名字直接索引。`economy[cost]` 散在 `validation.py:1224 / 2814 / 2897`，错误信息还用它拼字符串。
+
+往 `ACTION_COST_KINDS` 加 `"attack"` 后，报出 `the attack has already been spent` —— 某处拿 `"attack"` 去索引 `economy` 的结果。这不是加一个分支能解决的。
+
+### 结论：先做重构，再谈特性
+
+1. `CapabilityCost` 拆成 `slot: str`（经济槽）+ `attacks: int`（攻击次数）+ `resources` + `turn_start`
+2. 支付收敛成一个函数 `_pay_capability_cost()`，由它决定发 `action.spent` 还是 `attack.spent`
+3. 散落的 `economy[cost]` 全部改走该函数或 `_slot_available()`
+
+这条重构影响每个 capability，应单独立片、单独一轮全量回归。本片不塞。
+
+现场 patch 留在 `E:/pytest-tmp/f30-attack-cost.patch`（176 行：成本种类、校验绕过、`attack.spent` 结算、JSON 第二入口、两条用例），重构完成后可直接复用。
