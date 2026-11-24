@@ -66,10 +66,7 @@ ABJURE_FOES_DURATION = "abjure_foes"
 #: S0-F30：恐惧来自 Berserker 的特性而不是圣武士的引导神力，时长同为一分钟，
 #: 但解除条件与免疫来源不同，所以它是自己的 duration 而不是复用上面那条。
 INTIMIDATING_PRESENCE_DURATION = "intimidating_presence"
-#: S0-F30：Hurl Through Hell 的失能"到你的下回合结束"，按回合域计时。
-HURL_THROUGH_HELL_DURATION = "hurl_through_hell"
 TURNS_SCOPED_DURATIONS = frozenset({
-    HURL_THROUGH_HELL_DURATION,
     TURN_UNDEAD_DURATION, ABJURE_FOES_DURATION, INTIMIDATING_PRESENCE_DURATION,
 })
 # 只有世界时钟能结束的效果：它们不参与回合域到期，也不随战斗结束消失。

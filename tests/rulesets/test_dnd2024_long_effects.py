@@ -16,6 +16,7 @@ from tests.rulesets.test_dnd2024_channel_control import (
     _build,
     _capability,
     _conditions,
+    _enemy,
     _of_type,
     _setup,
     _start,
@@ -715,7 +716,8 @@ def test_the_incapacitation_lasts_one_round_not_ten(fiend14) -> None:
     )
 
     applied = _of_type(events, "condition.applied")[0]
-    assert applied["turns_remaining"] == 1
+    assert applied["duration"] == "caster_next_turn_end"
+    assert applied["turns_remaining"] == 2
 
 
 def test_the_quivering_save_goes_through_the_shared_authority(
@@ -799,22 +801,6 @@ def test_a_lower_slot_cannot_impersonate_the_level_five_cost(devotion20) -> None
     assert "level 5" in resolved["error"]
 
 
-def test_a_short_rest_does_not_restore_the_use(devotion20) -> None:
-    from src.rulesets.dnd2024.features.resources import feature_usage_count
-
-    engine, instance = _setup(devotion20)
-    _start(engine, instance, enemies=_two_enemies())
-    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
-    character = instance.get_character_sheet("gm")["ruleset_character"]
-    before = feature_usage_count(
-        character, "holy_nimbus", "holy_nimbus",
-    )
-    assert before == 1
-
-    # 短休只回血骰与部分资源，不回长休作用域的使用次数。
-    assert before == 1
-
-
 def test_friends_inside_the_aura_take_nothing(devotion20) -> None:
     from tests.rulesets.test_dnd2024_channel_control import _hp, _positions
 
@@ -827,6 +813,27 @@ def test_friends_inside_the_aura_take_nothing(devotion20) -> None:
     _to_turn(engine, instance, "player:gm")
 
     assert _hp(instance, "player:gm") == before
+
+
+def test_radiant_resistance_halves_the_aura_damage(devotion20) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _hp, _positions
+
+    foe = _enemy()
+    foe["resist_damage_types"] = ["radiant"]
+    engine, instance = _setup(devotion20)
+    _start(engine, instance, enemies=[foe])
+    _positions(instance, **{"enemy:goblin-1": 10})
+    before = _hp(instance, "enemy:goblin-1")
+
+    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
+    _to_turn(engine, instance, "player:gm")
+    _to_turn(engine, instance, "enemy:goblin-1")
+
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    full = (int(character["abilities"]["cha"]) - 10) // 2 + int(
+        character["derived"]["proficiency_bonus"]
+    )
+    assert before - _hp(instance, "enemy:goblin-1") == full // 2
 
 
 def test_no_light_kind_is_declared_for_the_aura(devotion20) -> None:

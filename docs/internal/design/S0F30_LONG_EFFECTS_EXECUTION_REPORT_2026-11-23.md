@@ -194,3 +194,27 @@ mypy                                           102 source files, no issues
 这条重构影响每个 capability，应单独立片、单独一轮全量回归。本片不塞。
 
 现场 patch 留在 `E:/pytest-tmp/f30-attack-cost.patch`（176 行：成本种类、校验绕过、`attack.spent` 结算、JSON 第二入口、两条用例），重构完成后可直接复用。
+
+## 12. 第二次独立审核（2026-11-24）
+
+复审用探针验证，抓到两处**"报告说修了、代码没修"**：
+
+| 阻塞 | 事实 | 修法 |
+|---|---|---|
+| B1 Hurl 失能到期归属 | `TURNS_SCOPED_DURATIONS` 是"持有者每到自己回合结束减一"，而规则是"到**你的**（邪术师）下回合结束"。探针实证：目标自己回合结束就被清掉 | 改用既有载体 `caster_next_turn_end` + `turns_remaining: 2`；删掉自造的 duration 常量（顺带清了 `primitives.py` 的白名单残留） |
+| B2 光耀伤害绕过抗性 | 报告 §10 第 5 条写"力场、心灵、光耀抗性……改走同一个伤害实例函数"，实际只有力场与心灵改了。探针：Cha 15 + PB 6 = 8，打在 radiant 抗性敌人身上仍掉 8 | 固定值也走 `_resist_damage`；新增抗性用例（8 → 4） |
+
+### 同时修的
+
+- Quivering Palm 的伤害类型仍写死 `"force"`（报告声称已改读参数）；现在读 `damage_type`。
+- Quivering Palm 的"每回合一次"是**永不生效的假门**：它读的账从不写入。规则也没有这条限制，删除。
+- `_player_view(..., now_minutes: int = 0)` 的默认值：任何漏传都会让过期效果复活，改为必填。
+- 删掉 `test_a_short_rest_does_not_restore_the_use`：它根本没执行短休，两次断言是同一句话。
+
+### 仍未修
+
+- **Quivering Palm 的焦点余额**没有在校验层拦截：视图的 `class_resources` 在 validation 阶段读不到当前值（试过直接读投影，仍读空），所以仍由 reducer 抛 `EventBatchError`。这是与"零槽"同类的欠账，需要先修资源投影。
+- Hurl 无法在法术攻击上触发（只挂在武器/徒手命中路径），Fiend Warlock 的主攻击 `Eldritch Blast` 触发不了。要么补法术路径，要么在契约里写明只支持武器攻击。
+- Quivering Palm 结束时的目标若已不在本场战斗，`_actor_view` 会抛异常而非 `ok=false`。
+- `_TURN_SCOPED_DURATIONS` 与 `TURNS_SCOPED_DURATIONS` 已漂移（前者不含后者的新成员）。
+- `resource.py` 的 `feature_kind: "intimidating_presence"` 写死在通用记账里，Holy Nimbus / Dragon Wings 的使用事件都会带这个错标签（当前无消费者）。

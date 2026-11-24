@@ -58,7 +58,6 @@ from .primitives import (
     roll,
     ABJURE_FOES_DURATION,
     INTIMIDATING_PRESENCE_DURATION,
-    HURL_THROUGH_HELL_DURATION,
     INITIATIVE_CHOICES,
     PERSISTENT_RAGE_DURATION,
     RELENTLESS_RAGE_DECISION,
@@ -2827,9 +2826,8 @@ class CombatResolutionMixin:
             intent.get("quivering_palm")
             and bool(weapon.get("unarmed"))
             and self.features.has_feature(character, "quivering_palm")
-            and not self._feature_used_this_turn(
-                combat, str(actor["actor_id"]), "quivering_palm",
-            )
+            # 规则只限制"同时只有一个目标"，没有"每回合一次"：这道门读的
+            # 账从不写入，等于永不生效的假防御。
             and long_effect_active(
                 character, "quivering_palm", world_minutes(instance),
             ) is None
@@ -2972,8 +2970,11 @@ class CombatResolutionMixin:
                     "type": "condition.applied",
                     "target_id": str(target["actor_id"]),
                     "condition": str(row.get("condition") or "incapacitated"),
-                    "duration": HURL_THROUGH_HELL_DURATION,
-                    "turns_remaining": max(1, int(row.get("turns") or 1)),
+                    # "until the end of your next turn" 里的 your 是邪术师：
+                    # 归属是施法者，不是被失能的目标自己。两跳刚好覆盖
+                    # "本回合结束（存续）→ 下回合结束（清除）"。
+                    "duration": "caster_next_turn_end",
+                    "turns_remaining": 2,
                     "source_actor_id": attacker_id,
                     "feature_id": "hurl_through_hell",
                     # 消失与返回需要战场坐标之外的语义；这里只落失能与时长。
@@ -5817,8 +5818,11 @@ class CombatResolutionMixin:
             "reason": "ended",
         })
         # 抗性与免疫走与其它伤害同一个实例函数：力场抗性必须生效。
+        damage_type = str(self.features.feature_value(
+            character, feature_id, "damage_type", "force",
+        ) or "force")
         damage, _total = self._damage_instance_event(
-            dice, "force", target, False, rng, half=saved,
+            dice, damage_type, target, False, rng, half=saved,
         )
         if damage is not None:
             damage["feature_id"] = feature_id
@@ -6796,16 +6800,23 @@ class CombatResolutionMixin:
             amount += proficiency_bonus(level)
             if amount <= 0:
                 continue
-            events.append({
+            # 固定值的伤害同样要过抗性：抗性判定只有 _resist_damage 一份。
+            damage, resistance = self._resist_damage(actor, amount, damage_type)
+            event: dict[str, Any] = {
                 "type": "resource.changed",
                 "resource": "hp",
                 "target_id": str(actor["actor_id"]),
-                "delta": -amount,
+                "delta": -damage,
+                "amount": damage,
                 "damage_type": damage_type,
                 "feature_id": definition.id,
                 "source_actor_id": holder_id,
                 "reason": "holy_nimbus",
-            })
+            }
+            if resistance:
+                event["resisted"] = True
+                event["resistance"] = resistance
+            events.append(event)
         return events
 
     @staticmethod
