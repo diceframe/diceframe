@@ -89,7 +89,10 @@ jobs:
     name: Backend coverage (main)
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 覆盖率插桩 + 按等级跑完整条升级链的矩阵用例，让这里成为最慢的一个 job；
+    # 托管 runner 快慢差了近一倍（同一条命令 40 分钟到 45 分钟还没跑完一半），
+    # 45 分钟的上限会在慢机器上把一次正常运行的覆盖率砍掉。
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
