@@ -1218,7 +1218,7 @@
       "concentration": false,
       "duration": "24 hours",
       "source_ref": "srd-5.2.1:p137:goodberry",
-      "material_cost_specified": true,
+      "material_cost_specified": false,
       "material_consumed": false
     },
     {
@@ -1384,7 +1384,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
-      "source_ref": "srd-5.2.1:p141:hunter_s_mark"
+      "source_ref": "srd-5.2.1:p141:hunter_s_mark",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "ice_knife",
@@ -1957,7 +1959,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "24 hours",
-      "source_ref": "srd-5.2.1:p110:arcanist_s_magic_aura"
+      "source_ref": "srd-5.2.1:p110:arcanist_s_magic_aura",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "augury",
@@ -2022,7 +2026,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "1 minute",
-      "source_ref": "srd-5.2.1:p113:blindness_deafness"
+      "source_ref": "srd-5.2.1:p113:blindness_deafness",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "blur",
@@ -2154,7 +2160,7 @@
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
       "source_ref": "srd-5.2.1:p123:detect_thoughts",
-      "material_cost_specified": false,
+      "material_cost_specified": true,
       "material_consumed": false
     },
     {
@@ -2175,7 +2181,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p126:dragon_s_breath"
+      "source_ref": "srd-5.2.1:p126:dragon_s_breath",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "enhance_ability",
@@ -2223,7 +2231,9 @@
       "ritual": false,
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
-      "source_ref": "srd-5.2.1:p127:enlarge_reduce"
+      "source_ref": "srd-5.2.1:p127:enlarge_reduce",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "enthrall",
@@ -2516,7 +2526,7 @@
       "concentration": true,
       "duration": "Concentration, up to 10 minutes",
       "source_ref": "srd-5.2.1:p144:levitate",
-      "material_cost_specified": true,
+      "material_cost_specified": false,
       "material_consumed": false
     },
     {
@@ -2957,7 +2967,7 @@
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
       "source_ref": "srd-5.2.1:p164:spider_climb",
-      "material_cost_specified": true,
+      "material_cost_specified": false,
       "material_consumed": false
     },
     {
@@ -3066,7 +3076,7 @@
       "concentration": true,
       "duration": "Concentration, up to 1 hour",
       "source_ref": "srd-5.2.1:p174:web",
-      "material_cost_specified": true,
+      "material_cost_specified": false,
       "material_consumed": false
     },
     {
@@ -4675,7 +4685,7 @@
       "concentration": true,
       "duration": "Concentration, up to 1 minute",
       "source_ref": "srd-5.2.1:p158:resilient_sphere",
-      "material_cost_specified": true,
+      "material_cost_specified": false,
       "material_consumed": false
     },
     {
@@ -5887,7 +5897,7 @@
       "concentration": false,
       "duration": "Instantaneous",
       "source_ref": "srd-5.2.1:p134:freezing_sphere",
-      "material_cost_specified": true,
+      "material_cost_specified": false,
       "material_consumed": false
     },
     {
@@ -6801,7 +6811,9 @@
       "ritual": false,
       "concentration": false,
       "duration": "10 days",
-      "source_ref": "srd-5.2.1:p109:antipathy_sympathy"
+      "source_ref": "srd-5.2.1:p109:antipathy_sympathy",
+      "material_cost_specified": false,
+      "material_consumed": false
     },
     {
       "id": "befuddlement",

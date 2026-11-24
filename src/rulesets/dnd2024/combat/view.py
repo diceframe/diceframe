@@ -8,6 +8,7 @@ from .triggered_spells import free_cast_resource
 
 from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.features import CombatCapabilityView
+from ..character.builder import ability_modifier
 from ..character.derivation import derive_armor_class
 from ..forms import (
     FormState, FormStateError, StatPanel, assume_form, merged_refs_for,
@@ -325,6 +326,39 @@ class CombatViewMixin:
             character.get("abilities") or {}, refs, self.bundle,
             armor_category_refs=proficiencies.get("armor_category_refs") or [],
         )
+
+    def _initiative_view(
+        self, instance: Any, uid: str, character: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """The character's view as shaped right now, or ``None`` if it cannot be composed.
+
+        Initiative is rolled before any intent of the fight has run, so an
+        unreadable stored shape cannot have been cleaned up yet.  Falling back
+        to the sheet is safe here: the common sweep ends that shape in the same
+        batch.
+        """
+
+        try:
+            return self._shaped_view(self._player_view(uid, character), character)
+        except CombatIntentError:
+            return None
+
+    def _initiative_modifier(
+        self, character: dict[str, Any], view: dict[str, Any] | None,
+    ) -> int:
+        """Initiative modifier of one player-like actor as it fights right now.
+
+        A shape replaces the physical scores, so a druid who walks into the
+        fight as a wolf rolls initiative with the wolf's Dexterity.  Whatever
+        the sheet's modifier owes to features rather than Dexterity is kept.
+        """
+
+        sheet = int(character.get("derived", {}).get("initiative", 0) or 0)
+        dex = ((view or {}).get("abilities") or {}).get("dex")
+        if dex is None:
+            return sheet
+        sheet_dex = ability_modifier(int((character.get("abilities") or {}).get("dex", 10) or 10))
+        return sheet - sheet_dex + ability_modifier(int(dex))
 
     def _statblock_by_ref(self, form_ref: str) -> dict[str, Any] | None:
         if not form_ref:

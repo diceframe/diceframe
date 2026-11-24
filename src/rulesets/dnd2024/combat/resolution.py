@@ -389,7 +389,10 @@ class CombatResolutionMixin:
             actor_id = _player_actor(uid)
             if "dead" in (canonical.get("conditions") or {}):
                 dead_actor_ids.add(actor_id)
-            modifier = int(canonical.get("derived", {}).get("initiative", 0) or 0)
+            # 形态会跨战斗保留：带着狼形态进战斗，先攻就用狼的敏捷。
+            modifier = self._initiative_modifier(
+                canonical, self._initiative_view(instance, uid, canonical),
+            )
             initiatives.append({
                 "actor_id": actor_id, "modifier": modifier, "kind": "player",
                 **self._initiative_roll(canonical, modifier, rng),
@@ -4527,8 +4530,10 @@ class CombatResolutionMixin:
             return [
                 {"type": "dnd2024.action.spent", "actor_id": actor_id,
                  "resource": "bonus_action", "amount": 1},
+                # 原因由引擎决定：主动变回就是 voluntary。存客户端给的字符串等于
+                # 让它把"死亡""失能"写进权威事件流。
                 {"type": "dnd2024.form.reverted", "actor_id": actor_id,
-                 "reason": str(intent.get("reason") or "voluntary")},
+                 "reason": "voluntary"},
             ]
         entry = self._statblock_by_ref(str(intent.get("form_ref") or ""))
         if entry is None:  # pragma: no cover - validation guards this

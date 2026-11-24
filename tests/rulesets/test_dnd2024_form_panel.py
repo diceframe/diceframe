@@ -738,6 +738,71 @@ def test_a_spell_with_materials_but_no_flags_fails_closed() -> None:
     assert CombatValidationMixin._material_restriction({}) != ""
 
 
+def test_the_material_import_reads_a_price_not_a_coin_substring() -> None:
+    """'a sprig of mistletoe' 里的 ' sp' 不是货币，'1 Copper Piece' 才是价格。"""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "import_srd_spell_materials", "scripts/rulesets/import_srd_spell_materials.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    cost = module.has_material_cost
+
+    for text in (
+        "a sprig of mistletoe", "a metal spring", "a drop of bitumen and a spider",
+        "a bit of spiderweb", "a glass sphere", "a miniature crystal sphere",
+        "a pinch of powdered iron", "which the spell consumes",
+    ):
+        assert cost(text) is False, text
+    for text in (
+        "a diamond worth 300+ GP", "a Holy Symbol worth 5+ GP",
+        "one 150+ GP black onyx stone for each corpse",
+        "1 Copper Piece", "2 Copper Pieces, which the spell consumes",
+    ):
+        assert cost(text) is True, text
+
+    assert module._row_key("arcanist_s_magic_aura") == module._row_key("arcanists-magic-aura")
+    assert module._row_key("enlarge_reduce") == module._row_key("enlargereduce")
+
+
+def test_every_material_spell_in_the_catalog_is_classified() -> None:
+    """未分类的法术在运行时 fail closed；目录里不该再有漏掉的。"""
+    spells = json.loads(Path(
+        "templates/rulesets/dnd2024_srd/content/spell_catalogs/srd_spells.json",
+    ).read_text(encoding="utf-8"))["spells"]
+    unclassified = [
+        spell["id"] for spell in spells
+        if isinstance(spell.get("components"), list)
+        and any(str(component).upper().startswith("M") for component in spell["components"])
+        and ("material_cost_specified" not in spell or "material_consumed" not in spell)
+    ]
+    assert unclassified == []
+
+
+def test_beast_spells_material_flags_match_the_rule_text() -> None:
+    """用目录里的真实法术锁住导入结果，而不是手搓一条数据里不存在的形状。"""
+    from src.rulesets.dnd2024 import Dnd2024Runtime
+    from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
+
+    runtime = Dnd2024Runtime()
+    spells = Dnd2024SpellCatalog.from_bundle(runtime.load_bundle("en"))
+
+    # 免费材料：曾被 " sp" 子串误判成计费，Beast Spells 因此错误地拒绝它们。
+    for ref in (
+        "spell:goodberry", "spell:levitate", "spell:spider_climb", "spell:web",
+        "spell:resilient_sphere", "spell:freezing_sphere",
+        # 先前没对上上游键、因此未分类（fail closed）的四个。
+        "spell:arcanist_s_magic_aura", "spell:dragon_s_breath",
+        "spell:enlarge_reduce", "spell:antipathy_sympathy",
+    ):
+        assert spells.get(ref).get("material_cost_specified") is False, ref
+        assert spells.get(ref).get("material_consumed") is False, ref
+    # 材料本身就是钱，或者写明了价格。
+    for ref in ("spell:detect_thoughts", "spell:create_undead", "spell:bless", "spell:revivify"):
+        assert spells.get(ref).get("material_cost_specified") is True, ref
+
+
 # ---------------------------------------------------------------------------
 # 30–32. 结束条件：失能 / 死亡 / 到期（R4b）
 # ---------------------------------------------------------------------------
@@ -785,16 +850,177 @@ def test_death_ends_the_shape_with_its_own_reason() -> None:
     assert [event["reason"] for event in exits] == ["death"]
 
 
-def test_the_shape_expires_when_the_clock_passes_its_duration() -> None:
-    from src.rulesets.dnd2024.forms import FormState
+def _stored_shape(instance, form_ref: str = "wolf") -> None:
+    """Put the druid in a shape the way a save would, without spending the turn."""
 
-    state = wild_shape_state(_wolf_entry(), druid_level=2, beast_spells=False)
-    payload = state.as_payload()
-    payload["assumed_at_minute"] = 0
-    restored = FormState.from_payload(payload)
-    # 2 级 → 1 小时；120 分钟时应当已过期（用纯函数验证判定式本身）
-    assert restored.duration_hours == 1
-    assert 0 + restored.duration_hours * 60 <= 120
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    payload = wild_shape_state(
+        _wolf_entry(), druid_level=2, beast_spells=False,
+    ).as_payload()
+    payload["form_ref"] = form_ref
+    character.setdefault("forms", {})["active"] = payload
+
+
+def test_the_shape_expires_when_the_clock_passes_its_duration(monkeypatch) -> None:
+    engine, instance, rng = _druid_combat(2)
+    from src.engine.modules import ruleset_runtime
+
+    _stored_shape(instance)
+    combat = ruleset_runtime.state(instance)["combat"]
+    assert engine._shape_exit_events(instance, combat) == []   # 刚变形，还没到时长
+
+    # 2 级 → duration_hours == 1；时钟走过整整一小时后必然过期。
+    # 引擎用 __slots__，时钟补丁打在类上。
+    active = instance.get_character_sheet("gm")["ruleset_character"]["forms"]["active"]
+    assumed = int(active["assumed_at_minute"])
+    monkeypatch.setattr(type(engine), "_logical_minutes", lambda self, _instance: assumed + 60)
+    exits = engine._shape_exit_events(instance, combat)
+    assert [(event["type"], event["reason"]) for event in exits] == [
+        ("dnd2024.form.reverted", "expired"),
+    ]
+
+
+def test_an_unreadable_stored_shape_ends_on_the_next_intent() -> None:
+    """目录改名或内容包停用后，存档里的形态引用会读不出 stat block。
+
+    视图层拒绝为它猜一份面板是对的，但这个角色不能因此做不了任何意图——包括
+    变回原形——轮到他时整桌都走不下去。公共收尾要替他结束这个形态。
+    """
+    from src.rulesets.dnd2024.combat.primitives import CombatIntentError
+
+    engine, instance, rng = _druid_combat(2)
+    from src.engine.modules import ruleset_runtime
+
+    _stored_shape(instance, form_ref="no-such-beast")
+    with pytest.raises(CombatIntentError):
+        engine._actor_view(instance, ruleset_runtime.state(instance)["combat"], "player:gm")
+
+    state = ruleset_runtime.state(instance)
+    result = engine.resolve_intent(instance, {
+        "intent_id": "cover-1", "type": "combat.set_cover",
+        "expected_version": state["version"], "submitted_by": "gm",
+        "target_id": "enemy:goblin-1", "level": "half",
+    }, rng([]))
+    assert result["ok"] is True, result.get("error")
+    engine.apply_batch(instance, result["event_batch"])
+
+    exits = [
+        event for event in result["event_batch"]["events"]
+        if event["type"] == "dnd2024.form.reverted"
+    ]
+    assert [event["reason"] for event in exits] == ["unavailable"]
+    view = engine._actor_view(instance, ruleset_runtime.state(instance)["combat"], "player:gm")
+    assert view.get("form_ref") is None
+
+
+def test_the_revert_reason_is_set_by_the_engine() -> None:
+    engine, instance, rng = _druid_combat(2)
+    from src.engine.modules import ruleset_runtime
+
+    _stored_shape(instance)
+    result = engine.resolve_intent(instance, {
+        "intent_id": "revert-1", "type": "form.revert",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+        "reason": "death",
+    }, rng([]))
+    assert result["ok"] is True, result.get("error")
+
+    reverted = next(
+        event for event in result["event_batch"]["events"]
+        if event["type"] == "dnd2024.form.reverted"
+    )
+    assert reverted["reason"] == "voluntary"
+
+
+def test_an_incapacitated_druid_cannot_change_shape() -> None:
+    engine, instance, rng = _druid_combat(2)
+    from src.engine.modules import ruleset_runtime
+
+    _stored_shape(instance)
+    state = ruleset_runtime.state(instance)
+    probe = engine.resolve_intent(instance, {
+        "intent_id": "probe-stunned", "type": "dodge",
+        "expected_version": state["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+    }, rng([]))
+    batch = dict(probe["event_batch"])
+    batch["events"] = [{
+        "type": "condition.applied", "target_id": "player:gm",
+        "condition": "stunned", "source_actor_id": "enemy:goblin-1",
+    }]
+    engine.apply_batch(instance, batch)
+
+    for intent_id, intent_type in (("revert-stunned", "form.revert"), ("assume-stunned", "form.assume")):
+        result = engine.resolve_intent(instance, {
+            "intent_id": intent_id, "type": intent_type,
+            "expected_version": ruleset_runtime.state(instance)["version"],
+            "submitted_by": "gm", "actor_id": "player:gm", "form_ref": "wolf",
+        }, rng([]))
+        assert result["ok"] is False
+        assert "incapacitated actor cannot take actions" in result["error"]
+
+
+def test_initiative_is_rolled_with_the_shape_dexterity() -> None:
+    from src.rulesets.dnd2024.character.builder import ability_modifier
+    from tests.rulesets.dnd2024_monk_common import goblin
+
+    engine, instance, rng = _druid_combat(2)
+    from src.engine.modules import ruleset_runtime
+
+    _stored_shape(instance)                    # 狼的 DEX 15；角色卡上是 DEX 13
+    # 角色卡的先攻 = 敏捷 + 其它来源（这个夹具带着 Alert）。只有敏捷那一项
+    # 换成狼的，专长之类的加值照留。
+    sheet = int(instance.get_character_sheet("gm")["ruleset_character"]["derived"]["initiative"])
+    expected = sheet - ability_modifier(13) + ability_modifier(15)
+    assert expected > sheet
+    state = ruleset_runtime.state(instance)
+    ended = engine.resolve_intent(instance, {
+        "intent_id": "end-fight", "type": "combat.end",
+        "expected_version": state["version"], "submitted_by": "gm",
+    }, rng([]))
+    assert ended["ok"] is True, ended.get("error")
+    engine.apply_batch(instance, ended["event_batch"])
+
+    # 形态跨战斗保留：带着狼形态进入下一场，先攻用的是狼的敏捷（+2）。
+    state = ruleset_runtime.state(instance)
+    restarted = engine.resolve_intent(instance, {
+        "intent_id": "start-2", "type": "combat.start",
+        "expected_version": state["version"], "submitted_by": "gm",
+        "enemies": [goblin(position=30)],
+    }, rng([20, 1]))
+    assert restarted["ok"] is True, restarted.get("error")
+    started = next(
+        event for event in restarted["event_batch"]["events"]
+        if event["type"] == "dnd2024.combat.started"
+    )
+    roll = next(
+        row for row in started["initiative_rolls"] if row["actor_id"] == "player:gm"
+    )
+    assert roll["modifier"] == expected
+
+
+def test_outside_combat_the_shape_intent_reports_the_real_reason() -> None:
+    engine, instance, rng = _druid_combat(2)
+    from src.engine.modules import ruleset_runtime
+
+    state = ruleset_runtime.state(instance)
+    ended = engine.resolve_intent(instance, {
+        "intent_id": "end-fight", "type": "combat.end",
+        "expected_version": state["version"], "submitted_by": "gm",
+    }, rng([]))
+    assert ended["ok"] is True, ended.get("error")
+    engine.apply_batch(instance, ended["event_batch"])
+
+    # 版本、战斗状态、回合与归属先于特性资格：否则玩家在战斗外看到的是
+    # "附赠动作已用完"，而不是这里真正的原因。
+    result = engine.resolve_intent(instance, {
+        "intent_id": "shape-outside", "type": "form.assume",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm", "form_ref": "wolf",
+    }, rng([]))
+    assert result["ok"] is False
+    assert "combat is not active" in result["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -858,6 +1084,35 @@ def test_a_long_rest_replaces_one_known_form() -> None:
     )
     stripped = out.get("character") or out.get("ruleset_character") or out
     assert stripped["forms"]["known"]["wild_shape"] == ["wolf", "rat", "cat", "badger"]
+
+
+def test_a_long_rest_swaps_a_form_for_a_druid_without_a_known_list() -> None:
+    """旧存档没有 forms.known：战斗按推荐形态兜底，长休必须给出同一个答案。
+
+    否则这些角色在战斗里"会"的形态，到长休一个都不认识，永远换不了。
+    """
+    from src.rulesets.dnd2024 import Dnd2024Runtime
+    from src.rulesets.dnd2024.resting.engine import Dnd2024RestEngine
+
+    engine = Dnd2024RestEngine(Dnd2024Runtime().load_bundle("en"))
+    character = {
+        "build": {"class_levels": [{"class_ref": "class:druid", "level": 2}]},
+        "resources": {"hp": 10, "max_hp": 10, "hit_dice": {"d8": 2}},
+        "abilities": {"str": 10, "dex": 12, "con": 14, "int": 8, "wis": 15, "cha": 10},
+        "equipment": {"item_refs": []},
+        "proficiencies": {"armor_category_refs": []},
+        "features": {}, "conditions": {},
+    }
+
+    out = engine.complete_long_rest(
+        character, wild_shape_forms={"old_form_ref": "wolf", "new_form_ref": "badger"},
+    )
+
+    stripped = out.get("character") or out.get("ruleset_character") or out
+    # 推荐四形态里的 wolf 被换成 badger，并且这次替换把列表落在了角色上。
+    assert stripped["forms"]["known"]["wild_shape"] == [
+        "rat", "riding-horse", "spider", "badger",
+    ]
 
 
 # ---------------------------------------------------------------------------
