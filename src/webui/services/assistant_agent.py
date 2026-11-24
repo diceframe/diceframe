@@ -897,7 +897,12 @@ class AgentRuntime:
                     "titles": [i["name"] for i in v.get("draft", {}).get("items", [])]} for k, v in session.data["drafts"].items()},
                     "receipts": [creator_receipt_observation(receipt) for receipt in session.data["receipts"][-4:]],
                     'execution_policy': current_authorization(session.data, self.deps.clock()),
-                    'capability_domains': sorted({tool.domain for tool in self.registry.values()})})
+                    # 域名列表同样过作用域：只藏目录、却在 payload 里报出"存在哪些域"，
+                    # 等于把不可见工具的存在性告诉了模型。
+                    'capability_domains': sorted({
+                        tool.domain for tool in self.registry.values()
+                        if visible_domain(tool.domain, scope_domains)
+                    })})
                 if memory_card is not None:
                     payload['memory_card'] = memory_card
                 if project_card is not None:

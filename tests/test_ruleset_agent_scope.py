@@ -305,14 +305,16 @@ def test_the_tool_tells_the_model_where_target_ids_come_from():
 
 
 class _RecordingPlanner:
-    """按脚本出牌，并记下每一轮模型实际拿到了哪些工具。"""
+    """按脚本出牌，并记下每一轮模型实际拿到了哪些工具、哪一段 payload。"""
 
     def __init__(self, *steps):
         self.steps = list(steps)
         self.offered: list[set[str]] = []
+        self.received: list[str] = []
 
     async def call_tools(self, system, user, **kwargs):
         self.offered.append({row["function"]["name"] for row in kwargs["tools"]})
+        self.received.append(user)
         step = self.steps.pop(0)
         if step.get("tool") == "respond":
             return LLMToolResponse(
@@ -370,6 +372,7 @@ async def test_a_dnd_session_offers_and_executes_set_cover(tmp_path):
     assert captured["intent"]["type"] == "combat.set_cover"
     assert captured["intent"]["target_id"] == "enemy:goblin"
     assert captured["intent"]["level"] == "half"
+    assert RULESET_DOMAIN in planner.received[0]
 
 
 @pytest.mark.asyncio
@@ -384,3 +387,6 @@ async def test_another_ruleset_session_never_offers_set_cover(tmp_path):
 
     assert "set_cover" not in planner.offered[0]
     assert captured == {}
+    # 不可见与不存在是同一回事：整段初始 payload（包括 capability_domains）
+    # 都不能把那个规则域的名字报给模型。
+    assert RULESET_DOMAIN not in planner.received[0]
