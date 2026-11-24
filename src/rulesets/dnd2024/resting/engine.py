@@ -10,7 +10,7 @@ from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.attunement import AttunementError
 from src.rulesets.dnd2024.character.attunement import apply_short_rest_attunement
 from src.rulesets.dnd2024.character.attunement import owned_ref_counts
-from src.rulesets.dnd2024.forms import KnownFormsError, replace_one
+from src.rulesets.dnd2024.forms import KnownFormsError, bootstrap_known_forms, replace_one
 from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.combat.catalog import DAMAGE_TYPES
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
@@ -568,15 +568,19 @@ class Dnd2024RestEngine:
             raise RestError("wild_shape_forms must be an object")
         old_ref = str(request.get("old_form_ref") or "")
         new_ref = str(request.get("new_form_ref") or "")
+        entries = [
+            entry for catalog in self.bundle.list("monster_catalog")
+            for entry in catalog.get("entries") or []
+        ]
         known = [
             str(item) for item in (
                 (character.get("forms") or {}).get("known", {}).get("wild_shape") or []
             )
         ]
-        entries = [
-            entry for catalog in self.bundle.list("monster_catalog")
-            for entry in catalog.get("entries") or []
-        ]
+        if not known:
+            # 旧存档没有已知列表：战斗校验按推荐形态兜底，长休必须给出同一个答案。
+            # 否则这些角色在战斗里"会"的形态，到长休却一个都不认识，永远换不了。
+            known = bootstrap_known_forms(entries, level)
         try:
             return replace_one(known, old_ref, new_ref, level, entries)
         except KnownFormsError as exc:

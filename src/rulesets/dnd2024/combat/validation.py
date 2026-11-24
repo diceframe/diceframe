@@ -808,10 +808,6 @@ class CombatValidationMixin:
         if intent_type not in INTENT_TYPES:
             raise CombatIntentError("intent type is not supported")
         state = self.initialize_state(instance)
-        if intent_type in {"wild_resurgence", "nature_magician"}:
-            self._validate_druid_conversion(instance, intent, state)
-        if intent_type in {"form.assume", "form.revert"}:
-            self._validate_form_intent(instance, intent)
         if intent_type == "ability_check":
             # 成本可变的检定不属于"动作经济块"，所以放在通用分支之前：
             # 挂在 hide 那段里会因为外层的动作成本守卫而永远不执行。
@@ -1027,6 +1023,12 @@ class CombatValidationMixin:
                 raise CombatIntentError("companions do not make death saves")
         if kind == "enemy" and submitted_by != gm_uid:
             raise CombatIntentError("only the GM can submit enemy intents")
+        # 特性资格排在版本、回合与归属之后：轮不到的人、别人的角色，先拿到的是
+        # 拒绝本身，而不是这个角色还剩几次 Wild Shape。
+        if intent_type in {"wild_resurgence", "nature_magician"}:
+            self._validate_druid_conversion(instance, intent, state)
+        if intent_type in {"form.assume", "form.revert"}:
+            self._validate_form_intent(instance, intent)
         actor = self._actor_view(instance, combat, actor_id)
         if "dead" in actor["conditions"]:
             if intent_type == "end_turn":
@@ -1049,7 +1051,7 @@ class CombatValidationMixin:
         if flags["incapacitated"] and intent_type in {
             "attack", "multiattack", "save_action", "escape", "stand_up",
             "cast_spell", "activate_item", "class_capability", "dash", "dodge",
-            "disengage", "hide", "stabilize",
+            "disengage", "hide", "stabilize", "form.assume", "form.revert",
         }:
             raise CombatIntentError("an incapacitated actor cannot take actions")
         if flags["speed_zero"] and intent_type == "move":
