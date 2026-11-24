@@ -202,10 +202,19 @@ class CapabilityCost:
 
 @dataclass(frozen=True, slots=True)
 class CapabilityAction:
-    """One underlying canonical action a capability performs."""
+    """One underlying canonical action a capability performs.
+
+    ``effect_id`` names *what* the action acts on when the kind alone is not
+    enough.  ``end_long_effect`` was the first case: it used to infer the
+    effect from ``capability.feature_id``, which only worked because every
+    ending capability happened to share the effect's id -- a harmless-dismiss
+    capability named ``quivering_palm_dismiss`` would have asked to end an
+    effect that does not exist.
+    """
 
     kind: str
     count: int = 1
+    effect_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -815,11 +824,15 @@ class Dnd2024ClassFeatureCatalog:
             kind = str(raw_action.get("kind") or "")
             if kind not in ACTION_KINDS:
                 raise ClassFeatureError(f"{capability_id} declares an unknown action kind")
+            effect_id = str(raw_action.get("effect_id") or "")
+            if effect_id:
+                _require_id(effect_id, f"{capability_id} action effect_id")
             actions.append(CapabilityAction(
                 kind=kind,
                 count=_require_positive_int(
                     raw_action.get("count", 1), f"{capability_id} action count",
                 ),
+                effect_id=effect_id,
             ))
         requires_condition = str(raw.get("requires_condition") or "")
         forbidden_condition = str(raw.get("forbidden_condition") or "")

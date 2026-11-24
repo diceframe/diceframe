@@ -2085,6 +2085,14 @@ class CombatResolutionMixin:
         )
         if conditions:
             damage_event["hit_condition_effects"] = conditions
+        # "这一击声明了哪些攻击命中触发"随伤害事件走，和 hit_riders 同一个
+        # 道理：决策路径（至圣斩窗口之后）拿不到原始意图，若只把触发挂在
+        # 直通路径上，那条路径会悄悄少掉半个特性。
+        triggers = {
+            "hurl_through_hell": bool(intent.get("hurl_through_hell")),
+        }
+        if any(triggers.values()):
+            damage_event["attack_hit_triggers"] = triggers
         brutal_effects = self._brutal_effect_declarations(actor, intent, check)
         if brutal_effects:
             damage_event["brutal_strike_effects"] = brutal_effects
@@ -5093,10 +5101,14 @@ class CombatResolutionMixin:
             elif action.kind == "end_long_effect":
                 # 主动结束不花任何经济：声明成空成本的能力，只是为了让
                 # "结束"也有一个可审计的意图入口。
+                #
+                # 结束哪个效果由声明给出，不由 capability id 反推：前者是
+                # 契约，后者只是"目前恰好同名"的巧合（quivering_palm_dismiss
+                # 会去结束一个不存在的 quivering_palm_dismiss）。
                 events.append({
                     "type": "dnd2024.long_effect.ended",
                     "actor_id": actor_id,
-                    "effect_id": capability.feature_id,
+                    "effect_id": action.effect_id or capability.feature_id,
                     "reason": "dismissed",
                 })
             elif action.kind == "restore_feature_use":

@@ -881,3 +881,49 @@ def test_a_spell_attack_goes_through_the_shared_hit_entry(
     _apply(engine, instance, resolved)
 
     assert seen == ["cast_spell"]
+
+
+def test_dismissing_the_vibration_is_harmless(open_hand17) -> None:
+    """SRD："You can end them harmlessly (no action required)". """
+
+    from src.rulesets.dnd2024.features.resources import long_effect_active
+    from src.rulesets.dnd2024.combat.primitives import world_minutes
+
+    engine, instance = _setup(open_hand17)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply_vibration(engine, instance)
+
+    events = _apply(engine, instance, _capability(
+        engine, instance, "quivering_palm_dismiss",
+    ))
+
+    ended = _of_type(events, "dnd2024.long_effect.ended")
+    assert ended and ended[0]["effect_id"] == "quivering_palm"
+    # 无害：不掷豁免、不造成伤害。
+    assert not _of_type(events, "check.resolved")
+    assert not [e for e in events if e.get("type") == "resource.changed"]
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    assert long_effect_active(
+        character, "quivering_palm", world_minutes(instance),
+    ) is None
+
+
+def test_the_hurl_declaration_travels_on_the_damage_event(fiend14) -> None:
+    """决策路径（至圣斩之后）拿不到原始意图，声明必须随伤害事件走。"""
+
+    from tests.rulesets.test_dnd2024_channel_control import _attack
+
+    engine, instance = _setup(fiend14)
+    _start(engine, instance, enemies=_two_enemies())
+
+    events, _decisions = _attack(
+        engine, instance, "item:dagger", dice=[20, 1, 1], hurl_through_hell=True,
+    )
+
+    damage = [
+        event for event in events
+        if event.get("type") == "resource.changed"
+        and event.get("feature_id") != "hurl_through_hell"
+    ]
+    assert damage
+    assert damage[0]["attack_hit_triggers"] == {"hurl_through_hell": True}

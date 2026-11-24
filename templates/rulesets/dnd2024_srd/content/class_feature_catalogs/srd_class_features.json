@@ -631,6 +631,16 @@
           },
           "capabilities": [
             {
+              "id": "quivering_palm_dismiss",
+              "cost": {},
+              "actions": [
+                {
+                  "kind": "end_long_effect",
+                  "effect_id": "quivering_palm"
+                }
+              ]
+            },
+            {
               "id": "quivering_palm_end",
               "cost": {
                 "action": 1
@@ -950,7 +960,8 @@
               "actions": [
                 {
                   "kind": "end_long_effect",
-                  "count": 1
+                  "count": 1,
+                  "effect_id": "holy_nimbus"
                 }
               ]
             }
@@ -2207,7 +2218,8 @@
               "actions": [
                 {
                   "kind": "end_long_effect",
-                  "count": 1
+                  "count": 1,
+                  "effect_id": "dragon_wings"
                 }
               ]
             }
