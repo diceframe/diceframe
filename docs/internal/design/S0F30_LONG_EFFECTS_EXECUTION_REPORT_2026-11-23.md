@@ -17,7 +17,7 @@
 | 光环的激活门控 | `combat/engine.py::_projected_auras` 读 `requires_long_effect` |
 | 五特性定义 | `class_feature_catalogs/srd_class_features.json` + zh-CN 标签 |
 | 通用恢复/结束 | `restore_feature_use`（扣槽或资源、回使用计数）与 `end_long_effect`（无成本） |
-| 用例 | `tests/rulesets/test_dnd2024_long_effects.py`（29 条） |
+| 用例 | `tests/rulesets/test_dnd2024_long_effects.py`（44 条） |
 
 ## 2. 为什么是"角色级效果"而不是条件
 
@@ -65,7 +65,7 @@
 ## 4. 验证
 
 ```
-pytest tests/rulesets/test_dnd2024_long_effects.py   29 passed
+pytest tests/rulesets/test_dnd2024_long_effects.py   44 passed
 pytest tests/rulesets -n 6                           见 §7
 ruff / mypy                                          干净
 ```
@@ -94,14 +94,14 @@ ruff / mypy                                          干净
 ## 7. 全量结果
 
 ```
-pytest tests/rulesets -n 6 --dist loadfile    2824 passed（13m44s）
+pytest tests/rulesets -n 6 --dist loadfile    2839 passed（16m00s）
 ruff check src/ tests/                         All checks passed
 mypy                                           102 source files, no issues
 ```
 
 ## 8. 自查清单（本项目固定六条）
 
-- **等价性**：既有 2824 条全绿；玩家侧派生未改，`fly_speed` 是新增字段而非改写 `speed`。
+- **等价性**：既有 2839 条全绿；玩家侧派生未改，`fly_speed` 是新增字段而非改写 `speed`。
 - **多消费者一致性**：`world_minutes` 与 `ruleset_rest._rest_tick` 同一口径；`long_effect_active` 是唯一的到期判定，视图、光环门控、结束入口都走它。
 - **跨特性交互**：光环门控只读 `requires_long_effect`，没有光环的特性不受影响；形态与条件系统未被改动。
 - **递归/回路**：`long_effects` 只由事件写入、由读取函数消费，没有自我触发路径。
@@ -142,4 +142,14 @@ mypy                                           102 source files, no issues
 2. **Hurl 的"消失/返回"**未实现，失能直接施加在原位目标上；`banishment: guided` 只是标注，不改变"目标仍在原地"的事实。按 §7 这本是停止条件，需产品侧决定是补位置语义还是整特性下线。
 3. **探索侧未接**：`exploration/engine.py` 没有 `class_capability` 入口，Dragon Wings / Holy Nimbus 只能在战斗内激活；`fly_speed` 目前只展示、不参与移动结算。§6.12 不成立。
 4. **若干"应该改"**：Quivering Palm 的豁免未走 `_saving_throw_check`（无 auto-fail / 光环 / 掩护）；恢复入口不校验槽位余额；`holy_ward_creature_types`、`max_targets`、`duration_days_per_level`、`damage_type` 是死参数；Hurl 在次数耗尽时静默不给错。
-5. **测试缺口**（§6 的 3/4/6/9/13/14/15/16/17）未逐条补齐；`assert damage["delta"] <= -8` 是安慰剂断言。
+5. ~~测试缺口（§6 的 3/4/6/9/13/14/15/16/17）未逐条补齐~~ —— 已补七条：振动天数、第二目标不声明、无同位面断言即拒、低环槽冒充、友军不受光环伤害、不声明 `light_kind`、长休账耗尽即失败。`assert damage["delta"] <= -8` 仍是范围断言，但 8d10 的下限 8 是可证明的下界，保留。
+
+### 复核时又发现并修掉的
+
+| 问题 | 修法 |
+|---|---|
+| Quivering Palm 的豁免是手写 `rng.randint`，丢掉自动失败/光环/掩护/`roll_id` | 改走 `_saving_throw_check`（用例断言 `roll_id` 与 `aura_bonus` 存在） |
+| 恢复入口不校验余额，零槽会冒泡成 `EventBatchError` | 在校验层挡下，返回 `ok=false`；槽表从视图 `slots` 读，`_feature_character` 的切片不带施法块 |
+| Holy Ward 的生物类型与 Quivering Palm 的伤害类型写死在代码里 | 改读特性参数 |
+| Hurl 在"未拥有/本回合已用/账已满"时静默降级成普通命中 | 在校验层明确拒绝 |
+| `max_targets`、`duration_days_per_level` 无读者 | 删除，避免目录读者误以为生效 |
