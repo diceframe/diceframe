@@ -274,6 +274,85 @@ def scan_backend_concrete_ruleset_debt(root: Path) -> set[DependencyDebt]:
     return found
 
 
+# The D&D 2024 combat package legitimately owns its own mechanics.  What the
+# baseline records is how many places name a *concrete* feature or switch: a new
+# class feature that adds another branch is a reviewed decision, not an
+# accident.  See docs/internal issue GAP-43 and ADR-0004.
+_COMBAT_PACKAGE = "src/rulesets/dnd2024/combat"
+_FEATURE_COMPARISON_NAMES = frozenset({"feature_id", "granted_by"})
+_FEATURE_LITERAL_CALLS = frozenset({"has_feature", "feature_value"})
+
+
+def _string_literal(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def scan_combat_feature_coupling(root: Path) -> set[DependencyDebt]:
+    """Find per-feature branches and per-action switches in a ruleset's combat package.
+
+    Three shapes are recorded, all keyed by file and symbol:
+
+    - ``kind_branch``: a comparison against ``<something>.kind``,
+    - ``feature_branch``: a comparison against a feature id or ``granted_by``,
+    - ``feature_literal``: ``has_feature`` / ``feature_value`` naming a concrete
+      feature,
+    - ``intent_switch``: a key read off an ``intent`` (``intent.get("x")`` or
+      ``intent["x"]``).  Boolean flags on intents are the pattern GAP-43 wants
+      retired; this makes every new one visible.
+    """
+
+    found: set[DependencyDebt] = set()
+    package = root / _COMBAT_PACKAGE
+    if not package.is_dir():
+        return found
+    for path in sorted(package.glob(f"*{_PYTHON_SUFFIX}")):
+        relative = _relative(root, path)
+        for node in ast.walk(_tree(path)):
+            if isinstance(node, ast.Compare):
+                for op, comparator in zip(node.ops, node.comparators):
+                    if not isinstance(op, (ast.Eq, ast.NotEq)):
+                        continue
+                    for left, right in ((node.left, comparator), (comparator, node.left)):
+                        value = _string_literal(right)
+                        if value is None:
+                            continue
+                        if isinstance(left, ast.Attribute) and left.attr == "kind":
+                            found.add(DependencyDebt(relative, "kind_branch", value))
+                        elif (
+                            isinstance(left, ast.Attribute)
+                            and left.attr in _FEATURE_COMPARISON_NAMES
+                        ) or (
+                            isinstance(left, ast.Name)
+                            and left.id in _FEATURE_COMPARISON_NAMES
+                        ):
+                            found.add(DependencyDebt(relative, "feature_branch", value))
+            elif isinstance(node, ast.Call):
+                func = node.func
+                if not isinstance(func, ast.Attribute):
+                    continue
+                if func.attr == "get" and node.args:
+                    base = func.value
+                    if isinstance(base, ast.Name) and base.id == "intent":
+                        value = _string_literal(node.args[0])
+                        if value is not None:
+                            found.add(DependencyDebt(relative, "intent_switch", value))
+                elif func.attr in _FEATURE_LITERAL_CALLS and len(node.args) >= 2:
+                    value = _string_literal(node.args[1])
+                    if value is not None:
+                        found.add(
+                            DependencyDebt(relative, "feature_literal", f"{func.attr}:{value}")
+                        )
+            elif isinstance(node, ast.Subscript):
+                base = node.value
+                if isinstance(base, ast.Name) and base.id == "intent":
+                    value = _string_literal(node.slice)
+                    if value is not None:
+                        found.add(DependencyDebt(relative, "intent_switch", value))
+    return found
+
+
 def _frontend_module_specifiers(source: str) -> Iterable[str]:
     for pattern in (_STATIC_IMPORT, _DYNAMIC_IMPORT):
         yield from (match.group(1) for match in pattern.finditer(source))
