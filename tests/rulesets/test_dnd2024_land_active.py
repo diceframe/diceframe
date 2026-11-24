@@ -331,3 +331,166 @@ def test_the_two_abilities_are_offered_to_the_player_as_actions() -> None:
     types = {str(a.get("type")) for a in engine.available_intents(instance, "gm")}
     assert "land_aid" not in types
     assert "nature_sanctuary" not in types
+
+
+# ---------------------------------------------------------------------------
+# 服务端权威：移动、区域身份、目标列表、时长、失能
+# ---------------------------------------------------------------------------
+
+def _grant_wild_shape_uses(instance) -> None:
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    character.setdefault("resources", {}).setdefault("class", {})["wild_shape"] = {
+        "current": 2, "maximum": 2,
+    }
+
+
+def _create_sanctuary(engine, instance, origin: int = 0, **extra) -> str:
+    created = _resolve(engine, instance, {
+        "intent_id": f"san-{origin}", "type": "nature_sanctuary",
+        "mode": "create", "origin": origin, **extra,
+    })
+    assert created["ok"] is True, created.get("error")
+    engine.apply_batch(instance, created["event_batch"])
+    return "sanctuary:player:gm"
+
+
+def _stored_spell_zone(owner_id: str) -> dict:
+    """A zone the way the reducer stores a spell's: owner_id back-filled from caster."""
+    return {
+        "kind": "sphere", "shape": "sphere", "size_ft": 20, "level": "heavily",
+        "origin": 0, "radius_ft": 20, "owner_id": owner_id, "caster_id": owner_id,
+        "rounds_left": 10, "expires_at_minute": None,
+    }
+
+
+def test_moving_the_sanctuary_has_real_limits() -> None:
+    engine, instance = _land_druid(14)
+    _grant_wild_shape_uses(instance)
+    zone_id = _create_sanctuary(engine, instance)
+    _state(instance)["combat"]["economy"]["bonus_action"] = 1
+
+    # 离自己 100 尺：在作用距离内，但离 Cube 现在的位置超过一次能走的 60 尺。
+    too_far = _resolve(engine, instance, {
+        "intent_id": "mv-far", "type": "nature_sanctuary", "mode": "move", "origin": 100,
+    })
+    assert too_far["ok"] is False
+    assert "at most 60 feet" in too_far["error"]
+
+    out_of_range = _resolve(engine, instance, {
+        "intent_id": "mv-away", "type": "nature_sanctuary", "mode": "move", "origin": 5000,
+    })
+    assert out_of_range["ok"] is False
+    assert "within 120 feet" in out_of_range["error"]
+
+    not_a_position = _resolve(engine, instance, {
+        "intent_id": "mv-text", "type": "nature_sanctuary", "mode": "move", "origin": "abc",
+    })
+    assert not_a_position["ok"] is False
+    assert "integer position" in not_a_position["error"]
+
+    fine = _resolve(engine, instance, {
+        "intent_id": "mv-ok", "type": "nature_sanctuary", "mode": "move", "origin": 40,
+    })
+    assert fine["ok"] is True, fine.get("error")
+    engine.apply_batch(instance, fine["event_batch"])
+    assert _state(instance)["combat"]["zones"][zone_id]["origin"] == 40
+
+
+def test_a_druids_own_spell_zone_is_not_a_sanctuary_to_move() -> None:
+    """reducer 用 caster 回填 owner_id，所以"是我放的"不能当成"是我的 Sanctuary"。"""
+    engine, instance = _land_druid(14)
+    _grant_wild_shape_uses(instance)
+    fog = "fog_cloud:player:gm:cast-1"
+    _state(instance)["combat"]["zones"][fog] = _stored_spell_zone("player:gm")
+    _state(instance)["combat"]["economy"]["bonus_action"] = 1
+
+    moved = _resolve(engine, instance, {
+        "intent_id": "mv-fog", "type": "nature_sanctuary", "mode": "move",
+        "zone_id": fog, "origin": 4000,
+    })
+
+    assert moved["ok"] is False
+    assert "not yours" in moved["error"]
+    assert _state(instance)["combat"]["zones"][fog]["origin"] == 0
+
+
+def test_creating_a_sanctuary_never_replaces_another_zone() -> None:
+    """区域 id 由服务端派生：客户端自报的 id 不能覆盖别人的区域。"""
+    engine, instance = _land_druid(14)
+    _grant_wild_shape_uses(instance)
+    enemy_fog = "fog_cloud:enemy:goblin-1:cast-1"
+    _state(instance)["combat"]["zones"][enemy_fog] = _stored_spell_zone("enemy:goblin-1")
+
+    _create_sanctuary(engine, instance, origin=0, zone_id=enemy_fog)
+
+    zones = _state(instance)["combat"]["zones"]
+    assert set(zones) == {enemy_fog, "sanctuary:player:gm"}
+    assert zones[enemy_fog]["owner_id"] == "enemy:goblin-1"
+    assert zones[enemy_fog]["kind"] == "sphere"
+
+
+def test_a_target_listed_twice_is_refused_instead_of_hit_twice() -> None:
+    engine, instance = _land_druid(3)
+    _grant_wild_shape_uses(instance)
+
+    twice = _resolve(engine, instance, {
+        "intent_id": "aid-twice", "type": "land_aid", "origin": 0,
+        "damage_targets": ["enemy:goblin-1", "enemy:goblin-1"],
+    }, rolls=[4, 4, 1])
+    assert twice["ok"] is False
+    assert "more than once" in twice["error"]
+
+    wrong_shape = _resolve(engine, instance, {
+        "intent_id": "aid-shape", "type": "land_aid", "origin": 0,
+        "damage_targets": "enemy:goblin-1",
+    })
+    assert wrong_shape["ok"] is False
+    assert "damage_targets must be a list" in wrong_shape["error"]
+
+
+def test_the_sanctuary_ends_after_ten_rounds_even_though_combat_never_moves_the_clock() -> None:
+    """"1 分钟"也是十个战斗回合；战斗不推进世界时钟，只靠分钟上限它永远不会结束。"""
+    engine, instance = _land_druid(14)
+    _grant_wild_shape_uses(instance)
+    zone_id = _create_sanctuary(engine, instance)
+    created_in = int(_state(instance)["combat"]["round"])
+    assert _state(instance)["combat"]["zones"][zone_id]["expires_at_round"] == created_in + 10
+
+    ended_in = None
+    for step in range(60):
+        current = str(engine._current_actor(_state(instance)["combat"]))
+        ended = _resolve(engine, instance, {
+            "intent_id": f"end-{step}", "type": "end_turn", "actor_id": current,
+        })
+        assert ended["ok"] is True, ended.get("error")
+        engine.apply_batch(instance, ended["event_batch"])
+        if zone_id not in _state(instance)["combat"]["zones"]:
+            ended_in = int(_state(instance)["combat"]["round"])
+            break
+
+    # 第 1 回合放下，覆盖第 1–10 回合；第 11 回合的第一条意图把它清掉。
+    assert ended_in == created_in + 10
+
+
+def test_an_incapacitated_druid_cannot_use_the_land_abilities() -> None:
+    engine, instance = _land_druid(14)
+    _grant_wild_shape_uses(instance)
+    probe = _resolve(engine, instance, {"intent_id": "probe-stunned", "type": "dodge"})
+    assert probe["ok"] is True, probe.get("error")
+    batch = dict(probe["event_batch"])
+    batch["events"] = [{
+        "type": "condition.applied", "target_id": "player:gm",
+        "condition": "stunned", "source_actor_id": "enemy:goblin-1",
+    }]
+    engine.apply_batch(instance, batch)
+
+    offered = {str(action.get("type")) for action in engine.available_intents(instance, "gm")}
+    assert "land_aid" not in offered
+    assert "nature_sanctuary" not in offered
+
+    used = _resolve(engine, instance, {
+        "intent_id": "aid-stunned", "type": "land_aid", "origin": 0,
+        "damage_targets": ["enemy:goblin-1"],
+    })
+    assert used["ok"] is False
+    assert "incapacitated actor cannot take actions" in used["error"]

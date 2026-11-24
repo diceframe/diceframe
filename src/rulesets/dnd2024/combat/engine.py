@@ -58,7 +58,16 @@ from .check_windows import (
     DAMAGE_WINDOW_DECISION,
     LUCKY_RESOURCE,
 )
-from .obscurement import best_obscurement, effective_level, obscurement_row, zone_covers
+from .obscurement import (
+    LAND_AID_RANGE_FT,
+    SANCTUARY_MOVE_LIMIT_FT,
+    SANCTUARY_RANGE_FT,
+    best_obscurement,
+    effective_level,
+    obscurement_row,
+    sanctuary_zone_id,
+    zone_covers,
+)
 from .primitives import (
     INTENT_TYPES,
     PERSISTENT_RAGE_DURATION,
@@ -2466,6 +2475,11 @@ class Dnd2024CombatEngine(
 
         if str(actor.get("kind") or "") != "player":
             return []
+        if condition_flags(
+            self.catalog.conditions, actor.get("conditions") or {},
+        )["incapacitated"]:
+            # 失能者不能执行动作：校验层会拒绝，投影层就不该把入口摆出来。
+            return []
         character = self._feature_character(actor)
         state = self.initialize_state(instance)
         combat_state = state.get("combat") or {}
@@ -2482,19 +2496,19 @@ class Dnd2024CombatEngine(
             if uses >= 1:
                 actions.append({
                     "type": "land_aid", "label": "Land's Aid", "actor_id": actor_id,
-                    "expected_version": version, "origin_limit_ft": 60,
+                    "expected_version": version, "origin_limit_ft": LAND_AID_RANGE_FT,
                     "radius_ft": 10, "wild_shape_uses": uses,
                     "targets": self._all_targets(instance, combat),
                 })
         if self.features.has_feature(character, "natures_sanctuary"):
-            zone_id = f"sanctuary:{actor_id}"
+            zone_id = sanctuary_zone_id(actor_id)
             existing = (combat_state.get("zones") or {}).get(zone_id)
             if isinstance(existing, dict) and int(economy.get("bonus_action", 0) or 0) > 0:
                 actions.append({
                     "type": "nature_sanctuary", "label": "Move the sanctuary",
                     "mode": "move", "zone_id": zone_id, "actor_id": actor_id,
-                    "expected_version": version, "origin_limit_ft": 120,
-                    "move_limit_ft": 60,
+                    "expected_version": version, "origin_limit_ft": SANCTUARY_RANGE_FT,
+                    "move_limit_ft": SANCTUARY_MOVE_LIMIT_FT,
                 })
             elif (
                 int(economy.get("action", 0) or 0) > 0
@@ -2503,7 +2517,7 @@ class Dnd2024CombatEngine(
                 actions.append({
                     "type": "nature_sanctuary", "label": "Nature's Sanctuary",
                     "mode": "create", "actor_id": actor_id,
-                    "expected_version": version, "origin_limit_ft": 120,
+                    "expected_version": version, "origin_limit_ft": SANCTUARY_RANGE_FT,
                     "size_ft": 15,
                 })
         return actions
@@ -2517,20 +2531,27 @@ class Dnd2024CombatEngine(
     def _zone_expiry_events(
         self, instance: Any, combat: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """区域到期：一分钟的时钟，或持有者失能/死亡。
+        """区域到期：战斗内的回合上限、世界时钟的一分钟，或持有者失能/死亡。
 
-        与回合数无关——Sanctuary 写的是"1 分钟"，按回合计会让它在一场
-        慢节奏战斗里提前消失，也会在战斗结束后永远留着。
+        两个时钟都记：一场战斗不推进世界时钟，一次长休也不推进回合数，先到
+        的那个结束效果。只记分钟的话，Sanctuary 会在整场战斗里一直在。
         """
 
         now = self._logical_minutes(instance)
+        round_now = int(combat.get("round", 0) or 0)
         events: list[dict[str, Any]] = []
         for zone_id, zone in sorted((combat.get("zones") or {}).items()):
             if not isinstance(zone, dict):
                 continue
             reason = ""
+            round_expires = zone.get("expires_at_round")
             expires = zone.get("expires_at_minute")
-            if isinstance(expires, int) and not isinstance(expires, bool) and now >= expires:
+            if (
+                isinstance(round_expires, int) and not isinstance(round_expires, bool)
+                and round_now >= round_expires
+            ) or (
+                isinstance(expires, int) and not isinstance(expires, bool) and now >= expires
+            ):
                 reason = "expired"
             elif zone.get("ends_on_owner_incapacitated"):
                 owner_id = str(zone.get("owner_id") or "")

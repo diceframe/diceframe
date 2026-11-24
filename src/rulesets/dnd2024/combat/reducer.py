@@ -837,7 +837,7 @@ class CombatReducerMixin:
                 "spell_ref": str(event.get("spell_ref") or ""),
                 "caster_id": str(event.get("caster_id") or ""),
                 "concentration": bool(event.get("concentration")),
-                # 0 = 由世界时钟裁剪（Sanctuary 的一分钟）；>0 才是按回合。
+                # 0 = 不按回合递减（Sanctuary 用 expires_at_round / expires_at_minute）；>0 才是按回合。
                 "rounds_left": int(event.get("rounds_left", 10) or 0),
                 "ward_type": str(event.get("ward_type") or ""),
                 "owner_id": str(event.get("owner_id") or event.get("caster_id") or ""),
@@ -845,6 +845,7 @@ class CombatReducerMixin:
                 "half_cover": bool(event.get("half_cover")),
                 "resistance_from_owner": bool(event.get("resistance_from_owner")),
                 "expires_at_minute": event.get("expires_at_minute"),
+                "expires_at_round": event.get("expires_at_round"),
                 "ends_on_owner_incapacitated": bool(
                     event.get("ends_on_owner_incapacitated")
                 ),
@@ -874,10 +875,6 @@ class CombatReducerMixin:
                     "level": level,
                     "source": str(event.get("source") or "gm"),
                 }
-            return
-        if event_type == "condition.blocked":
-            # 免疫拦截是一条**审计事件**，不是状态：它存在的意义是让 ledger
-            # 记得"有人试图施加、被谁挡下"，所以 reducer 既不写状态也不报错。
             return
         if event_type == "condition.applied":
             conditions = self._conditions(snapshot, combat, str(event["target_id"]))

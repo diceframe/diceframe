@@ -39,7 +39,7 @@ from ..spells.font_of_magic import (
     parse_created_slot_costs,
     slot_to_points_plan,
 )
-from .obscurement import zone_members
+from .obscurement import SANCTUARY_DURATION_ROUNDS, sanctuary_zone_id, zone_members
 from .action_adapter import (
     attack_damage_node,
     average_damage,
@@ -4517,7 +4517,10 @@ class CombatResolutionMixin:
             combat, {"shape": "sphere", "size_ft": 10, "origin": origin},
             combat.get("positions") or {}, None,
         ))
-        targets = [str(ref) for ref in intent.get("damage_targets") or [] if str(ref) in inside]
+        # 校验层已拒绝重复目标；这里再去一次重，"一个目标最多一段伤害"不依赖调用方。
+        targets = list(dict.fromkeys(
+            str(ref) for ref in intent.get("damage_targets") or [] if str(ref) in inside
+        ))
         heal_target = str(intent.get("heal_target") or "")
         events: list[dict[str, Any]] = [
             {"type": "dnd2024.action.spent", "actor_id": actor_id,
@@ -4568,16 +4571,18 @@ class CombatResolutionMixin:
         """Nature's Sanctuary: place a 15-foot Cube, or move it as a Bonus Action."""
 
         actor_id = str(intent["actor_id"])
+        # 区域 id 由服务端派生，不读意图里的值：reducer 按 id 存区域，客户端自报
+        # 的 id 会覆盖别人的区域（另一位德鲁伊的 Sanctuary、法术的遮蔽区）。
+        zone_id = sanctuary_zone_id(actor_id)
         mode = str(intent.get("mode") or "create")
         if mode == "move":
             return [
                 {"type": "dnd2024.action.spent", "actor_id": actor_id,
                  "resource": "bonus_action", "amount": 1},
                 {"type": "dnd2024.zone.moved",
-                 "zone_id": str(intent.get("zone_id") or ""),
+                 "zone_id": zone_id,
                  "origin": int(intent.get("origin", 0) or 0)},
             ]
-        zone_id = str(intent.get("zone_id") or f"sanctuary:{actor_id}")
         character = self._canonical_for_actor(instance, actor_id)
         return [
             {"type": "dnd2024.action.spent", "actor_id": actor_id,
@@ -4594,6 +4599,9 @@ class CombatResolutionMixin:
                 "beneficiaries": "allies", "half_cover": True,
                 "resistance_from_owner": True,
                 "expires_at_minute": self._logical_minutes(instance) + 1,
+                # 一分钟也是十个战斗回合：战斗不推进世界时钟，只记分钟的话
+                # 这个 Cube 会在整场战斗里一直在。
+                "expires_at_round": int(combat.get("round", 0) or 0) + SANCTUARY_DURATION_ROUNDS,
                 "ends_on_owner_incapacitated": True,
                 "feature_id": "natures_sanctuary",
                 "projection": "theater_1d",
