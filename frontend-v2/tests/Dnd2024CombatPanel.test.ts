@@ -1312,6 +1312,76 @@ describe('D&D 2024 combat panel', () => {
     wrapper.unmount()
   })
 
+  // 服务端在「已变形」时给出 form.revert，在「还有 Wild Shape 次数」时给出
+  // form.assume；两个条件同时成立时两条入口都在。
+  function wildShapeResponse(entries: 'both' | 'revert' | 'assume' = 'both') {
+    const result = response('active') as any
+    if (entries !== 'assume') {
+      result.available_actions.push({
+        type: 'form.revert', label: 'Revert form', actor_id: 'player:gm', expected_version: 1,
+      })
+    }
+    if (entries !== 'revert') {
+      result.available_actions.push({
+        type: 'form.assume', label: 'Wild Shape', actor_id: 'player:gm', expected_version: 1,
+        forms: [{ ref: 'wolf', name: 'Wolf', cr: '1/4' }, { ref: 'rat', name: 'Rat', cr: '1/8' }],
+      })
+    }
+    return result
+  }
+
+  async function openWildShapeDock() {
+    const wrapper = mount(Dnd2024CombatPanel, {
+      props: { gameKey: 'web|combat|bot', actorId: 'gm', isGm: true },
+    })
+    await flushPromises()
+    await wrapper.get('#dock-tab-bonus').trigger('click')
+    const card = await openTile(wrapper, 'form')
+    return { wrapper, card }
+  }
+
+  it('stages form.assume from the Wild Shape tile by default', async () => {
+    mocks.fetch.mockResolvedValue(wildShapeResponse())
+
+    const { wrapper, card } = await openWildShapeDock()
+    expect(card.find('[data-testid=combat-form-modes]').exists()).toBe(true)
+    expect(card.get('[data-form-mode=assume]').classes()).toContain('active')
+
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({ type: 'form.assume', form_ref: 'wolf' })
+  })
+
+  it('stages form.revert once the player picks Revert Form', async () => {
+    // 不给切换的话，面板永远暂存 form.assume，玩家要等次数用光才能变回原形。
+    mocks.fetch.mockResolvedValue(wildShapeResponse())
+
+    const { wrapper, card } = await openWildShapeDock()
+    await card.get('[data-form-mode=revert]').trigger('click')
+    expect(card.get('[data-form-mode=revert]').classes()).toContain('active')
+
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({
+      type: 'form.revert', actor_id: 'player:gm',
+    })
+    expect(mocks.submit.mock.calls[0][1]).not.toHaveProperty('form_ref')
+  })
+
+  it('sends form.revert without a switch when it is the only entry', async () => {
+    mocks.fetch.mockResolvedValue(wildShapeResponse('revert'))
+
+    const { wrapper, card } = await openWildShapeDock()
+    expect(card.find('[data-testid=combat-form-modes]').exists()).toBe(false)
+
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({ type: 'form.revert' })
+  })
+
   it('keeps a bonus-action spell and slot picked across the periodic refresh', async () => {
     const data = response('active') as any
     data.available_actions.push({

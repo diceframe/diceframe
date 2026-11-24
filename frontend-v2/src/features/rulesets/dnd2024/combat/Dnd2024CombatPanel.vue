@@ -102,7 +102,14 @@ const adventureActive = computed(() => String(
 const attackAction = computed(() => action('attack'))
 const formAssumeAction = computed(() => action('form.assume'))
 const formRevertAction = computed(() => action('form.revert'))
-const formAction = computed(() => formAssumeAction.value || formRevertAction.value)
+// 变形之后只要还有 Wild Shape 次数，服务端会同时给出「变形」和「恢复原形」。
+// 做哪一个由玩家在卡片里选；只有一条入口时不需要选。
+const formMode = ref<'assume' | 'revert'>('assume')
+const formAction = computed(() => (
+  formMode.value === 'revert'
+    ? (formRevertAction.value || formAssumeAction.value)
+    : (formAssumeAction.value || formRevertAction.value)
+))
 const formChoices = computed(() => (formAssumeAction.value?.forms || []) as JsonObject[])
 const spellAction = computed(() => action('cast_spell'))
 const spellActor = computed(() => combat.value?.actors?.find(actor => actor.actor_id === (spellAction.value?.actor_id || `player:${props.actorId}`)))
@@ -732,6 +739,8 @@ function resetSelections(): void {
   if (!formChoices.value.some(item => String(item.ref || '') === selectedFormRef.value)) {
     selectedFormRef.value = String(formChoices.value[0]?.ref || '')
   }
+  // 恢复原形入口消失后（已经变回来了），下次打开卡片从「变形」开始。
+  if (!formRevertAction.value) formMode.value = 'assume'
   if (!treasureTables.value.some(
     table => table.table_ref === treasureTableRef.value,
   )) {
@@ -776,6 +785,7 @@ function clearGameScopedState(): void {
   selectedItemRef.value = ''
   selectedItemTargetId.value = ''
   selectedFormRef.value = ''
+  formMode.value = 'assume'
   explorationItemRef.value = ''
   treasureTableRef.value = ''
   treasureResult.value = ''
@@ -1415,6 +1425,10 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
             </div>
 
             <div v-if="dockMode === 'form' && formAction" class="mode-panel" data-mode="form" data-testid="combat-form-card">
+              <div v-if="formAssumeAction && formRevertAction" class="form-modes" data-testid="combat-form-modes">
+                <button type="button" :class="{ active: formMode === 'assume' }" data-form-mode="assume" @click="formMode = 'assume'">{{ copy.assumeForm }}</button>
+                <button type="button" :class="{ active: formMode === 'revert' }" data-form-mode="revert" @click="formMode = 'revert'">{{ copy.revertForm }}</button>
+              </div>
               <template v-if="formAction.type === 'form.assume' && formChoices.length">
                 <label>{{ copy.chooseForm }}
                   <select v-model="selectedFormRef">
@@ -1663,6 +1677,9 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 .mode-panel > .range-guide, .mode-panel > .dock-hint, .mode-panel > .class-resource-strip, .mode-panel > .capability-list { grid-column: 1 / -1; }
 .mode-panel label { display: grid; gap: 4px; color: #aebcc6; font-size: 12px; }
 .mode-panel select, .mode-panel input { width: 100%; min-height: 40px; padding-inline: 10px; border: 1px solid #4a5560; border-radius: 8px; background: #0d1319; color: #f3eee7; }
+.form-modes { display: flex; grid-column: 1 / -1; gap: 6px; }
+.form-modes button { flex: 1 1 0; min-height: 36px; padding: 4px 12px; border: 1px solid rgb(120 150 175 / 40%); border-radius: 9px; background: rgb(15 24 35 / 90%); color: #e8eef2; cursor: pointer; }
+.form-modes button.active { border-color: #e4b75e; background: rgb(88 62 22 / 60%); }
 .capability-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .capability-list button { display: grid; gap: 2px; min-height: 40px; padding: 5px 12px; border: 1px solid rgb(120 150 175 / 40%); border-radius: 9px; background: rgb(15 24 35 / 90%); color: #e8eef2; text-align: left; cursor: pointer; }
 .capability-list button.active { border-color: #e4b75e; background: rgb(88 62 22 / 60%); }
