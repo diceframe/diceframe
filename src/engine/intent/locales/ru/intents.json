@@ -22,7 +22,7 @@
   "purchase_target_connector": ["снова", "потом", "также"],
   "purchase_target_suffix": [],
   "purchase_quantity_classifier": ["штука", "штуки", "бутылка", "бутылки"],
-  "purchase_generic_target": ["это", "то", "его"],
+  "purchase_generic_target": ["это", "то", "его", "газета", "товар", "вещь", "предмет"],
   "purchase_quantity_word": ["один=1", "два=2", "три=3", "четыре=4", "пять=5", "шесть=6", "семь=7", "восемь=8"],
   "purchase_balance": ["баланс", "есть", "имею", "осталось", "бюджет", "максимум", "лимит"],
   "purchase_offer": [

@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.engine.modules import narrative_notes
-from src.commands.round_helpers import should_multi_step
+from src.commands.round_helpers import should_multi_step, should_semantic_review
 from src.commands.round_llm import append_multistep_analysis
 from src.engine.game_instance import GameInstance
 from src.engine.puzzle import PuzzleInstance, PuzzleManager, PuzzleState
@@ -72,6 +72,11 @@ def test_non_web_entry_never_triggers() -> None:
     """非 Web 入口即使战斗或谜题也绝不触发。"""
     instance = _make_instance(entry_point="plugin", npcs=_five_historical_npcs())
     assert should_multi_step(instance, "我拔出剑，冲向敌人攻击！") is False
+
+
+def test_non_web_complex_turn_still_triggers_semantic_review() -> None:
+    instance = _make_instance(entry_point="plugin")
+    assert should_semantic_review(instance, "我拔出剑，冲向敌人攻击！") is True
 
 
 def test_multiple_npcs_named_in_current_scene_triggers() -> None:

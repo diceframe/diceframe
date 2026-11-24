@@ -28,7 +28,7 @@ from src.llm.context_builder import (
 )
 from src.memory.delta import MemoryStore
 from src.rules.loader import RuleBundleLoader
-from src.rules.rule_system import RuleSystem
+from src.rules.rule_system import RuleSystem, apply_currency_context
 from src.rulesets.contracts import NarrativeAdvancementRuntime
 from src.rulesets.registry import RulesetRuntimeRegistry
 
@@ -182,6 +182,11 @@ class PromptComposer:
                 if rule is None:
                     rule = RuleSystem.load_for_world(world_data, self.rules_dir, language)
                 if rule:
+                    rule = apply_currency_context(
+                        rule,
+                        game_config.currency_label(instance),
+                        game_config.currency_system(instance),
+                    )
                     ctx.rule = rule
                     ctx.rule_appendix = rule.get_gm_prompt_appendix(language)
                     ctx.combat_model = rule.combat_model

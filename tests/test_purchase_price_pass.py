@@ -36,6 +36,8 @@ from src.commands.economy_effects import unpriced_purchase_notice
 from src.engine.economy import (
     filter_unconfirmed_purchase_grants,
     has_pending_identical_purchase,
+    purchase_grant_ambiguity_snapshot,
+    purchase_grant_protection_snapshot,
     queue_purchase_offer,
     resolve_proposal,
 )
@@ -195,6 +197,24 @@ def test_normalize_economy_actions_keeps_unpriced_intents() -> None:
     ]
 
 
+def test_normalize_generic_unpriced_target_marks_ambiguous_delivery() -> None:
+    instance = _instance()
+    _, unpriced, errors = normalize_economy_actions(instance, [{
+        "type": "purchase",
+        "player": "p1",
+        "target": "报纸",
+        "price_source": "none",
+    }])
+
+    assert errors == []
+    assert unpriced == [{
+        "payer_uid": "p1",
+        "target": "报纸",
+        "quantity": 1,
+        "ambiguous_target": True,
+    }]
+
+
 @pytest.mark.asyncio
 async def test_plan_round_checks_reports_unpriced_intents() -> None:
     instance = _instance()
@@ -250,6 +270,221 @@ def test_filter_strips_unpriced_intent_items_only_with_kwarg() -> None:
     )
     assert removed == 1
     assert [entry["item"] for entry in data["state_update"]["loot"]] == ["磨刀石", "回复药水"]
+
+
+def test_generic_unpriced_intent_blocks_unresolved_item_grants() -> None:
+    instance = _instance()
+    data = {"state_update": {"loot": [
+        {"player": "p1", "item": "当日《新新新闻》", "qty": 1},
+        {"player": "p2", "item": "护符", "qty": 1},
+    ]}}
+    intents = [{
+        "payer_uid": "p1",
+        "target": "报纸",
+        "quantity": 1,
+        "ambiguous_target": True,
+    }]
+
+    removed = filter_unconfirmed_purchase_grants(
+        instance, data, unpriced_purchase_intents=intents,
+    )
+
+    assert removed == 1
+    assert data["state_update"]["loot"] == [
+        {"player": "p2", "item": "护符", "qty": 1},
+    ]
+
+
+def test_specific_unpriced_target_does_not_match_an_ascii_substring() -> None:
+    instance = _instance()
+    data = {"state_update": {"loot": [
+        {"player": "p1", "item": "spring", "qty": 1},
+    ]}}
+    removed = filter_unconfirmed_purchase_grants(
+        instance,
+        data,
+        unpriced_purchase_intents=[{
+            "payer_uid": "p1", "target": "ring", "quantity": 1,
+        }],
+    )
+
+    assert removed == 0
+    assert data["state_update"]["loot"] == [
+        {"player": "p1", "item": "spring", "qty": 1},
+    ]
+
+
+def test_specific_target_matches_a_descriptive_item_name_at_a_word_boundary() -> None:
+    instance = _instance()
+    data = {"state_update": {"loot": [
+        {"player": "p1", "item": "today's newspaper", "qty": 1},
+    ]}}
+
+    removed = filter_unconfirmed_purchase_grants(
+        instance,
+        data,
+        unpriced_purchase_intents=[{
+            "payer_uid": "p1", "target": "newspaper", "quantity": 1,
+        }],
+    )
+
+    assert removed == 1
+    assert data["state_update"]["loot"] == []
+
+
+@pytest.mark.parametrize(
+    ("target", "loot"),
+    [
+        ("arrow", "20 arrows"),
+        ("arrows", "arrow"),
+        ("healing potion", "2 healing potions"),
+        ("sword", "longsword"),
+        ("long sword", "longsword"),
+    ],
+)
+def test_english_plurals_and_compounds_still_name_the_purchased_item(
+    target: str, loot: str,
+) -> None:
+    """English inflection must not turn the unconfirmed-grant gate fail open."""
+
+    instance = _instance()
+    data = {"state_update": {"loot": [{"player": "p1", "item": loot, "qty": 1}]}}
+    removed = filter_unconfirmed_purchase_grants(
+        instance,
+        data,
+        unpriced_purchase_intents=[{"payer_uid": "p1", "target": target, "quantity": 1}],
+    )
+
+    assert removed == 1
+    assert data["state_update"]["loot"] == []
+
+
+def test_pending_charge_still_protects_a_plural_grant() -> None:
+    instance = _instance()
+    queue_purchase_offer(
+        instance, payer_uid="p1", amount=50, items=["healing potion"],
+        source="table_offer",
+    )
+    data = {"state_update": {"loot": [{"player": "p1", "item": "healing potions", "qty": 1}]}}
+
+    # 物品免费到手、扣款仍 pending、玩家再拒付：这是闸门必须关死的那条路。
+    assert filter_unconfirmed_purchase_grants(instance, data) == 1
+    assert data["state_update"]["loot"] == []
+
+
+@pytest.mark.parametrize(
+    ("target", "loot"),
+    [
+        ("ring", "spring"),
+        ("pier", "rapier"),
+        ("cape", "cap"),
+        ("healing potion", "healing herbs"),
+    ],
+)
+def test_short_stems_inside_other_words_are_distinct_items(
+    target: str, loot: str,
+) -> None:
+    instance = _instance()
+    data = {"state_update": {"loot": [{"player": "p1", "item": loot, "qty": 1}]}}
+
+    removed = filter_unconfirmed_purchase_grants(
+        instance,
+        data,
+        unpriced_purchase_intents=[{"payer_uid": "p1", "target": target, "quantity": 1}],
+    )
+
+    assert removed == 0
+    assert [entry["item"] for entry in data["state_update"]["loot"]] == [loot]
+
+
+@pytest.mark.parametrize(
+    ("language", "target"),
+    [
+        ("en", "newspaper"),
+        ("en", "a newspaper"),
+        ("en", "the local newspaper"),
+        ("en", "some item"),
+        ("zh-CN", "一份报纸"),
+        ("zh-CN", "那个东西"),
+        ("ja", "それを"),
+    ],
+)
+def test_generic_target_keeps_its_article_and_modifiers(language: str, target: str) -> None:
+    instance = _instance()
+    instance.language = language
+
+    _, unpriced, errors = normalize_economy_actions(instance, [{
+        "type": "purchase", "player": "p1", "target": target, "price_source": "none",
+    }])
+
+    assert errors == []
+    assert unpriced[0]["ambiguous_target"] is True
+
+
+@pytest.mark.parametrize(
+    ("language", "target"),
+    [
+        ("en", "that dagger"),
+        ("en", "newspaper stand"),
+        ("zh-CN", "报纸架"),
+        ("ja", "飲み物"),
+    ],
+)
+def test_modified_specific_target_is_not_ambiguous(language: str, target: str) -> None:
+    instance = _instance()
+    instance.language = language
+
+    _, unpriced, _ = normalize_economy_actions(instance, [{
+        "type": "purchase", "player": "p1", "target": target, "price_source": "none",
+    }])
+
+    assert "ambiguous_target" not in unpriced[0]
+
+
+def test_generic_target_with_an_article_blocks_the_unresolved_grant() -> None:
+    instance = _instance()
+    instance.language = "en"
+    _, unpriced, _ = normalize_economy_actions(instance, [{
+        "type": "purchase", "player": "p1", "target": "a newspaper", "price_source": "none",
+    }])
+    data = {"state_update": {"loot": [{"player": "p1", "item": "today's newspaper", "qty": 1}]}}
+
+    removed = filter_unconfirmed_purchase_grants(
+        instance, data, unpriced_purchase_intents=unpriced,
+    )
+
+    assert removed == 1
+    assert data["state_update"]["loot"] == []
+
+
+def test_ambiguous_pending_snapshot_stays_fail_closed_after_resolution() -> None:
+    instance = _instance()
+    proposal = queue_purchase_offer(
+        instance,
+        payer_uid="p1",
+        amount=50,
+        items=["商品"],
+        source="table_offer",
+        ambiguous_target=True,
+    )
+    protected_items = purchase_grant_protection_snapshot(instance)
+    protected_payers = purchase_grant_ambiguity_snapshot(instance)
+    assert resolve_proposal(
+        instance, proposal["id"], actor_uid="p1", accepted=False,
+    )["ok"] is True
+
+    data = {"state_update": {"loot": [
+        {"player": "p1", "item": "报纸", "qty": 1},
+    ]}}
+    removed = filter_unconfirmed_purchase_grants(
+        instance,
+        data,
+        protected_purchase_items=protected_items,
+        protected_ambiguous_payers=protected_payers,
+    )
+
+    assert removed == 1
+    assert data["state_update"]["loot"] == []
 
 
 def test_unpriced_intents_are_never_persisted() -> None:

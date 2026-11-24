@@ -1,0 +1,25 @@
+{
+  "name": "coc_long_horizon_smoke",
+  "turns": [
+    {"round": 1, "actions": "检查门锁", "narration": "门锁上残留着新鲜的盐渍。"},
+    {"round": 2, "actions": "观察盐渍", "narration": "盐渍形成一条指向地下室的细线。"},
+    {"round": 3, "actions": "进入地下室", "narration": "地下室的煤气灯在无人触碰时亮起。"},
+    {"round": 4, "actions": "检查煤气灯", "narration": "灯座里藏着一枚刻有海浪的铜片。"},
+    {"round": 5, "actions": "研究铜片", "narration": "铜片背面写着今晚零点和旧码头。"},
+    {"round": 6, "actions": "前往旧码头", "narration": "旧码头空无一人，潮水却拍打着三次固定节奏。"},
+    {"round": 7, "actions": "记录节奏", "narration": "节奏对应一段被删去的航海电报码。"},
+    {"round": 8, "actions": "寻找电报码", "narration": "废弃值班室的墙上留下半张航海图。"},
+    {"round": 9, "actions": "拼接航海图", "narration": "航海图标出码头外一座不在官方地图上的礁岛。"},
+    {"round": 10, "actions": "询问船工", "narration": "老船工认出礁岛，并警告潮退前不能靠近。"},
+    {"round": 11, "actions": "等待潮退", "narration": "等待期间，铜片上的海浪纹路开始渗出黑水。"},
+    {"round": 12, "actions": "检查黑水", "narration": "黑水带着铁锈味，指向船工藏起来的日志。"},
+    {"round": 13, "actions": "翻阅日志", "narration": "日志记录了三次失踪，以及同一个无名灯塔。"},
+    {"round": 14, "actions": "询问灯塔", "narration": "船工承认灯塔仍有人值守，却拒绝说出守塔人的名字。"},
+    {"round": 15, "actions": "说服船工", "narration": "船工交出一把旧钥匙，但要求你们先销毁航海图。"},
+    {"round": 16, "actions": "保留航海图", "narration": "你们保留航海图，船工转而指出通往灯塔的暗流。"},
+    {"round": 17, "actions": "驶入暗流", "narration": "暗流把小船推向礁岛，远处灯塔亮起两短一长。"},
+    {"round": 18, "actions": "回应灯光", "narration": "铜片回应同样的节奏，灯塔的门随即打开。"},
+    {"round": 19, "actions": "进入灯塔", "narration": "灯塔内部没有楼梯，只有通往海下的铁门。"},
+    {"round": 20, "actions": "检查铁门", "narration": "铁门上的盐渍与第一扇门完全相同，线索重新闭合。"}
+  ]
+}
