@@ -1451,8 +1451,18 @@ class Dnd2024CombatEngine(
         )
         return ids
 
-    #: 结束形状的三个"非主动"原因。
-    _SHAPE_EXIT_REASONS = ("death", "incapacitated", "expired")
+    #: 结束形状的四个"非主动"原因。
+    _SHAPE_EXIT_REASONS = ("death", "incapacitated", "expired", "unavailable")
+
+    def _active_form_payload(self, instance: Any, actor_id: str) -> dict[str, Any] | None:
+        """The stored active shape of one player actor, read without composing a panel."""
+
+        kind, raw_id = _actor_kind(str(actor_id or ""))
+        if kind != "player" or raw_id not in (getattr(instance, "players", {}) or {}):
+            return None
+        forms = _canonical(instance.get_character_sheet(raw_id)).get("forms")
+        active = forms.get("active") if isinstance(forms, dict) else None
+        return active if isinstance(active, dict) else None
 
     def _shape_exit_events(
         self, instance: Any, combat: dict[str, Any],
@@ -1469,7 +1479,15 @@ class Dnd2024CombatEngine(
         for actor_id in self._combat_actor_ids(instance, combat):
             try:
                 view = self._actor_view(instance, combat, actor_id)
-            except CombatIntentError:  # pragma: no cover - came from combat
+            except CombatIntentError:
+                if self._active_form_payload(instance, actor_id) is not None:
+                    # 存档里的形态引用已经读不出 stat block（目录改名、内容包停用）。
+                    # 视图层按约定拒绝猜一份面板，但留着这条记录，这个角色就做不了
+                    # 任何意图——包括变回原形——轮到他时整桌都走不下去。这里结束它。
+                    events.append({
+                        "type": "dnd2024.form.reverted", "actor_id": actor_id,
+                        "reason": "unavailable",
+                    })
                 continue
             form = view.get("form_ref")
             if not form:
@@ -1554,7 +1572,9 @@ class Dnd2024CombatEngine(
         turn_index = int(combat.get("turn_index", 0) or 0)
         insert_index = max(0, min(len(order), turn_index + 1))
         canonical = _canonical(instance.get_character_sheet(str(user_id)))
-        modifier = int(canonical.get("derived", {}).get("initiative", 0) or 0)
+        modifier = self._initiative_modifier(
+            canonical, self._initiative_view(instance, str(user_id), canonical),
+        )
         roll = SystemRandom().randint(1, 20)
         expected_version = int(state.get("version", 0) or 0)
         intent = {
