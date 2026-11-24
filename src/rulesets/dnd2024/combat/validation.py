@@ -22,7 +22,6 @@ from .action_adapter import is_supported_damage_formula
 from ..features.models import ClassFeatureError
 from ..features.resources import (
     long_effect_active,
-    world_minutes,
     OVERCHANNEL_FEATURE_ID,
     OVERCHANNEL_OWNER,
     OVERCHANNEL_SPELL_CLASS,
@@ -50,6 +49,7 @@ from ..spells.font_of_magic import (
 from .cover import COVER_LEVELS
 from .obscurement import OBSCUREMENT_LEVELS
 from .primitives import (
+    world_minutes,
     CONDITION_CODES,
     DICE_RE,
     INITIATIVE_CHOICES,

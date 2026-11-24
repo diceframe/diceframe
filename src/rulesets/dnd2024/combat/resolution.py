@@ -51,10 +51,10 @@ from .action_adapter import (
 from ..features.resources import (
     feature_usage_count,
     long_effect_active,
-    world_minutes,
 )
 from ..character.derivation import proficiency_bonus
 from .primitives import (
+    world_minutes,
     roll,
     ABJURE_FOES_DURATION,
     INTIMIDATING_PRESENCE_DURATION,

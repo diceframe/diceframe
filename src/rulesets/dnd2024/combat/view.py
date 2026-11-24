@@ -17,13 +17,13 @@ from src.rulesets.dnd2024.features.resources import (
     OVERCHANNEL_OWNER,
     OVERCHANNEL_SPELL_CLASS,
     fly_speed_from,
-    world_minutes,
 )
 from src.rulesets.dnd2024.spells.casting import spell_caster, spellcasting_projection
 
 from .check_modes import marked_target_id, sense_declarations
 from .check_windows import LUCKY_RESOURCE
 from .primitives import (
+    world_minutes,
     DIVINE_SENSE_CONDITION,
     FEATURE_STATE_KEYS,
     CombatIntentError,

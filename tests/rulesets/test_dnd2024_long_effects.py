@@ -156,7 +156,7 @@ def draconic(bundle):
 
 
 def _fly_speed(instance) -> int:
-    from src.rulesets.dnd2024.features.resources import world_minutes
+    from src.rulesets.dnd2024.combat.primitives import world_minutes
     from src.rulesets.dnd2024.features.resources import fly_speed_from
 
     character = instance.get_character_sheet("gm")["ruleset_character"]
@@ -270,7 +270,7 @@ def test_an_enemy_outside_the_aura_is_untouched(devotion20) -> None:
 
 def test_the_aura_stops_when_the_world_clock_passes_ten_minutes(devotion20) -> None:
     from src.engine.world_state import clock_from_minutes
-    from src.rulesets.dnd2024.features.resources import world_minutes
+    from src.rulesets.dnd2024.combat.primitives import world_minutes
     from src.rulesets.dnd2024.features.resources import long_effect_active
 
     engine, instance = _setup(devotion20)

@@ -65,6 +65,34 @@ SMITE_OF_PROTECTION_DURATION = "actor_turn_start"
 ABJURE_FOES_DURATION = "abjure_foes"
 #: S0-F30：恐惧来自 Berserker 的特性而不是圣武士的引导神力，时长同为一分钟，
 #: 但解除条件与免疫来源不同，所以它是自己的 duration 而不是复用上面那条。
+MINUTES_PER_DAY = 1440
+
+
+def world_minutes(instance: Any) -> int:
+    """Absolute logical minute of the world clock; 0 when unset.
+
+    与 ``ruleset_rest._rest_tick`` 同一口径。这里**不 import** ``world_state``：
+    ``src.rulesets`` 不许直接触达 World Runtime，只能读已经投影在 instance 上的
+    时钟字段——换算公式与 ``engine.world.contracts.clock_minutes`` 一致。
+    """
+
+    state = getattr(instance, "world_state", None)
+    raw = state.get("clock") if isinstance(state, dict) else None
+    if not isinstance(raw, dict):
+        payload = getattr(state, "payload", None)
+        raw = payload.get("clock") if isinstance(payload, dict) else None
+    if not isinstance(raw, dict):
+        return 0
+    day, minute = raw.get("day"), raw.get("minute")
+    if isinstance(day, bool) or not isinstance(day, int) or day < 1:
+        return 0
+    if isinstance(minute, bool) or not isinstance(minute, int):
+        return 0
+    if not 0 <= minute < MINUTES_PER_DAY:
+        return 0
+    return (day - 1) * MINUTES_PER_DAY + minute
+
+
 INTIMIDATING_PRESENCE_DURATION = "intimidating_presence"
 TURNS_SCOPED_DURATIONS = frozenset({
     TURN_UNDEAD_DURATION, ABJURE_FOES_DURATION, INTIMIDATING_PRESENCE_DURATION,

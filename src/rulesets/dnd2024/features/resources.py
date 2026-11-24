@@ -320,19 +320,6 @@ def reset_feature_usage(
 LONG_EFFECTS_KEY = "long_effects"
 
 
-def world_minutes(instance: Any) -> int:
-    """The world clock as an absolute minute; 0 when unset.
-
-    与 ``ruleset_rest._rest_tick`` 同一口径。放在这里是因为它只服务长时
-    效果的到期判定；局部导入 engine 的模块，避免 features 反向依赖。
-    """
-
-    from src.engine.world_state import clock_to_minutes, world_clock
-
-    minutes = clock_to_minutes(world_clock(getattr(instance, "world_state", None)))
-    return minutes if isinstance(minutes, int) and minutes >= 0 else 0
-
-
 def long_effects(character):
     """The live long-effect records, defensively copied."""
 
