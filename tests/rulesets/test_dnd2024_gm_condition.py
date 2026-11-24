@@ -34,12 +34,14 @@ def _apply(engine, instance, resolved: dict) -> list[dict]:
 def _declare(
     engine, instance, *, condition: str, action: str = "apply",
     target_id: str = "enemy:goblin-1", submitted_by: str = "gm",
+    duration: object = None,
 ) -> dict:
     state = _state(instance)
     return engine.resolve_intent(instance, {
         "intent_id": f"gm-cond-{condition}-{action}-{state['version']}-{target_id}",
         "type": "gm_condition",
         "expected_version": int(state.get("version", 0) or 0),
+        **({"duration": duration} if duration is not None else {}),
         "submitted_by": submitted_by,
         "target_id": target_id,
         "condition": condition,
@@ -249,3 +251,53 @@ def test_effects_are_found_from_their_source_without_a_stored_back_pointer():
     ]
     assert catalog.effects_for_source("mastery:vex") == ["next_attack_advantage"]
     assert catalog.effects_for_source("nobody:none") == []
+
+
+def test_a_condition_cannot_be_declared_as_both_a_state_and_an_effect():
+    """合并视图里效应会盖掉同名的规则书状态；那必须是一次加载失败，而不是静默覆盖。"""
+    from copy import deepcopy
+
+    import pytest
+
+    from src.rulesets.dnd2024 import Dnd2024Runtime
+    from src.rulesets.dnd2024.combat.catalog import CombatCatalogError, Dnd2024CombatCatalog
+
+    base = Dnd2024Runtime().load_bundle("en")
+    effects = deepcopy(base.get("combat_catalog", "srd_combat_core")["condition_effects"])
+
+    class _Bundle:
+        def get(self, kind, ident=None):
+            if kind == "combat_catalog":
+                raw = deepcopy(base.get(kind, ident))
+                raw["condition_effects"] = deepcopy(effects)
+                return raw
+            return base.get(kind, ident)
+
+        def list(self, kind):
+            return base.list(kind)
+
+    # 原样加载不变。
+    Dnd2024CombatCatalog.from_bundle(_Bundle())
+
+    effects["prone"] = {"kind": "effect", "source_ref": "spell:fake", "speed_zero": True}
+    with pytest.raises(CombatCatalogError, match="both sections"):
+        Dnd2024CombatCatalog.from_bundle(_Bundle())
+
+
+def test_a_condition_duration_must_be_a_marker_the_engine_can_honour():
+    engine, instance = _combat()
+
+    # 认不出的时长既不会到期、也不随战斗结束清除，状态会一直留在角色卡上。
+    # 带来源的标记对 GM 施加的状态同样永远不会到期（它没有来源生物）。
+    for bad in ("3 rounds", "1 hour", "caster_turn_end", 10):
+        resolved = _declare(engine, instance, condition="poisoned", duration=bad)
+        assert resolved["ok"] is False, bad
+        assert "condition duration must be one of" in resolved["error"], bad
+
+    events = _apply(
+        engine, instance, _declare(engine, instance, condition="poisoned", duration="combat"),
+    )
+    applied = [event for event in events if event["type"] == "condition.applied"]
+    assert applied[0]["duration"] == "combat"
+    stored = _actor_conditions(instance, "enemy:goblin-1")["poisoned"]
+    assert stored["duration"] == "combat"

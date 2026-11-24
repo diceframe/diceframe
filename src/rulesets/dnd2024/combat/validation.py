@@ -50,6 +50,7 @@ from .obscurement import OBSCUREMENT_LEVELS
 from .primitives import (
     CONDITION_CODES,
     DICE_RE,
+    GM_CONDITION_DURATIONS,
     INITIATIVE_CHOICES,
     INTENT_TYPES,
     MAX_ATTACK_DAMAGE_PARTS,
@@ -948,6 +949,16 @@ class CombatValidationMixin:
             if action == "apply" and condition not in self.catalog.gm_appliable_conditions():
                 raise CombatIntentError(
                     f"{condition} is not a condition the GM can apply"
+                )
+            duration = intent.get("duration")
+            if duration is not None and (
+                not isinstance(duration, str) or duration not in GM_CONDITION_DURATIONS
+            ):
+                # 时长是引擎的标记，不是自由文本：认不出的标记既不会到期，也不随
+                # 战斗结束清除，状态会一直留在角色卡上。
+                raise CombatIntentError(
+                    "condition duration must be one of "
+                    f"{sorted(GM_CONDITION_DURATIONS)}"
                 )
             kind, raw_id = _actor_kind(target_id)
             if kind == "player":

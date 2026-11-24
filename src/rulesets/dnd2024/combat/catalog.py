@@ -330,6 +330,13 @@ class Dnd2024CombatCatalog:
         # 顶层 ``effects`` 是 bundle 自己保留的字段（实体效果操作数组），
         # 所以状态效应目录用 ``condition_effects``，避免撞名。
         condition_effects = cls._validated_conditions(raw.get("condition_effects"))
+        overlap = sorted(set(states) & set(condition_effects))
+        if overlap:
+            # 合并视图里后者会无声盖掉前者：一条规则书状态就这样变成不可手工施加
+            # 的效应，而没有任何地方报错。
+            raise CombatCatalogError(
+                f"combat condition is declared in both sections: {overlap}"
+            )
         # 解释器（condition_flags / attack_modes / resist）只按 flag 取值，
         # 所以运行时必须看到合并视图；分表的目的是"谁能被手工施加"。
         conditions = {**states, **condition_effects}
