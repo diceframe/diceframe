@@ -78,15 +78,18 @@ class CombatTriggeredSpellsMixin:
         ]
         return decision if choices else None
 
-    def _spell_cost_events(self, actor, spell, slot_level, *, spend_action=True):
+    def _spell_cost_events(
+        self, actor, spell, slot_level, *, spend_action=True, quickened=False,
+    ):
         # 反应法术（护盾术）不占用动作经济里的动作，由调用方另记 reaction.spent。
+        # Quickened Spell 把这次施法的成本从动作换成附赠动作：换的是**哪一项**，
+        # 不是"多扣一项"，所以仍只有一条 action.spent。
+        as_bonus = quickened or str(spell["casting_time"]).startswith("Bonus Action")
         events = [
             {
                 "type": "dnd2024.action.spent",
                 "actor_id": actor["actor_id"],
-                "resource": "bonus_action"
-                if str(spell["casting_time"]).startswith("Bonus Action")
-                else "action",
+                "resource": "bonus_action" if as_bonus else "action",
                 "amount": 1,
             }
         ] if spend_action else []
@@ -117,13 +120,11 @@ class CombatTriggeredSpellsMixin:
         # （震慑击、散手技巧）在直通路径由 ``_resolve_committed_hit`` 结算，
         # 决策路径若漏掉它们，会变成"有至圣斩窗口的角色悄悄少了半个特性"。
         attacker_id = str(decision["actor_id"])
-        # 第二段伤害与 stat block rider 也在这一层结算：这条路径同样是"命中
-        # 落地"，它若漏掉，有至圣斩窗口的攻击就会少打一段、也少了击倒。
-        tail_events, tail_damage = self._hit_tail_events(
-            instance, combat, attacker_id, target, decision["damage_event"], rng,
+        rider_events, rider_damage = self._hit_rider_events(
+            combat, target, decision["damage_event"], rng, attacker_id=attacker_id,
         )
-        events.extend(tail_events)
-        total = int(decision["damage_event"]["amount"]) + tail_damage
+        events.extend(rider_events)
+        total = int(decision["damage_event"]["amount"]) + rider_damage
         if extra_damage:
             events.append(extra_damage)
             total += int(extra_damage["amount"])

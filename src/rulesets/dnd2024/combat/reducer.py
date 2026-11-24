@@ -544,6 +544,24 @@ class CombatReducerMixin:
             current = current if isinstance(current, dict) else {}
             block[feature_id] = {**deepcopy(current), **deepcopy(values)}
             return
+        if event_type == "dnd2024.metamagic.rerolled":
+            # 纯审计事件：谁把哪几颗骰子重掷了、前值后值各是多少。
+            return
+        if event_type == "dnd2024.metamagic.applied":
+            # 记录发生在哪一次施法上：审计需要"这个法术被改了哪几处"，
+            # 而不是只有一条扣点流水。
+            if "quickened_spell" in (event.get("options") or []):
+                combat.setdefault("economy", {})["quickened_cast"] = True
+            combat.setdefault("metamagic_log", []).append({
+                "actor_id": str(event["actor_id"]),
+                "options": [str(item) for item in event.get("options") or []],
+                "cost": int(event.get("cost", 0) or 0),
+            })
+            return
+        if event_type == "dnd2024.metamagic.free_used":
+            # Apotheosis 的免费额度每回合一次：标记跟着当前回合清。
+            combat["economy"]["free_metamagic_used"] = True
+            return
         if event_type == "dnd2024.wild_resurgence.used":
             # 每个自己的回合一次：标记跟着"当前回合的 actor"走，换人就失效。
             if event.get("turn_limited"):
@@ -901,6 +919,12 @@ class CombatReducerMixin:
                 raise EventBatchError("sustained condition is not active")
             conditions[condition_id]["sustained_this_turn"] = True
             return
+        if event_type == "dnd2024.spell.cast":
+            # 本回合施放过 1 环+ 法术：Quickened 的双向互斥读这一条，而不是
+            # 只认"扣过法术位"——免费施法与专长来源都不扣位。
+            if int(event.get("slot_level", 0) or 0) >= 1:
+                combat.setdefault("economy", {})["cast_level_one_plus"] = True
+            return
         if event_type == "dnd2024.spell.slot_spent":
             kind, raw_id = _actor_kind(str(event["actor_id"]))
             if kind not in {"player", "companion"}:
@@ -1000,6 +1024,8 @@ class CombatReducerMixin:
                     instance["mark_target_id"] = str(event["mark_target_id"])
                 if event.get("mark_expires_hours") is not None:
                     instance["mark_expires_hours"] = int(event["mark_expires_hours"])
+                if event.get("extended"):
+                    instance["extended"] = True
                 concentration_holder(self._canonical_of(snapshot, kind, raw_id))[
                     "concentration"
                 ] = instance

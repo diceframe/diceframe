@@ -134,6 +134,8 @@ INTENT_TYPES = frozenset({
     "wild_resurgence", "nature_magician",
     # S0-F26：Circle of the Land 的两个主动能力。
     "land_aid", "nature_sanctuary",
+    # S0-F28：Innate Sorcery 的开启是附赠动作。
+    "innate_sorcery",
     # 职业特性提供的战斗能力：Combat 只认 capability id、动作/资源成本与底层
     # canonical action，"哪个职业在第几级授予它" 由 feature boundary 回答。
     "class_capability",
@@ -161,6 +163,9 @@ RELENTLESS_RAGE_DECISION = "relentless_rage"
 FEATURE_STATE_KEYS = {
     "relentless_rage": frozenset({"next_dc"}),
     "fiendish_resilience": frozenset({"damage_type"}),
+    # S0-F28：超魔选项是角色级选择。不投影它，战斗里的 known 就恒为空，
+    # 所有选项都会以 "not known" 被拒。
+    "metamagic": frozenset({"known"}),
 }
 
 

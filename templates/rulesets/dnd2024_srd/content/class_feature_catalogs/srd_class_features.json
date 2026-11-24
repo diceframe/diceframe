@@ -2039,6 +2039,50 @@
             "max_hp_bonus_first": 3,
             "max_hp_bonus_per_level_after": 1
           }
+        },
+        {
+          "id": "innate_sorcery",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p65:innate-sorcery",
+          "summary": "Bonus Action, 1 minute: your Sorcerer spell save DC increases by 1 and you have Advantage on the attack rolls of Sorcerer spells you cast. Twice per Long Rest.",
+          "parameters": {
+            "uses": 2,
+            "spell_save_dc_bonus": 1,
+            "duration_minutes": 1
+          }
+        },
+        {
+          "id": "metamagic",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p66:metamagic",
+          "summary": "You know two Metamagic options and can apply one to a spell you cast (two while Sorcery Incarnate is active). You gain two more at levels 10 and 17, and may replace one whenever you gain a Sorcerer level.",
+          "parameters": {
+            "options_per_step": 2,
+            "steps": [
+              2,
+              10,
+              17
+            ]
+          }
+        },
+        {
+          "id": "sorcery_incarnate",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p66:sorcery-incarnate",
+          "summary": "With no Innate Sorcery uses left, spend 2 Sorcery Points to activate it. While it is active you can apply up to two Metamagic options to each spell.",
+          "parameters": {
+            "reactivate_points": 2,
+            "metamagic_slots": 2
+          }
+        },
+        {
+          "id": "arcane_apotheosis",
+          "minimum_level": 20,
+          "source_ref": "srd-5.2.1:p66:arcane-apotheosis",
+          "summary": "While Innate Sorcery is active you can use one Metamagic option on each of your turns without spending Sorcery Points on it.",
+          "parameters": {
+            "free_metamagic_per_turn": 1
+          }
         }
       ]
     },

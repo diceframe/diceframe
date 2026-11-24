@@ -45,6 +45,16 @@ def _advance(runtime: Dnd2024Runtime, sheet: dict, target_level: int) -> dict:
                     option for option in requirement["options"] if option.get("available")
                 ]
                 answers[requirement_id] = str(available[0]["value"])
+            elif requirement.get("kind") == "metamagic":
+                count = int(requirement.get("count", 1) or 1)
+                answers["metamagic_option_ids"] = [
+                    str(row["value"]) for row in requirement.get("options") or []
+                ][:count]
+            elif requirement.get("kind") == "known_forms":
+                count = int(requirement.get("count", 1) or 1)
+                answers["known_form_refs"] = [
+                    str(row["value"]) for row in requirement.get("options") or []
+                ][:count]
             elif requirement_id == "ability_score_increases":
                 answers["ability_score_increases"] = {
                     "con": int(requirement.get("total", 2)),

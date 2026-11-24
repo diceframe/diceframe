@@ -633,6 +633,22 @@ class Dnd2024ClassFeatureResolver:
     # always-prepared spell grants
     # ------------------------------------------------------------------
 
+    def metamagic_known(self, character: Mapping[str, Any] | None) -> dict[str, Any]:
+        """The Metamagic options this character chose, as a lookup.
+
+        Parsed from ``features.metamagic.known``; the advancement step writes it
+        at levels 2/10/17 and can replace one entry per level gained.  An absent
+        or malformed record yields nothing -- the read path must not invent a
+        known option, because that would hand out free points.
+        """
+
+        features = (character or {}).get("features")
+        block = features.get("metamagic") if isinstance(features, Mapping) else None
+        raw = block.get("known") if isinstance(block, Mapping) else None
+        if not isinstance(raw, list):
+            return {}
+        return {str(item): {} for item in raw if isinstance(item, str) and item}
+
     def spell_grant_choices(
         self, character: Mapping[str, Any] | None,
     ) -> dict[str, dict[str, Any]]:

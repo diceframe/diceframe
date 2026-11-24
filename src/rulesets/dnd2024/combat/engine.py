@@ -1173,6 +1173,8 @@ class Dnd2024CombatEngine(
             events.extend(self._basic_action_events(combat, intent_type, str(intent["actor_id"])))
         elif intent_type == "hide":
             events.extend(self._hide_events(instance, combat, intent, rng))
+        elif intent_type == "innate_sorcery":
+            events.extend(self._innate_sorcery_events(instance, combat, intent))
         elif intent_type == "land_aid":
             events.extend(self._land_aid_events(instance, combat, intent, rng))
         elif intent_type == "nature_sanctuary":
@@ -2119,8 +2121,14 @@ class Dnd2024CombatEngine(
             # 不带 ``success`` 当成失败，会为一次不需要的豁免开窗口。
             return []
         dc = max(10, damage // 2)
-        roll = int(rng.randint(1, 20))
         modifier = int(target["saving_throws"].get("con", 0) or 0)
+        concentration = target.get("concentration")
+        extended = bool(
+            isinstance(concentration, dict) and concentration.get("extended")
+        )
+        first = int(rng.randint(1, 20))
+        second = int(rng.randint(1, 20)) if extended else None
+        roll = max(first, second) if extended else first
         # 专注维持是一次体质豁免，条件声明的豁免加值骰同样生效。
         check_bonus_rolls = condition_check_bonus_rolls(
             self.catalog.conditions, target.get("conditions") or {}, "saving_throw", rng,
@@ -2133,7 +2141,10 @@ class Dnd2024CombatEngine(
         success = total >= dc
         events: list[dict[str, Any]] = [{
             "type": "check.resolved", "kind": "concentration", "actor_id": target["actor_id"],
-            "rolls": [roll], "natural": roll, "modifier": modifier,
+            "rolls": [value for value in (first, second) if value is not None],
+            "natural": roll, "modifier": modifier,
+            **({"advantage_sources": [{"code": "extended_spell", "mode": "advantage"}]}
+               if extended else {}),
             "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
             "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
             "total": total, "target": dc, "success": success,

@@ -93,6 +93,50 @@ describe('D&D 2024 advancement panel', () => {
     mocks.complete.mockReset()
   })
 
+  it('collects the Metamagic picks a Sorcerer level requires', async () => {
+    mocks.preview.mockResolvedValue({
+      ok: true,
+      rule_id: 'dnd2024_srd',
+      advancement: {
+        ok: true, errors: [], from_level: 1, to_level: 2,
+        requirements: [
+          {
+            id: 'metamagic_option_ids', kind: 'metamagic', count: 2,
+            options: [
+              { value: 'subtle_spell', name: 'Subtle Spell' },
+              { value: 'quickened_spell', name: 'Quickened Spell' },
+              { value: 'distant_spell', name: 'Distant Spell' },
+            ],
+          },
+        ],
+        class_ref: 'class:sorcerer', source_ref: 'srd-5.2.1:p66:metamagic',
+        content_version: 'srd-5.2.1+r2',
+        diff: {
+          proficiency_bonus: { before: 2, after: 2 }, hp: { gain: 6 },
+          gained_feature_ids: ['metamagic'], spell_slot_changes: {}, abilities: {},
+        },
+        snapshot: {},
+      },
+    })
+    const wrapper = mount(Dnd2024AdvancementPanel, {
+      props: { ruleId: 'dnd2024_srd', character, language: 'en' },
+    })
+    await flushPromises()
+
+    const boxes = wrapper.findAll('input[type="checkbox"]')
+    expect(boxes.length).toBeGreaterThanOrEqual(2)
+    await boxes[0].setValue(true)
+    await flushPromises()
+    await boxes[1].setValue(true)
+    await flushPromises()
+
+    const sent = mocks.preview.mock.calls.at(-1)?.[2] ?? mocks.preview.mock.calls.at(-1)?.[1]
+    expect(JSON.stringify(sent)).toContain('metamagic_option_ids')
+    // 选满两个后，第三个不再可选（上限来自后端 count）。
+    expect((wrapper.findAll('input[type="checkbox"]')[2].element as HTMLInputElement).disabled)
+      .toBe(true)
+  })
+
   it('shows an exact before/after preview and applies only a valid plan', async () => {
     const wrapper = mount(Dnd2024AdvancementPanel, {
       props: { ruleId: 'dnd2024_srd', character, language: 'en' },

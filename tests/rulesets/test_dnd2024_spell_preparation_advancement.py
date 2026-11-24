@@ -107,20 +107,21 @@ def test_sorcerer_may_swap_exactly_one_while_gaining_capacity(
     block = _magic(sorcerer)
     kept = block["prepared_spell_refs"][:1]
 
-    preview = engine.preview_next_level(sorcerer, {"class_spell_choices": {
-        "cantrip_refs": list(block["cantrip_refs"]),
-        "prepared_spell_refs": [
-            *kept, "spell:chromatic_orb", "spell:color_spray", "spell:comprehend_languages",
-        ],
-    }})
+    # 2 级同时是 Metamagic 的授予级：超魔是升级的必要条件，不选不能确认。
+    choices = {
+        "class_spell_choices": {
+            "cantrip_refs": list(block["cantrip_refs"]),
+            "prepared_spell_refs": [
+                *kept, "spell:chromatic_orb", "spell:color_spray",
+                "spell:comprehend_languages",
+            ],
+        },
+        "metamagic_option_ids": ["subtle_spell", "quickened_spell"],
+    }
+    preview = engine.preview_next_level(sorcerer, choices)
 
     assert preview["ok"] is True, _errors(preview)
-    applied = engine.apply_next_level(sorcerer, {"class_spell_choices": {
-        "cantrip_refs": list(block["cantrip_refs"]),
-        "prepared_spell_refs": [
-            *kept, "spell:chromatic_orb", "spell:color_spray", "spell:comprehend_languages",
-        ],
-    }})
+    applied = engine.apply_next_level(sorcerer, choices)
     assert applied["build"]["level"] == 2
     assert len(_magic(applied)["prepared_spell_refs"]) == 4
 

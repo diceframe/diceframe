@@ -1033,6 +1033,13 @@ class CombatViewMixin:
                 }
                 if effect.get("target_scope"):
                     row["target_scope"] = effect["target_scope"]
+                # Innate Sorcery 的 +1 DC 与攻击优势只对"术士法术"生效，而是否为
+                # 术士法术是法术自身的法表归属，不是施法者属性。投影出来，面板才
+                # 能解释同一角色身上为什么有的法术吃到 +1、有的吃不到。
+                row["innate_sorcery_applies"] = bool(
+                    "innate_sorcery" in (actor.get("conditions") or {})
+                    and self.is_sorcerer_spell(spell)
+                )
                 if spell_range != int(effect["range"]):
                     # 被特性改写过的射程要能对账：前端显示的是和，不是原文。
                     row["range_base"] = int(effect["range"])

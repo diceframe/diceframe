@@ -2603,8 +2603,31 @@ class CombatResolutionMixin:
             return 0
         return ability_modifier(actor["abilities"].get(ability, 10))
 
+    @staticmethod
+    def is_sorcerer_spell(spell: dict[str, Any]) -> bool:
+        """Whether this spell is on the Sorcerer list.
+
+        Innate Sorcery's +1 DC and attack Advantage are limited to "your
+        Sorcerer spells", so the list membership -- not the caster's level -- is
+        what decides.  A multiclass caster's Wizard spell keeps its own DC.
+        """
+
+        return "class:sorcerer" in (spell.get("class_refs") or ())
+
+    def _spell_save_dc(self, actor: dict[str, Any], spell: dict[str, Any]) -> int:
+        """The DC for *this* spell: base, plus Innate Sorcery when it applies."""
+
+        base = int(actor.get("spell_save_dc", 0) or 0)
+        if (
+            self.is_sorcerer_spell(spell)
+            and "innate_sorcery" in (actor.get("conditions") or {})
+        ):
+            return base + 1
+        return base
+
     def _spell_effective_range(
         self, actor: dict[str, Any], spell: dict[str, Any], effect: dict[str, Any],
+        metamagic_plan: Any = None,
     ) -> int:
         """``effect["range"]`` after the Druid 15 Elemental Fury upgrade.
 
@@ -2616,6 +2639,19 @@ class CombatResolutionMixin:
         """
 
         base = int(effect["range"])
+        if metamagic_plan is not None and metamagic_plan.has("distant_spell"):
+            # Distant Spell：射程 ≥5 尺翻倍；触及变 30 尺。Self 不变——"自己"
+            # 没有可以拉长的距离。
+            text = str(effect.get("range_text") or spell.get("range") or "").lower()
+            if text.startswith("self"):
+                return base
+            # Touch 在数据里也编码成 range: 5，所以看文本而不是看数值，
+            # 否则 Cure Wounds 会被"翻倍"成 10 尺。
+            if text.startswith("touch"):
+                return 30
+            if base < 5:
+                return 30
+            return base * 2
         if self._potent_spellcasting_owner(actor, spell) != "class:druid":
             return base
         character = self._feature_character(actor)
@@ -3493,6 +3529,7 @@ class CombatResolutionMixin:
     def _obscuring_zone_event(
         self, combat: dict[str, Any], intent: dict[str, Any], effect: dict[str, Any],
         actor_id: str, spell_ref: str, slot_level: int, target_ids: list[str],
+        spell: dict[str, Any] | None = None, plan: Any = None,
     ) -> dict[str, Any]:
         """The zone a cast leaves behind: a fact on the battlefield, no targets.
 
@@ -3517,8 +3554,117 @@ class CombatResolutionMixin:
             "caster_id": actor_id,
             "concentration": bool(effect.get("concentration")),
             "slot_level": slot_level,
-            "rounds_left": int(effect.get("duration_rounds", 10) or 10),
+            "rounds_left": self._duration_for(
+                effect, spell, slot_level, plan,
+            ).rounds or 10,
         }
+
+    def _duration_for(
+        self, effect: dict[str, Any], spell: dict[str, Any] | None,
+        slot_level: int, plan: Any,
+    ) -> Any:
+        """One place that answers "how long does this cast last".
+
+        Base comes from the catalogue (rounds / condition code / mark hours),
+        upcasting adds its own increments, and Extended Spell doubles the
+        result — all in `spells.duration`, so zones, conditions and marks can
+        never disagree.
+        """
+
+        from ..spells import duration
+
+        extended = bool(plan is not None and plan.has("extended_spell"))
+        return duration.effective(
+            effect, spell, slot_level=int(slot_level or 0), extended=extended,
+        )
+
+    def _damage_roll(
+        self, damage_node: Any, plan: Any, rng: Any, *, allow_metamagic: bool = True,
+    ) -> tuple[int, list[int], dict[str, Any] | None]:
+        """Roll spell damage, then let Empowered Spell reroll the lowest dice.
+
+        Re-rolling the *same node* is what keeps each die's size honest: the
+        second pass draws d6/d8/d10 exactly where the first did, and only the
+        chosen positions are adopted.  Picking the lowest dice is what a player
+        would do after seeing them, and it keeps the server the only roller --
+        the client never receives dice and sends back a "chosen" subset.
+        """
+
+        damage, rolls = roll_damage_node(damage_node, rng)
+        if not allow_metamagic or plan is None or not plan.has("empowered_spell"):
+            return damage, rolls, None
+        count = int(plan.parameter("empowered_spell") or 0)
+        if count <= 0 or not rolls:
+            return damage, rolls, None
+        chosen = sorted(range(len(rolls)), key=lambda index: rolls[index])[
+            : min(count, len(rolls))
+        ]
+        _second, second_rolls = roll_damage_node(damage_node, rng)
+        updated = list(rolls)
+        for index in chosen:
+            updated[index] = second_rolls[index]
+        empowered = {
+            "dice": chosen,
+            "before": [rolls[index] for index in chosen],
+            "after": [updated[index] for index in chosen],
+        }
+        return damage + (sum(updated) - sum(rolls)), updated, empowered
+
+    def _metamagic_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor_id: str, spell: dict[str, Any], effect: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any], Any]:
+        """Settle the modifiers: pay the points, then hand back the effect.
+
+        Transmuted Spell is applied by rewriting the *effect's* damage type on a
+        copy, because every consumer below (damage, resistance, riders) reads
+        that field and must see one answer.
+        """
+
+        from ..spells import metamagic
+
+        if not (intent.get("metamagic") or []):
+            return [], effect, None
+        character = self._canonical_for_actor(instance, actor_id)
+        stored = self.features.metamagic_known(character)
+        known = {option_id: {} for option_id in stored}
+        economy = combat.get("economy") or {}
+        active = "innate_sorcery" in (character.get("conditions") or {})
+        plan = metamagic.plan(
+            intent,
+            spell=spell,
+            effect=effect,
+            known=known,
+            points=int((character.get("resources") or {}).get("class", {})
+                       .get("sorcery_points", {}).get("current", 0) or 0),
+            incarnate=active and self.features.has_feature(
+                character, "sorcery_incarnate",
+            ),
+            apotheosis=active and self.features.has_feature(
+                character, "arcane_apotheosis",
+            ),
+            free_used_this_turn=bool(economy.get("free_metamagic_used")),
+            cast_level_one_plus_this_turn=bool(economy.get("cast_level_one_plus")),
+        )
+        events: list[dict[str, Any]] = []
+        if plan.cost:
+            events.append({
+                "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+                "resource_id": "sorcery_points", "amount": plan.cost,
+            })
+        if plan.free_used:
+            events.append({
+                "type": "dnd2024.metamagic.free_used", "actor_id": actor_id,
+            })
+        events.append({
+            "type": "dnd2024.metamagic.applied", "actor_id": actor_id,
+            "options": list(plan.applied), "cost": plan.cost,
+        })
+        if plan.has("transmuted_spell"):
+            changed = dict(effect)
+            changed["damage_type"] = plan.parameter("transmuted_spell")
+            effect = changed
+        return events, effect, plan
 
     def _spell_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
@@ -3538,13 +3684,20 @@ class CombatResolutionMixin:
             # 不扣任何施法资源，也不重置剩余时长。
             return self._mark_retarget_events(instance, combat, intent, effect)
         slot_level = int(intent.get("slot_level", spell["level"]) or 0)
+        metamagic_events, effect, metamagic_plan = self._metamagic_events(
+            instance, combat, intent, actor_id, spell, effect,
+        )
         # 一次施法只有一个启用状态：所有目标、所有射线共享它。
         overchannel = bool(intent.get("overchannel"))
         target_ids = intent.get("target_ids")
         if not isinstance(target_ids, list):
             target_ids = [intent.get("target_id")]
         target_ids = [str(item) for item in target_ids if item]
-        events: list[dict[str, Any]] = [
+        # 一次施放只允许一次 Empowered / Seeking：多目标与多射线共享同一个
+        # "已用过"的标记，否则 1 点就能在三束 Magic Missile 上各重掷一次。
+        empowered_spent = False
+        seeking_spent = False
+        events: list[dict[str, Any]] = metamagic_events + [
             # 施法本身就会终止"施法即结束"的旧法术（例如隐形术的自重刷）。
             *self._spell_end_trigger_events(actor, "spell_cast"),
         ]
@@ -3552,7 +3705,11 @@ class CombatResolutionMixin:
             str(event["actor_id"]) for event in events
             if event.get("type") == "dnd2024.concentration.ended"
         }
-        events.extend(self._spell_cost_events(actor, spell, slot_level))
+        events.extend(self._spell_cost_events(
+            actor, spell, slot_level,
+            quickened=bool(metamagic_plan and metamagic_plan.has("quickened_spell")),
+        ))
+
         if effect.get("concentration"):
             if actor.get("concentration") and actor_id not in ended_owners:
                 events.append({
@@ -3563,13 +3720,18 @@ class CombatResolutionMixin:
                 "type": "dnd2024.concentration.started", "actor_id": actor_id,
                 "spell_ref": spell_ref, "target_ids": target_ids,
             }
+            if metamagic_plan is not None and metamagic_plan.has("extended_spell"):
+                # Extended Spell 的"维持专注有优势"跟着这次施放的实例走，
+                # 不是角色的常驻状态：法术结束就该消失。
+                started["extended"] = True
             if effect.get("marks_target"):
                 # 唯一当前目标与剩余时长随实例一起落地：走这条唯一写入点，
                 # 才能保证"一个施法者同时只有一个标记"是数据形状而非约定。
                 started["mark_target_id"] = target_ids[0]
                 started["mark_expires_hours"] = self._mark_duration_hours(
                     effect, slot_level,
-                )
+                ) * (2 if metamagic_plan is not None
+                     and metamagic_plan.has("extended_spell") else 1)
             events.append(started)
         cast_event = {
             "type": "dnd2024.spell.cast", "actor_id": actor_id, "spell_ref": spell_ref,
@@ -3583,6 +3745,7 @@ class CombatResolutionMixin:
             # 那一点"展开并在施放瞬间定死，之后不随生物移动。
             events.append(self._obscuring_zone_event(
                 combat, intent, effect, actor_id, spell_ref, slot_level, target_ids,
+                spell, metamagic_plan,
             ))
             return events
         # Lucky's advantage face declares one extra source for the first
@@ -3615,10 +3778,17 @@ class CombatResolutionMixin:
 
                 visible_actor = _without_consumed_conditions(actor, consumed_conditions)
                 visible_target = _without_consumed_conditions(target, consumed_conditions)
-                extra_sources = (
-                    ({"code": "lucky", "mode": "advantage"},)
-                    if spend_luck and ray_index == 0 else ()
-                )
+                extras: list[dict[str, Any]] = []
+                if spend_luck and ray_index == 0:
+                    extras.append({"code": "lucky", "mode": "advantage"})
+                if (
+                    "innate_sorcery" in (visible_actor.get("conditions") or {})
+                    and self.is_sorcerer_spell(spell)
+                ):
+                    # 原文限定"术士法术"：法师法术即使由同一个多职业角色施放，
+                    # 也不吃这条优势。
+                    extras.append({"code": "innate_sorcery", "mode": "advantage"})
+                extra_sources = tuple(extras)
                 check_mode = attack_mode(
                     self, instance, visible_actor, visible_target, False,
                     extra_sources=extra_sources, combat=combat,
@@ -3648,6 +3818,21 @@ class CombatResolutionMixin:
                     cover["armor_class_bonus"]
                 )
                 succeeded = roll != 1 and (roll == 20 or total >= target_ac)
+                seeking: dict[str, Any] | None = None
+                if (
+                    not succeeded
+                    and not seeking_spent
+                    and metamagic_plan is not None
+                    and metamagic_plan.has("seeking_spell")
+                ):
+                    seeking_spent = True
+                    # Seeking Spell：未命中时重掷 d20 并**必须采用新结果**。
+                    # 只重掷那一颗，加值与掩蔽都不重来。
+                    first = roll
+                    roll = int(rng.randint(1, 20))
+                    total = roll + bonus + check_bonus + sundering_bonus
+                    succeeded = roll != 1 and (roll == 20 or total >= target_ac)
+                    seeking = {"before": first, "after": roll}
                 critical = roll == 20
                 if (
                     succeeded and not critical
@@ -3666,6 +3851,7 @@ class CombatResolutionMixin:
                     consumed_conditions.add((target_id, sundering_condition))
                 events.append({
                     "type": "check.resolved", "kind": "spell_attack", "actor_id": actor_id,
+                    **({"seeking": seeking} if seeking else {}),
                     "target_id": target_id, "rolls": rolls, "natural": roll,
                     "advantage_mode": check_mode["mode"], "advantage_sources": check_mode["sources"],
                     "modifier": bonus,
@@ -3692,7 +3878,16 @@ class CombatResolutionMixin:
                     # 否则重击会把这个固定加值也一起翻倍。
                     damage_node = self._add_potent_spellcasting(actor, spell, damage_node)
                     damage_node = self._maybe_overchannel(intent, damage_node)
-                    damage, rolls = roll_damage_node(damage_node, rng)
+                    damage, rolls, empowered = self._damage_roll(
+                        damage_node, metamagic_plan, rng,
+                        allow_metamagic=not empowered_spent,
+                    )
+                    empowered_spent = empowered_spent or bool(empowered)
+                    if empowered:
+                        events.append({
+                            "type": "dnd2024.metamagic.rerolled",
+                            "actor_id": actor_id, **empowered,
+                        })
                     damage_type = str(
                         intent.get("damage_type") or effect.get("damage_type") or ""
                     )
@@ -3747,13 +3942,36 @@ class CombatResolutionMixin:
                 events.extend(consumed_events)
             elif mode == "saving_throw":
                 save_ability = str(effect["save"])
+                spell_dc = self._spell_save_dc(actor, spell)
+                base_dc = int(actor.get("spell_save_dc", 0) or 0)
+                careful_targets = (
+                    metamagic_plan.parameter("careful_spell")
+                    if metamagic_plan and metamagic_plan.has("careful_spell") else ()
+                )
+                heightened = (
+                    metamagic_plan.parameter("heightened_spell")
+                    if metamagic_plan and metamagic_plan.has("heightened_spell") else ""
+                )
+                forced = ""
+                careful_here = bool(careful_targets and target_id in careful_targets)
+                if careful_here:
+                    forced = "success"
+                elif heightened and str(heightened) == target_id:
+                    forced = "disadvantage"
                 check_event = self._saving_throw_check(
                     instance, combat, target, target_id, save_ability,
-                    int(actor["spell_save_dc"]), actor_id, events, rng,
+                    spell_dc, actor_id, events, rng,
                     # Magic Resistance 只对抗法术的豁免：这一处是唯一由法术
                     # 产出的豁免，其余的（呼吸、rider）不享受它。
                     against_spell=True,
+                    forced_outcome=forced,
                 )
+                if spell_dc != base_dc:
+                    # Innate Sorcery 的 +1 要能在日志里对账：`target` 是实际 DC，
+                    # `dc_base` 是基础值。只把和写进 target 会让"为什么这次是 16
+                    # 不是 15"无据可查。
+                    check_event["dc_base"] = base_dc
+                    check_event["innate_sorcery"] = True
                 if not check_event.get("auto_failed"):
                     # 掩蔽只帮敏捷豁免，Indomitable Might 用力量值替换总值；
                     # 两者都只改总数，掷骰面与 check_bonus 保持原样。自动失败
@@ -3774,7 +3992,7 @@ class CombatResolutionMixin:
                     check_event["cover_interaction"] = cover_axis(effect)[0]
                     check_event.update(replacement)
                     check_event["total"] = total
-                    check_event["success"] = total >= int(actor["spell_save_dc"])
+                    check_event["success"] = total >= spell_dc
                 succeeded = check_event["success"]
                 save_check_index = len(events)
                 events.append(check_event)
@@ -3790,13 +4008,26 @@ class CombatResolutionMixin:
                     # 同一个总数，顺序不能倒。
                     damage_node = self._add_potent_spellcasting(actor, spell, damage_node)
                     damage_node = self._maybe_overchannel(intent, damage_node)
-                    damage, rolls = roll_damage_node(damage_node, rng)
+                    damage, rolls, empowered = self._damage_roll(
+                        damage_node, metamagic_plan, rng,
+                        allow_metamagic=not empowered_spent,
+                    )
+                    empowered_spent = empowered_spent or bool(empowered)
+                    if empowered:
+                        events.append({
+                            "type": "dnd2024.metamagic.rerolled",
+                            "actor_id": actor_id, **empowered,
+                        })
                     half_on_success = bool(effect.get("half_on_success"))
                     if half_on_success and self._evasion_applies(target, save_ability):
                         # Evasion 改写的是"这条允许敏捷豁免半伤"的效果分支，不是
                         # 所有敏捷豁免：成功 0、失败 floor(amount/2)，之后抗性
                         # 仍只应用一次（顺序固定，不能重复减半）。
                         damage = 0 if succeeded else damage // 2
+                    elif succeeded and careful_here:
+                        # Careful Spell：自动成功的那个生物"若成功本应半伤则
+                        # 不受伤"，所以这里是 0 而不是减半。
+                        damage = 0
                     elif succeeded:
                         damage = damage // 2 if half_on_success else 0
                     damage_type = str(effect.get("damage_type") or "force")
@@ -3837,7 +4068,16 @@ class CombatResolutionMixin:
                 )
                 damage_node = self._add_potent_spellcasting(actor, spell, damage_node)
                 damage_node = self._maybe_overchannel(intent, damage_node)
-                damage, rolls = roll_damage_node(damage_node, rng)
+                damage, rolls, empowered = self._damage_roll(
+                    damage_node, metamagic_plan, rng,
+                    allow_metamagic=not empowered_spent,
+                )
+                empowered_spent = empowered_spent or bool(empowered)
+                if empowered:
+                    events.append({
+                        "type": "dnd2024.metamagic.rerolled",
+                        "actor_id": actor_id, **empowered,
+                    })
                 damage_type = str(effect.get("damage_type") or "force")
                 damage, resistance = self._resist_damage(target, damage, damage_type)
                 damage_event = {
@@ -4019,7 +4259,10 @@ class CombatResolutionMixin:
             elif condition and condition_applies:
                 applied = {
                     "type": "condition.applied", "target_id": target_id,
-                    "condition": condition, "duration": str(effect.get("condition_duration") or ""),
+                    "condition": condition,
+                    "duration": self._duration_for(
+                        effect, spell, slot_level, metamagic_plan,
+                    ).as_condition_text(),
                     "source_actor_id": actor_id,
                     "concentration_owner": actor_id if effect.get("concentration") else "",
                     # 服务端来源快照：解除魔法只认这两个键，客户端不可声明。
@@ -4036,10 +4279,12 @@ class CombatResolutionMixin:
                 if effect.get("resist_choice"):
                     applied["resist_damage_types"] = [str(intent["resist_type"])]
                 # 每回合重复豁免：DC 是施放当刻的快照，之后施法者属性变化不影响。
+                # 快照取的是**这个法术**的 DC：Innate Sorcery 的 +1 只对术士法术生
+                # 效，若这里读基础 DC，首次豁免与后续豁免会差 1。
                 if effect.get("save_repeat") is not None:
                     applied["save_repeat"] = {
                         "ability": str(effect["save_repeat"]),
-                        "dc": int(actor["spell_save_dc"]),
+                        "dc": self._spell_save_dc(actor, spell),
                     }
                 for removed in effect.get("removes_conditions") or []:
                     if str(removed) in target["conditions"]:
@@ -4503,6 +4748,47 @@ class CombatResolutionMixin:
             if level < ceiling:
                 return count
         return 4
+
+    def _innate_sorcery_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Innate Sorcery: a Bonus Action for one minute of +1 DC and Advantage.
+
+        The use is spent when there is one; otherwise the level-7 path pays two
+        Sorcery Points.  Which path was taken is recorded on the condition so a
+        later feature (Arcane Apotheosis) can tell that the aura is genuinely on.
+        """
+
+        actor_id = str(intent["actor_id"])
+        character = self._canonical_for_actor(instance, actor_id)
+        uses = (character.get("resources") or {}).get("class", {}).get(
+            "innate_sorcery", {}
+        )
+        current = int((uses or {}).get("current", 0) or 0)
+        spent: list[dict[str, Any]] = [
+            {"type": "dnd2024.action.spent", "actor_id": actor_id,
+             "resource": "bonus_action", "amount": 1},
+        ]
+        paid = "use"
+        if current >= 1:
+            spent.append({
+                "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+                "resource_id": "innate_sorcery", "amount": 1,
+            })
+        else:
+            paid = "points"
+            spent.append({
+                "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+                "resource_id": "sorcery_points", "amount": 2,
+            })
+        spent.append({
+            "type": "condition.applied", "target_id": actor_id,
+            "condition": "innate_sorcery",
+            "source_actor_id": actor_id,
+            "paid_with": paid,
+            "expires_at_minute": self._logical_minutes(instance) + 1,
+        })
+        return spent
 
     def _land_aid_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
@@ -6199,6 +6485,7 @@ class CombatResolutionMixin:
         self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
         actor_id: str, ability: str, dc: int, source_actor_id: str,
         events: list[dict[str, Any]], rng: Any, *, against_spell: bool = False,
+        forced_outcome: str = "",
     ) -> dict[str, Any]:
         """Shared save authority for spells, repeated saves and hit riders.
 
@@ -6224,9 +6511,27 @@ class CombatResolutionMixin:
                 "target": dc, "success": False, "auto_failed": True,
                 "roll_id": self._roll_id(events, "saving_throw", actor_id),
             }
+        if forced_outcome == "success":
+            # Careful Spell：选中的生物直接成功，不掷骰。掷了会让"自动成功"
+            # 看起来像一次运气好的豁免，日志里也就无法区分两者。
+            return {
+                "type": "check.resolved", "kind": "saving_throw",
+                "actor_id": actor_id, "source_actor_id": source_actor_id,
+                "ability": ability, "rolls": [], "natural": 0,
+                "modifier": modifier, "check_bonus": 0, "check_bonus_rolls": [],
+                "aura_bonus": 0, "aura_sources": [],
+                "total": dc, "target": dc, "success": True,
+                "auto_succeeded": True, "metamagic": "careful_spell",
+                "roll_id": self._roll_id(events, "saving_throw", actor_id),
+            }
         save_sources = self._saving_throw_sources(
             actor, ability, against_spell=against_spell,
         )
+        if forced_outcome == "disadvantage":
+            # Heightened Spell：只改这一条豁免，不写到目标身上。
+            save_sources = [
+                *save_sources, {"code": "heightened_spell", "mode": "disadvantage"},
+            ]
         traits = actor.get("traits")
         if against_spell and "magic_resistance" in trait_ids(traits):
             save_sources.append({"code": "magic_resistance", "mode": "advantage"})

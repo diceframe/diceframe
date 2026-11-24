@@ -107,6 +107,14 @@ def advancement_choices(preview: dict[str, Any]) -> dict[str, Any]:
                 "choice_id": str(requirement["choice_id"]),
                 "selected_refs": [str(option["value"]) for option in available[:count]],
             })
+        elif requirement_id == "metamagic_option_ids" or requirement.get("kind") == "metamagic":
+            count = int(requirement.get("count", 1) or 1)
+            options = [str(row["value"]) for row in requirement.get("options") or []]
+            choices["metamagic_option_ids"] = options[:count]
+        elif requirement_id == "known_form_refs" or requirement.get("kind") == "known_forms":
+            count = int(requirement.get("count", 1) or 1)
+            options = [str(row["value"]) for row in requirement.get("options") or []]
+            choices["known_form_refs"] = options[:count]
         elif requirement_id == "ability_score_increases":
             allowed = requirement.get("allowed", "any")
             ability = "str" if allowed == "any" else str(allowed[0])

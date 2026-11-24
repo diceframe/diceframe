@@ -48,6 +48,8 @@ from ..spells.font_of_magic import (
     parse_created_slot_costs,
     slot_to_points_plan,
 )
+from ..spells.metamagic import MetamagicError
+from ..character.primitives import ability_modifier
 from .cover import COVER_LEVELS
 from .obscurement import (
     LAND_AID_RANGE_FT,
@@ -1037,6 +1039,8 @@ class CombatValidationMixin:
             self._validate_form_intent(instance, intent)
         if intent_type in {"land_aid", "nature_sanctuary"}:
             self._validate_land_feature(instance, intent, state)
+        if intent_type == "innate_sorcery":
+            self._validate_innate_sorcery(instance, intent, state)
         actor = self._actor_view(instance, combat, actor_id)
         if "dead" in actor["conditions"]:
             if intent_type == "end_turn":
@@ -1408,6 +1412,93 @@ class CombatValidationMixin:
         if reason:
             raise CombatIntentError(f"beast spells cannot cast it: {reason}")
 
+    def _validate_metamagic(
+        self, intent: dict[str, Any], actor: dict[str, Any],
+        spell: dict[str, Any], effect: dict[str, Any], combat: dict[str, Any],
+    ) -> None:
+        """Metamagic is priced and checked before anything is rolled.
+
+        Validation and settlement both call ``metamagic.plan`` -- the difference
+        is only that this one turns its refusal into a combat error, so a bad
+        request never deducts a point or spends a slot.
+        """
+
+        if not (intent.get("metamagic") or []):
+            return
+        if effect.get("mode") == "triggered_damage":
+            # 触发型法术（至圣斩等）走另一条结算路径，不经过 _spell_events 的
+            # 效果处理；接受超魔只会"扣了点、什么也没改"，所以直接拒绝。
+            raise CombatIntentError("metamagic cannot modify a triggered spell")
+        character = self._feature_character(actor)
+        if not self.features.has_feature(character, "metamagic"):
+            raise CombatIntentError("this character has no Metamagic feature")
+        try:
+            plan = self._metamagic_plan(
+                intent, character, spell, effect, combat,
+                conditions=actor.get("conditions") or {},
+            )
+        except MetamagicError as exc:
+            raise CombatIntentError(str(exc)) from None
+        if plan.has("careful_spell"):
+            # 原文：最多等于魅力调整值（至少 1 个）的生物，且必须是本法术的
+            # 目标之一——否则 1 点就能让任意多个生物免疫。
+            limit = max(1, ability_modifier(int(actor["abilities"].get("cha", 10))))
+            chosen = list(plan.parameter("careful_spell") or ())
+            if len(chosen) > limit:
+                raise CombatIntentError(
+                    f"Careful Spell can protect at most {limit} creatures"
+                )
+            declared = {
+                str(intent.get("target_id") or ""),
+                *[str(item) for item in intent.get("target_ids") or []],
+            } - {""}
+            if not set(chosen) <= declared:
+                raise CombatIntentError(
+                    "Careful Spell targets must be targets of this spell"
+                )
+        if plan.has("empowered_spell"):
+            # Empowered Spell 的重掷数量上限是魅力调整值（至少一颗）。
+            limit = max(1, ability_modifier(int(actor["abilities"].get("cha", 10))))
+            count = int(plan.parameter("empowered_spell") or 0)
+            if count > limit:
+                raise CombatIntentError(
+                    f"Empowered Spell can reroll at most {limit} dice"
+                )
+
+    def _metamagic_plan(
+        self, intent: dict[str, Any], character: dict[str, Any],
+        spell: dict[str, Any], effect: dict[str, Any], combat: dict[str, Any],
+        conditions: dict[str, Any] | None = None,
+    ) -> Any:
+        from ..spells import metamagic
+
+        known = self.features.metamagic_known(character)
+        economy = combat.get("economy") or {}
+        # `_feature_character` 只带特性切片，不带条件：Innate 是否激活必须问
+        # actor view，否则 Incarnate 的双名额与 Apotheosis 的免费永远为假。
+        active = "innate_sorcery" in (
+            conditions if conditions is not None
+            else (character.get("conditions") or {})
+        )
+        incarnate = (
+            active and self.features.has_feature(character, "sorcery_incarnate")
+        )
+        apotheosis = (
+            active and self.features.has_feature(character, "arcane_apotheosis")
+        )
+        return metamagic.plan(
+            intent,
+            spell=spell,
+            effect=effect,
+            known=known,
+            points=int((character.get("resources") or {}).get("class", {})
+                       .get("sorcery_points", {}).get("current", 0) or 0),
+            incarnate=incarnate,
+            apotheosis=apotheosis,
+            free_used_this_turn=bool(economy.get("free_metamagic_used")),
+            cast_level_one_plus_this_turn=bool(economy.get("cast_level_one_plus")),
+        )
+
     def _spell_entity(self, spell_ref: str) -> dict[str, Any] | None:
         """与其它施法校验读同一本目录：`self.spells`，不是 bundle.get。
 
@@ -1541,6 +1632,31 @@ class CombatValidationMixin:
             raise CombatIntentError(
                 f"the sanctuary can move at most {SANCTUARY_MOVE_LIMIT_FT} feet"
             )
+    def _validate_innate_sorcery(
+        self, instance: Any, intent: dict[str, Any], state: dict[str, Any],
+    ) -> None:
+        """One Bonus Action; either a use, or 2 Sorcery Points at level 7+."""
+
+        actor_id = str(intent.get("actor_id") or "")
+        kind, raw_id = _actor_kind(actor_id)
+        if kind != "player":
+            raise CombatIntentError("only a player can use Innate Sorcery")
+        character = _canonical(instance.get_character_sheet(raw_id))
+        if not self.features.has_feature(character, "innate_sorcery"):
+            raise CombatIntentError("this character has no Innate Sorcery")
+        if "innate_sorcery" in (character.get("conditions") or {}):
+            raise CombatIntentError("Innate Sorcery is already active")
+        economy = (state.get("combat") or {}).get("economy") or {}
+        if int(economy.get("bonus_action", 0) or 0) < 1:
+            raise CombatIntentError("the bonus action has already been spent")
+        uses = self._class_resource_state(character, "innate_sorcery")
+        if uses["current"] >= 1:
+            return
+        if not self.features.has_feature(character, "sorcery_incarnate"):
+            raise CombatIntentError("no Innate Sorcery uses left")
+        points = self._class_resource_state(character, "sorcery_points")
+        if points["current"] < 2:
+            raise CombatIntentError("Sorcery Incarnate needs 2 Sorcery Points")
 
     def _validate_land_feature(
         self, instance: Any, intent: dict[str, Any], state: dict[str, Any],
@@ -3091,6 +3207,9 @@ class CombatValidationMixin:
         cost = declaration["cost"]
         if int(economy.get(cost, 0) or 0) < 1:
             raise CombatIntentError(f"the {cost.replace('_', ' ')} has already been spent")
+        # Quickened 的双向互斥都靠这一条：本回合只要施放过 1 环+ 法术（含免费
+        # 施法与专长来源），就不能再 Quickened，也不能在被 Quickened 之后放。
+
         canonical = self._canonical_actor(instance, actor)
         payload = self._activation_payload(instance, actor)
         # Consumables are removed from the live inventory when the batch is
@@ -3154,6 +3273,7 @@ class CombatValidationMixin:
             raise CombatIntentError("spell is not deterministically automated yet")
         if spell_ref not in actor["spell_refs"]:
             raise CombatIntentError("spell is not prepared or known by the actor")
+        self._validate_metamagic(intent, actor, spell, effect, combat)
         if effect["mode"] == "reaction_defense":
             raise CombatIntentError("this spell is cast as a reaction when you are hit")
         trigger = hit_spell_decision(combat, actor["actor_id"])
@@ -3169,12 +3289,29 @@ class CombatValidationMixin:
         if intent.get("spend_luck") and effect["mode"] != "spell_attack":
             raise CombatIntentError("spend_luck requires a spell attack roll")
         self._validate_lucky_spend(instance, intent, actor)
-        cost = "bonus_action" if str(spell["casting_time"]).startswith("Bonus Action") else "action"
+        plan = self._metamagic_plan(
+            intent, self._feature_character(actor), spell, effect, combat,
+            conditions=actor.get("conditions") or {},
+        ) if intent.get("metamagic") else None
+        # Quickened Spell 把"一个动作的施法"改成附赠动作：成本要按它读，
+        # 否则玩家付了附赠动作却仍被要求有动作。
+        quickened = bool(plan and plan.has("quickened_spell"))
+        cost = "bonus_action" if (
+            quickened or str(spell["casting_time"]).startswith("Bonus Action")
+        ) else "action"
         if int(economy.get(cost, 0) or 0) < 1:
             raise CombatIntentError(f"the {cost.replace('_', ' ')} has already been spent")
+        # Quickened 的双向互斥都靠这一条：本回合只要施放过 1 环+ 法术（含免费
+        # 施法与专长来源），就不能再 Quickened，也不能在被 Quickened 之后放。
+
         slot_level = intent.get("slot_level", spell["level"])
         if isinstance(slot_level, bool) or not isinstance(slot_level, int):
             raise CombatIntentError("slot_level must be an integer")
+        if economy.get("quickened_cast") and slot_level >= 1:
+            # Quickened 之后本回合不能再放 1 环+（戏法不受限）。
+            raise CombatIntentError(
+                "a level 1+ spell cannot be cast after Quickened Spell this turn"
+            )
         if spell["level"] == 0:
             if slot_level != 0:
                 raise CombatIntentError("a cantrip does not use a spell slot")
@@ -3196,8 +3333,16 @@ class CombatValidationMixin:
         ]
         required_count = int(effect.get("target_count", 1) or 1)
         upcast_targets = int(effect.get("upcast_target_count", 0) or 0)
+        if not upcast_targets and bool(effect.get("upcast_target_bonus")):
+            # 数据里"可升环多选一个目标"有两种写法：布尔标记只说明"每升一环
+            # 多一个目标"，等价于 count=1。
+            upcast_targets = 1
         if upcast_targets:
             required_count += upcast_targets * max(0, slot_level - int(spell["level"]))
+        if plan is not None and plan.has("twinned_spell") and upcast_targets:
+            # Twinned Spell 把法术的**有效环阶** +1：多出来的一个目标不花更高
+            # 的槽，槽位仍按原环阶结算。
+            required_count += upcast_targets
         has_duplicates = len(set(target_ids)) != len(target_ids)
         if not target_ids or len(target_ids) > required_count or (
             has_duplicates and not effect.get("repeat_targets")
@@ -3250,7 +3395,7 @@ class CombatValidationMixin:
                 # 射程是特性可能改写过的值（德鲁伊 15 的元素之怒），不是目录原文。
                 self._require_range(
                     combat, actor["actor_id"], target_id,
-                    self._spell_effective_range(actor, spell, effect),
+                    self._spell_effective_range(actor, spell, effect, plan),
                 )
             if effect.get("marks_target") and not self._spell_target_visible(
                 instance, combat, actor, target,
