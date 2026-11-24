@@ -23,6 +23,7 @@ from src.rulesets.dnd2024.features.resources import (
 from src.rulesets.dnd2024.spells.casting import spell_caster, spellcasting_projection
 
 from .check_modes import marked_target_id, sense_declarations
+from .obscurement import zone_covers
 from .check_windows import LUCKY_RESOURCE
 from .primitives import (
     DIVINE_SENSE_CONDITION,
@@ -94,6 +95,9 @@ class CombatViewMixin:
             view = self._shaped_view(view, character)
             view["cover"] = cover
             view["obscurement"] = self.obscurement_row(combat, actor_id)
+            view["ward_resistance_type"] = self._ward_resistance_type(
+                combat, actor_id, character,
+            )
             self._attach_hunter_lore(instance, combat, actor_id, view)
             return view
         if kind == "companion":
@@ -106,6 +110,9 @@ class CombatViewMixin:
             view = self._with_hands(combat, view)
             view["cover"] = cover
             view["obscurement"] = self.obscurement_row(combat, actor_id)
+            view["ward_resistance_type"] = self._ward_resistance_type(
+                combat, actor_id, character,
+            )
             self._attach_hunter_lore(instance, combat, view["actor_id"], view)
             return view
         if kind == "enemy":
@@ -327,6 +334,42 @@ class CombatViewMixin:
             armor_category_refs=proficiencies.get("armor_category_refs") or [],
         )
 
+    def _ward_resistance_type(
+        self, combat: dict[str, Any], actor_id: str, character: dict[str, Any],
+    ) -> str:
+        """Nature's Ward 的伤害类型：自己有，或在盟友的 Sanctuary 里被分享。
+
+        分享是位置事实：走出 Cube 后下一次受伤就拿不到。区域上存的是**建立
+        时**持有者的 land 类型——一分钟内不可能完成一次长休换 land，所以这里
+        没有"当前 land 已变而区域还记着旧的"的窗口。
+        """
+
+        mapping = {"arid": "fire", "polar": "cold", "temperate": "lightning",
+                   "tropical": "poison"}
+        land = str(
+            (self.features.spell_grant_choices(character) or {}).get(
+                "circle_of_the_land_spells", {}
+            ).get("terrain") or ""
+        )
+        owns = any(
+            feature.id == "natures_ward" for feature in self.features.features_for(character)
+        )
+        if land and owns:
+            return mapping.get(land, "")
+        position = int((combat.get("positions") or {}).get(actor_id, 0) or 0)
+        for zone in (combat.get("zones") or {}).values():
+            if not isinstance(zone, dict) or not zone.get("resistance_from_owner"):
+                continue
+            if str(zone.get("beneficiaries") or "all") == "allies" and not actor_id.startswith(
+                ("player:", "companion:")
+            ):
+                continue
+            if not zone_covers(zone, int(zone.get("origin", 0) or 0), position):
+                continue
+            shared = str(zone.get("ward_type") or "")
+            if shared:
+                return shared
+        return ""
     def _initiative_view(
         self, instance: Any, uid: str, character: dict[str, Any],
     ) -> dict[str, Any] | None:
@@ -455,6 +498,13 @@ class CombatViewMixin:
                 character.get("derived", {}).get("spell_attack_bonus", 0) or 0
             ),
             "spell_save_dc": int(character.get("derived", {}).get("spell_save_dc", 0) or 0),
+            # 当前 land 属于角色而不是视图：投影出来，抗性这类"按 land 求值"
+            # 的规则才不必回头去拿 canonical 角色（视图里拿不到）。
+            "land_terrain": str(
+                (self.features.spell_grant_choices(character) or {}).get(
+                    "circle_of_the_land_spells", {}
+                ).get("terrain") or ""
+            ),
             "spell_ability": str(class_magic.get("ability") or ""),
             "concentration": deepcopy(
                 class_magic.get("concentration") if class_magic

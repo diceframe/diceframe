@@ -39,6 +39,7 @@ from ..spells.font_of_magic import (
     parse_created_slot_costs,
     slot_to_points_plan,
 )
+from .obscurement import SANCTUARY_DURATION_ROUNDS, sanctuary_zone_id, zone_members
 from .action_adapter import (
     attack_damage_node,
     average_damage,
@@ -1108,7 +1109,25 @@ class CombatResolutionMixin:
                 return amount // 2, condition_id
         if self._fiendish_resilience_type(target) == damage_type:
             return amount // 2, "fiendish_resilience"
+        ward = self._natures_ward_source(target, damage_type)
+        if ward:
+            return amount // 2, ward
         return amount, ""
+
+    def _natures_ward_source(self, target: dict[str, Any], damage_type: str) -> str:
+        """Nature's Ward, on the owner or shared inside their Sanctuary.
+
+        Resistance never stacks, so this is consulted after every condition
+        source declined and returns at most one source id.  Zone sharing is
+        positional: walking out of the Cube drops it on the next hit.
+        """
+
+        if target.get("kind") not in {"player", "companion"}:
+            return ""
+        ward_type = str(target.get("ward_resistance_type") or "")
+        if ward_type and ward_type == damage_type:
+            return "natures_ward"
+        return ""
 
     def _fiendish_resilience_type(self, target: dict[str, Any]) -> str:
         """The damage type this character re-chose at its last rest, or ``""``."""
@@ -4460,6 +4479,137 @@ class CombatResolutionMixin:
 
     #: Wild Resurgence 的两种方向。
     WILD_RESURGENCE_DIRECTIONS = ("slot_to_use", "use_to_slot")
+
+    LAND_WARD_DAMAGE = {
+        "arid": "fire", "polar": "cold", "temperate": "lightning", "tropical": "poison",
+    }
+    LAND_AID_DICE = ((10, 2), (14, 3), (99, 4))
+
+    def _land_terrain(self, character: dict[str, Any]) -> str:
+        """The current land, from the slot F4 already writes."""
+
+        try:
+            stored = self.features.spell_grant_choices(character)
+        except Exception:  # pragma: no cover - resolver already validated
+            return ""
+        for block in (stored or {}).values():
+            if isinstance(block, dict) and block.get("terrain"):
+                return str(block["terrain"])
+        return ""
+
+    def _land_aid_dice(self, character: dict[str, Any]) -> int:
+        level = declaring_class_level(character, "druid")
+        for ceiling, count in self.LAND_AID_DICE:
+            if level < ceiling:
+                return count
+        return 4
+
+    def _land_aid_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Land's Aid: one damage roll, one save per target, one healing roll."""
+
+        actor_id = str(intent["actor_id"])
+        character = self._canonical_for_actor(instance, actor_id)
+        actor = self._actor_view(instance, combat, actor_id)
+        origin = int(intent.get("origin", 0) or 0)
+        inside = set(zone_members(
+            combat, {"shape": "sphere", "size_ft": 10, "origin": origin},
+            combat.get("positions") or {}, None,
+        ))
+        # 校验层已拒绝重复目标；这里再去一次重，"一个目标最多一段伤害"不依赖调用方。
+        targets = list(dict.fromkeys(
+            str(ref) for ref in intent.get("damage_targets") or [] if str(ref) in inside
+        ))
+        heal_target = str(intent.get("heal_target") or "")
+        events: list[dict[str, Any]] = [
+            {"type": "dnd2024.action.spent", "actor_id": actor_id,
+             "resource": "action", "amount": 1},
+            {"type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+             "resource_id": "wild_shape", "amount": 1},
+        ]
+        count = self._land_aid_dice(character)
+        dc = int(actor.get("spell_save_dc", 0) or 0)
+        if targets:
+            dice = [int(rng.randint(1, 6)) for _ in range(count)]
+            total = sum(dice)
+            for target_id in targets:
+                target = self._actor_view(instance, combat, target_id)
+                save = self._saving_throw_check(
+                    instance, combat, target, target_id, "con", dc, actor_id, events, rng,
+                )
+                events.append(save)
+                damage = total if not save["success"] else max(0, total // 2)
+                damage, resisted = self._resist_damage(target, damage, "necrotic")
+                extra = {"resisted": True, "resistance": resisted} if resisted else {}
+                events.append({
+                    "type": "resource.changed", "resource": "hp", "target_id": target_id,
+                    "delta": -damage, "amount": damage, "damage_type": "necrotic",
+                    "rolls": dice, **extra,
+                })
+        if heal_target:
+            heal_dice = [int(rng.randint(1, 6)) for _ in range(count)]
+            total_heal = sum(heal_dice)
+            heal_view = self._actor_view(instance, combat, heal_target)
+            blocked = "cannot_regain_hp" in (heal_view.get("conditions") or {})
+            events.append({
+                "type": "resource.changed", "resource": "hp", "target_id": heal_target,
+                "delta": 0 if blocked else total_heal,
+                "amount": 0 if blocked else total_heal,
+                "healing": True, "rolls": heal_dice, "source": "lands_aid",
+                **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
+            })
+        return events
+
+    def _land_ward_type(self, character: dict[str, Any]) -> str:
+        land = self._land_terrain(character)
+        return self.LAND_WARD_DAMAGE.get(land, "")
+
+    def _nature_sanctuary_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Nature's Sanctuary: place a 15-foot Cube, or move it as a Bonus Action."""
+
+        actor_id = str(intent["actor_id"])
+        # 区域 id 由服务端派生，不读意图里的值：reducer 按 id 存区域，客户端自报
+        # 的 id 会覆盖别人的区域（另一位德鲁伊的 Sanctuary、法术的遮蔽区）。
+        zone_id = sanctuary_zone_id(actor_id)
+        mode = str(intent.get("mode") or "create")
+        if mode == "move":
+            return [
+                {"type": "dnd2024.action.spent", "actor_id": actor_id,
+                 "resource": "bonus_action", "amount": 1},
+                {"type": "dnd2024.zone.moved",
+                 "zone_id": zone_id,
+                 "origin": int(intent.get("origin", 0) or 0)},
+            ]
+        character = self._canonical_for_actor(instance, actor_id)
+        return [
+            {"type": "dnd2024.action.spent", "actor_id": actor_id,
+             "resource": "action", "amount": 1},
+            {"type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+             "resource_id": "wild_shape", "amount": 1},
+            {
+                "type": "dnd2024.zone.created", "zone_id": zone_id,
+                "kind": "sanctuary", "shape": "cube", "size_ft": 15,
+                "level": "none", "origin": int(intent.get("origin", 0) or 0),
+                "radius_ft": 7, "magical": False, "concentration": False,
+                "rounds_left": 0,
+                "owner_id": actor_id, "caster_id": actor_id,
+                "beneficiaries": "allies", "half_cover": True,
+                "resistance_from_owner": True,
+                "expires_at_minute": self._logical_minutes(instance) + 1,
+                # 一分钟也是十个战斗回合：战斗不推进世界时钟，只记分钟的话
+                # 这个 Cube 会在整场战斗里一直在。
+                "expires_at_round": int(combat.get("round", 0) or 0) + SANCTUARY_DURATION_ROUNDS,
+                "ends_on_owner_incapacitated": True,
+                "feature_id": "natures_sanctuary",
+                "projection": "theater_1d",
+                # 一分钟内不会发生长休换 land，所以把建立时的类型写在区域上，
+                # 盟友在区域内按它取抗性；离开即失去。
+                "ward_type": self._land_ward_type(character),
+            },
+        ]
 
     def _wild_resurgence_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],

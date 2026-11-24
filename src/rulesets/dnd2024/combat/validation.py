@@ -49,7 +49,13 @@ from ..spells.font_of_magic import (
     slot_to_points_plan,
 )
 from .cover import COVER_LEVELS
-from .obscurement import OBSCUREMENT_LEVELS
+from .obscurement import (
+    LAND_AID_RANGE_FT,
+    OBSCUREMENT_LEVELS,
+    SANCTUARY_MOVE_LIMIT_FT,
+    SANCTUARY_RANGE_FT,
+    sanctuary_zone_id,
+)
 from .primitives import (
     CONDITION_CODES,
     DICE_RE,
@@ -1029,6 +1035,8 @@ class CombatValidationMixin:
             self._validate_druid_conversion(instance, intent, state)
         if intent_type in {"form.assume", "form.revert"}:
             self._validate_form_intent(instance, intent)
+        if intent_type in {"land_aid", "nature_sanctuary"}:
+            self._validate_land_feature(instance, intent, state)
         actor = self._actor_view(instance, combat, actor_id)
         if "dead" in actor["conditions"]:
             if intent_type == "end_turn":
@@ -1052,6 +1060,7 @@ class CombatValidationMixin:
             "attack", "multiattack", "save_action", "escape", "stand_up",
             "cast_spell", "activate_item", "class_capability", "dash", "dodge",
             "disengage", "hide", "stabilize", "form.assume", "form.revert",
+            "land_aid", "nature_sanctuary",
         }:
             raise CombatIntentError("an incapacitated actor cannot take actions")
         if flags["speed_zero"] and intent_type == "move":
@@ -1496,6 +1505,97 @@ class CombatValidationMixin:
         except FormStateError:  # pragma: no cover - reducer guarantees the shape
             return False
         return mode_for(state, str(item_ref)) == "merge"
+
+    def _origin_position(
+        self, intent: dict[str, Any], combat: dict[str, Any], actor_id: str, limit: int,
+    ) -> int:
+        """The point an area is placed at: an integer within ``limit`` feet of the actor."""
+
+        origin = intent.get("origin")
+        if isinstance(origin, bool) or not isinstance(origin, int):
+            raise CombatIntentError("origin must be an integer position")
+        position = int((combat.get("positions") or {}).get(actor_id, 0) or 0)
+        if abs(origin - position) > limit:
+            raise CombatIntentError(f"origin must be within {limit} feet of you")
+        return origin
+
+    def _validate_sanctuary_move(
+        self, combat: dict[str, Any], actor_id: str, intent: dict[str, Any],
+        economy: dict[str, Any],
+    ) -> None:
+        """Moving the Cube costs a Bonus Action, covers at most 60 feet, and only your own."""
+
+        if int(economy.get("bonus_action", 0) or 0) < 1:
+            raise CombatIntentError("the bonus action has already been spent")
+        # 区域 id 由服务端按施法者派生。reducer 会给每个法术区域用 caster 回填
+        # owner_id，所以"是我放的"不等于"是我的 Sanctuary"：只认 Sanctuary 本身。
+        zone = (combat.get("zones") or {}).get(sanctuary_zone_id(actor_id))
+        if (
+            not isinstance(zone, dict)
+            or str(zone.get("kind") or "") != "sanctuary"
+            or str(zone.get("owner_id") or "") != actor_id
+        ):
+            raise CombatIntentError("that sanctuary is not yours")
+        origin = self._origin_position(intent, combat, actor_id, SANCTUARY_RANGE_FT)
+        if abs(origin - int(zone.get("origin", 0) or 0)) > SANCTUARY_MOVE_LIMIT_FT:
+            raise CombatIntentError(
+                f"the sanctuary can move at most {SANCTUARY_MOVE_LIMIT_FT} feet"
+            )
+
+    def _validate_land_feature(
+        self, instance: Any, intent: dict[str, Any], state: dict[str, Any],
+    ) -> None:
+        """Circle of the Land 的主动能力：谁能不能用、够不够付、点在哪。
+
+        一维投影下"点"就是坐标线上的一个位置：客户端给的 origin 必须落在
+        60/120 尺之内，超出即拒绝，不做静默截断。
+        """
+
+        actor_id = str(intent.get("actor_id") or "")
+        kind, raw_id = _actor_kind(actor_id)
+        if kind != "player":
+            raise CombatIntentError("only a player can use a land feature")
+        character = _canonical(instance.get_character_sheet(raw_id))
+        intent_type = str(intent.get("type"))
+        feature_id = "natures_sanctuary" if intent_type == "nature_sanctuary" else "lands_aid"
+        if not self.features.has_feature(character, feature_id):
+            raise CombatIntentError(f"{feature_id} is not granted to this character")
+        combat = state.get("combat") or {}
+        economy = combat.get("economy") or {}
+        mode = str(intent.get("mode") or "create")
+        if feature_id == "natures_sanctuary" and mode == "move":
+            self._validate_sanctuary_move(combat, actor_id, intent, economy)
+            return
+        if int(economy.get("action", 0) or 0) < 1:
+            raise CombatIntentError("the action has already been spent")
+        uses = self._class_resource_state(character, "wild_shape")
+        if uses["current"] < 1:
+            raise CombatIntentError("no Wild Shape uses left")
+        limit = LAND_AID_RANGE_FT if feature_id == "lands_aid" else SANCTUARY_RANGE_FT
+        origin = self._origin_position(intent, combat, actor_id, limit)
+        if feature_id == "natures_sanctuary":
+            # 区域 id 由服务端派生；新建只替换自己的那一个 Cube。
+            return
+        raw_targets = intent.get("damage_targets") or []
+        if not isinstance(raw_targets, list):
+            raise CombatIntentError("damage_targets must be a list")
+        targets = [str(target) for target in raw_targets]
+        if len(set(targets)) != len(targets):
+            # 同一个目标写多遍不会多救一次，只会多挨几段伤害。
+            raise CombatIntentError("a damage target is listed more than once")
+        positions = combat.get("positions") or {}
+        inside = {
+            actor for actor, pos in positions.items()
+            if abs(int(pos) - origin) <= 10
+        }
+        for target in targets:
+            if target not in inside:
+                raise CombatIntentError("a damage target is outside the sphere")
+        heal_target = str(intent.get("heal_target") or "")
+        if heal_target and heal_target not in inside:
+            raise CombatIntentError("the healing target is outside the sphere")
+        if not targets and not heal_target and inside:
+            raise CombatIntentError("the sphere contains creatures; choose targets")
 
 
     def _validate_turn_choice(

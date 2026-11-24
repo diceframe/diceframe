@@ -910,7 +910,8 @@
               ]
             }
           ]
-        },        {
+        },
+        {
           "id": "tactical_shift",
           "minimum_level": 5,
           "source_ref": "srd-5.2.1:p48:tactical-shift",
@@ -919,7 +920,6 @@
             "rider_move": "tactical_shift"
           }
         },
-
         {
           "id": "weapon_mastery",
           "minimum_level": 1,
@@ -2591,6 +2591,32 @@
           "resource_id": "archdruid",
           "source_ref": "srd-5.2.1:p43:archdruid",
           "summary": "Evergreen Wild Shape: when you roll Initiative and have no Wild Shape uses left, you regain one. Nature Magician: convert Wild Shape uses into a spell slot of twice that level. Longevity: for every ten years that pass, your body ages only one year (narrative; not modelled mechanically)."
+        },
+        {
+          "id": "lands_aid",
+          "owner": "subclass:circle_of_the_land",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p46:lands-aid",
+          "summary": "Magic action + one Wild Shape use: a 10-foot-radius Sphere within 60 feet. Chosen creatures make a Constitution save against your spell save DC, taking 2d6 Necrotic (3d6 at 10, 4d6 at 14) or half on a success; one creature in the area regains the same number of d6."
+        },
+        {
+          "id": "natures_ward",
+          "owner": "subclass:circle_of_the_land",
+          "minimum_level": 10,
+          "source_ref": "srd-5.2.1:p46:natures-ward",
+          "summary": "You are immune to the Poisoned condition and have Resistance to the damage type of your current land: arid Fire, polar Cold, temperate Lightning, tropical Poison.",
+          "parameters": {
+            "immune_conditions": [
+              "poisoned"
+            ]
+          }
+        },
+        {
+          "id": "natures_sanctuary",
+          "owner": "subclass:circle_of_the_land",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p46:natures-sanctuary",
+          "summary": "Magic action + one Wild Shape use: a 15-foot Cube on the ground within 120 feet for 1 minute or until you are Incapacitated or die. You and your allies have Half Cover there, and allies also gain your Nature's Ward resistance. A Bonus Action moves it up to 60 feet."
         }
       ]
     },

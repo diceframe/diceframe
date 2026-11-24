@@ -132,6 +132,8 @@ INTENT_TYPES = frozenset({
     "form.assume", "form.revert",
     # S0-F25：Wild Resurgence 的两个方向与 Nature Magician 的换算，全部 no action。
     "wild_resurgence", "nature_magician",
+    # S0-F26：Circle of the Land 的两个主动能力。
+    "land_aid", "nature_sanctuary",
     # 职业特性提供的战斗能力：Combat 只认 capability id、动作/资源成本与底层
     # canonical action，"哪个职业在第几级授予它" 由 feature boundary 回答。
     "class_capability",

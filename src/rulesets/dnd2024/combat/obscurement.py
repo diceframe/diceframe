@@ -78,12 +78,56 @@ def obscurement_row(level: str, sources: Iterable[str] = ()) -> dict[str, Any]:
 #: recorded here so the shortcut is a decision, not an accident.
 ZONE_KINDS = ("sphere", "emanation", "cylinder", "cube")
 
+# Circle of the Land, on the one-dimensional position line.  Nature's Sanctuary
+# is a 15-foot Cube placed within 120 feet and moved by a Bonus Action of at
+# most 60 feet; Land's Aid is a 10-foot-radius Sphere within 60 feet.
+SANCTUARY_RANGE_FT = 120
+SANCTUARY_MOVE_LIMIT_FT = 60
+#: "1 minute" on the round clock.  A fight does not advance the world clock,
+#: so the minute limit alone would keep the Cube for the whole fight.
+SANCTUARY_DURATION_ROUNDS = 10
+LAND_AID_RANGE_FT = 60
+
+
+def sanctuary_zone_id(actor_id: str) -> str:
+    """The one Sanctuary an actor may have.
+
+    Derived here and never read from an intent: the reducer stores a zone by
+    id, so a client-chosen id could replace a zone that belongs to someone else.
+    """
+
+    return f"sanctuary:{actor_id}"
+
 
 def zone_covers(combat_row: dict, origin: int, position: int) -> bool:
     """Whether a zone centred at ``origin`` reaches ``position``."""
 
     radius = int(combat_row.get("radius_ft", 0) or 0)
     return abs(int(origin) - int(position)) <= radius
+
+
+def zone_members(
+    combat: dict, zone: dict, positions: dict[str, int], predicate,
+) -> list[str]:
+    """Who is inside this area, in a stable order.
+
+    The area is a one-dimensional projection: an origin plus a size.  Members
+    are ``|position - origin| <= reach``; ``predicate(actor_id)`` filters for
+    the abilities that only cover allies (Nature's Sanctuary).
+    """
+
+    shape = str(zone.get("shape") or "sphere")
+    size = int(zone.get("size_ft") or zone.get("radius_ft") or 0)
+    reach = size // 2 if shape == "cube" else size
+    origin = int(zone.get("origin", 0) or 0)
+    members: list[str] = []
+    for actor_id, position in sorted(positions.items()):
+        if abs(int(position) - origin) > reach:
+            continue
+        if predicate is not None and not predicate(actor_id):
+            continue
+        members.append(str(actor_id))
+    return members
 
 
 def zone_row(zone_id: str, zone: dict) -> dict:
