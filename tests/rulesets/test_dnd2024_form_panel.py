@@ -601,40 +601,47 @@ def test_new_incapacitation_is_seen_by_the_same_batch_shape_exit_sweep() -> None
     assert [event["reason"] for event in exits] == ["incapacitated"]
 
 
-def test_save_action_half_damage_only_applies_on_a_successful_save(monkeypatch) -> None:
-    engine, instance = _combat()
+def test_damage_held_by_relentless_rage_does_not_end_the_shape() -> None:
+    engine, instance, _rng_factory = _shaped_druid(2)
     from src.engine.modules import ruleset_runtime
 
-    state = ruleset_runtime.state(instance)
-    enemies = state["combat"]["enemies"]
-    enemy_id = next(iter(enemies))
-    enemies[enemy_id]["actions"] = [{
-        "id": "save-test", "kind": "save_action", "ability": "dex", "dc": 10,
-        "on_fail": [{"damage": [{"dice": "2d6", "type": "fire", "half": True}]}],
+    combat = ruleset_runtime.state(instance)["combat"]
+    lethal = {
+        "type": "resource.changed", "resource": "hp", "target_id": "player:gm",
+        "delta": -999, "amount": 999, "relentless": {"feature_id": "relentless_rage"},
+    }
+    # reducer 把这次伤害挂在"是否用不屈狂暴"的决策上，HP 不动。预演必须给出
+    # 同一个答案，否则形态会在 HP 根本没降的时候被结束。
+    assert engine._shape_exit_events(instance, combat, [dict(lethal)]) == []
+
+    # 玩家放弃不屈、伤害真正落地时照常结束形态。
+    resolved = {**lethal, "relentless_deferred": True}
+    exits = engine._shape_exit_events(instance, combat, [resolved])
+    assert [event["reason"] for event in exits] == ["incapacitated"]
+
+
+def test_an_incapacitated_druid_is_not_offered_the_shape_entries() -> None:
+    engine, instance, rng = _shaped_druid(2)
+    from src.engine.modules import ruleset_runtime
+
+    probe = engine.resolve_intent(instance, {
+        "intent_id": "probe-stunned-ui", "type": "dodge",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+    }, rng([]))
+    batch = dict(probe["event_batch"])
+    batch["events"] = [{
+        "type": "condition.applied", "target_id": "player:gm",
+        "condition": "stunned", "source_actor_id": "enemy:goblin",
     }]
-    seen_half: list[bool] = []
+    engine.apply_batch(instance, batch)
+    # 下一回合的预算：已变形、次数也还有，平时两条入口都会出现。
+    ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] = 1
 
-    def fake_save(self, *args, **kwargs):
-        return {"type": "check.resolved", "success": False}
+    offered = {action["type"] for action in engine.available_intents(instance, "gm")}
 
-    def fake_damage(self, dice, damage_type, target, critical, rng, *, half=False):
-        seen_half.append(half)
-        return None, 0
-
-    monkeypatch.setattr(type(engine), "_saving_throw_check", fake_save)
-    monkeypatch.setattr(type(engine), "_damage_instance_event", fake_damage)
-    engine._save_action_events(
-        instance,
-        state["combat"],
-        {
-            "actor_id": f"enemy:{enemy_id}",
-            "target_id": "player:gm",
-            "action_id": "save-test",
-        },
-        _rng(),
-    )
-
-    assert seen_half == [False]
+    assert "form.assume" not in offered
+    assert "form.revert" not in offered
 
 
 # ---------------------------------------------------------------------------

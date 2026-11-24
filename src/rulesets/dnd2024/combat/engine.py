@@ -239,6 +239,11 @@ class Dnd2024CombatEngine(
 
         if actor.get("kind") != "player":
             return []
+        if condition_flags(
+            self.catalog.conditions, actor.get("conditions") or {},
+        )["incapacitated"]:
+            # 失能者不能执行附赠动作：校验层会拒绝，投影层就不该把入口摆出来。
+            return []
         feature_character = self._feature_character(actor)
         if not self.features.has_feature(feature_character, "wild_shape"):
             return []
@@ -1532,7 +1537,17 @@ class Dnd2024CombatEngine(
                         absorbed = min(temp_hp, -delta)
                         temp_hp -= absorbed
                         delta += absorbed
-                    hp = max(0, min(int(view.get("max_hp", hp) or hp), hp + delta))
+                    next_hp = max(0, min(int(view.get("max_hp", hp) or hp), hp + delta))
+                    if (
+                        next_hp <= 0
+                        and hp > 0
+                        and isinstance(event.get("relentless"), dict)
+                        and not event.get("relentless_deferred")
+                    ):
+                        # 与 reducer 一致：不屈狂暴把这次致命伤挂在决策上，HP 不动。
+                        # 预演若把它当成已经落地，形态会在 HP 根本没降时被结束。
+                        continue
+                    hp = next_hp
                     if hp <= 0:
                         conditions["unconscious"] = {}
                     elif delta > 0:
