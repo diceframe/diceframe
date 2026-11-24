@@ -4424,6 +4424,9 @@ class CombatResolutionMixin:
         # 它们是独立事件，不能混进主伤害的线上形状。
         event.pop("extra_damage_parts", None)
         event.pop("statblock_riders", None)
+        # 命中触发的声明只给决策路径用：待定的命中法术决策在创建时留了一份
+        # 伤害事件的副本，这里从线上形状里摘掉，客户端不会看到一个它用不上的键。
+        event.pop("attack_hit_triggers", None)
         events: list[dict[str, Any]] = [event]
         if isinstance(feature_use, dict):
             events.append({"type": "dnd2024.feature.used", **feature_use})

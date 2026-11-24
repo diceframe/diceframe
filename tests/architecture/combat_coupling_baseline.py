@@ -14,6 +14,10 @@ from __future__ import annotations
 
 from scripts.architecture_fitness import DependencyDebt
 
+#: Registered with #841 (S0-F30, 2026-11-25): the five long-lived features were
+#: in flight before this baseline existed.  Their kinds and intent keys are the
+#: first migration list of GAP-43, not a pattern to copy.
+#:
 #: One entry per (file, category, symbol), generated from the current package.
 #: Categories: kind_branch, feature_branch, feature_literal, intent_switch.
 COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
@@ -66,6 +70,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "feature_value:evasion"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "feature_value:foe_slayer"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "feature_value:heightened_focus"),
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "feature_value:holy_nimbus"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "feature_value:improved_blessed_strikes"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "feature_value:improved_elemental_fury"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "feature_value:perfect_focus"),
@@ -93,6 +98,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:perfect_focus"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:persistent_rage"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:potent_spellcasting"),
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:quivering_palm"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:radiant_strikes"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:reckless_attack"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:relentless_rage"),
@@ -128,6 +134,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "form_ref"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "heal_target"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "healing_amount"),
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "hurl_through_hell"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "initiative_choices"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "intent_id"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "item_ref"),
@@ -140,6 +147,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "origin_step_id"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "overchannel"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "player_positions"),
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "quivering_palm"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "reckless_attack"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "remove_conditions"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "resist_type"),
@@ -168,15 +176,21 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "bardic_grant"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "divine_sense"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "divine_spark"),
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "dragon_wings"),
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "end_long_effect"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "heal"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "hide"),
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "holy_nimbus"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "inspiration_slot_exchange"),
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "intimidating_presence"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "invisible"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "lay_on_hands"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "preserve_life"),
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "quivering_palm_end"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "rage"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "rage_sustain"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "resistance_all"),
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "restore_feature_use"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "steady_aim"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "temp_hp"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "turn_undead"),
@@ -205,6 +219,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:archdruid"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:brutal_strike"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:horde_breaker"),
+    DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:hurl_through_hell"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:improved_blessed_strikes"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:improved_brutal_strike"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:open_hand_technique"),
@@ -243,6 +258,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "form_ref"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "heal_target"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "healing_amount"),
+    DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "hurl_through_hell"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "initiative_choices"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "intent_id"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "item_ref"),
@@ -262,6 +278,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "rider_damage_type"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "rider_move"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "sacred_weapon_damage"),
+    DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "same_plane"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "sear_undead"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "second_target_id"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "second_target_of"),
@@ -292,6 +309,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "kind_branch", "inspiration_slot_exchange"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "kind_branch", "lay_on_hands"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "kind_branch", "preserve_life"),
+    DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "kind_branch", "restore_feature_use"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "kind_branch", "turn_undead"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "kind_branch", "unarmed_strike"),
     DependencyDebt("src/rulesets/dnd2024/combat/view.py", "feature_literal", "has_feature:hunters_lore"),

@@ -9,6 +9,7 @@ from copy import deepcopy
 
 import pytest
 
+from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from tests.rulesets.test_dnd2024_channel_control import (
@@ -908,22 +909,71 @@ def test_dismissing_the_vibration_is_harmless(open_hand17) -> None:
     ) is None
 
 
-def test_the_hurl_declaration_travels_on_the_damage_event(fiend14) -> None:
-    """决策路径（至圣斩之后）拿不到原始意图，声明必须随伤害事件走。"""
+def _fiend_with_a_hit_spell(sheet: dict) -> dict:
+    """A Fiend 14 that also prepares Divine Smite.
+
+    A hit-spell decision is the only path that finalises a hit without the
+    original intent, and the engine finds those spells on the actor's prepared
+    list -- which class the list belongs to is not part of that check.  The
+    sheet stands in for the Warlock / Paladin that would legally hold both.
+    """
+
+    prepared = sheet["ruleset_character"]["spellcasting"]["class"]["prepared_spell_refs"]
+    prepared.append("spell:divine_smite")
+    return sheet
+
+
+def test_the_hurl_declaration_is_held_with_the_damage(fiend14) -> None:
+    """决策收尾拿不到原始意图，声明必须跟着被扣住的那份伤害事件走。"""
 
     from tests.rulesets.test_dnd2024_channel_control import _attack
 
-    engine, instance = _setup(fiend14)
+    engine, instance = _setup(_fiend_with_a_hit_spell(deepcopy(fiend14)))
     _start(engine, instance, enemies=_two_enemies())
 
     events, _decisions = _attack(
-        engine, instance, "item:dagger", dice=[20, 1, 1], hurl_through_hell=True,
+        engine, instance, "item:dagger", dice=[20, 1, 1] + [6] * 8,
+        hurl_through_hell=True, decline=False,
     )
 
-    damage = [
-        event for event in events
-        if event.get("type") == "resource.changed"
-        and event.get("feature_id") != "hurl_through_hell"
+    # 伤害被决策扣住，Hurl 还没触发；声明只在待定决策手里的那份伤害上，
+    # 不出现在客户端能看到的 resource.changed 上。
+    assert not _of_type(events, "dnd2024.feature.used")
+    assert not [
+        row for row in _of_type(events, "resource.changed")
+        if "attack_hit_triggers" in row
     ]
-    assert damage
-    assert damage[0]["attack_hit_triggers"] == {"hurl_through_hell": True}
+    decision = ruleset_runtime.state(instance)["combat"]["pending_decisions"][0]
+    assert decision["kind"] == "melee_hit_spell"
+    assert decision["damage_event"]["attack_hit_triggers"] == {"hurl_through_hell": True}
+
+
+def test_the_decision_path_still_hurls(fiend14) -> None:
+    """命中的收尾有两条：经过命中法术决策的那条也必须触发并消耗 Hurl。"""
+
+    from tests.rulesets.test_dnd2024_channel_control import _attack
+
+    engine, instance = _setup(_fiend_with_a_hit_spell(deepcopy(fiend14)))
+    _start(engine, instance, enemies=_two_enemies())
+
+    events, decided = _attack(
+        engine, instance, "item:dagger", dice=[20, 1, 1] + [6] * 8,
+        hurl_through_hell=True,
+    )
+
+    assert not _of_type(events, "dnd2024.feature.used")
+    used = [
+        row for row in _of_type(decided, "dnd2024.feature.used")
+        if row.get("feature_id") == "hurl_through_hell"
+    ]
+    assert used
+    check = [
+        row for row in _of_type(decided, "check.resolved")
+        if row.get("ability") == "cha"
+    ][0]
+    # 决策收尾没有骰子序列可用：豁免落到最小值，目标被放逐。
+    assert check["success"] is False
+    assert [
+        row for row in _of_type(decided, "resource.changed")
+        if row.get("damage_type") == "psychic"
+    ]
