@@ -10,6 +10,7 @@ from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.attunement import AttunementError
 from src.rulesets.dnd2024.character.attunement import apply_short_rest_attunement
 from src.rulesets.dnd2024.character.attunement import owned_ref_counts
+from src.rulesets.dnd2024.forms import KnownFormsError, bootstrap_known_forms, replace_one
 from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.combat.catalog import DAMAGE_TYPES
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
@@ -355,6 +356,7 @@ class Dnd2024RestEngine:
         free_cast: dict[str, Any] | None = None,
         fiendish_resilience: str | None = None,
         hunter_options: dict[str, Any] | None = None,
+        wild_shape_forms: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         character = self.sync_resources(payload)
         self._require_conscious(character, "Long Rest")
@@ -380,8 +382,18 @@ class Dnd2024RestEngine:
             character, free_cast if free_cast is not None
             else payload.get("free_cast"),
         )
+        # S0-F25：长休可以替换**一个**已知形态。同样先计划再落账——非法替换
+        # 不能让长休留下已经恢复的 HP 与槽位。
+        form_plan = self._plan_wild_shape_forms(
+            character,
+            wild_shape_forms if wild_shape_forms is not None
+            else payload.get("wild_shape_forms"),
+        )
         events: list[dict[str, Any]] = []
         events.extend(self._apply_hunter_options(character, hunter_plan))
+        if form_plan is not None:
+            character.setdefault("forms", {}).setdefault("known", {})["wild_shape"] = list(form_plan)
+            events.append({"type": "wild_shape_forms_replaced", "forms": list(form_plan)})
         resources = character["resources"]
         previous_hp = int(resources.get("hp", 0) or 0)
         resources["hp"] = int(resources.get("max_hp", 0) or 0)
@@ -541,6 +553,38 @@ class Dnd2024RestEngine:
         if "cantrip_refs" in change:
             block["cantrip_refs"] = list(change["cantrip_refs"])
         return [{"type": "prepared_spells_changed", "before": before, "after": after}]
+
+    def _plan_wild_shape_forms(
+        self, character: Mapping[str, Any], request: Any,
+    ) -> list[str] | None:
+        """长休的形态替换计划；没请求就返回 ``None``（保持原样）。"""
+
+        if request is None:
+            return None
+        class_ref, class_id, level = self._class_state(character)
+        if class_id != "druid":
+            raise RestError("only a druid can replace known forms")
+        if not isinstance(request, Mapping):
+            raise RestError("wild_shape_forms must be an object")
+        old_ref = str(request.get("old_form_ref") or "")
+        new_ref = str(request.get("new_form_ref") or "")
+        entries = [
+            entry for catalog in self.bundle.list("monster_catalog")
+            for entry in catalog.get("entries") or []
+        ]
+        known = [
+            str(item) for item in (
+                (character.get("forms") or {}).get("known", {}).get("wild_shape") or []
+            )
+        ]
+        if not known:
+            # 旧存档没有已知列表：战斗校验按推荐形态兜底，长休必须给出同一个答案。
+            # 否则这些角色在战斗里"会"的形态，到长休却一个都不认识，永远换不了。
+            known = bootstrap_known_forms(entries, level)
+        try:
+            return replace_one(known, old_ref, new_ref, level, entries)
+        except KnownFormsError as exc:
+            raise RestError(str(exc)) from exc
 
     def rest_options(self, character: Mapping[str, Any] | None) -> dict[str, Any]:
         """Read-only description of what a Long Rest requires or may change.

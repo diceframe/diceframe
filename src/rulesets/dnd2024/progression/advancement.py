@@ -9,6 +9,9 @@ from typing import Any
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.attunement import attuned_refs
 from src.rulesets.dnd2024.character.builder import ABILITY_IDS, ability_modifier
+from src.rulesets.dnd2024.forms import (
+    cr_cap, eligible_forms, known_form_count, validate_selection,
+)
 from src.rulesets.dnd2024.character.derivation import (
     apply_feature_ability_bonuses,
     derive_armor_class,
@@ -773,8 +776,44 @@ class Dnd2024AdvancementEngine:
         )
         errors.extend(choice_errors)
         requirements.extend(choice_requirements)
+        # S0-F25：Wild Shape 在 2 级开始，同一级必须选满已知形态。选择本身走
+        # 通用 `choices`，不新开一条升级通道。
+        form_requirements: dict[str, Any] = {}
+        if class_ref == "class:druid" and target_level >= 2:
+            entries = [
+                entry for catalog in self.bundle.list("monster_catalog")
+                for entry in catalog.get("entries") or []
+            ]
+            # 选择是**可选的一步**：没提交就不拦升级（角色会走推荐形态兜底），
+            # 提交了就必须恰好 N 个且合法——否则"选了 3 个"会被静默接受。
+            if "known_form_refs" in choices:
+                errors.extend(validate_selection(
+                    choices.get("known_form_refs"),
+                    target_level, entries,
+                ))
+            count = known_form_count(target_level)
+            options = eligible_forms(entries, target_level)
+            form_requirements = {
+                "known_form_count": count,
+                "cr_cap": cr_cap(target_level),
+                "known_form_options": options,
+            }
+            if count:
+                # 与其它槽位同构：前端不需要为形态单开一套渲染。
+                requirements.append({
+                    "id": "known_form_refs",
+                    "kind": "known_forms",
+                    "count": count,
+                    "cr_cap": cr_cap(target_level),
+                    # 与其它槽位同构：{value, name}，前端不必解释两种形状。
+                    "options": [
+                        {"value": row["ref"], "name": row["name"], "cr": row["cr"]}
+                        for row in options
+                    ],
+                })
         return {
             "ok": not errors,
+            "form_requirements": form_requirements,
             "errors": errors,
             "requirements": requirements,
             "choices": choices,
@@ -857,6 +896,13 @@ class Dnd2024AdvancementEngine:
         hit_die_key = f"d{int(class_entity.get('hit_die', 0) or 0)}"
         hit_dice = resources.setdefault("hit_dice", {})
         hit_dice[hit_die_key] = target_level
+
+        # S0-F25：升级时选好的已知形态写进角色级状态（跨变形、跨战斗存在）。
+        known_forms = preview.get("choices", {}).get("known_form_refs") or []
+        if known_forms:
+            character.setdefault("forms", {}).setdefault("known", {})["wild_shape"] = [
+                str(ref) for ref in known_forms
+            ]
 
         features = character.setdefault("features", {})
         subclass_ref = str(preview["choices"].get("subclass_ref") or "")

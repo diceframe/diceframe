@@ -39,7 +39,9 @@
     ],
     "druid": [
       {"id": "wild_shape", "minimum_level": 2, "maximum_track": "wild_shape", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p42:wild-shape"},
-      {"id": "natural_recovery", "minimum_level": 6, "maximum_fixed": 1, "short": "none", "long": "all", "requires_subclass": "subclass:circle_of_the_land", "short_recovery": {"mode": "spell_slots", "budget": "half_level_round_up", "max_slot_level": 5}, "source_ref": "srd-5.2.1:p46:natural-recovery"}
+      {"id": "natural_recovery", "minimum_level": 6, "maximum_fixed": 1, "short": "none", "long": "all", "requires_subclass": "subclass:circle_of_the_land", "short_recovery": {"mode": "spell_slots", "budget": "half_level_round_up", "max_slot_level": 5}, "source_ref": "srd-5.2.1:p46:natural-recovery"},
+      {"id": "wild_resurgence", "minimum_level": 5, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p42:wild-resurgence"},
+      {"id": "archdruid", "minimum_level": 20, "maximum_fixed": 1, "short": "none", "long": "all", "source_ref": "srd-5.2.1:p43:archdruid"}
     ],
     "fighter": [
       {"id": "second_wind", "minimum_level": 1, "maximum_track": "second_wind", "short": {"amount": 1}, "long": "all", "source_ref": "srd-5.2.1:p48:second-wind"},

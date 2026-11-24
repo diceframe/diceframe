@@ -2564,6 +2564,33 @@
             "range_bonus_ft": 300,
             "range_minimum_ft": 10
           }
+        },
+        {
+          "id": "wild_shape",
+          "minimum_level": 2,
+          "resource_id": "wild_shape",
+          "source_ref": "srd-5.2.1:p42:wild-shape",
+          "summary": "As a Bonus Action, assume a Beast form you know. You keep your HP, Hit Dice, INT/WIS/CHA, creature type and languages; your physical scores, AC (if higher), speeds, senses and attacks come from the beast. You gain Temporary HP equal to your Druid level."
+        },
+        {
+          "id": "wild_resurgence",
+          "minimum_level": 5,
+          "resource_id": "wild_resurgence",
+          "source_ref": "srd-5.2.1:p42:wild-resurgence",
+          "summary": "Once on each of your turns, if you have no Wild Shape uses left, you can expend a spell slot to regain one use (no action). Alternatively, expend one use to gain a level 1 spell slot (no action); this direction needs a Long Rest before it can be used again."
+        },
+        {
+          "id": "beast_spells",
+          "minimum_level": 18,
+          "source_ref": "srd-5.2.1:p43:beast-spells",
+          "summary": "You can cast spells while in a Beast form, except spells whose material component has a specified cost or is consumed by the spell."
+        },
+        {
+          "id": "archdruid",
+          "minimum_level": 20,
+          "resource_id": "archdruid",
+          "source_ref": "srd-5.2.1:p43:archdruid",
+          "summary": "Evergreen Wild Shape: when you roll Initiative and have no Wild Shape uses left, you regain one. Nature Magician: convert Wild Shape uses into a spell slot of twice that level. Longevity: for every ten years that pass, your body ages only one year (narrative; not modelled mechanically)."
         }
       ]
     },

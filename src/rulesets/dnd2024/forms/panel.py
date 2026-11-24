@@ -86,6 +86,14 @@ POLYMORPH_POLICY: dict[str, str] = {
 }
 
 
+def cr_value(label: str) -> float:
+    text = str(label or "0")
+    if "/" in text:
+        numerator, denominator = text.split("/")[:2]
+        return float(numerator) / float(denominator)
+    return float(text)
+
+
 class FormPanelError(ValueError):
     """Raised when a panel or a policy cannot be applied."""
 
@@ -305,6 +313,7 @@ __all__ = [
     "FormPanelError",
     "StatPanel",
     "compose",
+    "cr_value",
     "panel_from_statblock",
     "panel_from_view",
 ]
