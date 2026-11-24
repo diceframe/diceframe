@@ -23,7 +23,7 @@ from src.commands.protocol_repair import repair_malformed_protocol_response
 from src.commands.round_actions import format_check_results_constraint
 from src.commands.state_update_applier import StateUpdateApplier, discard_unresolved_player_damage
 from src.commands.tag_parser import parse_tag_state
-from src.commands.story_output import ensure_story_response, bound_story_response
+from src.commands.story_output import ensure_story_response, bound_story_response, story_limit
 from src.engine.game_instance import GameInstance, restore_players
 from src.engine.modules import adventure_runtime_state, progression_state, session_stats
 from src.engine.world_state import ensure_world_state
@@ -252,8 +252,7 @@ class SwipeGenerator:
         narration = sanitize_narration(narration)
         data = parse_tag_state(response.content, combat_model_s)
         if getattr(response, "story", None):
-            bound_story_response(response, data, trigger=500 if instance.language == "zh-CN" else 1200,
-                                 limit=400 if instance.language == "zh-CN" else 1100)
+            bound_story_response(response, data, limit=story_limit(instance.language))
             narration = response.narration
         system_changes: list[str] = []
         if should_warn_unbacked_payment(

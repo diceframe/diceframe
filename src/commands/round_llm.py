@@ -19,7 +19,7 @@ from src.engine.health import record_health_event
 from src.engine.language import localized_text, normalize_language
 from src.engine.modules import progression_state
 from src.engine.story import StoryFormatError, StorySink, StoryStream, read_story_mode
-from src.commands.story_output import bound_story_response, decode_story_response
+from src.commands.story_output import bound_story_response, decode_story_response, story_limit
 from src.llm.client import OutputTruncatedError, length_retry_budgets
 from src.llm.parser import (
     find_protocol_suffix_start,
@@ -726,8 +726,7 @@ async def call_llm_with_tag_retry(
         int((time.perf_counter() - started) * 1000),
     )
     if dialogue:
-        limits = _NARRATION_LIMITS.get(normalize_language(instance.language), _NARRATION_LIMITS["zh-CN"])
-        bound_story_response(response, data, trigger=limits["trigger"], limit=limits["combat"])
+        bound_story_response(response, data, limit=story_limit(instance.language))
         if stream and streamed_story != response.story:
             if on_reset:
                 await on_reset()
