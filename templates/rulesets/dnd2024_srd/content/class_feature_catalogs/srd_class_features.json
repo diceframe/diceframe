@@ -627,9 +627,7 @@
             "damage_dice": "10d12",
             "damage_type": "force",
             "save_ability": "con",
-            "dc_ability": "wis",
-            "duration_days_per_level": true,
-            "max_targets": 1
+            "dc_ability": "wis"
           },
           "capabilities": [
             {

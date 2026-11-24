@@ -2780,13 +2780,25 @@ class CombatResolutionMixin:
                     ),
                 })
 
-        if intent.get("hurl_through_hell") and self.features.has_feature(
-            character, "hurl_through_hell",
-        ) and not self._feature_used_this_turn(
-            combat, str(actor["actor_id"]), "hurl_through_hell",
-        ) and feature_usage_count(
-            character, "hurl_through_hell", "hurl_through_hell",
-        ) < int(parameter("hurl_through_hell", "uses_per_long_rest") or 1):
+        if intent.get("hurl_through_hell"):
+            # 要求了却不满足条件时**直接失败**：静默降级成一次普通命中，
+            # 会让客户端以为能力已经生效。
+            if not self.features.has_feature(character, "hurl_through_hell"):
+                raise CombatIntentError(
+                    "Hurl Through Hell is not available to this actor"
+                )
+            if self._feature_used_this_turn(
+                combat, str(actor["actor_id"]), "hurl_through_hell",
+            ):
+                raise CombatIntentError(
+                    "Hurl Through Hell was already used this turn"
+                )
+            if feature_usage_count(
+                character, "hurl_through_hell", "hurl_through_hell",
+            ) >= int(parameter("hurl_through_hell", "uses_per_long_rest") or 1):
+                raise CombatIntentError(
+                    "Hurl Through Hell has no use left until a long rest"
+                )
             declarations.append({
                 "kind": "hurl_through_hell",
                 "feature_id": "hurl_through_hell",
@@ -5784,24 +5796,20 @@ class CombatResolutionMixin:
             + proficiency_bonus(level)
         )
         target = self._actor_view(instance, combat, target_id)
-        natural = int(rng.randint(1, 20))
-        modifier = int((target.get("saving_throws") or {}).get(save_ability, 0) or 0)
-        total = natural + modifier
-        total, replacement = self._strength_total_replacement(
-            target, save_ability, total,
+        # 走与法术、重复豁免同一个权威函数：自动失败（麻痹/昏迷）、光环、
+        # 掩护、条件加值与 roll_id 都在里面，手写一份就全丢了。
+        events: list[dict[str, Any]] = []
+        check = self._saving_throw_check(
+            instance, combat, target, target_id,
+            save_ability, dc, actor_id, events, rng,
         )
-        saved = total >= dc
-        events: list[dict[str, Any]] = [{
-            "type": "check.resolved", "kind": "saving_throw",
-            "actor_id": target_id, "ability": save_ability,
-            "rolls": [natural], "natural": natural, "modifier": modifier,
-            "total": total, "target": dc, "success": saved,
-            "feature_id": feature_id, "channel_effect": "quivering_palm",
-            # 位面由调用方断言，不由引擎判定：没有权威系统时，把这条事实
-            # 原样写进事件，让日志能看出它来自哪里。
-            "plane_asserted": True,
-            **replacement,
-        }]
+        check["feature_id"] = feature_id
+        check["channel_effect"] = "quivering_palm"
+        # 位面由调用方断言，不由引擎判定：没有权威系统时，把这条事实原样
+        # 写进事件，让日志能看出它来自哪里。
+        check["plane_asserted"] = True
+        events.append(check)
+        saved = bool(check["success"])
         events.append({
             "type": "dnd2024.long_effect.ended",
             "actor_id": actor_id,
@@ -6359,7 +6367,14 @@ class CombatResolutionMixin:
             source = self._actor_view(instance, combat, source_actor_id)
         except Exception:  # noqa: BLE001 - 来源可能是已离场的叙事对象
             return False
-        return str(source.get("creature_type") or "").lower() in {"fiend", "undead"}
+        # 名单来自特性参数：改内容不需要改代码。
+        declared = self.features.feature_value(
+            character, "holy_nimbus", "holy_ward_creature_types", None,
+        )
+        accepted = {
+            str(code).lower() for code in (declared or ("fiend", "undead"))
+        }
+        return str(source.get("creature_type") or "").lower() in accepted
 
     def _saving_throw_check(
         self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],

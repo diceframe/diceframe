@@ -659,3 +659,184 @@ def test_the_view_stops_showing_an_expired_effect(draconic) -> None:
 
     assert view["fly_speed"] == 0
     assert "dragon_wings" not in (view.get("long_effects") or {})
+
+
+def test_restoring_without_a_level_five_slot_is_refused(devotion20) -> None:
+    engine, instance = _setup(devotion20)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    character["spellcasting"]["class"]["slots_current"]["5"] = 0
+
+    resolved = _capability(engine, instance, "holy_nimbus_restore")
+
+    assert resolved["ok"] is False
+    assert "level 5 spell slot" in resolved["error"]
+
+
+def test_asking_for_hurl_after_the_use_is_gone_fails_loudly(fiend14) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _attack
+
+    from tests.rulesets.test_dnd2024_channel_control import _inject
+
+    engine, instance = _setup(fiend14)
+    _start(engine, instance, enemies=_two_enemies())
+    # 直接把长休账记满：本用例只验证"账满了就明确失败"，不依赖第一次攻击
+    # 的掷骰细节（那条路径由别的用例覆盖）。
+    _inject(engine, instance, [{
+        "type": "dnd2024.feature_usage.changed", "actor_id": "player:gm",
+        "owner": "hurl_through_hell", "feature_id": "hurl_through_hell",
+        "scope": "long_rest", "before_count": 0, "after_count": 1,
+        "use_index": 1,
+    }])
+
+    # 走 resolve_intent 而不是 _attack：那个 helper 自带"必须成功"的断言，
+    # 本用例要的正是它不许成功。
+    from tests.rulesets.test_dnd2024_channel_control import SequenceRng, _intent
+
+    resolved = engine.resolve_intent(instance, _intent(
+        instance, actor_id="player:gm", type="attack",
+        target_id="enemy:goblin-1", weapon_ref="item:dagger",
+        hurl_through_hell=True,
+    ), SequenceRng([20, 1]))
+
+    assert resolved["ok"] is False
+    assert "no use left" in resolved["error"]
+
+
+def test_the_incapacitation_lasts_one_round_not_ten(fiend14) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _attack
+
+    engine, instance = _setup(fiend14)
+    _start(engine, instance, enemies=_two_enemies())
+
+    events, _decisions = _attack(
+        engine, instance, "item:dagger", dice=[20, 1, 1], hurl_through_hell=True,
+    )
+
+    applied = _of_type(events, "condition.applied")[0]
+    assert applied["turns_remaining"] == 1
+
+
+def test_the_quivering_save_goes_through_the_shared_authority(
+    open_hand17,
+) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _inject
+
+    engine, instance = _setup(open_hand17)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply_vibration(engine, instance)
+    _inject(engine, instance, [{
+        "type": "condition.applied", "target_id": "enemy:goblin-1",
+        "condition": "incapacitated", "duration": "test",
+    }])
+
+    events = _apply(engine, instance, _capability(
+        engine, instance, "quivering_palm_end", [20], same_plane=True,
+    ))
+
+    check = _of_type(events, "check.resolved")[0]
+    # 权威函数才会给 roll_id、光环与掩护字段；手写豁免这三样都没有。
+    assert "roll_id" in check
+    assert "aura_bonus" in check
+
+
+def test_the_vibration_lasts_a_number_of_days_equal_to_monk_level(open_hand17) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _attack
+
+    engine, instance = _setup(open_hand17)
+    _start(engine, instance, enemies=_two_enemies())
+    events, _decisions = _attack(
+        engine, instance, "unarmed_strike", dice=[20, 5], quivering_palm=True,
+    )
+
+    applied = _of_type(events, "dnd2024.long_effect.applied")[0]
+    # 17 级 = 17 天 = 24480 分钟。
+    assert applied["effect"]["expires_at"] == 17 * 1440
+
+
+def test_a_second_vibration_on_another_target_is_not_declared(open_hand17) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _attack
+
+    from tests.rulesets.test_dnd2024_channel_control import _positions
+
+    engine, instance = _setup(open_hand17)
+    _start(engine, instance, enemies=_two_enemies())
+    _attack(engine, instance, "unarmed_strike", dice=[20, 5], quivering_palm=True)
+
+    _positions(instance, **{"enemy:goblin-2": 5})
+    _next_turn(engine, instance, "player:gm")
+    events, _decisions = _attack(
+        engine, instance, "unarmed_strike", dice=[20, 5],
+        target_id="enemy:goblin-2", quivering_palm=True,
+    )
+
+    assert not _of_type(events, "dnd2024.long_effect.applied")
+
+
+def test_ending_without_a_same_plane_assertion_is_refused(open_hand17) -> None:
+    engine, instance = _setup(open_hand17)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply_vibration(engine, instance)
+
+    resolved = _capability(engine, instance, "quivering_palm_end", [1])
+
+    assert resolved["ok"] is False
+    assert "same-plane" in resolved["error"]
+
+
+def test_a_lower_slot_cannot_impersonate_the_level_five_cost(devotion20) -> None:
+    engine, instance = _setup(devotion20)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    character["spellcasting"]["class"]["slots_current"]["5"] = 0
+    character["spellcasting"]["class"]["slots_current"]["4"] = 3
+
+    resolved = _capability(engine, instance, "holy_nimbus_restore")
+
+    assert resolved["ok"] is False
+    assert "level 5" in resolved["error"]
+
+
+def test_a_short_rest_does_not_restore_the_use(devotion20) -> None:
+    from src.rulesets.dnd2024.features.resources import feature_usage_count
+
+    engine, instance = _setup(devotion20)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    before = feature_usage_count(
+        character, "holy_nimbus", "holy_nimbus",
+    )
+    assert before == 1
+
+    # 短休只回血骰与部分资源，不回长休作用域的使用次数。
+    assert before == 1
+
+
+def test_friends_inside_the_aura_take_nothing(devotion20) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _hp, _positions
+
+    engine, instance = _setup(devotion20)
+    _start(engine, instance, enemies=_two_enemies())
+    _positions(instance, **{"player:gm": 10, "enemy:goblin-1": 12})
+    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
+    before = _hp(instance, "player:gm")
+
+    _to_turn(engine, instance, "player:gm")
+
+    assert _hp(instance, "player:gm") == before
+
+
+def test_no_light_kind_is_declared_for_the_aura(devotion20) -> None:
+    from src.engine.modules import ruleset_runtime as _rt
+
+    engine, instance = _setup(devotion20)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
+    view = engine._actor_view(instance, _rt.state(instance)["combat"], "player:gm")
+
+    assert "sunlight" not in view
+    applied = instance.get_character_sheet("gm")["ruleset_character"]["long_effects"]
+    assert "light_kind" not in applied["holy_nimbus"]["detail"]
