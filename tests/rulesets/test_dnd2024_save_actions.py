@@ -168,6 +168,23 @@ def test_an_odd_pool_can_declare_a_halved_roll() -> None:
     assert (hits[0]["damage_type"], hits[0]["amount"]) == ("cold", 5)
 
 
+def test_a_halved_flag_inside_the_failed_branch_does_not_halve_a_failed_save() -> None:
+    """``half`` means "half on a success"; a failed save is always the whole roll."""
+    engine, instance = _instance()
+    _start(engine, instance, _enemy({
+        **_action(),
+        "on_fail": [{"damage": [{"dice": "4d6", "type": "fire", "half": True}]}],
+    }))
+
+    batch = _breathe(engine, instance, rolls=[1, 3, 3, 3, 3])
+
+    check = next(row for row in _of_type(batch["events"], "check.resolved")
+                 if row["kind"] == "saving_throw")
+    assert check["success"] is False
+    hits = _hits(batch["events"])
+    assert (len(hits[0]["rolls"]), hits[0]["amount"]) == (4, 12)
+
+
 # 3. 契约 --------------------------------------------------------------------
 
 

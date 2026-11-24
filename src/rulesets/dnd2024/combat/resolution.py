@@ -1568,7 +1568,7 @@ class CombatResolutionMixin:
                     continue
                 event, _amount = self._damage_instance_event(
                     str(part["dice"]), str(part.get("type") or ""), target,
-                    False, rng, half=bool(part.get("half")),
+                    False, rng, half=bool(check["success"] and part.get("half")),
                 )
                 if event is not None:
                     events.append(event)

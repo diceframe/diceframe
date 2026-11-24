@@ -252,6 +252,47 @@ def test_form_state_round_trips_through_a_save_payload() -> None:
     assert "abilities" not in state.as_payload()
 
 
+def test_legacy_form_payload_keeps_the_single_equipment_mode() -> None:
+    restored = FormState.from_payload({
+        "effect_id": "wild_shape",
+        "form_ref": "wolf",
+        "equipment_mode": "merge",
+    })
+
+    assert restored.equipment_modes == {"*": "merge"}
+
+
+def test_reverting_a_legacy_active_form_preserves_known_forms() -> None:
+    from src.engine.modules import ruleset_runtime
+
+    engine, instance = _combat()
+    canonical = instance.get_character_sheet("gm")["ruleset_character"]
+    canonical["forms"] = {
+        "known": {"wild_shape": ["wolf"]},
+        "active": {
+            "effect_id": "wild_shape",
+            "form_ref": "wolf",
+            "equipment_mode": "merge",
+        },
+    }
+    state = ruleset_runtime.state(instance)
+    batch = {
+        "batch_id": "batch_legacy_form_revert",
+        "intent_id": "legacy-form-revert",
+        "intent_type": "form.revert",
+        "expected_version": state["version"],
+        "result_version": state["version"] + 1,
+        "events": [{
+            "type": "dnd2024.form.reverted", "actor_id": "player:gm",
+        }],
+    }
+    engine.apply_batch(instance, batch)
+
+    restored = instance.get_character_sheet("gm")["ruleset_character"]
+    assert restored["forms"]["known"]["wild_shape"] == ["wolf"]
+    assert "active" not in restored["forms"]
+
+
 def test_an_unknown_effect_or_mode_is_rejected_on_load() -> None:
     with pytest.raises(FormStateError, match="unknown shape-shift effect"):
         FormState.from_payload({"effect_id": "polymorph_self", "form_ref": "wolf"})
@@ -473,6 +514,41 @@ def test_a_druid_can_assume_a_beast_form() -> None:
     assert int(character["resources"].get("temp_hp", 0) or 0) == 2
 
 
+def test_legacy_druid_without_known_form_state_uses_the_safe_bootstrap() -> None:
+    engine, instance, rng = _druid_combat(2)
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    character.setdefault("forms", {}).pop("known", None)
+    state = __import__("src.engine.modules", fromlist=["ruleset_runtime"]).ruleset_runtime.state(instance)
+
+    result = engine.resolve_intent(instance, {
+        "intent_id": "legacy-shape", "type": "form.assume",
+        "expected_version": state["version"], "submitted_by": "gm",
+        "actor_id": "player:gm", "form_ref": "wolf",
+    }, rng([]))
+
+    assert result["ok"] is True, result.get("error")
+
+
+def test_available_intents_exposes_assume_and_revert_controls() -> None:
+    engine, instance, rng = _druid_combat(2)
+    actions = engine.available_intents(instance, "gm")
+    assume = next(action for action in actions if action["type"] == "form.assume")
+    assert {row["ref"] for row in assume["forms"]} >= {"wolf"}
+
+    state = __import__("src.engine.modules", fromlist=["ruleset_runtime"]).ruleset_runtime.state(instance)
+    result = engine.resolve_intent(instance, {
+        "intent_id": "shape-ui", "type": "form.assume",
+        "expected_version": state["version"], "submitted_by": "gm",
+        "actor_id": "player:gm", "form_ref": "wolf",
+    }, rng([]))
+    assert result["ok"] is True
+    engine.apply_batch(instance, result["event_batch"])
+    state = __import__("src.engine.modules", fromlist=["ruleset_runtime"]).ruleset_runtime.state(instance)
+    state["combat"]["economy"]["bonus_action"] = 1
+    actions = engine.available_intents(instance, "gm")
+    assert any(action["type"] == "form.revert" for action in actions), actions
+
+
 def test_wild_shape_refuses_a_form_above_the_level_cap() -> None:
     engine, instance, rng = _druid_combat(2)
     from src.engine.modules import ruleset_runtime
@@ -510,6 +586,62 @@ def test_reverting_requires_an_active_form() -> None:
     }, rng([]))
     assert result["ok"] is False
     assert "no shape" in result["error"]
+
+
+def test_new_incapacitation_is_seen_by_the_same_batch_shape_exit_sweep() -> None:
+    engine, instance, _rng_factory = _shaped_druid(2)
+    from src.engine.modules import ruleset_runtime
+
+    combat = ruleset_runtime.state(instance)["combat"]
+    exits = engine._shape_exit_events(instance, combat, [{
+        "type": "condition.applied", "target_id": "player:gm",
+        "condition": "stunned", "source_actor_id": "enemy:goblin",
+    }])
+
+    assert [event["reason"] for event in exits] == ["incapacitated"]
+
+
+def test_damage_held_by_relentless_rage_does_not_end_the_shape() -> None:
+    engine, instance, _rng_factory = _shaped_druid(2)
+    from src.engine.modules import ruleset_runtime
+
+    combat = ruleset_runtime.state(instance)["combat"]
+    lethal = {
+        "type": "resource.changed", "resource": "hp", "target_id": "player:gm",
+        "delta": -999, "amount": 999, "relentless": {"feature_id": "relentless_rage"},
+    }
+    # reducer 把这次伤害挂在"是否用不屈狂暴"的决策上，HP 不动。预演必须给出
+    # 同一个答案，否则形态会在 HP 根本没降的时候被结束。
+    assert engine._shape_exit_events(instance, combat, [dict(lethal)]) == []
+
+    # 玩家放弃不屈、伤害真正落地时照常结束形态。
+    resolved = {**lethal, "relentless_deferred": True}
+    exits = engine._shape_exit_events(instance, combat, [resolved])
+    assert [event["reason"] for event in exits] == ["incapacitated"]
+
+
+def test_an_incapacitated_druid_is_not_offered_the_shape_entries() -> None:
+    engine, instance, rng = _shaped_druid(2)
+    from src.engine.modules import ruleset_runtime
+
+    probe = engine.resolve_intent(instance, {
+        "intent_id": "probe-stunned-ui", "type": "dodge",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+    }, rng([]))
+    batch = dict(probe["event_batch"])
+    batch["events"] = [{
+        "type": "condition.applied", "target_id": "player:gm",
+        "condition": "stunned", "source_actor_id": "enemy:goblin",
+    }]
+    engine.apply_batch(instance, batch)
+    # 下一回合的预算：已变形、次数也还有，平时两条入口都会出现。
+    ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] = 1
+
+    offered = {action["type"] for action in engine.available_intents(instance, "gm")}
+
+    assert "form.assume" not in offered
+    assert "form.revert" not in offered
 
 
 # ---------------------------------------------------------------------------

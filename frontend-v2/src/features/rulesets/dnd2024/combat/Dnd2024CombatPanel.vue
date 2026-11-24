@@ -100,6 +100,17 @@ const adventureActive = computed(() => String(
   gameplay.value?.campaign?.tutorial?.status || '',
 ) === 'active')
 const attackAction = computed(() => action('attack'))
+const formAssumeAction = computed(() => action('form.assume'))
+const formRevertAction = computed(() => action('form.revert'))
+// 变形之后只要还有 Wild Shape 次数，服务端会同时给出「变形」和「恢复原形」。
+// 做哪一个由玩家在卡片里选；只有一条入口时不需要选。
+const formMode = ref<'assume' | 'revert'>('assume')
+const formAction = computed(() => (
+  formMode.value === 'revert'
+    ? (formRevertAction.value || formAssumeAction.value)
+    : (formAssumeAction.value || formRevertAction.value)
+))
+const formChoices = computed(() => (formAssumeAction.value?.forms || []) as JsonObject[])
 const spellAction = computed(() => action('cast_spell'))
 const spellActor = computed(() => combat.value?.actors?.find(actor => actor.actor_id === (spellAction.value?.actor_id || `player:${props.actorId}`)))
 // 职业特性提供的战斗能力：服务端只返回当前真实可用的 capability，前端只渲染
@@ -145,6 +156,7 @@ const treasureTableRef = ref('')
 const treasureResult = ref('')
 const selectedItemRef = ref('')
 const selectedItemTargetId = ref('')
+const selectedFormRef = ref('')
 const explorationItemRef = ref('')
 const itemChoices = computed(() => {
   if (dockTab.value !== 'action' && dockTab.value !== 'bonus') return []
@@ -255,6 +267,9 @@ const stagedSummary = computed(() => {
     const aimed = capability?.requires_target ? ` → ${target}` : ''
     return [label, cost].filter(Boolean).join(' · ') + aimed
   }
+  if (type === 'form.assume' || type === 'form.revert') {
+    return type === 'form.assume' ? copy.value.assumeForm : copy.value.revertForm
+  }
   return localizedTerm(type)
 })
 
@@ -359,7 +374,7 @@ const { floaters, play: playFeedback, clear: clearFeedback } = useFeedback(() =>
   condition: localizedTerm,
 }))
 
-type DockMode = '' | 'attack' | 'spell' | 'item' | 'capability' | 'explore' | 'explore_item' | 'move'
+type DockMode = '' | 'attack' | 'form' | 'spell' | 'item' | 'capability' | 'explore' | 'explore_item' | 'move'
 const dockTab = ref<'action' | 'bonus' | 'move' | 'reaction'>('action')
 const dockMode = ref<DockMode>('')
 const inspectedId = ref('')
@@ -384,7 +399,7 @@ const visibleTileCount = computed(() => {
   if (dockTab.value === 'reaction') return 0
   const spell = showSpellTile.value ? 1 : 0
   const item = showItemTile.value ? 1 : 0
-  if (dockTab.value === 'bonus') return spell + item
+  if (dockTab.value === 'bonus') return spell + item + (formAction.value ? 1 : 0)
   return spell + item + (attackAction.value ? 1 : 0) + (explorationAction.value ? 1 : 0)
     + (explorationItemAction.value ? 1 : 0) + simpleActions.value.length
     + (capabilityActions.value.length || currentClassResources.value.length ? 1 : 0)
@@ -455,6 +470,7 @@ const dockTargetDistance = computed(() => (
 ))
 const dockCost = computed(() => {
   if (dockMode.value === 'attack') return copy.value.action
+  if (dockMode.value === 'form') return copy.value.bonus
   if (dockMode.value === 'spell' || dockMode.value === 'explore') {
     const spell = dockMode.value === 'spell' ? selectedSpell.value : explorationSpell.value
     if (!spell) return ''
@@ -476,6 +492,7 @@ const canStageDock = computed(() => {
   if (busy.value) return false
   switch (dockMode.value) {
     case 'attack': return Boolean(selectedWeapon.value && selectedTargetId.value && selectedWeaponRange.value?.usable)
+    case 'form': return Boolean(formAction.value && (formAction.value.type === 'form.revert' || selectedFormRef.value))
     // Only a spell listed under the open tab may be sent from it.
     case 'spell': return Boolean(spellTargetsValid.value
       && spellChoices.value.some(item => item.spell_ref === selectedSpellRef.value))
@@ -498,6 +515,9 @@ function openDockMode(mode: DockMode, keepOpen = false): void {
       selectedSpellRef.value = choices[0]!.spell_ref
     }
   }
+  if (dockMode.value === 'form' && !formChoices.value.some(item => String(item.ref || '') === selectedFormRef.value)) {
+    selectedFormRef.value = String(formChoices.value[0]?.ref || '')
+  }
   if (dockMode.value === 'capability' && !selectedCapability.value) {
     selectedCapabilityId.value = capabilityActions.value[0]?.capability_id || ''
   }
@@ -517,6 +537,7 @@ function openDockMode(mode: DockMode, keepOpen = false): void {
 function stageDock(): void {
   if (!canStageDock.value) return
   if (dockMode.value === 'attack') stageAttack()
+  else if (dockMode.value === 'form') stageForm()
   else if (dockMode.value === 'spell') stageSpell()
   else if (dockMode.value === 'item') stageItem()
   else if (dockMode.value === 'capability' && selectedCapability.value) stageCapability(selectedCapability.value)
@@ -715,6 +736,11 @@ function resetSelections(): void {
   )) {
     explorationItemRef.value = explorationItemAction.value?.items?.[0]?.item_ref || ''
   }
+  if (!formChoices.value.some(item => String(item.ref || '') === selectedFormRef.value)) {
+    selectedFormRef.value = String(formChoices.value[0]?.ref || '')
+  }
+  // 恢复原形入口消失后（已经变回来了），下次打开卡片从「变形」开始。
+  if (!formRevertAction.value) formMode.value = 'assume'
   if (!treasureTables.value.some(
     table => table.table_ref === treasureTableRef.value,
   )) {
@@ -758,6 +784,8 @@ function clearGameScopedState(): void {
   selectedSpellRef.value = ''
   selectedItemRef.value = ''
   selectedItemTargetId.value = ''
+  selectedFormRef.value = ''
+  formMode.value = 'assume'
   explorationItemRef.value = ''
   treasureTableRef.value = ''
   treasureResult.value = ''
@@ -863,6 +891,16 @@ function stageAttack(): void {
     ...(declareTwoHanded.value && weapon.damage_two_handed ? { two_handed: true } : {}),
     ...(declareAttackLuck.value ? { spend_luck: true } : {}),
   })
+}
+
+function stageForm(): void {
+  if (!formAction.value) return
+  const payload: JsonObject = {
+    type: formAction.value.type,
+    actor_id: formAction.value.actor_id,
+  }
+  if (formAction.value.type === 'form.assume') payload.form_ref = selectedFormRef.value
+  stage(payload)
 }
 
 function stageSpell(): void {
@@ -1386,6 +1424,24 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               </label>
             </div>
 
+            <div v-if="dockMode === 'form' && formAction" class="mode-panel" data-mode="form" data-testid="combat-form-card">
+              <div v-if="formAssumeAction && formRevertAction" class="form-modes" data-testid="combat-form-modes">
+                <button type="button" :class="{ active: formMode === 'assume' }" data-form-mode="assume" @click="formMode = 'assume'">{{ copy.assumeForm }}</button>
+                <button type="button" :class="{ active: formMode === 'revert' }" data-form-mode="revert" @click="formMode = 'revert'">{{ copy.revertForm }}</button>
+              </div>
+              <template v-if="formAction.type === 'form.assume' && formChoices.length">
+                <label>{{ copy.chooseForm }}
+                  <select v-model="selectedFormRef">
+                    <option v-for="form in formChoices" :key="String(form.ref || '')" :value="String(form.ref || '')">
+                      {{ String(form.name || form.ref || '') }} · CR {{ String(form.cr || '0') }}
+                    </option>
+                  </select>
+                </label>
+              </template>
+              <p v-else-if="formAction.type === 'form.revert'" class="dock-hint">{{ copy.revertForm }}</p>
+              <p v-else class="dock-hint">{{ copy.noFormAvailable }}</p>
+            </div>
+
             <div v-if="dockMode === 'spell'" class="mode-panel" data-mode="spell" data-testid="combat-spell-card">
               <template v-if="spellAction && spellChoices.length">
                 <label>{{ copy.spell }}
@@ -1530,6 +1586,9 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
                 <template #icon><NIcon :component="FlashOutline" /></template>
               </ActionTile>
             </template>
+            <ActionTile v-if="formAction && dockTab === 'bonus'" :label="copy.wildShape" :hint="formAction.type === 'form.revert' ? copy.revertForm : copy.assumeForm" :active="dockMode === 'form'" data-tile="form" @click="openDockMode('form')">
+              <template #icon><NIcon :component="SparklesOutline" /></template>
+            </ActionTile>
             <ActionTile v-if="showSpellTile" :label="copy.cast" :active="dockMode === 'spell'" data-tile="spell" @click="openDockMode('spell')">
               <template #icon><NIcon :component="SparklesOutline" /></template>
             </ActionTile>
@@ -1618,6 +1677,9 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 .mode-panel > .range-guide, .mode-panel > .dock-hint, .mode-panel > .class-resource-strip, .mode-panel > .capability-list { grid-column: 1 / -1; }
 .mode-panel label { display: grid; gap: 4px; color: #aebcc6; font-size: 12px; }
 .mode-panel select, .mode-panel input { width: 100%; min-height: 40px; padding-inline: 10px; border: 1px solid #4a5560; border-radius: 8px; background: #0d1319; color: #f3eee7; }
+.form-modes { display: flex; grid-column: 1 / -1; gap: 6px; }
+.form-modes button { flex: 1 1 0; min-height: 36px; padding: 4px 12px; border: 1px solid rgb(120 150 175 / 40%); border-radius: 9px; background: rgb(15 24 35 / 90%); color: #e8eef2; cursor: pointer; }
+.form-modes button.active { border-color: #e4b75e; background: rgb(88 62 22 / 60%); }
 .capability-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .capability-list button { display: grid; gap: 2px; min-height: 40px; padding: 5px 12px; border: 1px solid rgb(120 150 175 / 40%); border-radius: 9px; background: rgb(15 24 35 / 90%); color: #e8eef2; text-align: left; cursor: pointer; }
 .capability-list button.active { border-color: #e4b75e; background: rgb(88 62 22 / 60%); }
