@@ -426,7 +426,7 @@ class GameLifecycle:
                 max_tokens=self.narrative_max_tokens,
             )
             response.content = normalize_tag_protocol(response.content)
-            from src.commands.story_output import ensure_story_response, bound_story_response
+            from src.commands.story_output import ensure_story_response, bound_story_response, story_limit
             response = await ensure_story_response(
                 instance, response, self.llm_client, system_prompt=gm_prompt,
                 user_message=welcome_context, max_tokens=self.narrative_max_tokens, round_number=0,
@@ -438,9 +438,7 @@ class GameLifecycle:
             # 开场标签同样需要落地到 instance：NPC 登记、场景、首次战利品等。
             start_data = parse_tag_state(response.content, rule_ctx.combat_model)
             if getattr(response, "story", None):
-                bound_story_response(response, start_data,
-                                     trigger=500 if instance.language == "zh-CN" else 1200,
-                                     limit=400 if instance.language == "zh-CN" else 1100)
+                bound_story_response(response, start_data, limit=story_limit(instance.language))
                 opening_story = response.story
                 narration = response.narration
         except Exception:

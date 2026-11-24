@@ -1,10 +1,26 @@
 """Adapt model story output to the existing plain narration/state-tag contract."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+from src.engine.language import normalize_language
 from src.engine.story import StoryFormatError, parse_story, public_story, story_text, trim_story, read_story_mode
 from src.llm.parser import normalize_tag_protocol, sanitize_narration
+
+logger = logging.getLogger("trpg")
+
+# Hard ceiling for a whole dialogue-mode story, in ``story_text`` characters
+# including speaker names. It only stops runaway output: it sits far above the
+# regular length the prompt asks for (3-8 beats), so a normal reply is never
+# cut. Chinese and Japanese count characters; English, German and Russian are
+# sized by word count (about 600 words). Unlisted languages fall back to the
+# Chinese value.
+STORY_LIMITS = {"zh-CN": 1500, "ja": 1500, "en": 3600, "de": 3600, "ru": 3600}
+
+
+def story_limit(language: Any) -> int:
+    return STORY_LIMITS.get(normalize_language(language), STORY_LIMITS["zh-CN"])
 
 
 def decode_story_response(instance: Any, response: Any, *, strict: bool = False,
@@ -20,14 +36,20 @@ def decode_story_response(instance: Any, response: Any, *, strict: bool = False,
     _replace_public_body(response)
 
 
-def bound_story_response(response: Any, data: dict, *, trigger: int, limit: int) -> bool:
-    if len(response.narration) <= trigger:
+def bound_story_response(response: Any, data: dict, *, limit: int) -> bool:
+    """Bound an overlong story on whole beats; rounds, swipes and openings share it."""
+    if len(response.narration) <= limit:
         return False
+    total = len(response.story.get("segments", []))
     response.story = trim_story(response.story, limit)
     response.narration = story_text(response.story)
     # Options referring to an omitted story beat must not survive truncation.
     data["quick_actions"] = []
     _replace_public_body(response)
+    logger.warning(
+        "对话叙事超出长度上限，已按整段截断: 保留 %d/%d 段 (上限 %d 字)",
+        len(response.story["segments"]), total, limit,
+    )
     return True
 
 
