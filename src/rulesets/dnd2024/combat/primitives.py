@@ -190,8 +190,6 @@ INTENT_TYPES = frozenset({
     "wild_resurgence", "nature_magician",
     # S0-F26：Circle of the Land 的两个主动能力。
     "land_aid", "nature_sanctuary",
-    # S0-F28：Innate Sorcery 的开启是附赠动作。
-    "innate_sorcery",
     # 职业特性提供的战斗能力：Combat 只认 capability id、动作/资源成本与底层
     # canonical action，"哪个职业在第几级授予它" 由 feature boundary 回答。
     "class_capability",

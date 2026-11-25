@@ -1268,8 +1268,6 @@ class Dnd2024CombatEngine(
             events.extend(self._basic_action_events(combat, intent_type, str(intent["actor_id"])))
         elif intent_type == "hide":
             events.extend(self._hide_events(instance, combat, intent, rng))
-        elif intent_type == "innate_sorcery":
-            events.extend(self._innate_sorcery_events(instance, combat, intent))
         elif intent_type == "land_aid":
             events.extend(self._land_aid_events(instance, combat, intent, rng))
         elif intent_type == "nature_sanctuary":

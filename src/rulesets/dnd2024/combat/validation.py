@@ -1081,8 +1081,6 @@ class CombatValidationMixin:
             self._validate_form_intent(instance, intent)
         if intent_type in {"land_aid", "nature_sanctuary"}:
             self._validate_land_feature(instance, intent, state)
-        if intent_type == "innate_sorcery":
-            self._validate_innate_sorcery(instance, intent, state)
         actor = self._actor_view(instance, combat, actor_id)
         if "dead" in actor["conditions"]:
             if intent_type == "end_turn":
@@ -1674,32 +1672,6 @@ class CombatValidationMixin:
             raise CombatIntentError(
                 f"the sanctuary can move at most {SANCTUARY_MOVE_LIMIT_FT} feet"
             )
-    def _validate_innate_sorcery(
-        self, instance: Any, intent: dict[str, Any], state: dict[str, Any],
-    ) -> None:
-        """One Bonus Action; either a use, or 2 Sorcery Points at level 7+."""
-
-        actor_id = str(intent.get("actor_id") or "")
-        kind, raw_id = _actor_kind(actor_id)
-        if kind != "player":
-            raise CombatIntentError("only a player can use Innate Sorcery")
-        character = _canonical(instance.get_character_sheet(raw_id))
-        if not self.features.has_feature(character, "innate_sorcery"):
-            raise CombatIntentError("this character has no Innate Sorcery")
-        if "innate_sorcery" in (character.get("conditions") or {}):
-            raise CombatIntentError("Innate Sorcery is already active")
-        economy = (state.get("combat") or {}).get("economy") or {}
-        if int(economy.get("bonus_action", 0) or 0) < 1:
-            raise CombatIntentError("the bonus action has already been spent")
-        uses = self._class_resource_state(character, "innate_sorcery")
-        if uses["current"] >= 1:
-            return
-        if not self.features.has_feature(character, "sorcery_incarnate"):
-            raise CombatIntentError("no Innate Sorcery uses left")
-        points = self._class_resource_state(character, "sorcery_points")
-        if points["current"] < 2:
-            raise CombatIntentError("Sorcery Incarnate needs 2 Sorcery Points")
-
     def _validate_land_feature(
         self, instance: Any, intent: dict[str, Any], state: dict[str, Any],
     ) -> None:
@@ -1911,6 +1883,29 @@ class CombatValidationMixin:
                     f"{self.features.catalog.label(capability_id, capability_id)} cannot be "
                     f"used while {self.features.catalog.label(forbidden, forbidden)} is active"
                 )
+            feature_character = self._feature_character(actor)
+            if (
+                capability.requires_feature_id
+                and not self.features.has_feature(
+                    feature_character, capability.requires_feature_id,
+                )
+            ):
+                # 第二条价格挂在更高的另一条特性上：能力属于低等级特性，所以
+                # 这里要问"那条特性在不在"，而不是把等级写进引擎。
+                raise CombatIntentError(
+                    f"{self.features.catalog.label(capability_id, capability_id)} requires "
+                    f"{self.features.catalog.label(capability.requires_feature_id, capability.requires_feature_id)}"
+                )
+            if capability.exhausted_resource_id:
+                # 与池相反：还有余额时这条价格根本不成立。
+                state = resource_state(
+                    feature_character, capability.exhausted_resource_id,
+                )
+                if int(state.get("current", 0) or 0) > 0:
+                    raise CombatIntentError(
+                        f"{self.features.catalog.label(capability.exhausted_resource_id, capability.exhausted_resource_id)} "
+                        "is not exhausted yet"
+                    )
         if capability_id == "quivering_palm_end":
             # 结束振动必须先有振动：放在校验层，客户端拿到 ok=false 而不是
             # 运行期异常。

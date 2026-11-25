@@ -173,7 +173,8 @@ def test_innate_sorcery_spends_a_bonus_action_and_one_use() -> None:
         "current": 2, "maximum": 2,
     }
     result = _cast(engine, instance, {
-        "intent_id": "is-1", "type": "innate_sorcery",
+        "intent_id": "is-1", "type": "class_capability",
+        "capability_id": "innate_sorcery",
     })
     assert result["ok"] is True, result.get("error")
     engine.apply_batch(instance, result["event_batch"])
@@ -195,7 +196,10 @@ def test_sorcery_incarnate_pays_two_points_when_no_uses_remain() -> None:
     character.setdefault("resources", {}).setdefault("class", {})["innate_sorcery"] = {
         "current": 0, "maximum": 2,
     }
-    result = _cast(engine, instance, {"intent_id": "is-2", "type": "innate_sorcery"})
+    result = _cast(engine, instance, {
+        "intent_id": "is-2", "type": "class_capability",
+        "capability_id": "innate_sorcery_from_points",
+    })
     assert result["ok"] is True, result.get("error")
     spent = [
         e for e in result["event_batch"]["events"]
@@ -210,9 +214,13 @@ def test_sorcery_incarnate_pays_two_points_when_no_uses_remain() -> None:
     character2.setdefault("resources", {}).setdefault("class", {})["innate_sorcery"] = {
         "current": 0, "maximum": 2,
     }
-    refused = _cast(engine2, instance2, {"intent_id": "is-3", "type": "innate_sorcery"})
+    refused = _cast(engine2, instance2, {
+        "intent_id": "is-3", "type": "class_capability",
+        "capability_id": "innate_sorcery_from_points",
+    })
     assert refused["ok"] is False
-    assert "no Innate Sorcery uses" in refused["error"]
+    # 声明挂在 1 级特性上，但第二份价格要求 7 级的 Sorcery Incarnate。
+    assert "requires Sorcery Incarnate" in refused["error"]
 
 
 def test_quickened_spell_costs_the_bonus_action_not_the_action() -> None:
@@ -632,7 +640,10 @@ def _activate_innate(engine, instance, intent_id: str = "is-scope") -> None:
     character.setdefault("resources", {}).setdefault("class", {})["innate_sorcery"] = {
         "current": 2, "maximum": 2,
     }
-    result = _cast(engine, instance, {"intent_id": intent_id, "type": "innate_sorcery"})
+    result = _cast(engine, instance, {
+        "intent_id": intent_id, "type": "class_capability",
+        "capability_id": "innate_sorcery",
+    })
     assert result["ok"] is True, result.get("error")
     engine.apply_batch(instance, result["event_batch"])
 
@@ -830,3 +841,40 @@ def test_distant_spell_refuses_a_self_ranged_spell() -> None:
             incarnate=False, apotheosis=False,
             free_used_this_turn=False, cast_level_one_plus_this_turn=False,
         )
+
+
+def test_innate_sorcery_is_offered_as_a_capability_with_one_price_at_a_time() -> None:
+    """入口必须出现在投影里。
+
+    专用意图的毛病不是"结算不对"，而是"引擎能算、面板点不到"：它不在
+    `combat_capabilities` 里，所以没有一个瓦片承载它。改成 capability 之后，
+    两条付法各自的可用性由门禁决定，面板只看投影。
+    """
+
+    engine, instance = _sorcerer(level=10, points=5)
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    character.setdefault("resources", {}).setdefault("class", {})["innate_sorcery"] = {
+        "current": 2, "maximum": 2,
+    }
+
+    def offered() -> dict[str, dict]:
+        return {
+            row["capability_id"]: row
+            for row in engine.available_intents(instance, "gm")
+            if row["type"] == "class_capability"
+        }
+
+    with_uses = offered()
+    assert "innate_sorcery" in with_uses
+    assert with_uses["innate_sorcery"]["costs"]
+    # 术法点那条要求次数已经用完：还有剩余时它连瓦片都不该出现。
+    assert "innate_sorcery_from_points" not in with_uses
+    # 旧形态（专用意图）不该再出现在入口清单里。
+    assert "innate_sorcery" not in {
+        row["type"] for row in engine.available_intents(instance, "gm")
+    }
+
+    character["resources"]["class"]["innate_sorcery"]["current"] = 0
+    empty = offered()
+    assert "innate_sorcery" not in empty
+    assert "innate_sorcery_from_points" in empty

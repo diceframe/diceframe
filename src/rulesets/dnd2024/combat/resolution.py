@@ -4943,44 +4943,24 @@ class CombatResolutionMixin:
 
     def _innate_sorcery_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        capability: Any,
     ) -> list[dict[str, Any]]:
-        """Innate Sorcery: a Bonus Action for one minute of +1 DC and Advantage.
+        """Innate Sorcery: one minute of +1 DC and Advantage.
 
-        The use is spent when there is one; otherwise the level-7 path pays two
-        Sorcery Points.  Which path was taken is recorded on the condition so a
-        later feature (Arcane Apotheosis) can tell that the aura is genuinely on.
+        The price is not decided here: the capability declares it（1 次使用，
+        或次数用完后 2 点术法点），通用的成本块在本方法之前已经付掉。这里只
+        记录**付的是哪一种**，因为 Arcane Apotheosis 与审计都要区分两条路径。
         """
 
         actor_id = str(intent["actor_id"])
-        character = self._canonical_for_actor(instance, actor_id)
-        uses = (character.get("resources") or {}).get("class", {}).get(
-            "innate_sorcery", {}
-        )
-        current = int((uses or {}).get("current", 0) or 0)
-        spent: list[dict[str, Any]] = [
-            {"type": "dnd2024.action.spent", "actor_id": actor_id,
-             "resource": "bonus_action", "amount": 1},
-        ]
-        paid = "use"
-        if current >= 1:
-            spent.append({
-                "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
-                "resource_id": "innate_sorcery", "amount": 1,
-            })
-        else:
-            paid = "points"
-            spent.append({
-                "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
-                "resource_id": "sorcery_points", "amount": 2,
-            })
-        spent.append({
+        paid = "use" if capability.id == "innate_sorcery" else "points"
+        return [{
             "type": "condition.applied", "target_id": actor_id,
             "condition": "innate_sorcery",
             "source_actor_id": actor_id,
             "paid_with": paid,
             "expires_at_minute": self._logical_minutes(instance) + 1,
-        })
-        return spent
+        }]
 
     def _land_aid_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
@@ -5756,6 +5736,10 @@ class CombatResolutionMixin:
             elif action.kind == "divine_sense":
                 events.extend(self._divine_sense_events(
                     instance, actor, capability,
+                ))
+            elif action.kind == "innate_sorcery":
+                events.extend(self._innate_sorcery_events(
+                    instance, combat, intent, capability,
                 ))
             elif action.kind == "lay_on_hands":
                 events.extend(self._lay_on_hands_events(

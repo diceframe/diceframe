@@ -54,6 +54,10 @@ ACTION_KINDS = frozenset({
     # 斥退敌人是"一次魔法动作 + 一次引导，目标数由魅力决定"的多目标控制，
     # 与 Divine Spark 的单目标、Turn Undead 的固定类型都不同形。
     "abjure_foes",
+    # 术士：Innate Sorcery 只施加一个 1 分钟状态（+1 DC 与术士法术攻击优势），
+    # 超魔由施法链路消费。两条付法（次数 / 术法点）共用同一个 kind，差别在
+    # 成本与门禁，不在效果。
+    "innate_sorcery",
 })
 # 动作槽的名字。一个能力最多占一个槽。目录里的旧写法把槽名当键
 # （``action: 1`` / ``bonus_action: 1``），新写法是 ``slot: "action"``；两种都
@@ -270,6 +274,14 @@ class FeatureCapability:
     # 特性自身的使用次数（每长休）。资源表达不了"特性还剩几次"：资源是
     # 角色卡上的条，特性使用是一次性开关，两者在投影上不该混在一起。
     uses_per_long_rest: int = 0
+    # 必须**为空**才算成立的那个资源池：Innate Sorcery 的 2 点术法点价格
+    # 只在次数用完之后才存在。``pool_resource_id`` 要求"还有余额"，这个刚好
+    # 相反，两者都是成本模型说不出来的前置。
+    exhausted_resource_id: str = ""
+    # 第二条价格挂在另一条特性上：Innate Sorcery 属于 1 级特性，而"用术法点
+    # 换一次"从 7 级的 Sorcery Incarnate 才开始。声明出来，引擎就不必记住
+    # "哪条能力在几级多出一种付法"。
+    requires_feature_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -914,6 +926,18 @@ class Dnd2024ClassFeatureCatalog:
             raise ClassFeatureError(
                 f"{capability_id}.uses_per_long_rest must be a non-negative integer"
             )
+        exhausted_resource_id = str(raw.get("exhausted_resource_id") or "")
+        if exhausted_resource_id:
+            _require_id(exhausted_resource_id, f"{capability_id}.exhausted_resource_id")
+            if exhausted_resource_id in {cost.resource_id for cost in resources}:
+                # 既"要先花掉一单位"又"必须是零"：没有角色能同时满足。
+                raise ClassFeatureError(
+                    f"{capability_id} cannot both spend and require-empty "
+                    f"{exhausted_resource_id}"
+                )
+        requires_feature_id = str(raw.get("requires_feature_id") or "")
+        if requires_feature_id:
+            _require_id(requires_feature_id, f"{capability_id}.requires_feature_id")
         return FeatureCapability(
             id=capability_id,
             feature_id=feature_id,
@@ -928,6 +952,8 @@ class Dnd2024ClassFeatureCatalog:
             target_kind=target_kind,
             pool_resource_id=pool_resource_id,
             uses_per_long_rest=uses_per_long_rest,
+            exhausted_resource_id=exhausted_resource_id,
+            requires_feature_id=requires_feature_id,
         )
 
     def label(self, key: str, default: str = "") -> str:

@@ -2234,7 +2234,31 @@
             "uses": 2,
             "spell_save_dc_bonus": 1,
             "duration_minutes": 1
-          }
+          },
+          "capabilities": [
+            {
+              "id": "innate_sorcery",
+              "cost": {
+                "slot": "bonus_action",
+                "resources": [{"id": "innate_sorcery", "amount": 1}]
+              },
+              "forbidden_condition": "innate_sorcery",
+              "target_kind": "none",
+              "actions": [{"kind": "innate_sorcery"}]
+            },
+            {
+              "id": "innate_sorcery_from_points",
+              "cost": {
+                "slot": "bonus_action",
+                "resources": [{"id": "sorcery_points", "amount": 2}]
+              },
+              "forbidden_condition": "innate_sorcery",
+              "exhausted_resource_id": "innate_sorcery",
+              "requires_feature_id": "sorcery_incarnate",
+              "target_kind": "none",
+              "actions": [{"kind": "innate_sorcery"}]
+            }
+          ]
         },
         {
           "id": "metamagic",
