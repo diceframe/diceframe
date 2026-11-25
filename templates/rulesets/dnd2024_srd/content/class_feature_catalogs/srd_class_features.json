@@ -635,6 +635,7 @@
             {
               "id": "quivering_palm_dismiss",
               "cost": {},
+              "requires": ["active_long_effect:quivering_palm"],
               "actions": [
                 {
                   "kind": "end_long_effect",
@@ -960,6 +961,7 @@
             {
               "id": "holy_nimbus_end",
               "cost": {},
+              "requires": ["active_long_effect:holy_nimbus"],
               "actions": [
                 {
                   "kind": "end_long_effect",
@@ -2218,6 +2220,7 @@
             {
               "id": "dragon_wings_end",
               "cost": {},
+              "requires": ["active_long_effect:dragon_wings"],
               "actions": [
                 {
                   "kind": "end_long_effect",

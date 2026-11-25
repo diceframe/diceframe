@@ -15,6 +15,7 @@ from typing import Any, Iterable, Mapping
 
 from .kinds import KIND_HANDLERS
 from .models import (
+    ACTIVE_LONG_EFFECT_REQUIREMENT,
     ClassFeatureDefinition,
     CombatCapabilityView,
     Dnd2024ClassFeatureCatalog,
@@ -65,7 +66,7 @@ def spell_slot_count(slots: Mapping[str, Any], level: int) -> int:
 
 @dataclass(frozen=True, slots=True)
 class CombatContext:
-    """The turn and spell-slot budgets a capability is evaluated against."""
+    """Turn and spell-slot budgets plus active effects from the actor snapshot."""
 
     action: int = 0
     bonus_action: int = 0
@@ -78,11 +79,13 @@ class CombatContext:
     fleet_step: bool = False
     spell_slots: Mapping[str, Any] = field(default_factory=dict)
     spell_slot_maxima: Mapping[str, Any] = field(default_factory=dict)
+    active_effects: frozenset[str] = frozenset()
 
     @classmethod
     def from_economy(
         cls, economy: Mapping[str, Any] | None, actor_id: str = "",
         *, class_magic: Mapping[str, Any] | None = None,
+        active_effects: frozenset[str] = frozenset(),
     ) -> CombatContext:
         source: Mapping[str, Any] = economy if isinstance(economy, Mapping) else {}
 
@@ -104,6 +107,7 @@ class CombatContext:
             fleet_step=bool(source.get("fleet_step_available")),
             spell_slots=slots if isinstance(slots, Mapping) else {},
             spell_slot_maxima=maxima if isinstance(maxima, Mapping) else {},
+            active_effects=active_effects,
         )
 
     def remaining(self, action: str) -> int:
@@ -207,6 +211,13 @@ def _blocked_reason(
         # 窗口一旦被动作或跳过关掉，就不能回头再激活：这就是"at the start of
         # your turn"的可执行含义。
         return "the start of your turn has already passed"
+    for prerequisite in capability.requires:
+        if prerequisite.startswith(ACTIVE_LONG_EFFECT_REQUIREMENT):
+            effect_id = prerequisite.removeprefix(ACTIVE_LONG_EFFECT_REQUIREMENT)
+            if effect_id not in context.active_effects:
+                return "no effect to dismiss"
+        else:
+            return "unsupported capability prerequisite"
     return ""
 
 

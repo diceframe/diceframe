@@ -59,9 +59,13 @@ def test_an_empty_cost_needs_no_slot_and_reports_nothing_to_pay() -> None:
         for definition in resolver.catalog.features.values()
     }
 
+    # 结束类（*_end / dismiss）虽然空成本，但要结束的东西必须存在；这条
+    # 用例问的是"空成本不需要槽位"，所以先给它一个可结束的效果。
+    effects = frozenset({"holy_nimbus", "dragon_wings", "quivering_palm"})
     for feature_id, capability_id, _kinds in sorted(EMPTY_COST_CAPABILITIES):
         views = combat_capabilities(
-            resolver.catalog, (definitions[feature_id],), CombatContext(), {},
+            resolver.catalog, (definitions[feature_id],),
+            CombatContext(active_effects=effects), {},
             include_unavailable=True,
         )
         view = next(view for view in views if view.id == capability_id)
