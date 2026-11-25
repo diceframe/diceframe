@@ -6,10 +6,12 @@ from dataclasses import replace
 import pytest
 
 from src.engine.modules import ruleset_runtime
+from src.rulesets.dnd2024.combat import CombatIntentError
 from src.rulesets.dnd2024.features import ClassFeatureError, Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.features.kinds import KIND_HANDLERS, KindHandler
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
-from tests.rulesets.test_dnd2024_channel_control import _apply, _capability, _start, _two_enemies
+from tests.rulesets.test_dnd2024_channel_control import _apply, _capability, _enemy, _start, _two_enemies
+from dnd2024_monk_common import monk_sheet
 from tests.rulesets.test_dnd2024_combat import _instance_with_sheet
 from tests.rulesets.test_dnd2024_d20_skills import _rogue
 
@@ -26,6 +28,7 @@ def _custom_bundle(runtime):
     )
     capability = feature["capabilities"][0]
     capability["id"] = "test_activation"
+    capability["requires_hostile_target"] = True
     capability["actions"] = [{"kind": KIND, "count": 1}]
     return replace(bundle, entities=entities)
 
@@ -39,6 +42,10 @@ def test_registered_kind_runs_all_three_phases_without_central_changes(monkeypat
     def validate(capability, action, context) -> str:
         return "" if context.intent.get("confirm") is True else "confirm the test activation"
 
+    def validate_available(capability, action, context) -> None:
+        if context.intent.get("amount") != action.count:
+            raise CombatIntentError("the amount must match the declaration")
+
     def resolve(capability, action, context, rng) -> list[dict]:
         return [{
             "type": "dnd2024.economy.granted", "actor_id": context.actor_id,
@@ -49,7 +56,7 @@ def test_registered_kind_runs_all_three_phases_without_central_changes(monkeypat
         return {"requires_confirmation": True, "actions_granted": action.count}
 
     monkeypatch.setitem(KIND_HANDLERS, KIND, KindHandler(
-        validate=validate, resolve=resolve, project=project,
+        validate=validate, validate_available=validate_available, resolve=resolve, project=project,
     ))
     runtime = Dnd2024Runtime()
     engine, instance = _instance_with_sheet(_rogue(runtime, 3), _custom_bundle(runtime))
@@ -67,7 +74,20 @@ def test_registered_kind_runs_all_three_phases_without_central_changes(monkeypat
     assert denied["error"] == "confirm the test activation"
     assert economy["bonus_action"] == 1
 
-    events = _apply(engine, instance, _capability(engine, instance, "test_activation", confirm=True))
+    denied = _capability(engine, instance, "test_activation", confirm=True, amount=2)
+    assert denied["ok"] is False
+    assert denied["error"] == "the amount must match the declaration"
+    assert economy["bonus_action"] == 1
+
+    denied = _capability(
+        engine, instance, "test_activation", confirm=True, amount=1, target_id="player:gm",
+    )
+    assert denied["ok"] is False
+    assert denied["error"] == "this capability requires a living hostile target"
+
+    events = _apply(engine, instance, _capability(
+        engine, instance, "test_activation", confirm=True, amount=1, target_id="enemy:goblin-1",
+    ))
     assert [event["type"] for event in events] == [
         "intent.submitted", "dnd2024.action.spent", "dnd2024.economy.granted",
     ]
@@ -78,3 +98,30 @@ def test_registered_kind_runs_all_three_phases_without_central_changes(monkeypat
         row.get("capability_id") == "test_activation"
         for row in engine.available_intents(instance, "gm")
     )
+    denied = _capability(engine, instance, "test_activation", confirm=True, amount=2)
+    assert denied["ok"] is False
+    assert denied["error"] == "the bonus action has already been spent"
+
+
+def test_granted_strike_that_ends_combat_stops_remaining_effects() -> None:
+    runtime = Dnd2024Runtime()
+    bundle = runtime.load_bundle("en")
+    entities = deepcopy(bundle.entities)
+    catalog = entities["class_feature_catalog"]["srd_class_features"]
+    flurry = next(
+        capability
+        for feature in catalog["classes"]["monk"]["features"]
+        for capability in feature.get("capabilities", [])
+        if capability["id"] == "flurry_of_blows"
+    )
+    flurry["actions"].append({"kind": "dodge", "count": 1})
+    engine, instance = _instance_with_sheet(monk_sheet(runtime, level=2), replace(bundle, entities=entities))
+    _start(engine, instance, enemies=[_enemy(hp=1)])
+
+    # The first strike wins. No die is available for a second strike, and the
+    # following Dodge effect must not be emitted after combat ends.
+    events = _apply(engine, instance, _capability(
+        engine, instance, "flurry_of_blows", [15, 4], target_id="enemy:goblin-1",
+    ))
+    assert events[-1]["type"] == "dnd2024.combat.ended"
+    assert len([event for event in events if event["type"] == "check.resolved"]) == 1

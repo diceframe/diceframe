@@ -245,9 +245,9 @@ def combat_capabilities(
             )
             details: dict[str, dict[str, Any]] = {}
             for action in capability.actions:
-                handler = KIND_HANDLERS.get(action.kind)
-                if handler is not None and handler.project is not None:
-                    detail = handler.project(capability, action, context, view)
+                project = KIND_HANDLERS[action.kind].project
+                if project is not None:
+                    detail = project(capability, action, context, view)
                     if detail:
                         details.setdefault(action.kind, {}).update(detail)
             result.append(replace(view, kind_details=details) if details else view)

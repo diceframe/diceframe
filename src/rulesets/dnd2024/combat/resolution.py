@@ -5373,165 +5373,122 @@ class CombatResolutionMixin:
             self._pay_cost(actor_id, capability, via_fleet_step=via_fleet_step)
         )
         events.extend(self._fleet_step_grant_events(actor, capability))
-        target_id = str(intent.get("target_id") or "")
-        # Reuse the actual reducer on an isolated aggregate, not a second
-        # approximation of HP, positions, conditions or per-turn usage.
-        staged = fork_domain_state(instance)
-        simulated = 0
-        context = KindContext(self, instance, combat, actor, intent)
         for action in capability.actions:
-            handler = KIND_HANDLERS.get(action.kind)
-            if handler is not None:
-                events.extend(handler.resolve(capability, action, context, rng))
-                continue
-            if action.kind == "unarmed_strike":
-                strike_count = self._strike_count(actor, capability, action.count)
-                for _ in range(strike_count):
-                    self._simulate_capability_events(staged, events[simulated:])
-                    simulated = len(events)
-                    current_combat = ruleset_runtime.state(staged)["combat"]
-                    current_actor = self._actor_view(staged, current_combat, actor_id)
-                    current_target = self._actor_view(staged, current_combat, target_id)
-                    strike_intent = {
-                        "actor_id": actor_id, "target_id": target_id,
-                        "weapon_ref": UNARMED_STRIKE_REF,
-                        **{key: intent[key] for key in (
-                            "unarmed_damage_type", "rider_damage_type", "stunning_strike",
-                        ) if key in intent},
-                    }
-                    # The choice applies to the first eligible hit, never twice
-                    # in the same turn (a miss leaves it available).
-                    if self._feature_used_this_turn(current_combat, actor_id, "stunning_strike"):
-                        strike_intent.pop("stunning_strike", None)
-                    weapon = self._declared_attack(current_actor, strike_intent)
-                    if (
-                        current_target["hp"] <= 0
-                        or self._distance(current_combat, actor_id, target_id)
-                        > int(weapon.get("long_range") or weapon.get("range", 5))
-                    ):
-                        break
-                    self._validate_attack(staged, current_combat, strike_intent, current_actor)
-                    if intent.get("open_hand_choice"):
-                        strike_intent["open_hand_choice"] = intent["open_hand_choice"]
-                    strike_events = self._attack_events(
-                        staged, current_combat, strike_intent, rng,
-                        spend_attack_action=False,
-                        granted_by=str(capability.feature_id),
-                    )
-                    events.extend(strike_events)
-                    if any(
-                        event["type"] == "dnd2024.combat.ended" for event in strike_events
-                    ):
-                        # 战斗已经结束：不再追加注定落空的后续打击。
-                        return events
-            elif action.kind == "divine_spark":
-                events.extend(self._divine_spark_events(
-                    instance, combat, actor_id, actor, capability, intent, rng,
-                ))
-            elif action.kind == "turn_undead":
-                events.extend(self._turn_undead_events(
-                    instance, combat, actor_id, actor, capability, intent, rng,
-                ))
-            elif action.kind == "abjure_foes":
-                events.extend(self._abjure_foes_events(
-                    instance, combat, actor_id, actor, capability, intent, rng,
-                ))
-            elif action.kind == "preserve_life":
-                events.extend(self._preserve_life_events(
-                    actor, capability, intent,
-                ))
-            elif action.kind == "divine_sense":
-                events.extend(self._divine_sense_events(
-                    instance, actor, capability,
-                ))
-            elif action.kind == "lay_on_hands":
-                events.extend(self._lay_on_hands_events(
-                    instance, combat, actor_id, capability, intent,
-                ))
-            elif action.kind == "heal":
-                # 特性声明的治疗骰 + 等级加值；事件形状与法术治疗分支一致。
-                character = self._feature_character(actor)
-                dice = str(self.features.feature_value(
-                    character, capability.feature_id, "heal_dice", "",
-                ) or "")
-                if dice == "martial_arts":
-                    # Wholeness of Body 掷的是"当前等级轨道的一个 Martial Arts
-                    # die"，不是固定骰：6/11/17 级分别是 d8/d10/d12，写成常量就
-                    # 会在升级后停在旧骰面上。
-                    dice = self.features.unarmed_strike_die(character)
-                bonus = int(self.features.feature_value(
-                    character, capability.feature_id, "heal_bonus", 0,
-                ) or 0)
-                ability = str(self.features.feature_value(
-                    character, capability.feature_id, "heal_ability", "",
-                ) or "")
-                if ability:
-                    bonus += ability_modifier(
-                        int((actor.get("abilities") or {}).get(ability, 10) or 10)
-                    )
-                minimum = int(self.features.feature_value(
-                    character, capability.feature_id, "heal_minimum", 1,
-                ) or 1)
-                healing_node = formula_node_from_dice_formula(dice)
-                if bonus:
-                    healing_node = {"op": "add", "args": [
-                        healing_node, {"op": "constant", "value": bonus},
-                    ]}
-                healing, rolls = roll_damage_node(healing_node, rng)
-                # 最低值作用在"最终治疗量"上：Wis 为负时 roll+mod 可以是负数，
-                # 但它仍是一次成功的治疗，不能变成扣血。
-                healing = max(minimum, healing)
-                blocked = "cannot_regain_hp" in actor["conditions"]
-                events.append({
-                    "type": "resource.changed", "resource": "hp", "target_id": actor_id,
-                    "delta": 0 if blocked else healing, "amount": 0 if blocked else healing,
-                    "healing": True, "rolls": rolls,
-                    "feature_id": capability.feature_id,
-                    "heal_die": dice, "heal_bonus": bonus,
-                    **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
-                })
-                events.extend(
-                    self._rider_move_events(combat, actor, capability_id, intent)
-                )
-            elif action.kind == "rage":
-                # 狂暴不能维持专注：进入狂暴即结束正在维持的专注法术。
-                if actor.get("concentration"):
-                    events.append({
-                        "type": "dnd2024.concentration.ended", "actor_id": actor_id,
-                        "reason": "rage",
-                    })
-                events.append({
-                    "type": "condition.applied", "target_id": actor_id,
-                    "condition": "rage",
-                    "duration": (
-                        PERSISTENT_RAGE_DURATION
-                        if self.features.has_feature(
-                            self._feature_character(actor), "persistent_rage",
-                        )
-                        else "rage"
-                    ),
-                    "turns_remaining": RAGE_MAX_ROUNDS,
-                    "sustained_this_turn": False, "established": False,
-                    "source_actor_id": actor_id,
-                })
-                # 进入狂暴时"已有的条件直接结束"，与"之后的免疫"是两件事：
-                # 免疫只拦新增，已经挂上的条目要真的删除并留下可审计事件。
-                events.extend(
-                    self._condition_gain_cleanup_events(instance, actor, "rage")
-                )
-                events.extend(
-                    self._rider_move_events(combat, actor, "rage", intent)
-                )
-            elif action.kind == "bardic_grant":
-                events.extend(self._bardic_grant_events(instance, combat, intent, rng))
-            elif action.kind == "inspiration_slot_exchange":
-                events.extend(self._font_slot_exchange_events(instance, actor, intent))
-            elif action.kind in {"font_slot_to_points", "font_create_slot"}:
-                events.extend(self._font_of_magic_events(
-                    instance, actor, intent, action.kind, capability.feature_id,
-                ))
-            else:  # pragma: no cover - catalog validation guards this
-                raise CombatIntentError("unsupported class capability action")
+            context = KindContext(self, instance, combat, actor, intent, tuple(events))
+            effect_events = KIND_HANDLERS[action.kind].resolve(capability, action, context, rng)
+            events.extend(effect_events)
+            if any(event["type"] == "dnd2024.combat.ended" for event in effect_events):
+                break
+        return events
+
+    def _capability_unarmed_strike_events(
+        self, instance: Any, intent: dict[str, Any], actor: dict[str, Any],
+        capability: FeatureCapability, count: int,
+        prior_events: tuple[dict[str, Any], ...], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Resolve granted strikes against a detached copy of the paid batch."""
+
+        actor_id = str(actor["actor_id"])
+        target_id = str(intent.get("target_id") or "")
+        staged = fork_domain_state(instance)
+        events: list[dict[str, Any]] = []
+        pending = list(prior_events)
+        for _ in range(self._strike_count(actor, capability, count)):
+            self._simulate_capability_events(staged, pending)
+            current_combat = ruleset_runtime.state(staged)["combat"]
+            current_actor = self._actor_view(staged, current_combat, actor_id)
+            current_target = self._actor_view(staged, current_combat, target_id)
+            strike_intent = {
+                "actor_id": actor_id, "target_id": target_id,
+                "weapon_ref": UNARMED_STRIKE_REF,
+                **{key: intent[key] for key in (
+                    "unarmed_damage_type", "rider_damage_type", "stunning_strike",
+                ) if key in intent},
+            }
+            # The choice applies to the first eligible hit, never twice
+            # in the same turn (a miss leaves it available).
+            if self._feature_used_this_turn(current_combat, actor_id, "stunning_strike"):
+                strike_intent.pop("stunning_strike", None)
+            weapon = self._declared_attack(current_actor, strike_intent)
+            if (
+                current_target["hp"] <= 0
+                or self._distance(current_combat, actor_id, target_id)
+                > int(weapon.get("long_range") or weapon.get("range", 5))
+            ):
+                break
+            self._validate_attack(staged, current_combat, strike_intent, current_actor)
+            if intent.get("open_hand_choice"):
+                strike_intent["open_hand_choice"] = intent["open_hand_choice"]
+            pending = self._attack_events(
+                staged, current_combat, strike_intent, rng,
+                spend_attack_action=False,
+                granted_by=str(capability.feature_id),
+            )
+            events.extend(pending)
+            if any(event["type"] == "dnd2024.combat.ended" for event in pending):
+                break
+        return events
+
+    def _capability_heal_events(
+        self, combat: dict[str, Any], actor: dict[str, Any], capability: FeatureCapability,
+        intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Roll the declared healing formula and append any granted movement."""
+
+        character = self._feature_character(actor)
+        feature_id = capability.feature_id
+        dice = str(self.features.feature_value(character, feature_id, "heal_dice", "") or "")
+        if dice == "martial_arts":
+            # Wholeness of Body uses the character's current Martial Arts die.
+            dice = self.features.unarmed_strike_die(character)
+        bonus = int(self.features.feature_value(character, feature_id, "heal_bonus", 0) or 0)
+        ability = str(self.features.feature_value(character, feature_id, "heal_ability", "") or "")
+        if ability:
+            bonus += ability_modifier(int((actor.get("abilities") or {}).get(ability, 10) or 10))
+        minimum = int(self.features.feature_value(character, feature_id, "heal_minimum", 1) or 1)
+        healing_node = formula_node_from_dice_formula(dice)
+        if bonus:
+            healing_node = {"op": "add", "args": [
+                healing_node, {"op": "constant", "value": bonus},
+            ]}
+        healing, rolls = roll_damage_node(healing_node, rng)
+        healing = max(minimum, healing)
+        blocked = "cannot_regain_hp" in actor["conditions"]
+        return [{
+            "type": "resource.changed", "resource": "hp", "target_id": str(actor["actor_id"]),
+            "delta": 0 if blocked else healing, "amount": 0 if blocked else healing,
+            "healing": True, "rolls": rolls,
+            "feature_id": feature_id,
+            "heal_die": dice, "heal_bonus": bonus,
+            **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
+        }, *self._rider_move_events(combat, actor, capability.id, intent)]
+
+    def _capability_rage_events(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any], intent: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        actor_id = str(actor["actor_id"])
+        events: list[dict[str, Any]] = []
+        # Entering Rage ends concentration before applying its condition.
+        if actor.get("concentration"):
+            events.append({
+                "type": "dnd2024.concentration.ended", "actor_id": actor_id,
+                "reason": "rage",
+            })
+        events.append({
+            "type": "condition.applied", "target_id": actor_id,
+            "condition": "rage",
+            "duration": (
+                PERSISTENT_RAGE_DURATION
+                if self.features.has_feature(self._feature_character(actor), "persistent_rage")
+                else "rage"
+            ),
+            "turns_remaining": RAGE_MAX_ROUNDS,
+            "sustained_this_turn": False, "established": False,
+            "source_actor_id": actor_id,
+        })
+        # Gaining immunity also ends conditions that are already active.
+        events.extend(self._condition_gain_cleanup_events(instance, actor, "rage"))
+        events.extend(self._rider_move_events(combat, actor, "rage", intent))
         return events
 
     def _simulate_capability_events(

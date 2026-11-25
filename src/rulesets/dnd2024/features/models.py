@@ -768,7 +768,7 @@ class Dnd2024ClassFeatureCatalog:
     @classmethod
     def _parse_capability(cls, feature_id: str, raw: Any) -> FeatureCapability:
         # Handlers depend on declaration types, so look up the registry only at load time.
-        from .kinds import KIND_HANDLERS, is_known_kind
+        from .kinds import KIND_HANDLERS
 
         if not isinstance(raw, dict):
             raise ClassFeatureError(f"{feature_id} contains an invalid capability")
@@ -863,10 +863,10 @@ class Dnd2024ClassFeatureCatalog:
             if not isinstance(raw_action, dict):
                 raise ClassFeatureError(f"{capability_id} contains an invalid action")
             kind = str(raw_action.get("kind") or "")
-            if not is_known_kind(kind):
-                raise ClassFeatureError(f"{capability_id} declares an unknown action kind: {kind!r}")
             handler = KIND_HANDLERS.get(kind)
-            if handler is not None and handler.requires_resource_cost and not resources:
+            if handler is None:
+                raise ClassFeatureError(f"{capability_id} declares an unknown action kind: {kind!r}")
+            if handler.requires_resource_cost and not resources:
                 raise ClassFeatureError(f"{capability_id} must declare its price in cost.resources")
             effect_id = str(raw_action.get("effect_id") or "")
             if effect_id:
