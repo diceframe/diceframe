@@ -104,6 +104,7 @@ files = [
     "src/webui/bootstrap.py",
     "src/webui/composition.py",
     "src/webui/config_controller.py",
+    "src/webui/content_sources.py",
     "src/webui/host_credentials.py",
     "src/webui/runtime_config.py",
     "src/webui/services/adventures.py",
