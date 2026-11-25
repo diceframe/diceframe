@@ -7,23 +7,20 @@ import base64
 import contextlib
 import hashlib
 import hmac
-import io
 import json
 import logging
 import os
-import re
 import secrets
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
-import zipfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
-from . import manifest_validation
+from . import manifest_validation, package_io
 from .capabilities import (
     clear_runtime_capabilities,
     find_provider_plugin,
@@ -51,13 +48,7 @@ from .marketplace import PluginMarketplace
 from .mirrors import MirrorManager
 from .models import PluginRuntime
 from src.version import needs_core_update
-from .package_limits import (
-    MAX_PLUGIN_ARCHIVE_FILES,
-    MAX_PLUGIN_FILE_BYTES,
-    MAX_PLUGIN_PACKAGE_BYTES,
-    MAX_PLUGIN_PATH_CHARS,
-    MAX_PLUGIN_UNPACKED_BYTES,
-)
+from .package_limits import MAX_PLUGIN_PACKAGE_BYTES
 from .policy import PERMISSION_DETAILS, effective_plugin_permissions
 from .registry import ContributionRegistry, validate_contributes
 from .requirements import (
@@ -84,7 +75,6 @@ from .support import (
 )
 from src.localization.messages import t
 
-_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _BRIDGE_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 _MAX_BRIDGE_IMAGE_BYTES = 10 * 1024 * 1024
 _RESTART_BASE_DELAY = 3.0
@@ -2167,7 +2157,7 @@ class PluginHost:
         manifest_path = plugin_dir / "plugin.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         plugin_id = str(manifest.get("id") or "")
-        if not _ID_RE.fullmatch(plugin_id):
+        if not manifest_validation.valid_plugin_id(plugin_id):
             raise ValueError(t("plugin_host.host.plugin_id_invalid"))
         if require_directory_match and plugin_dir.name != plugin_id:
             raise ValueError(t("plugin_host.host.plugin_id_dir_mismatch"))
@@ -2278,102 +2268,12 @@ class PluginHost:
             plugin_id, runtime = self._load_runtime(source_dir, require_directory_match=False)
             return plugin_id, dict(runtime.manifest)
 
-    @staticmethod
-    def _extract_zip(payload: bytes, target_dir: Path) -> None:
-        try:
-            archive = zipfile.ZipFile(io.BytesIO(payload))
-        except zipfile.BadZipFile as exc:
-            raise ValueError(t("plugin_host.host.package_not_zip")) from exc
-        with archive:
-            items = archive.infolist()
-            if len(items) > MAX_PLUGIN_ARCHIVE_FILES:
-                raise ValueError(t("plugin_host.host.package_too_many_files", max_plugin_archive_files=MAX_PLUGIN_ARCHIVE_FILES))
-            total_unpacked = sum(info.file_size for info in items if not info.is_dir())
-            if total_unpacked > MAX_PLUGIN_UNPACKED_BYTES:
-                raise ValueError(t("plugin_host.host.package_extracted_too_large"))
-            seen_paths: set[str] = set()
-            for info in items:
-                name = info.filename.replace("\\", "/")
-                parts = Path(name).parts
-                if not name or Path(name).is_absolute() or any(part == ".." for part in parts):
-                    raise ValueError(t("plugin_host.host.package_path_invalid"))
-                if len(name) > MAX_PLUGIN_PATH_CHARS:
-                    raise ValueError(t("plugin_host.host.package_path_too_long"))
-                normalized = "/".join(parts).casefold()
-                if normalized in seen_paths:
-                    raise ValueError(t("plugin_host.host.package_path_duplicate"))
-                seen_paths.add(normalized)
-                if info.flag_bits & 0x1:
-                    raise ValueError(t("plugin_host.host.package_encrypted"))
-                if info.file_size > MAX_PLUGIN_FILE_BYTES:
-                    raise ValueError(t("plugin_host.host.package_file_too_large"))
-                file_type = (info.external_attr >> 16) & 0o170000
-                if file_type == 0o120000:
-                    raise ValueError(t("plugin_host.host.package_symlink"))
-                resolved = (target_dir / name).resolve()
-                PluginHost._ensure_inside(target_dir, resolved)
-            archive.extractall(target_dir)
-
-    @staticmethod
-    def package_files(plugin_id: str, files: dict[str, str | bytes], *, flat: bool = False) -> bytes:
-        """把内存中的插件文件打包成 zip 字节，镜像 _extract_zip 的约束。
-
-        files 的 key 是相对路径。``flat=False``（默认，.dfplugin 用）会自动加
-        ``<plugin_id>/`` 前缀；``flat=True``（仓库源码用）不加前缀，plugin.json
-        落到根目录，解压即可推到 GitHub。
-        """
-        if not _ID_RE.fullmatch(plugin_id):
-            raise ValueError(t("plugin_host.host.plugin_id_invalid"))
-        buffer = io.BytesIO()
-        seen: set[str] = set()
-        total_unpacked = 0
-        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for rel, content in files.items():
-                name = str(rel or "").replace("\\", "/").strip("/")
-                parts = Path(name).parts
-                if not name or Path(name).is_absolute() or any(part == ".." for part in parts):
-                    raise ValueError(t("plugin_host.host.export_path_invalid", rel=rel))
-                if not flat and parts[0] != plugin_id:
-                    name = f"{plugin_id}/{name}"
-                    parts = Path(name).parts
-                if len(name) > MAX_PLUGIN_PATH_CHARS:
-                    raise ValueError(t("plugin_host.host.export_path_too_long", rel=rel))
-                normalized = "/".join(parts).casefold()
-                if normalized in seen:
-                    raise ValueError(t("plugin_host.host.export_path_duplicate", rel=rel))
-                seen.add(normalized)
-                data = content.encode("utf-8") if isinstance(content, str) else bytes(content)
-                if len(data) > MAX_PLUGIN_FILE_BYTES:
-                    raise ValueError(t("plugin_host.host.export_file_too_large", rel=rel))
-                total_unpacked += len(data)
-                if total_unpacked > MAX_PLUGIN_UNPACKED_BYTES:
-                    raise ValueError(t("plugin_host.host.export_total_too_large"))
-                if len(seen) > MAX_PLUGIN_ARCHIVE_FILES:
-                    raise ValueError(t("plugin_host.host.export_too_many_files"))
-                archive.writestr(name, data)
-        payload = buffer.getvalue()
-        if len(payload) > MAX_PLUGIN_PACKAGE_BYTES:
-            raise ValueError(t("plugin_host.host.export_package_too_large"))
-        return payload
-
-    @staticmethod
-    def _find_install_root(temp_dir: Path) -> Path:
-        if (temp_dir / "plugin.json").exists():
-            return temp_dir
-        candidates = [path.parent for path in temp_dir.glob("**/plugin.json")]
-        if not candidates:
-            raise ValueError(t("plugin_host.host.package_manifest_missing"))
-        if len(candidates) > 1:
-            raise ValueError(t("plugin_host.host.package_multiple_manifests"))
-        return candidates[0]
-
+    # Retain the host entry points while package_io owns the file operations.
+    _extract_zip = staticmethod(package_io._extract_zip)
+    package_files = staticmethod(package_io.package_files)
+    _find_install_root = staticmethod(package_io._find_install_root)
     _ensure_inside = staticmethod(manifest_validation.ensure_inside)
-
-    @staticmethod
-    def _atomic_json(path: Path, value: object) -> None:
-        temp = path.with_suffix(path.suffix + ".tmp")
-        temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-        temp.replace(path)
+    _atomic_json = staticmethod(package_io._atomic_json)
 
     def _status_for_enabled(self, runtime: PluginRuntime) -> str:
         if not runtime.config.get("enabled"):

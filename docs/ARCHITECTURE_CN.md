@@ -4852,6 +4852,7 @@ World locale 只能修改：
 src/plugin_host/
 ├─ host.py
 ├─ manifest_validation.py
+├─ package_io.py
 ├─ support.py
 ├─ descriptors.py
 ├─ capabilities.py
@@ -4864,6 +4865,8 @@ src/plugin_host/
 
 `host.py` 编排运行时加载和安装事务；`manifest_validation.py` 负责包内声明、配置 schema
 和权限声明的校验，不加载运行时、不发布插件。权限定义与推导仍由 `policy.py` 负责。
+`package_io.py` 负责 ZIP 打包与解压、定位包根目录和原子写入 JSON；`PluginHost.package_files`
+仍是对外入口，安装事务及其发布、恢复和回滚仍由 `host.py` 负责。
 
 ---
 

@@ -76,6 +76,7 @@ files = [
     "src/plugin_host/host.py",
     "src/plugin_host/manifest_validation.py",
     "src/plugin_host/models.py",
+    "src/plugin_host/package_io.py",
     "src/plugin_host/registry.py",
     "src/plugin_host/support.py",
     "src/plugin_sdk/bridge_runtime.py",
