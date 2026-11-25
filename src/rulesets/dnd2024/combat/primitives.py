@@ -35,6 +35,20 @@ def size_at_most(size: str, limit: str) -> bool:
     if size not in SIZE_CODES or limit not in SIZE_CODES:
         return False
     return SIZE_CODES.index(size) <= SIZE_CODES.index(limit)
+
+
+def slot_available(economy: Mapping[str, Any] | None, slot: str) -> bool:
+    """Whether the actor still holds the named action-economy slot.
+
+    ``slot`` is an economy key such as ``action`` or ``bonus_action``.  This is
+    the availability question only; the matching payment is the ``spent`` event
+    a resolution emits, so the two never read the economy in different ways.
+    """
+
+    if not slot:
+        return False
+    return int((economy or {}).get(slot, 0) or 0) > 0
+
 # 18 级卓越防御：一条自带"除 Force 外全部抗性"的条件。它既不是 ``combat``
 # （战斗结束不等于一分钟到）也不是回合域（它按分钟计时），因此有自己的
 # duration，并靠 duration_minutes + 到期轮数两个上限之一结束。

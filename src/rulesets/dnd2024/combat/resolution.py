@@ -5275,7 +5275,7 @@ class CombatResolutionMixin:
 
         if capability.feature_id == "step_of_the_wind":
             return []
-        if capability.cost.action != "bonus_action":
+        if capability.cost.slot != "bonus_action":
             return []
         character = self._feature_character(actor)
         if not self.features.has_feature(character, "fleet_step"):
@@ -5284,6 +5284,36 @@ class CombatResolutionMixin:
             "type": "dnd2024.economy.granted", "actor_id": str(actor["actor_id"]),
             "grants": {}, "flags": {"fleet_step_available": True},
         }]
+
+    def _pay_cost(
+        self, actor_id: str, capability: Any, *, via_fleet_step: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Charge one capability's declared price: its slot, then its resources.
+
+        This is the only place a capability cost is paid.  Availability is a
+        separate question answered before resolution from the same
+        declaration, so an actor is never refused a price it would not pay and
+        never charged one it was not asked for.  A Bonus Action paid with Fleet
+        Step's free step spends that step instead of the slot.
+        """
+
+        events: list[dict[str, Any]] = []
+        if capability.cost.slot and not via_fleet_step:
+            events.append({
+                "type": "dnd2024.action.spent", "actor_id": actor_id,
+                "resource": capability.cost.slot, "amount": 1,
+            })
+        if via_fleet_step:
+            events.append({
+                "type": "dnd2024.economy.granted", "actor_id": actor_id,
+                "grants": {}, "flags": {"fleet_step_available": False},
+            })
+        for resource_cost in capability.cost.resources:
+            events.append({
+                "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+                "resource_id": resource_cost.resource_id, "amount": resource_cost.amount,
+            })
+        return events
 
     def _class_capability_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
@@ -5330,21 +5360,9 @@ class CombatResolutionMixin:
                 "feature_kind": "intimidating_presence",
             })
         via_fleet_step = bool(intent.get("via_fleet_step"))
-        if capability.cost.action and not via_fleet_step:
-            events.append({
-                "type": "dnd2024.action.spent", "actor_id": actor_id,
-                "resource": capability.cost.action, "amount": 1,
-            })
-        if via_fleet_step:
-            events.append({
-                "type": "dnd2024.economy.granted", "actor_id": actor_id,
-                "grants": {}, "flags": {"fleet_step_available": False},
-            })
-        for resource_cost in capability.cost.resources:
-            events.append({
-                "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
-                "resource_id": resource_cost.resource_id, "amount": resource_cost.amount,
-            })
+        events.extend(
+            self._pay_cost(actor_id, capability, via_fleet_step=via_fleet_step)
+        )
         events.extend(self._fleet_step_grant_events(actor, capability))
         target_id = str(intent.get("target_id") or "")
         # Reuse the actual reducer on an isolated aggregate, not a second

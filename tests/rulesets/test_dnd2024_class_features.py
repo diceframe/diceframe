@@ -338,6 +338,38 @@ def _bad_once_per_turn(catalog: dict) -> None:
     action_surge["capabilities"][0]["once_per_turn"] = "yes"
 
 
+def _flurry_cost(catalog: dict) -> dict:
+    return _monk_feature(catalog, "flurry_of_blows")["capabilities"][0]["cost"]
+
+
+def _superior_defense_cost(catalog: dict) -> dict:
+    return _monk_feature(catalog, "superior_defense")["capabilities"][0]["cost"]
+
+
+def _slot_next_to_a_keyed_action(catalog: dict) -> None:
+    _flurry_cost(catalog)["slot"] = "bonus_action"
+
+
+def _unknown_slot(catalog: dict) -> None:
+    cost = _flurry_cost(catalog)
+    cost.pop("bonus_action")
+    cost["slot"] = "reaction"
+
+
+def _timing_next_to_turn_start(catalog: dict) -> None:
+    _superior_defense_cost(catalog)["timing"] = "turn_start"
+
+
+def _unknown_timing(catalog: dict) -> None:
+    cost = _flurry_cost(catalog)
+    cost.pop("bonus_action")
+    cost["timing"] = "end_of_turn"
+
+
+def _timing_next_to_a_slot(catalog: dict) -> None:
+    _flurry_cost(catalog)["timing"] = "turn_start"
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -348,6 +380,11 @@ def _bad_once_per_turn(catalog: dict) -> None:
         _undeclared_resource,
         _bad_cost_amount,
         _bad_once_per_turn,
+        _slot_next_to_a_keyed_action,
+        _unknown_slot,
+        _timing_next_to_turn_start,
+        _unknown_timing,
+        _timing_next_to_a_slot,
     ],
 )
 def test_malformed_feature_declarations_fail_closed(mutate) -> None:
@@ -355,6 +392,38 @@ def test_malformed_feature_declarations_fail_closed(mutate) -> None:
 
     with pytest.raises(ClassFeatureError):
         Dnd2024ClassFeatureResolver(_mutated_bundle(runtime, mutate))
+
+
+def test_slot_resources_and_timing_are_three_independent_fields() -> None:
+    """The new catalog spelling says the same thing the keyed form says."""
+
+    runtime = Dnd2024Runtime()
+
+    def rewrite(catalog: dict) -> None:
+        cost = _flurry_cost(catalog)
+        cost.pop("bonus_action")
+        cost["slot"] = "bonus_action"
+        cost = _superior_defense_cost(catalog)
+        cost.pop("turn_start")
+        cost["timing"] = "turn_start"
+
+    resolver = Dnd2024ClassFeatureResolver(_mutated_bundle(runtime, rewrite))
+    flurry = resolver.declared_capability(_with_focus(3, 3), "flurry_of_blows")
+    superior = resolver.declared_capability(
+        _with_focus(3, 3, level=18), "superior_defense",
+    )
+
+    assert flurry is not None and superior is not None
+    assert (flurry.cost.slot, flurry.cost.timing) == ("bonus_action", "")
+    assert (superior.cost.slot, superior.cost.timing) == ("", "turn_start")
+    assert [
+        (cost.resource_id, cost.amount) for cost in superior.cost.resources
+    ] == [("focus_points", 3)]
+    # 兼容期别名读到的仍是同一个事实，不是第二份状态。
+    assert flurry.cost.action == flurry.cost.slot
+    assert flurry.cost.turn_start is False
+    assert superior.cost.action == ""
+    assert superior.cost.turn_start is True
 
 
 def test_resolver_requires_a_validated_progression_table() -> None:
