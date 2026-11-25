@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from copy import deepcopy
 from typing import Any
 
 from src.engine.player_control import is_ai_controlled
@@ -20,10 +19,10 @@ from ..character.attunement import (
 from .action_adapter import is_supported_damage_formula
 from ..features.attack_declarations import (
     BRUTAL_STRIKE, LIGHT_EXTRA_ATTACK, SELECTION_KEY, STUNNING_STRIKE,
-    declaration_value, granted_strike_selection, selection_error, validate_uses, validate_weapon_selection,
+    declaration_value, selection_error, validate_uses, validate_weapon_selection,
 )
 from ..features.kinds import KIND_HANDLERS, KindContext
-from ..features.models import ClassFeatureError, FeatureCapability, ResourceCost
+from ..features.models import ClassFeatureError
 from ..forms import (
     FormState, FormStateError, bootstrap_known_forms, mode_for, restrictions,
 )
@@ -71,7 +70,6 @@ from .primitives import (
     RIDER_PUSH_MINIMUM_FT,
     LEGENDARY_RESISTANCE_DEFAULT_PER_DAY,
     stand_up_declaration,
-    UNARMED_STRIKE_REF,
     SIZE_CODES,
     TRAIT_IDS,
     TRAIT_PARAMS,
@@ -1828,28 +1826,6 @@ class CombatValidationMixin:
             )
             if str(target.get("side") or "") == str(actor.get("side") or "") or target["hp"] <= 0:
                 raise CombatIntentError("this capability requires a living hostile target")
-
-    def _validate_capability_unarmed_strike(
-        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
-        actor: dict[str, Any], capability: FeatureCapability,
-    ) -> None:
-        # The capability's own spend precedes every granted hit. Validate
-        # rider affordability against that balance, not the original pool.
-        rider_actor = deepcopy(actor)
-        for cost in capability.cost.resources:
-            if not isinstance(cost, ResourceCost):
-                continue
-            for pool in rider_actor.get("class_resources") or []:
-                if pool.get("id") == cost.resource_id:
-                    pool["current"] = int(pool.get("current", 0)) - cost.amount
-        self._validate_attack(instance, combat, {
-            "target_id": str(intent.get("target_id") or ""),
-            "weapon_ref": UNARMED_STRIKE_REF,
-            **{key: intent[key] for key in (
-                "unarmed_damage_type", "rider_damage_type",
-            ) if key in intent},
-            **granted_strike_selection(intent),
-        }, rider_actor)
 
     def _validate_two_handed(
         self, actor: dict[str, Any], intent: dict[str, Any], weapon: dict[str, Any],

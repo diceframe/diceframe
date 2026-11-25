@@ -3596,11 +3596,14 @@ validate → resolve → events → reducer
 使用已扣费、已应用前序事件的隔离状态；战斗结束后不再派发后续效果。处理器可以补充
 展示资料，不能改写成本或权威判定。反应和决策窗口不使用此注册表。
 引导神力能力（如神圣火花、驱散亡灵、呵斥敌人）与圣疗的目标校验及事件生成
-由 `combat/divine_actions.py` 负责；通用前提和声明成本仍由职业能力流程处理。
+由 `combat/divine_actions.py` 负责，生命领域的法术治疗增益也由此模块结算。
+通用前提和声明成本仍由职业能力流程处理。
 `combat/ongoing_effects.py` 负责职业持续效果，包括跨遭遇的长时效果、回合增益与神圣武器绑定；
 它复用战斗的豁免、伤害与状态权威。
 `combat/support_actions.py` 负责诗人激励授予与职业法术位兑换。注册适配器传入所选目标
 或法术位环阶，合法性仍由战斗方法根据权威状态判定。
+`combat/martial_actions.py` 负责能力授予的连击、自疗与移动，以及武僧命中效果；
+`combat/stealth_actions.py` 供普通躲藏与能力躲藏共用前提和结算。
 
 攻击附加选项在 `features/attack_declarations.py` 注册。新意图使用
 `attack_declarations` ID 数组，可选 `sacred_weapon`、`light_extra_attack`、

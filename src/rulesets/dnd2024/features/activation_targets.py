@@ -12,13 +12,13 @@ if TYPE_CHECKING:
 class TargetOperations(Protocol):
     def _validate_capability_unarmed_strike(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
-        actor: dict[str, Any], capability: FeatureCapability,
+        actor: dict[str, Any], capability: FeatureCapability, target_id: str,
     ) -> None: ...
 
     def _capability_unarmed_strike_events(
         self, instance: Any, intent: dict[str, Any],
         actor: dict[str, Any], capability: FeatureCapability, count: int,
-        prior_events: tuple[dict[str, Any], ...], rng: Any,
+        prior_events: tuple[dict[str, Any], ...], rng: Any, target_id: str,
     ) -> list[dict[str, Any]]: ...
 
     def _validate_bardic_grant(
@@ -86,12 +86,14 @@ class TargetOperations(Protocol):
 def validate_unarmed_strike(capability: FeatureCapability, action: CapabilityAction, ctx: KindContext) -> None:
     ctx.operations._validate_capability_unarmed_strike(
         ctx.instance, ctx.combat, ctx.intent, ctx.actor, capability,
+        str(ctx.intent.get("target_id") or ""),
     )
 
 
 def unarmed_strike(capability: FeatureCapability, action: CapabilityAction, ctx: KindContext, rng: Any) -> list[dict[str, Any]]:
     return ctx.operations._capability_unarmed_strike_events(
         ctx.instance, ctx.intent, ctx.actor, capability, action.count, ctx.prior_events, rng,
+        str(ctx.intent.get("target_id") or ""),
     )
 
 
