@@ -772,3 +772,61 @@ def test_spell_rows_report_whether_innate_sorcery_applies() -> None:
     on = rows()
     assert on["spell:burning_hands"]["innate_sorcery_applies"] is True
     assert on["spell:vicious_mockery"]["innate_sorcery_applies"] is False
+
+
+def test_extended_spell_doubles_a_concentration_spell_from_the_catalogue() -> None:
+    """目录里 Hex 只写 ``condition_duration: "concentration"``，长度在 spell 的
+    "up to 1 hour" 里。两者必须合起来读：只看 code 是"由专注结束"（长度 0，
+    Extended 翻倍翻的是 0），只看 spell 就丢了结束条件。
+    """
+
+    engine, _instance = _sorcerer(level=10, known=("extended_spell",))
+    effect = engine.catalog.spell_effects["hex"]
+    spell = {"id": "hex", "level": 1, "duration": "Concentration, up to 1 hour"}
+    plan = metamagic.Plan(("extended_spell",), 1, 0)
+
+    base = engine._duration_for(effect, spell, 1, None)
+    doubled = engine._duration_for(effect, spell, 1, plan)
+
+    # 长度来自 spell 的上限，翻倍也作用在它上面。
+    assert base.hours == 1
+    assert doubled.hours == 2
+    # 但"怎么结束"不因 Extended 改变：写成 1_hour 会让条件在专注断了之后还在。
+    assert doubled.as_condition_text() == "concentration"
+
+
+def test_a_fog_cloud_zone_lasts_its_stated_hour_not_ten_rounds() -> None:
+    """``duration_rounds: 10`` 说的是"每轮推进"，不是总长度。
+
+    原文是 "Concentration, up to 1 hour"（600 轮）；按 10 轮开局，区域会提前
+    五十九分钟消失。
+    """
+
+    engine, _instance = _sorcerer(level=10, known=("extended_spell",))
+    effect = engine.catalog.spell_effects["fog_cloud"]
+    spell = {"id": "fog_cloud", "level": 1, "duration": "Concentration, up to 1 hour"}
+    assert effect["duration_rounds"] == 10
+
+    resolved = engine._duration_for(effect, spell, 1, None)
+
+    assert resolved.total_rounds == 600
+    assert resolved.as_condition_text() == "1_hour"
+
+
+def test_distant_spell_refuses_a_self_ranged_spell() -> None:
+    """Self 法术在数据里也带 range 数值（Burning Hands 的锥长是 15）。
+
+    只看数值会放行，而结算期 Self 又原样返回——玩家付 1 点换不到任何东西。
+    """
+
+    spell = {"id": "burning_hands", "level": 1, "range": "Self",
+             "casting_time": "Action"}
+    effect = {"mode": "saving_throw", "range": 15, "damage_type": "fire"}
+
+    with pytest.raises(metamagic.MetamagicError, match="range is Self"):
+        metamagic.plan(
+            {"metamagic": [{"option_id": "distant_spell"}]},
+            spell=spell, effect=effect, known={"distant_spell": {}}, points=5,
+            incarnate=False, apotheosis=False,
+            free_used_this_turn=False, cast_level_one_plus_this_turn=False,
+        )

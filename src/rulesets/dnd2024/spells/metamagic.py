@@ -153,6 +153,13 @@ def _check_requires(
     if requires.get("saving_throw") and not _saves(effect):
         raise MetamagicError(f"{meta.id} requires a spell that forces a saving throw")
     if "range_min_ft" in requires:
+        # 数据里 Self 法术也带一个 range 数值（Burning Hands 是锥形长度 15、
+        # Shield 是 5），只看数值会把它们放行，而结算期 Self 又原样返回——
+        # 玩家付掉 1 点、什么也没变。所以按原文先排除 Self。
+        if _self_only(spell):
+            raise MetamagicError(
+                f"{meta.id} cannot extend a spell whose range is Self"
+            )
         range_ft = _range_ft(effect, spell)
         if range_ft < int(requires["range_min_ft"]):
             raise MetamagicError(f"{meta.id} requires a spell with range 5 feet or more")
@@ -305,6 +312,12 @@ def _duration_minutes(effect: Mapping[str, Any], spell: Mapping[str, Any]) -> in
 
 def _damage_type(effect: Mapping[str, Any], spell: Mapping[str, Any]) -> str:
     return str(effect.get("damage_type") or spell.get("damage_type") or "").lower()
+
+
+def _self_only(spell: Mapping[str, Any]) -> bool:
+    """Whether the spell's own range is Self (so there is no distance to double)."""
+
+    return str(spell.get("range") or "").strip().lower().startswith("self")
 
 
 def _attack_roll(effect: Mapping[str, Any]) -> bool:
