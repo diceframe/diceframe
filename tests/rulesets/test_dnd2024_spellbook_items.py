@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from src.rulesets.dnd2024.character.attunement import (
@@ -14,6 +16,8 @@ from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.play import EncounterAccess
 from src.rulesets.dnd2024.progression.advancement import Dnd2024AdvancementEngine
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
+from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
+from tests.rulesets.dnd2024_monk_common import advancement_choices
 from tests.rulesets.test_dnd2024_item_activation import (
     SequenceRng,
     _carry,
@@ -84,51 +88,84 @@ def test_the_bonus_never_leaks_to_another_class() -> None:
 # --------------------------------------------------------------------------
 
 
+def _spell_choices(bundle: Any, character: dict, row: dict) -> dict:
+    """A legal answer for one level's spell selection, built on the real book.
+
+    升级要求书目"只增不减且恰好加 2"，准备法术必须都在书里，所以这里不是
+    "挑前几个"，而是在**现有书**上补齐到 minimum 再选准备列表。
+    """
+
+    requirements = Dnd2024SpellSelection(bundle).options(
+        str(row["class_ref"]), int(row["level"]),
+    )
+    limits = requirements["requirements"]
+    block = (character.get("spellcasting") or {}).get("class") or {}
+    book = [str(ref) for ref in block.get("spellbook_refs") or []]
+    candidates = [
+        row_["ref"] for row_ in requirements["leveled_spells"]
+        if row_["ref"] not in book
+    ]
+    for ref in candidates:
+        if len(book) >= int(limits["spellbook_minimum"]):
+            break
+        book.append(ref)
+    # 准备位与戏法在升级时不许换（replace_limit 0），只能在**原有**的基上补足：
+    # 从 leveled_spells 重新挑前 N 个会被判成"替换了一堆法术"。
+    old_prepared = [str(ref) for ref in block.get("prepared_spell_refs") or []]
+    prepared = [ref for ref in old_prepared if ref in book][
+        : int(limits["prepared_spell_count"])
+    ]
+    for ref in book:
+        if len(prepared) >= int(limits["prepared_spell_count"]):
+            break
+        if ref not in prepared:
+            prepared.append(ref)
+    old_cantrips = [str(ref) for ref in block.get("cantrip_refs") or []]
+    cantrips = old_cantrips[: int(limits["cantrip_count"])]
+    for row_ in requirements["cantrips"]:
+        if len(cantrips) >= int(limits["cantrip_count"]):
+            break
+        if row_["ref"] not in cantrips:
+            cantrips.append(row_["ref"])
+    return {
+        "cantrip_refs": cantrips,
+        "prepared_spell_refs": prepared,
+        "spellbook_refs": book,
+    }
+
+
 def _advance(
     runtime: Dnd2024Runtime, character: dict, target: int,
     *, subclass: str = "subclass:thief",
 ) -> dict:
-    """Level a character up, filling every required choice generically.
+    """Level a character up, answering every required choice.
 
-    The rogue needs expertise picks and a feat on the way to 13, so a fixed
-    script would break the moment the catalog adds one more required choice.
+    Wizard levels also ask for `class_spell_choices`; the generic picker in
+    `dnd2024_monk_common` answers the rest (feat / ASI / feature_choice), so
+    this only adds the spell-selection branch and a fixed subclass.
     """
 
-    engine = Dnd2024AdvancementEngine(runtime.load_bundle("en"))
+    bundle = runtime.load_bundle("en")
+    engine = Dnd2024AdvancementEngine(bundle)
     while int(character["build"]["level"]) < target:
         requirements = engine.preview_next_level(character)["requirements"]
-        choices: dict = {}
-        for row in requirements:
-            if not row.get("required"):
-                continue
-            kind = row.get("kind")
-            if row["id"] == "subclass_ref":
-                choices["subclass_ref"] = subclass
-            elif row["id"] == "ability_score_increases":
-                abilities = character.get("abilities") or {}
-                # 13 级前会拿到两次 ASI：固定加一项会在第二次撞 20 上限。
-                # 注意别叫 `target`——那是本函数的循环变量。
-                ability = next(
-                    (
-                        key for key in ("con", "dex", "int", "wis", "str", "cha")
-                        if isinstance(abilities.get(key), int) and abilities[key] + 2 <= 20
-                    ),
-                    "con",
-                )
-                choices["ability_score_increases"] = {ability: 2}
-            elif kind == "feature_choice":
-                options = [
-                    o["value"] for o in row.get("options") or [] if o.get("available", True)
-                ]
-                picked = options[: int(row.get("count", 1) or 1)]
-                choices.setdefault("feature_choices", []).append({
-                    "owner": row["owner"], "feature_id": row["feature_id"],
-                    "choice_id": row["choice_id"], "selected_refs": picked,
-                })
-            else:
-                options = [o["value"] for o in row.get("options") or [] if o.get("available", True)]
-                if options:
-                    choices[row["id"]] = options[0]
+        choices = advancement_choices({"requirements": requirements})
+        subclass_row = next(
+            (row for row in requirements if row["id"] == "subclass_ref"), None,
+        )
+        if subclass_row is not None:
+            allowed = [str(o["value"]) for o in subclass_row.get("options") or []]
+            # rogue 用 thief；wizard 的子职在 3 级选，写死 thief 会被拒。
+            choices["subclass_ref"] = (
+                subclass if subclass in allowed else (allowed[0] if allowed else subclass)
+            )
+        spell_row = next(
+            (row for row in requirements if row.get("kind") == "spell_selection"), None,
+        )
+        if spell_row is not None:
+            choices["class_spell_choices"] = _spell_choices(
+                bundle, character, spell_row,
+            )
         character = engine.apply_next_level(character, choices)
     return character
 
@@ -214,14 +251,19 @@ def test_a_rogue_without_use_magic_device_never_rolls_the_d6() -> None:
 # --------------------------------------------------------------------------
 
 
-def _wizard_sheet(runtime: Dnd2024Runtime, *, prepared: bool = False) -> dict:
-    """1 级法师；默认把 `detect_magic` 从准备列表里摘掉，留它在书里。"""
+def _wizard_sheet(
+    runtime: Dnd2024Runtime, *, prepared: bool = False, level: int = 1,
+) -> dict:
+    """法师；默认把 `detect_magic` 从准备列表里摘掉，留它在书里。"""
 
     presets = runtime.builder_choices(None, {"locale": "en"})["quick_presets"]
     preset = next(item for item in presets if item["id"] == "curious_arcanist")
     sheet = runtime.finalize_character(
         None, {**preset["draft"], "locale": "en", "name": "Mira"},
     )
+    if level > 1:
+        sheet["ruleset_character"] = _advance(runtime, sheet["ruleset_character"], level)
+        return sheet
     if not prepared:
         block = sheet["ruleset_character"]["spellcasting"]["class"]
         block["prepared_spell_refs"] = [
@@ -339,3 +381,100 @@ def test_ritual_casting_is_refused_in_combat() -> None:
 
     assert resolved["ok"] is False
     assert "ritual casting is not available in combat" in resolved["error"]
+
+
+# --------------------------------------------------------------------------
+# Memorize Spell: one swap on a Short Rest
+# --------------------------------------------------------------------------
+
+
+def _wizard_book(sheet: dict) -> tuple[list[str], list[str]]:
+    block = sheet["ruleset_character"]["spellcasting"]["class"]
+    return (
+        [str(ref) for ref in block.get("prepared_spell_refs") or []],
+        [str(ref) for ref in block.get("spellbook_refs") or []],
+    )
+
+
+def test_memorize_spell_swaps_one_prepared_spell_on_a_short_rest() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime, level=5)
+    prepared, book = _wizard_book(sheet)
+    gained = next(ref for ref in book if ref not in prepared)
+    replaced = prepared[0]
+
+    result = runtime.complete_rest(
+        None, sheet, "short", {}, memorize_spell={
+            "replace_ref": replaced, "with_ref": gained,
+        },
+    )
+
+    after_prepared, after_book = _wizard_book(result["character"])
+    assert gained in after_prepared and replaced not in after_prepared
+    # 数量不变、书目不变：这次只动了准备位。
+    assert len(after_prepared) == len(prepared)
+    assert after_book == book
+    assert [e for e in result["events"] if e["type"] == "memorize_spell"]
+
+
+def test_memorize_spell_refuses_a_spell_outside_the_book() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime, level=5)
+    prepared, _book = _wizard_book(sheet)
+
+    with pytest.raises(Exception) as excinfo:
+        runtime.complete_rest(
+            None, sheet, "short", {}, memorize_spell={
+                "replace_ref": prepared[0], "with_ref": "spell:wish",
+            },
+        )
+
+    assert "spellbook" in str(excinfo.value)
+
+
+def test_memorize_spell_refuses_a_spell_that_is_not_prepared() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime, level=5)
+    prepared, book = _wizard_book(sheet)
+    gained = next(ref for ref in book if ref not in prepared)
+
+    with pytest.raises(Exception) as excinfo:
+        runtime.complete_rest(
+            None, sheet, "short", {}, memorize_spell={
+                "replace_ref": gained, "with_ref": prepared[0],
+            },
+        )
+
+    assert "not prepared" in str(excinfo.value)
+
+
+def test_memorize_spell_needs_five_wizard_levels() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime, level=1)
+    block = sheet["ruleset_character"]["spellcasting"]["class"]
+    prepared = [str(ref) for ref in block.get("prepared_spell_refs") or []]
+    book = [str(ref) for ref in block.get("spellbook_refs") or []]
+    gained = next(ref for ref in book if ref not in prepared)
+
+    with pytest.raises(Exception) as excinfo:
+        runtime.complete_rest(
+            None, sheet, "short", {}, memorize_spell={
+                "replace_ref": prepared[0], "with_ref": gained,
+            },
+        )
+
+    assert "Memorize Spell" in str(excinfo.value)
+
+
+def test_memorize_spell_is_not_a_long_rest_option() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime, level=5)
+
+    with pytest.raises(ValueError) as excinfo:
+        runtime.complete_rest(
+            None, sheet, "long", {}, memorize_spell={
+                "replace_ref": "spell:detect_magic", "with_ref": "spell:sleep",
+            },
+        )
+
+    assert "short rest" in str(excinfo.value)

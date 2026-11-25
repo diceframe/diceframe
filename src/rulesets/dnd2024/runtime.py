@@ -927,6 +927,7 @@ class Dnd2024Runtime:
         recovery: dict[str, Any] | None = None,
         hunter_options: dict[str, Any] | None = None,
         wild_shape_forms: dict[str, Any] | None = None,
+        memorize_spell: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         del rule
         canonical = character.get("ruleset_character")
@@ -943,6 +944,8 @@ class Dnd2024Runtime:
             raise ValueError("recovery must be an object keyed by feature id")
         if hunter_options is not None and not isinstance(hunter_options, dict):
             raise ValueError("hunter_options must be an object keyed by feature id")
+        if memorize_spell is not None and not isinstance(memorize_spell, dict):
+            raise ValueError("memorize_spell must be an object")
         engine = Dnd2024RestEngine(bundle)
         if rest == "short":
             if prepared_spells is not None:
@@ -955,7 +958,7 @@ class Dnd2024Runtime:
                 raise ValueError("wild shape forms are only replaced on a long rest")
             result = engine.complete_short_rest(
                 character, hit_die_rolls, attunement=attunement, recovery=recovery,
-                hunter_options=hunter_options,
+                hunter_options=hunter_options, memorize_spell=memorize_spell,
             )
         elif rest == "long":
             if hit_die_rolls:
@@ -964,6 +967,8 @@ class Dnd2024Runtime:
                 raise ValueError("attunement changes are only valid during a short rest")
             if recovery is not None:
                 raise ValueError("recovery is only valid for a short rest")
+            if memorize_spell is not None:
+                raise ValueError("memorize_spell is only valid for a short rest")
             change = (
                 engine.parse_prepared_spells(character, prepared_spells)
                 if prepared_spells is not None

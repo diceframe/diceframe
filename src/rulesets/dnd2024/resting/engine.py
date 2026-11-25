@@ -20,6 +20,7 @@ from src.rulesets.dnd2024.items.charges import ChargesError, recharge_for_rest
 from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
 from src.rulesets.dnd2024.spells.feat_spells import concentration_holder, restore_feat_free_casts
 from src.rulesets.dnd2024.spells.font_of_magic import clear_font_slots
+from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
 from src.rulesets.dnd2024.spells.preparation import PreparationPolicy
 from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 
@@ -275,6 +276,7 @@ class Dnd2024RestEngine:
         recovery: dict[str, Any] | None = None,
         fiendish_resilience: str | None = None,
         hunter_options: dict[str, Any] | None = None,
+        memorize_spell: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if free_cast:
             # Spell Mastery 的研究只发生在长休；短休给这个参数不是"没效果"，
@@ -300,6 +302,12 @@ class Dnd2024RestEngine:
             character,
             hunter_options if hunter_options is not None
             else payload.get("hunter_options"),
+        )
+        # Memorize Spell 与上面几个同形：先算计划，任何一步非法都在状态变化前拒绝。
+        memorize_plan = self._plan_memorize_spell(
+            character,
+            memorize_spell if memorize_spell is not None
+            else payload.get("memorize_spell"),
         )
         events: list[dict[str, Any]] = []
         rolls = hit_die_rolls or {}
@@ -338,6 +346,7 @@ class Dnd2024RestEngine:
         self._recover_free_cast_slots(character, "short", events)
         events.extend(self._apply_short_recovery(character, recovery_plan))
         events.extend(self._apply_hunter_options(character, hunter_plan))
+        events.extend(self._apply_memorize_spell(character, memorize_plan))
         events.extend(self._apply_fiendish_resilience(character, fiendish_choice))
         events.extend(self._reset_relentless_rage_dc(character))
         events.extend(self._apply_attunement(character, payload, attunement))
@@ -1006,6 +1015,69 @@ class Dnd2024RestEngine:
                 raise RestError(f"this character has no {feature_id}")
             plan[feature_id] = choice_id
         return plan
+
+    def _plan_memorize_spell(
+        self, character: dict[str, Any], request: Any,
+    ) -> dict[str, str]:
+        """Memorize Spell: exactly one level 1+ Wizard spell swapped in the book.
+
+        短休换准备是**特性**给的预算（5 级法师一次一个），不是职业策略，所以
+        不走 `PreparationPolicy`：那条路按"每级/每次长休能换几个"算，法师的长休
+        本来就不限数量。这里只认这次请求本身是否合法。
+        """
+
+        if request is None:
+            return {}
+        if not isinstance(request, Mapping):
+            raise RestError("memorize_spell must be an object")
+        unknown = sorted(set(request) - {"replace_ref", "with_ref"})
+        if unknown:
+            raise RestError(f"memorize_spell has an unknown field: {unknown[0]}")
+        replaced = str(request.get("replace_ref") or "")
+        gained = str(request.get("with_ref") or "")
+        if not replaced or not gained:
+            raise RestError("memorize_spell needs replace_ref and with_ref")
+        if replaced == gained:
+            raise RestError("memorize_spell must swap two different spells")
+        resolver = Dnd2024ClassFeatureResolver(self.bundle)
+        if not resolver.has_feature(character, "memorize_spell"):
+            raise RestError("this character has no Memorize Spell")
+        block = (character.get("spellcasting") or {}).get("class")
+        block = block if isinstance(block, dict) else {}
+        prepared = [str(ref) for ref in block.get("prepared_spell_refs") or []]
+        book = [str(ref) for ref in block.get("spellbook_refs") or []]
+        if replaced not in prepared:
+            raise RestError("the replaced spell is not prepared")
+        if gained not in book:
+            raise RestError("the new spell must be in the spellbook")
+        if gained in prepared:
+            raise RestError("the new spell is already prepared")
+        spells = Dnd2024SpellCatalog.from_bundle(self.bundle)
+        for ref in (replaced, gained):
+            spell = spells.get(ref) or {}
+            if int(spell.get("level", 0) or 0) < 1:
+                raise RestError("Memorize Spell swaps level 1+ spells only")
+            lists = [str(item) for item in spell.get("class_refs") or []]
+            if "class:wizard" not in lists:
+                raise RestError("Memorize Spell swaps Wizard spells only")
+        return {"replace_ref": replaced, "with_ref": gained}
+
+    def _apply_memorize_spell(
+        self, character: dict[str, Any], plan: dict[str, str],
+    ) -> list[dict[str, Any]]:
+        if not plan:
+            return []
+        block = character.setdefault("spellcasting", {}).setdefault("class", {})
+        prepared = [str(ref) for ref in block.get("prepared_spell_refs") or []]
+        block["prepared_spell_refs"] = [
+            plan["with_ref"] if ref == plan["replace_ref"] else ref
+            for ref in prepared
+        ]
+        return [{
+            "type": "memorize_spell",
+            "replaced": plan["replace_ref"],
+            "with": plan["with_ref"],
+        }]
 
     def _apply_hunter_options(
         self, character: dict[str, Any], plan: dict[str, str],
