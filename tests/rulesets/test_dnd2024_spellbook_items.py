@@ -8,8 +8,10 @@ from src.rulesets.dnd2024.character.attunement import (
     BASE_ATTUNEMENT_SLOTS,
     attunement_capacity,
 )
+from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 from src.rulesets.dnd2024.exploration.engine import Dnd2024ExplorationEngine
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.play import EncounterAccess
 from src.rulesets.dnd2024.progression.advancement import Dnd2024AdvancementEngine
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from tests.rulesets.test_dnd2024_item_activation import (
@@ -19,6 +21,7 @@ from tests.rulesets.test_dnd2024_item_activation import (
     _install_item,
     _charged_potion,
     _reconcile,
+    _start,
 )
 
 
@@ -204,3 +207,135 @@ def test_a_rogue_without_use_magic_device_never_rolls_the_d6() -> None:
     events = resolved["event_batch"]["events"]
     assert [e for e in events if e["type"] == "dnd2024.item.charge_spent"][0]["amount"] == 1
     assert not [e for e in events if e["type"] == "dnd2024.item.charge_waived"]
+
+
+# --------------------------------------------------------------------------
+# Ritual Adept: read the book, spend no slot
+# --------------------------------------------------------------------------
+
+
+def _wizard_sheet(runtime: Dnd2024Runtime, *, prepared: bool = False) -> dict:
+    """1 级法师；默认把 `detect_magic` 从准备列表里摘掉，留它在书里。"""
+
+    presets = runtime.builder_choices(None, {"locale": "en"})["quick_presets"]
+    preset = next(item for item in presets if item["id"] == "curious_arcanist")
+    sheet = runtime.finalize_character(
+        None, {**preset["draft"], "locale": "en", "name": "Mira"},
+    )
+    if not prepared:
+        block = sheet["ruleset_character"]["spellcasting"]["class"]
+        block["prepared_spell_refs"] = [
+            ref for ref in block.get("prepared_spell_refs") or []
+            if ref != "spell:detect_magic"
+        ]
+    return sheet
+
+
+def _cast_ritual(
+    runtime: Dnd2024Runtime, sheet: dict, spell_ref: str, **extra,
+):
+    instance = _instance(sheet)
+    engine = Dnd2024ExplorationEngine(runtime.load_bundle("en"), "en")
+    return engine.resolve_intent(instance, {
+        "intent_id": "ritual-1", "type": "exploration.cast_spell",
+        "expected_version": 0, "submitted_by": "gm", "actor_id": "player:gm",
+        "spell_ref": spell_ref, "ritual": True, **extra,
+    }, SequenceRng([4]))
+
+
+def test_ritual_adept_offers_an_unprepared_ritual_from_the_book() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime)
+    engine = Dnd2024ExplorationEngine(runtime.load_bundle("en"), "en")
+
+    offered = [
+        spell
+        for action in engine.available_intents(_instance(sheet), "gm")
+        for spell in action.get("spells") or []
+    ]
+    ritual = [spell for spell in offered if spell.get("ritual")]
+    assert [spell["spell_ref"] for spell in ritual] == ["spell:detect_magic"]
+    assert ritual[0]["available_slot_levels"] == [0]
+
+
+def test_a_ritual_cast_spends_no_spell_slot() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime)
+
+    resolved = _cast_ritual(runtime, sheet, "spell:detect_magic")
+
+    assert resolved["ok"] is True, resolved.get("error")
+    events = resolved["event_batch"]["events"]
+    cast = [e for e in events if e["type"] == "dnd2024.spell.cast"]
+    assert cast and cast[0]["ritual"] is True and cast[0]["slot_level"] == 0
+    spent = [
+        e for e in events
+        if e["type"] in {"dnd2024.spell.slot_spent", "dnd2024.spell.font_slot_spent"}
+    ]
+    assert spent == []
+
+
+def test_a_prepared_ritual_is_listed_once_as_an_ordinary_cast() -> None:
+    """已准备的仪式法术不额外列一条：它是同一个法术的两种施法方式。"""
+
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime, prepared=True)
+    engine = Dnd2024ExplorationEngine(runtime.load_bundle("en"), "en")
+
+    offered = [
+        spell
+        for action in engine.available_intents(_instance(sheet), "gm")
+        for spell in action.get("spells") or []
+    ]
+    detect = [spell for spell in offered if spell["spell_ref"] == "spell:detect_magic"]
+    assert len(detect) == 1
+    assert not detect[0].get("ritual")
+
+
+def test_a_spell_without_the_ritual_tag_cannot_be_cast_ritually() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime)
+
+    resolved = _cast_ritual(runtime, sheet, "spell:magic_missile")
+
+    assert resolved["ok"] is False
+    assert "Ritual tag" in resolved["error"]
+
+
+def test_a_spell_outside_the_book_cannot_be_cast_ritually() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime)
+
+    resolved = _cast_ritual(runtime, sheet, "spell:alarm")
+
+    assert resolved["ok"] is False
+    assert "spellbook" in resolved["error"]
+
+
+def test_only_a_ritual_adept_may_cast_ritually() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _thief_sheet(runtime, 13)
+
+    resolved = _cast_ritual(runtime, sheet, "spell:detect_magic")
+
+    assert resolved["ok"] is False
+    assert "Ritual Adept" in resolved["error"]
+
+
+def test_ritual_casting_is_refused_in_combat() -> None:
+    """战斗里没有那 10 分钟：拒绝，而不是静默按普通施法扣槽。"""
+
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime)
+    instance = _instance(sheet)
+    engine = Dnd2024CombatEngine(runtime.load_bundle("en"), EncounterAccess.sandbox())
+    _start(engine, instance)
+
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": "ritual-combat", "type": "cast_spell",
+        "expected_version": 1, "submitted_by": "gm", "actor_id": "player:gm",
+        "spell_ref": "spell:detect_magic", "ritual": True,
+    }, SequenceRng([4]))
+
+    assert resolved["ok"] is False
+    assert "ritual casting is not available in combat" in resolved["error"]

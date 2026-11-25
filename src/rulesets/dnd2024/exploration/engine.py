@@ -178,6 +178,41 @@ class Dnd2024ExplorationEngine:
     def _spell_refs(self, canonical: dict[str, Any]) -> list[str]:
         return spellcasting_projection(canonical, self.features)["spell_refs"]
 
+    def _ritual_spell_refs(self, canonical: dict[str, Any]) -> list[str]:
+        """Spells the caster may cast ritually *without* preparing them.
+
+        Ritual Adept reads the book, not the prepared list, so this is the one
+        place that looks at ``spellbook_refs`` for casting purposes.
+        """
+
+        if not self.features.has_feature(canonical, "ritual_adept"):
+            return []
+        block = (canonical.get("spellcasting") or {}).get("class") or {}
+        book = [str(ref) for ref in block.get("spellbook_refs") or []]
+        return [
+            ref for ref in dict.fromkeys(book)
+            if (self.spells.get(ref) or {}).get("ritual")
+        ]
+
+    def _validate_ritual(
+        self, canonical: dict[str, Any], spell_ref: str, spell: dict[str, Any],
+        intent: dict[str, Any],
+    ) -> None:
+        """Ritual Adept: book + ritual tag, no slot, and no shortcut around time.
+
+        时间与组件在本层没有可推进的时钟，所以这里只保证"不花槽、必须读书
+        里的那一条"；施法时间留给叙事层，事件里写明是仪式而非普通施法。
+        """
+
+        if not self.features.has_feature(canonical, "ritual_adept"):
+            raise ExplorationIntentError("ritual casting requires Ritual Adept")
+        if not spell.get("ritual"):
+            raise ExplorationIntentError("this spell has no Ritual tag")
+        if spell_ref not in self._ritual_spell_refs(canonical):
+            raise ExplorationIntentError("ritual casting reads from the spellbook")
+        if int(intent.get("slot_level", 0) or 0) != 0:
+            raise ExplorationIntentError("a ritual cast spends no spell slot")
+
     def _casting_eligible(self, canonical: dict[str, Any]) -> bool:
         """探索施法的公共资格：HP>0、非 dead、非失能。
 
@@ -253,6 +288,18 @@ class Dnd2024ExplorationEngine:
             spells.append({
                 "spell_ref": spell_ref, "name": spell["name"], "level": spell["level"],
                 "casting_time": spell["casting_time"], "available_slot_levels": available_slots,
+            })
+        # 仪式是"另一种施法方式"：只有未准备的书内仪式法术才单列，已准备的那条
+        # 已经在上面的普通施法里出现过，重复列会让人以为是两个不同的法术。
+        prepared = set(casting["spell_refs"])
+        for spell_ref in self._ritual_spell_refs(canonical):
+            spell = self.spells.get(spell_ref)
+            if spell is None or spell_ref in prepared:
+                continue
+            spells.append({
+                "spell_ref": spell_ref, "name": spell["name"], "level": spell["level"],
+                "casting_time": spell["casting_time"], "available_slot_levels": [0],
+                "ritual": True,
             })
         if spells:
             actions.append({
@@ -365,15 +412,22 @@ class Dnd2024ExplorationEngine:
         spell = self.spells.get(spell_ref)
         if spell is None:
             raise ExplorationIntentError("spell does not exist in the ruleset")
-        if spell_ref not in self._spell_refs(canonical):
+        ritual = bool(intent.get("ritual"))
+        if ritual:
+            self._validate_ritual(canonical, spell_ref, spell, intent)
+        elif spell_ref not in self._spell_refs(canonical):
             raise ExplorationIntentError("spell is not prepared or known by the actor")
-        slot_level = intent.get("slot_level", spell["level"])
+        slot_level = intent.get("slot_level", 0 if ritual else spell["level"])
         if isinstance(slot_level, bool) or not isinstance(slot_level, int):
             raise ExplorationIntentError("slot_level must be an integer")
         class_magic = canonical.get("spellcasting", {}).get("class")
         class_magic = class_magic if isinstance(class_magic, dict) else {}
         slots = class_magic.get("slots_current") or {}
-        if spell["level"] == 0:
+        if ritual:
+            # 仪式不花槽，也就没有"槽够不够"这一问；`_validate_ritual` 已经
+            # 确认了它与免费施法资源无关。
+            pass
+        elif spell["level"] == 0:
             if slot_level != 0:
                 raise ExplorationIntentError("a cantrip does not use a spell slot")
         elif slot_level == 0:
@@ -602,7 +656,9 @@ class Dnd2024ExplorationEngine:
         spell = self.spells.get(spell_ref)
         if spell is None:  # pragma: no cover - validation guards this
             raise ExplorationIntentError("spell does not exist in the ruleset")
-        slot_level = int(intent.get("slot_level", spell["level"]) or 0)
+        ritual = bool(intent.get("ritual"))
+        # 仪式不花槽：这里把 0 写死，而不是"信任客户端传了 0"。
+        slot_level = 0 if ritual else int(intent.get("slot_level", spell["level"]) or 0)
         effect = self.catalog.spell_effects.get(spell_ref.removeprefix("spell:"))
         target_values = intent.get("target_ids")
         target_ids = [str(item) for item in (target_values or []) if str(item)]
@@ -614,7 +670,8 @@ class Dnd2024ExplorationEngine:
         expected = int(intent["expected_version"])
         intent_id = str(intent.get("intent_id") or "")
         caster = spell_caster(self._actor_view(instance, actor_id), spell_ref)
-        events.extend(spell_cost_events(caster, spell, slot_level))
+        if not ritual:
+            events.extend(spell_cost_events(caster, spell, slot_level))
         if effect is not None and effect.get("concentration"):
             actor_canonical = self._canonical_of(instance, actor_id)
             if concentration_holder(actor_canonical).get("concentration"):
@@ -626,11 +683,15 @@ class Dnd2024ExplorationEngine:
                 "type": "dnd2024.concentration.started", "actor_id": actor_id,
                 "spell_ref": spell_ref, "target_ids": target_ids,
             })
-        events.append({
+        cast_event: dict[str, Any] = {
             "type": "dnd2024.spell.cast", "actor_id": actor_id, "spell_ref": spell_ref,
             "slot_level": slot_level, "target_ids": target_ids,
             "context": "exploration",
-        })
+        }
+        if ritual:
+            # 事件必须说清"这一次是仪式"：审计要能区分"没花槽"的两种原因。
+            cast_event["ritual"] = True
+        events.append(cast_event)
         revive = revive_definition(spell_ref)
         if revive is not None:
             for target_id in target_ids:
