@@ -103,6 +103,11 @@ from .check_modes import (
     mode_from_sources,
     owned_mark,
 )
+from src.rulesets.dnd2024.features.attack_declarations import (
+    BRUTAL_STRIKE, HELD_HIT_KEY, HURL, LIGHT_EXTRA_ATTACK, SACRED_WEAPON, STUNNING_STRIKE,
+    HitConditionContext,
+    committed_hit_events, declaration_value, granted_strike_selection, held_hit_declarations, plan_hit_conditions,
+)
 from src.rulesets.dnd2024.features.kinds import KIND_HANDLERS, KindContext
 from src.rulesets.dnd2024.features.models import FeatureCapability, SpellSlotCost
 from src.rulesets.dnd2024.features.resources import resource_state
@@ -1323,7 +1328,7 @@ class CombatResolutionMixin:
             state["studied_consumed"] = True
             state["studied_kind"] = mark_kind
 
-        if bool(intent.get("brutal_strike")) and self.features.has_feature(
+        if declaration_value(intent, BRUTAL_STRIKE) and self.features.has_feature(
             character, "brutal_strike",
         ):
             required = str(parameter("brutal_strike", "requires_declaration") or "")
@@ -1763,7 +1768,7 @@ class CombatResolutionMixin:
                 sacred_bonus = self._sacred_weapon_bonus(
                     actor, str(weapon.get("weapon_ref") or ""),
                 )
-                if not sacred_bonus and intent.get("activate_sacred_weapon"):
+                if not sacred_bonus and declaration_value(intent, SACRED_WEAPON):
                     # 激活与首次攻击是同一个动作：绑定状态要到批次落地才存在，
                     # 但这一掷已经吃到了它的加值。
                     sacred_bonus, _ability = self._sacred_weapon_bonus_value(actor)
@@ -1847,7 +1852,7 @@ class CombatResolutionMixin:
             *self._spell_end_trigger_events(actor, "attack_roll"),
             *([self._attack_cost_event(
                 combat, actor,
-                resource="bonus_action" if intent.get("light_extra_attack") else "",
+                resource="bonus_action" if declaration_value(intent, LIGHT_EXTRA_ATTACK) else "",
                 weapon=weapon,
                 # Multiattack 的第一次攻击为"这一次动作"开一张总额度，后续
                 # 每一击都从同一份额度里扣：动作只付一次，次数不重复付。
@@ -1857,7 +1862,7 @@ class CombatResolutionMixin:
         events.extend(self._attack_declaration_events(
             combat, actor_id, target_id, declaration,
         ))
-        if intent.get("activate_sacred_weapon"):
+        if declaration_value(intent, SACRED_WEAPON):
             # 激活不是独立动作：它占用的是这次真实 Attack action 的首个攻击，
             # 所以支付与绑定都落在这个攻击的同一批事件里。
             events.extend(self._sacred_weapon_events(
@@ -1921,7 +1926,7 @@ class CombatResolutionMixin:
             and str((combat.get("economy") or {}).get("actor_id") or "") == str(actor_id)
         )
         if (
-            intent.get("light_extra_attack")
+            declaration_value(intent, LIGHT_EXTRA_ATTACK)
             and actor["kind"] in {"player", "companion"}
             and not bool(actor.get("light_extra_attack_ability_damage"))
         ):
@@ -2159,11 +2164,9 @@ class CombatResolutionMixin:
         # "这一击声明了哪些攻击命中触发"随伤害事件走，和 hit_riders 同一个
         # 道理：决策路径（至圣斩窗口之后）拿不到原始意图，若只把触发挂在
         # 直通路径上，那条路径会悄悄少掉半个特性。
-        triggers = {
-            "hurl_through_hell": bool(intent.get("hurl_through_hell")),
-        }
-        if any(triggers.values()):
-            damage_event["attack_hit_triggers"] = triggers
+        triggers = held_hit_declarations(intent)
+        if triggers:
+            damage_event[HELD_HIT_KEY] = triggers
         brutal_effects = self._brutal_effect_declarations(actor, intent, check)
         if brutal_effects:
             damage_event["brutal_strike_effects"] = brutal_effects
@@ -2206,7 +2209,7 @@ class CombatResolutionMixin:
             return [{"type": "dnd2024.decision.pending", **(reaction or damage_window or offer)}]
         return self._resolve_committed_hit(
             instance, combat, actor_id, target, damage_event, damage, rng,
-            intent=intent,
+            settle_attack_declarations=True,
         )
 
     def _hit_rider_declarations(
@@ -2859,58 +2862,11 @@ class CombatResolutionMixin:
                     ),
                 })
 
-        if (
-            intent.get("quivering_palm")
-            and bool(weapon.get("unarmed"))
-            and self.features.has_feature(character, "quivering_palm")
-            # 规则只限制"同时只有一个目标"，没有"每回合一次"：这道门读的
-            # 账从不写入，等于永不生效的假防御。
-            and long_effect_active(
-                character, "quivering_palm", world_minutes(instance),
-            ) is None
-        ):
-            declarations.append({
-                "kind": "quivering_palm",
-                "feature_id": "quivering_palm",
-                "focus_cost": int(parameter("quivering_palm", "focus_cost") or 4),
-                "duration_minutes": int(
-                    (character.get("build") or {}).get("level", 1) or 1
-                ) * 1440,
-            })
-
-        if not intent.get("stunning_strike"):
-            return declarations
-        if not self.features.has_feature(character, "stunning_strike"):
-            return declarations
         actor_id = str(actor["actor_id"])
-        if self._feature_used_this_turn(combat, actor_id, "stunning_strike"):
-            return declarations
-        unarmed = bool(weapon.get("unarmed"))
-        # Martial Arts 已经把"力量或敏捷"投到它覆盖的武器上（徒手与 Monk
-        # weapon）。那个投影就是判定依据，不再按武器名重猜一次。
-        monk_weapon = bool(weapon.get("ability_choice"))
-        if not (unarmed or monk_weapon):
-            # 只有 Monk weapon 与 Unarmed Strike 能触发；普通武器命中不算。
-            return declarations
-
-        save_ability = str(parameter("stunning_strike", "save_ability") or "")
-        on_fail = str(parameter("stunning_strike", "on_fail_condition") or "")
-        on_success = str(parameter("stunning_strike", "on_success_condition") or "")
-        duration = str(parameter("stunning_strike", "condition_duration") or "")
-        if not (save_ability and on_fail and on_success and duration):
-            return declarations
-        declarations.append({
-            "kind": "stunning_strike",
-            "feature_id": "stunning_strike",
-            "save_ability": save_ability,
-            "focus_cost": int(parameter("stunning_strike", "focus_cost") or 1),
-            "on_fail_condition": on_fail,
-            "on_success_condition": on_success,
-            "on_success_attack_condition": str(
-                parameter("stunning_strike", "on_success_attack_condition") or ""
-            ),
-            "duration": duration,
-        })
+        declarations.extend(plan_hit_conditions(intent, HitConditionContext(
+            self.features, character, weapon, world_minutes(instance),
+            lambda feature_id: self._feature_used_this_turn(combat, actor_id, feature_id),
+        )))
         return declarations
 
     def _hit_condition_events(
@@ -3361,7 +3317,7 @@ class CombatResolutionMixin:
     def _resolve_committed_hit(
         self, instance: Any, combat: dict[str, Any], attacker_id: str,
         target: dict[str, Any], damage_event: dict[str, Any], damage: int, rng: Any,
-        *, intent: dict[str, Any] | None = None,
+        *, settle_attack_declarations: bool = False,
     ) -> list[dict[str, Any]]:
         """Submit a final hit's damage and run its trailing consequences."""
 
@@ -3383,14 +3339,12 @@ class CombatResolutionMixin:
         events.extend(self._hit_condition_events(
             instance, combat, attacker_id, target, damage_event, rng,
         ))
-        # 命中成立之后的一切"攻击命中触发"效果都在这里统一处理：它不跟着
-        # 武器/法术两条判定分叉，也正因为如此，只写一次就两条路都生效。
-        # 反应窗收尾（Cutting Words 之后）拿不到原始 intent，那条路径上
-        # 就不触发——它已经越过了"命中成立"的那一刻。
-        if intent is not None:
-            events.extend(self._attack_hit_events(
-                instance, combat, self._actor_view(instance, combat, attacker_id),
-                target, intent, rng,
+        # Keep the existing settlement boundary: direct attacks and the
+        # separate hit-spell finisher settle final-hit subscribers. A standalone
+        # damage-window finisher settles only its existing damage consequences.
+        if settle_attack_declarations:
+            events.extend(self._held_attack_hit_events(
+                instance, combat, attacker_id, target, damage_event, rng,
             ))
         events.extend(self._enemy_zero_hp_feature_events(
             instance, combat, attacker_id, target, total_damage,
@@ -3399,28 +3353,18 @@ class CombatResolutionMixin:
             events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         return events
 
-    def _attack_hit_events(
-        self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
-        target: dict[str, Any], intent: dict[str, Any], rng: Any,
+    def _held_attack_hit_events(
+        self, instance: Any, combat: dict[str, Any], attacker_id: str,
+        target: dict[str, Any], damage_event: dict[str, Any], rng: Any,
     ) -> list[dict[str, Any]]:
-        """Everything that triggers on "you hit a creature with an attack roll".
-
-        The two hit resolutions are deliberately separate -- a weapon rolls
-        ``attack_bonus`` and a spell rolls ``spell_attack_bonus`` -- but what
-        happens **after** a hit lands should not fork with them: the rule text
-        says "with an attack roll", not "with a weapon".  Both funnels end
-        their success branch here, so a new on-hit effect is written once.
-
-        Today the only subscriber is Hurl Through Hell.  A "replace one attack"
-        Grapple or Shove would subscribe here too.
-        """
-
-        events: list[dict[str, Any]] = []
-        if intent.get("hurl_through_hell"):
-            events.extend(self._hurl_through_hell_hit_events(
-                instance, combat, attacker, target, rng,
-            ))
-        return events
+        """Settle declarations from a final hit, never from a decision intent."""
+        held = damage_event.get(HELD_HIT_KEY)
+        if not isinstance(held, dict) or not held:
+            return []
+        return committed_hit_events(
+            self, instance, combat, self._actor_view(instance, combat, attacker_id),
+            target, held, rng,
+        )
 
     def _hurl_through_hell_hit_events(
         self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
@@ -3432,7 +3376,7 @@ class CombatResolutionMixin:
         以为能力已经生效。
         """
 
-        feature_id = "hurl_through_hell"
+        feature_id = HURL.id
         character = self._feature_character(attacker)
         attacker_id = str(attacker["actor_id"])
         if not self.features.has_feature(character, feature_id):
@@ -3790,6 +3734,7 @@ class CombatResolutionMixin:
         # 同一次施法的多道射线共用一个事件批次：已消耗条件只在局部隐藏，
         # 事件仍在批次末尾统一移除，状态写入时机不变。
         consumed_conditions: set[tuple[str, str]] = set()
+        hit_declarations = held_hit_declarations(intent)
         for ray_index, target_id in enumerate(target_ids):
             target = self._actor_view(instance, combat, target_id)
             mode = str(effect["mode"])
@@ -3923,11 +3868,14 @@ class CombatResolutionMixin:
                         events.extend(self._enemy_zero_hp_feature_events(
                             instance, combat, actor_id, target, total_dealt,
                         ))
-                    # 法术攻击同样是一次"用攻击检定命中"：命中触发效果在这里
-                    # 走同一入口，不在两条判定里各写一份。
-                    events.extend(self._attack_hit_events(
-                        instance, combat, actor, target, intent, rng,
-                    ))
+                    # A cast declares these effects for its first successful
+                    # attack roll. A miss does not spend them; later rays do
+                    # not get a fresh use from the unchanged actor snapshot.
+                    if hit_declarations:
+                        events.extend(committed_hit_events(
+                            self, instance, combat, actor, target, hit_declarations, rng,
+                        ))
+                        hit_declarations = {}
                 consumed_events = self._consume_attack_conditions(
                     actor_id, target_id, visible_actor, visible_target,
                 )
@@ -4428,7 +4376,7 @@ class CombatResolutionMixin:
         event.pop("statblock_riders", None)
         # 命中触发的声明只给决策路径用：待定的命中法术决策在创建时留了一份
         # 伤害事件的副本，这里从线上形状里摘掉，客户端不会看到一个它用不上的键。
-        event.pop("attack_hit_triggers", None)
+        event.pop(HELD_HIT_KEY, None)
         events: list[dict[str, Any]] = [event]
         if isinstance(feature_use, dict):
             events.append({"type": "dnd2024.feature.used", **feature_use})
@@ -5402,13 +5350,13 @@ class CombatResolutionMixin:
                 "actor_id": actor_id, "target_id": target_id,
                 "weapon_ref": UNARMED_STRIKE_REF,
                 **{key: intent[key] for key in (
-                    "unarmed_damage_type", "rider_damage_type", "stunning_strike",
+                    "unarmed_damage_type", "rider_damage_type",
                 ) if key in intent},
+                # The first eligible hit consumes the declaration; a miss does not.
+                **granted_strike_selection(intent, already_used=self._feature_used_this_turn(
+                    current_combat, actor_id, STUNNING_STRIKE.id,
+                )),
             }
-            # The choice applies to the first eligible hit, never twice
-            # in the same turn (a miss leaves it available).
-            if self._feature_used_this_turn(current_combat, actor_id, "stunning_strike"):
-                strike_intent.pop("stunning_strike", None)
             weapon = self._declared_attack(current_actor, strike_intent)
             if (
                 current_target["hp"] <= 0

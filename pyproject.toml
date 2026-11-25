@@ -91,6 +91,7 @@ files = [
     "src/rulesets/dnd2024/features/activation_effects.py",
     "src/rulesets/dnd2024/features/activation_exchanges.py",
     "src/rulesets/dnd2024/features/activation_targets.py",
+    "src/rulesets/dnd2024/features/attack_declarations.py",
     "src/rulesets/dnd2024/features/combat.py",
     "src/rulesets/dnd2024/features/equipment.py",
     "src/rulesets/dnd2024/features/kinds.py",

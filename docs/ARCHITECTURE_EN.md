@@ -3662,6 +3662,15 @@ catalog order. Granted strikes use detached state with costs and preceding event
 combat ending stops further dispatch. Handlers can add display details but cannot override
 shared costs or authority checks. Reactions and decision windows use separate paths.
 
+Attack add-ons register in `features/attack_declarations.py`. New intents select IDs in
+`attack_declarations`: `sacred_weapon`, `light_extra_attack`, `brutal_strike`,
+`stunning_strike`, `quivering_palm`, or `hurl_through_hell`. The registry validates IDs
+and intent surfaces without changing rule timing: Sacred Weapon affects the current roll,
+while Stunning Strike spends Focus after a hit. Legacy flags remain accepted as compatibility
+inputs, but cannot be mixed with the ID array. Hit-spell decisions still read declarations from
+`attack_hit_triggers` on held damage. This field is absent from committed damage events
+and non-GM decision projections.
+
 ---
 
 ## 27.2 Encounter Access
