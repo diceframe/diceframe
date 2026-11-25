@@ -1465,12 +1465,28 @@ class Dnd2024ClassFeatureResolver:
             definition for definition in owned
             if self.feature_is_active(character, definition)
         )
+        grants = self._spell_grant_rows(owned, character)
+        # 一条授予行同时可以是一种"免费施放来源"：Natural Recovery 的免费面是
+        # 「当前地形授予的任一法术，无槽一次，每长休一次」，实现上就是"这组授予
+        # 行各自再带一个资源池"。派生在这里而不是写进 `_grant_row`，是为了保住
+        # 上面那条界线——常驻授予只说明"已准备"，挂资源的只有下面这张派生表。
+        free_cast_pools = {
+            definition.id: str(definition.parameters.get("free_cast_resource_id") or "")
+            for definition in owned
+            if definition.parameters.get("free_cast_resource_id")
+        }
         return {
             "spell_grants": [
                 # 常驻授予（子职法术表、Land 地形、Magical Discoveries）与
                 # "免费施放" 授予是两种东西：前者只说明"已准备"，不带资源，
                 # 后者挂一个职业资源池。两者同列但都不许对方冒充自己。
-                *self._spell_grant_rows(owned, character),
+                *grants,
+                *[
+                    {"spell_ref": row["spell_ref"],
+                     "resource_id": free_cast_pools[row["feature_id"]]}
+                    for row in grants
+                    if row["feature_id"] in free_cast_pools
+                ],
                 *[
                     {
                         "spell_ref": f"spell:{definition.parameters['granted_spell_id']}",
