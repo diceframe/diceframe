@@ -42,6 +42,8 @@
       "barbarian": "Barbarian",
       "rage": "Rage",
       "rages": "Rage Uses",
+      "sorcery_points": "Sorcery Points",
+      "spell_slot_cost": "Level {level} spell slot",
       "rage_sustain": "Sustain Rage",
       "retaliation": "Retaliation",
       "rogue": "Rogue",

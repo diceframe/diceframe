@@ -23,7 +23,8 @@ from src.rulesets.dnd2024.character.reconciliation import (
 )
 from src.rulesets.dnd2024.combat.catalog import Dnd2024CombatCatalog
 from src.rulesets.dnd2024.content.encounter import expand_encounter_enemies
-from src.rulesets.dnd2024.features.models import TURN_START_TIMING
+from src.rulesets.dnd2024.features.combat import spell_slot_count
+from src.rulesets.dnd2024.features.models import SpellSlotCost, TURN_START_TIMING
 from src.rulesets.dnd2024.features import (
     CombatCapabilityView,
     Dnd2024ClassFeatureResolver,
@@ -2161,7 +2162,9 @@ class Dnd2024CombatEngine(
                 if capability.cost.timing != TURN_START_TIMING:
                     continue
                 affordable = all(
-                    int(resource_state(character, cost.resource_id).get("current", 0) or 0)
+                    spell_slot_count(actor.get("slots") or {}, cost.level) >= 1
+                    if isinstance(cost, SpellSlotCost)
+                    else int(resource_state(character, cost.resource_id).get("current", 0) or 0)
                     >= cost.amount
                     for cost in capability.cost.resources
                 )

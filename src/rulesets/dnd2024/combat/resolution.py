@@ -103,6 +103,7 @@ from .check_modes import (
     mode_from_sources,
     owned_mark,
 )
+from src.rulesets.dnd2024.features.models import FeatureCapability, SpellSlotCost
 from src.rulesets.dnd2024.features.resources import resource_state
 from .check_windows import CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION
 from .cover import cover_axis
@@ -5286,7 +5287,7 @@ class CombatResolutionMixin:
         }]
 
     def _pay_cost(
-        self, actor_id: str, capability: Any, *, via_fleet_step: bool = False,
+        self, actor_id: str, capability: FeatureCapability, *, via_fleet_step: bool = False,
     ) -> list[dict[str, Any]]:
         """Charge one capability's declared price: its slot, then its resources.
 
@@ -5309,6 +5310,13 @@ class CombatResolutionMixin:
                 "grants": {}, "flags": {"fleet_step_available": False},
             })
         for resource_cost in capability.cost.resources:
+            if isinstance(resource_cost, SpellSlotCost):
+                # This pays for a capability, not a spell cast.
+                events.append({
+                    "type": "dnd2024.spell.slot_spent", "actor_id": actor_id,
+                    "slot_level": resource_cost.level, "exchange": True,
+                })
+                continue
             events.append({
                 "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
                 "resource_id": resource_cost.resource_id, "amount": resource_cost.amount,
@@ -5440,9 +5448,7 @@ class CombatResolutionMixin:
                     "reason": "dismissed",
                 })
             elif action.kind == "restore_feature_use":
-                events.extend(self._restore_feature_use_events(
-                    instance, actor_id, actor, capability,
-                ))
+                events.append(self._restore_feature_use_event(actor_id, actor, capability))
             elif action.kind == "quivering_palm_end":
                 events.extend(self._quivering_palm_end_events(
                     instance, combat, actor_id, actor, capability, rng,
@@ -6080,50 +6086,23 @@ class CombatResolutionMixin:
                     events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         return events
 
-    def _restore_feature_use_events(
-        self, instance: Any, actor_id: str, actor: dict[str, Any],
-        capability: Any,
-    ) -> list[dict[str, Any]]:
-        """Pay a real slot or resource to regain one use of a feature.
-
-        与 ``font_of_inspiration`` 同形：扣的是权威槽表里的一格（``exchange``
-        标记让它不占本回合的施法位），回的是长休作用域的使用计数。拒绝条件
-        在校验层：没有已用次数、或槽位不够，都不该走到这里。
-        """
+    def _restore_feature_use_event(
+        self, actor_id: str, actor: dict[str, Any], capability: FeatureCapability,
+    ) -> dict[str, Any]:
+        """Regain one use; the capability's declared price is paid separately."""
 
         character = self._feature_character(actor)
         feature_id = capability.feature_id
-        slot_level = int(self.features.feature_value(
-            character, feature_id, "restore_slot_level", 0,
-        ) or 0)
-        resource_id = str(self.features.feature_value(
-            character, feature_id, "restore_resource", "",
-        ) or "")
-        amount = int(self.features.feature_value(
-            character, feature_id, "restore_resource_amount", 0,
-        ) or 0)
-        events: list[dict[str, Any]] = []
-        if slot_level:
-            events.append({
-                "type": "dnd2024.spell.slot_spent", "actor_id": actor_id,
-                "slot_level": slot_level, "exchange": True,
-            })
-        if resource_id:
-            events.append({
-                "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
-                "resource_id": resource_id, "amount": amount,
-            })
         before = feature_usage_count(
             character, feature_id, feature_id, USAGE_SCOPE_LONG_REST,
         )
-        events.append({
+        return {
             "type": "dnd2024.feature_usage.restored", "actor_id": actor_id,
             "owner": feature_id, "feature_id": feature_id,
             "scope": USAGE_SCOPE_LONG_REST,
             "before_count": before,
             "reason": "restored",
-        })
-        return events
+        }
 
     def _quivering_palm_end_events(
         self, instance: Any, combat: dict[str, Any], actor_id: str,

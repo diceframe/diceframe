@@ -3649,6 +3649,13 @@ report unavailable reasons rather than hiding prepared spells with no legal cast
 Monster and NPC profiles optionally declare a canonical `creature_type`; encounters
 preserve it, so extra damage against `fiend` / `undead` never depends on display names.
 
+Class capabilities declare fixed resource prices in `cost.resources`.
+`{"id": "rages", "amount": 1}` spends a class resource, while `{"spell_slot": 5}` exchanges
+one slot of that exact level from the authoritative class spell slot table, not from temporary
+slots. Validation, action projection, and payment read this declaration. Capabilities that
+restore a feature use must declare their price here. A slot exchange sets `exchange: true`
+and does not count as casting a spell for the turn's action economy.
+
 ---
 
 ## 27.2 Encounter Access
