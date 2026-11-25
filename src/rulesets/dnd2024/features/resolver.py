@@ -40,6 +40,7 @@ from .resources import (
     ClassResourceDeclaration,
     Dnd2024ClassResourceCatalog,
     ResourceDefinition,
+    long_effects,
     resource_state,
 )
 from .validation import (
@@ -1548,7 +1549,8 @@ class Dnd2024ClassFeatureResolver:
         combat economy, which is one object for the whole table, so a
         capability that may only be paid "at the start of your turn" has to be
         matched against the actor being evaluated -- otherwise every monk would
-        see the window the current actor's turn just opened.
+        see the window the current actor's turn just opened. The combat actor
+        snapshot already filters expired long effects using the world clock.
         """
 
         active = self.active_features_for(character)
@@ -1563,6 +1565,7 @@ class Dnd2024ClassFeatureResolver:
             CombatContext.from_economy(
                 combat_context, actor_id,
                 class_magic=class_magic if isinstance(class_magic, Mapping) else None,
+                active_effects=frozenset(long_effects(character)),
             ),
             definitions,
             include_unavailable=include_unavailable,

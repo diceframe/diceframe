@@ -216,6 +216,9 @@ class CapabilityAction:
     effect_id: str = ""
 
 
+ACTIVE_LONG_EFFECT_REQUIREMENT = "active_long_effect:"
+
+
 @dataclass(frozen=True, slots=True)
 class FeatureCapability:
     """A combat capability a class feature grants.
@@ -231,6 +234,8 @@ class FeatureCapability:
     availability but whose spend is decided per intent (Lay On Hands).  A
     fixed ``ResourceCost`` cannot express "up to what is left", so the pool is
     only checked here and charged at resolution.
+
+    ``requires`` lists prerequisites independent of costs and action kinds.
     """
 
     id: str
@@ -246,6 +251,7 @@ class FeatureCapability:
     # 特性自身的使用次数（每长休）。资源表达不了"特性还剩几次"：资源是
     # 角色卡上的条，特性使用是一次性开关，两者在投影上不该混在一起。
     uses_per_long_rest: int = 0
+    requires: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -878,6 +884,24 @@ class Dnd2024ClassFeatureCatalog:
                 ),
                 effect_id=effect_id,
             ))
+        raw_requires = raw.get("requires", [])
+        if not isinstance(raw_requires, list):
+            raise ClassFeatureError(f"{capability_id}.requires must be an array")
+        requires: list[str] = []
+        for prerequisite in raw_requires:
+            if not isinstance(prerequisite, str) or not prerequisite.startswith(
+                ACTIVE_LONG_EFFECT_REQUIREMENT,
+            ):
+                raise ClassFeatureError(
+                    f"{capability_id}.requires has an unknown prerequisite: {prerequisite!r}"
+                )
+            _require_id(
+                prerequisite.removeprefix(ACTIVE_LONG_EFFECT_REQUIREMENT),
+                f"{capability_id}.requires effect id",
+            )
+            if prerequisite in requires:
+                raise ClassFeatureError(f"{capability_id}.requires repeats {prerequisite!r}")
+            requires.append(prerequisite)
         requires_condition = str(raw.get("requires_condition") or "")
         forbidden_condition = str(raw.get("forbidden_condition") or "")
         if requires_condition and forbidden_condition:
@@ -926,6 +950,7 @@ class Dnd2024ClassFeatureCatalog:
             target_kind=target_kind,
             pool_resource_id=pool_resource_id,
             uses_per_long_rest=uses_per_long_rest,
+            requires=tuple(requires),
         )
 
     def label(self, key: str, default: str = "") -> str:

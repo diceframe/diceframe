@@ -3655,6 +3655,9 @@ one slot of that exact level from the authoritative class spell slot table, not 
 slots. Validation, action projection, and payment read this declaration. Capabilities that
 restore a feature use must declare their price here. A slot exchange sets `exchange: true`
 and does not count as casting a spell for the turn's action economy.
+`requires` lists prerequisites independent of costs and effect kinds. For instance,
+`["active_long_effect:dragon_wings"]` requires an unexpired effect on the acting character;
+both action projection and authoritative validation use the same world-clock-filtered actor view.
 
 New class capability effects register in `features/kinds.py`. Catalog loading rejects
 unknown kinds. Combat validates, pays the declared cost once, then dispatches each effect in

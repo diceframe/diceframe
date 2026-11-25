@@ -19,7 +19,7 @@ from tests.rulesets.test_dnd2024_d20_skills import _rogue
 KIND = "test_grant_action"
 
 
-def _custom_bundle(runtime):
+def _custom_bundle(runtime, *, requires=()):
     bundle = runtime.load_bundle("en")
     entities = deepcopy(bundle.entities)
     catalog = entities["class_feature_catalog"]["srd_class_features"]
@@ -30,12 +30,26 @@ def _custom_bundle(runtime):
     capability["id"] = "test_activation"
     capability["requires_hostile_target"] = True
     capability["actions"] = [{"kind": KIND, "count": 1}]
+    if requires != ():
+        capability["requires"] = requires
     return replace(bundle, entities=entities)
 
 
 def test_unregistered_kind_is_rejected_on_catalog_load() -> None:
     with pytest.raises(ClassFeatureError, match=f"test_activation.*unknown action kind.*{KIND}"):
         Dnd2024ClassFeatureResolver(_custom_bundle(Dnd2024Runtime()))
+
+
+@pytest.mark.parametrize(("requires", "error"), [
+    (None, "must be an array"),
+    (["unknown:shadow"], "unknown prerequisite"),
+    (["active_long_effect:"], "effect id is not a canonical id"),
+    (["active_long_effect:shadow"] * 2, "repeats"),
+])
+def test_catalog_rejects_invalid_prerequisites(monkeypatch, requires, error) -> None:
+    monkeypatch.setitem(KIND_HANDLERS, KIND, KindHandler(resolve=lambda *_: []))
+    with pytest.raises(ClassFeatureError, match=rf"test_activation\.requires.*{error}"):
+        Dnd2024ClassFeatureResolver(_custom_bundle(Dnd2024Runtime(), requires=requires))
 
 
 def test_registered_kind_runs_all_three_phases_without_central_changes(monkeypatch) -> None:
@@ -59,9 +73,20 @@ def test_registered_kind_runs_all_three_phases_without_central_changes(monkeypat
         validate=validate, validate_available=validate_available, resolve=resolve, project=project,
     ))
     runtime = Dnd2024Runtime()
-    engine, instance = _instance_with_sheet(_rogue(runtime, 3), _custom_bundle(runtime))
+    engine, instance = _instance_with_sheet(
+        _rogue(runtime, 3), _custom_bundle(runtime, requires=["active_long_effect:shadow"]),
+    )
     _start(engine, instance, enemies=_two_enemies())
     economy = ruleset_runtime.state(instance)["combat"]["economy"]
+
+    denied = _capability(engine, instance, "test_activation", confirm=True, amount=1)
+    assert denied["ok"] is False
+    assert denied["error"] == "no effect to dismiss"
+    assert economy["bonus_action"] == 1
+
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    character.setdefault("long_effects", {})["shadow"] = {"expires_at": 10}
+
     entry = next(
         row for row in engine.available_intents(instance, "gm")
         if row.get("capability_id") == "test_activation"

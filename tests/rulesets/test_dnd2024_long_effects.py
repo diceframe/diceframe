@@ -600,6 +600,37 @@ def test_hurl_is_restored_by_spending_a_pact_slot(fiend14) -> None:
     })
 
 
+@pytest.mark.parametrize(("sheet", "effect_id", "capability_id"), [
+    ("draconic", "dragon_wings", "dragon_wings_end"),
+    ("devotion20", "holy_nimbus", "holy_nimbus_end"),
+    ("open_hand17", "quivering_palm", "quivering_palm_dismiss"),
+])
+@pytest.mark.parametrize("expired", [False, True])
+def test_dismiss_needs_a_live_effect(request, sheet, effect_id, capability_id, expired) -> None:
+    from src.engine.modules import ruleset_runtime
+    from src.engine.world_state import clock_from_minutes
+
+    engine, instance = _setup(request.getfixturevalue(sheet))
+    _start(engine, instance, enemies=_two_enemies())
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    if expired:
+        # An expired record may still exist in a save; evaluate at the exact deadline.
+        character.setdefault("long_effects", {})[effect_id] = {"expires_at": 10}
+        instance.world_state["clock"] = clock_from_minutes(10)
+    before_character = deepcopy(character)
+    before_combat = deepcopy(ruleset_runtime.state(instance)["combat"])
+
+    assert not any(
+        action.get("capability_id") == capability_id
+        for action in engine.available_intents(instance, "gm")
+    )
+    denied = _capability(engine, instance, capability_id)
+    assert denied["ok"] is False
+    assert denied["error"] == "no effect to dismiss"
+    assert ruleset_runtime.state(instance)["combat"] == before_combat
+    assert instance.get_character_sheet("gm")["ruleset_character"] == before_character
+
+
 def test_dragon_wings_can_be_dismissed_without_an_action(draconic) -> None:
     engine, instance = _setup(draconic)
     _start(engine, instance, enemies=_two_enemies())
