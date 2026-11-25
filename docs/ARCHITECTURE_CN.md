@@ -3593,6 +3593,8 @@ validate → resolve → events → reducer
 战斗流程统一校验、支付一次声明成本，再按声明顺序派发各效果。同一批次内的连击
 使用已扣费、已应用前序事件的隔离状态；战斗结束后不再派发后续效果。处理器可以补充
 展示资料，不能改写成本或权威判定。反应和决策窗口不使用此注册表。
+引导神力能力（如神圣火花、驱散亡灵、呵斥敌人）与圣疗的目标校验及事件生成
+由 `combat/divine_actions.py` 负责；通用前提和声明成本仍由职业能力流程处理。
 
 攻击附加选项在 `features/attack_declarations.py` 注册。新意图使用
 `attack_declarations` ID 数组，可选 `sacred_weapon`、`light_extra_attack`、

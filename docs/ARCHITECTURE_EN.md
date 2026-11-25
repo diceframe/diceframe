@@ -3661,6 +3661,9 @@ unknown kinds. Combat validates, pays the declared cost once, then dispatches ea
 catalog order. Granted strikes use detached state with costs and preceding events applied;
 combat ending stops further dispatch. Handlers can add display details but cannot override
 shared costs or authority checks. Reactions and decision windows use separate paths.
+`combat/divine_actions.py` owns target validation and events for Channel Divinity
+capabilities (such as Divine Spark, Turn Undead, and Abjure Foes) and Lay On Hands.
+The common capability flow still owns shared prerequisites and declared costs.
 
 Attack add-ons register in `features/attack_declarations.py`. New intents select IDs in
 `attack_declarations`: `sacred_weapon`, `light_extra_attack`, `brutal_strike`,
