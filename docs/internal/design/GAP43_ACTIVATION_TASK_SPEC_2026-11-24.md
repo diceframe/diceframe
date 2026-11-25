@@ -29,9 +29,9 @@ trigger / window **保持现状**：它们有 offer → decision → resolve 的
 
 - `FeatureCapability` 38 条，其中 **8 条 `cost: {}`**。
 - `WINDOW_REGISTRY` 17 条 / 5 个 surface，生命周期是 offer → decision → resolve。
-- `attack_hit` 组 6 个意图布尔：`hurl_through_hell`、`quivering_palm`、`stunning_strike`、`brutal_strike`、`activate_sacred_weapon`、`light_extra_attack`。
+- `attack_hit` 组在 main 上是 4 个意图布尔：`stunning_strike`、`brutal_strike`、`activate_sacred_weapon`、`light_extra_attack`；#841 另加 2 个（`hurl_through_hell`、`quivering_palm`），迁移时按合入后的实际数量算。
 - `_class_capability_events` 约 290 行、**24 个 `action.kind` 分支**，其中 11 个是单特性 kind（`quivering_palm_end`、`holy_nimbus`、`dragon_wings` 等），另有 `feature_id == "step_of_the_wind"`、`"feature_kind": "intimidating_presence"` 这类具体 id。
-- `economy[cost]` 实际 7 处：`validation.py:1219 / 2387 / 2787 / 2870`、`engine.py:683`、`view.py:690 / 891`（行号以合并后的 main 为准）。七处都是 `< 1` 的可用性判断，没有一处是支付——所以它们的目标是 `_slot_available()`，不是 `_pay_cost()`。
+- `economy[cost]` 实际 7 处：`validation.py:1285 / 2726 / 3131 / 3212`、`engine.py:755`、`view.py:794 / 1004`（行号以合并后的 main 为准）。七处都是 `< 1` 的可用性判断，没有一处是支付——所以它们的目标是 `_slot_available()`，不是 `_pay_cost()`。
 
 ## 3. 精确契约
 
