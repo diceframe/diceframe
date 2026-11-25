@@ -323,12 +323,14 @@ def test_patient_defense_focus_also_dodges() -> None:
         ),
         SequenceRng([]),
     )
-    conditions = [
-        event["condition"] for event in resolved["event_batch"]["events"]
-        if event["type"] == "condition.applied"
+    events = resolved["event_batch"]["events"]
+    assert [event["type"] for event in events] == [
+        "intent.submitted", "dnd2024.action.spent", "dnd2024.class_resource.spent",
+        "condition.applied", "condition.applied",
     ]
-
-    assert conditions == ["disengaged", "dodging"]
+    assert events[1]["resource"] == "bonus_action"
+    assert events[2]["resource_id"] == "focus_points"
+    assert [event["condition"] for event in events[3:]] == ["disengaged", "dodging"]
     assert focus_state(instance)["current"] == 1
 
 

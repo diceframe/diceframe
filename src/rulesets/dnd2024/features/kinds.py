@@ -10,12 +10,14 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+from . import activation_effects as effects
+
 if TYPE_CHECKING:
     from .combat import CombatContext
     from .models import CapabilityAction, CombatCapabilityView, FeatureCapability
 
 
-class CapabilityOperations(Protocol):
+class CapabilityOperations(effects.EffectOperations, Protocol):
     def hide_preconditions(
         self, instance: Any, combat: dict[str, Any], actor_id: str,
     ) -> dict[str, Any]: ...
@@ -53,6 +55,7 @@ class KindHandler:
         [FeatureCapability, CapabilityAction, CombatContext, CombatCapabilityView],
         Mapping[str, Any],
     ] | None = None
+    requires_resource_cost: bool = False
 
 
 def _validate_hide(
@@ -109,17 +112,32 @@ KIND_HANDLERS: dict[str, KindHandler] = {
     "hide": KindHandler(resolve=_resolve_hide, validate=_validate_hide),
     "steady_aim": KindHandler(resolve=_resolve_steady_aim, validate=_validate_steady_aim),
     "end_long_effect": KindHandler(resolve=_resolve_end_long_effect),
+    "dash": KindHandler(resolve=effects.basic_action),
+    "dodge": KindHandler(resolve=effects.basic_action),
+    "disengage": KindHandler(resolve=effects.basic_action),
+    "temp_hp": KindHandler(resolve=effects.temp_hp),
+    "invisible": KindHandler(resolve=effects.invisible),
+    "resistance_all": KindHandler(resolve=effects.resistance_all),
+    "quivering_palm_end": KindHandler(
+        resolve=effects.quivering_palm_end, validate=effects.validate_quivering_palm_end,
+    ),
+    "holy_nimbus": KindHandler(resolve=effects.holy_nimbus),
+    "dragon_wings": KindHandler(resolve=effects.dragon_wings),
+    "intimidating_presence": KindHandler(resolve=effects.intimidating_presence),
+    "restore_feature_use": KindHandler(
+        resolve=effects.restore_feature_use, validate=effects.validate_restore_feature_use,
+        requires_resource_cost=True,
+    ),
+    "rage_sustain": KindHandler(resolve=effects.rage_sustain),
+    "action_surge": KindHandler(resolve=effects.action_surge),
 }
 
 # Shrink as each handler moves out of the legacy resolution chain. New kinds
 # are registered above; never add to the legacy list.
 _LEGACY_KINDS = frozenset({
-    "unarmed_strike", "dash", "dodge", "disengage", "heal", "rage",
-    "rage_sustain", "action_surge", "bardic_grant", "inspiration_slot_exchange",
-    "font_slot_to_points", "font_create_slot", "temp_hp", "invisible", "resistance_all",
-    "intimidating_presence", "dragon_wings", "holy_nimbus", "quivering_palm_end",
-    "restore_feature_use", "divine_spark", "turn_undead", "preserve_life", "divine_sense",
-    "lay_on_hands", "abjure_foes",
+    "unarmed_strike", "heal", "rage", "bardic_grant", "inspiration_slot_exchange",
+    "font_slot_to_points", "font_create_slot", "divine_spark", "turn_undead",
+    "preserve_life", "divine_sense", "lay_on_hands", "abjure_foes",
 })
 
 
