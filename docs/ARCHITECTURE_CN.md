@@ -3594,6 +3594,14 @@ validate → resolve → events → reducer
 使用已扣费、已应用前序事件的隔离状态；战斗结束后不再派发后续效果。处理器可以补充
 展示资料，不能改写成本或权威判定。反应和决策窗口不使用此注册表。
 
+攻击附加选项在 `features/attack_declarations.py` 注册。新意图使用
+`attack_declarations` ID 数组，可选 `sacred_weapon`、`light_extra_attack`、
+`brutal_strike`、`stunning_strike`、`quivering_palm` 和 `hurl_through_hell`。
+注册表校验 ID 和入口，但不改变各选项的规则时机；例如神圣武器影响本次掷骰，
+震慑打击在命中后扣 Focus。旧布尔字段只作为兼容输入，不得与 ID 数组混用。
+命中法术决策继续从暂存伤害的 `attack_hit_triggers` 读取声明；该字段不进入
+最终伤害事件或非 GM 的决策投影。
+
 ---
 
 ## 27.2 Encounter Access

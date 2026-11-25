@@ -6,10 +6,11 @@
 """
 
 from copy import deepcopy
-from json import dumps
+from json import dumps, loads
 
 import pytest
 
+from src.engine.game_instance import GameInstance
 from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
@@ -373,14 +374,17 @@ def test_ending_without_a_vibration_is_refused(open_hand17) -> None:
     assert resolved["ok"] is False
 
 
-def test_a_hit_can_start_the_vibration_and_spend_four_focus(open_hand17) -> None:
+@pytest.mark.parametrize("selection", [
+    {"quivering_palm": True}, {"attack_declarations": ["quivering_palm"]},
+])
+def test_a_hit_can_start_the_vibration_and_spend_four_focus(open_hand17, selection) -> None:
     from tests.rulesets.test_dnd2024_channel_control import _attack
 
     engine, instance = _setup(open_hand17)
     _start(engine, instance, enemies=_two_enemies())
 
     events, _decisions = _attack(
-        engine, instance, "unarmed_strike", dice=[20, 5], quivering_palm=True,
+        engine, instance, "unarmed_strike", dice=[20, 5], **selection,
     )
 
     applied = _of_type(events, "dnd2024.long_effect.applied")
@@ -388,6 +392,26 @@ def test_a_hit_can_start_the_vibration_and_spend_four_focus(open_hand17) -> None
     assert applied[0]["effect"]["detail"]["target_id"] == "enemy:goblin-1"
     spend = _of_type(events, "dnd2024.class_resource.spent")
     assert [row["amount"] for row in spend] == [4]
+
+
+@pytest.mark.parametrize(("focus", "choices"), [
+    (3, ["quivering_palm"]), (4, ["stunning_strike", "quivering_palm"]),
+])
+def test_declared_strike_effects_must_fit_the_combined_focus_budget(open_hand17, focus, choices) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import SequenceRng, _intent
+
+    engine, instance = _setup(open_hand17)
+    _start(engine, instance, enemies=_two_enemies())
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    character["resources"]["class"]["focus_points"]["current"] = focus
+    before = deepcopy(instance.to_dict())
+    resolved = engine.resolve_intent(instance, _intent(
+        instance, type="attack", target_id="enemy:goblin-1", weapon_ref="unarmed_strike",
+        attack_declarations=choices,
+    ), SequenceRng([]))
+    assert not resolved["ok"]
+    assert "not enough Focus Points" in resolved["error"]
+    assert instance.to_dict() == before
 
 
 WARLOCK_ABILITIES = {"str": 8, "dex": 14, "con": 13, "int": 10, "wis": 12, "cha": 15}
@@ -731,7 +755,10 @@ def test_restore_cost_projection_and_rejection(
     assert instance.get_character_sheet("gm")["ruleset_character"] == before
 
 
-def test_asking_for_hurl_after_the_use_is_gone_fails_loudly(fiend14) -> None:
+@pytest.mark.parametrize("selection", [
+    {"hurl_through_hell": True}, {"attack_declarations": ["hurl_through_hell"]},
+])
+def test_asking_for_hurl_after_the_use_is_gone_fails_loudly(fiend14, selection) -> None:
     from tests.rulesets.test_dnd2024_channel_control import _attack
 
     from tests.rulesets.test_dnd2024_channel_control import _inject
@@ -754,7 +781,7 @@ def test_asking_for_hurl_after_the_use_is_gone_fails_loudly(fiend14) -> None:
     resolved = engine.resolve_intent(instance, _intent(
         instance, actor_id="player:gm", type="attack",
         target_id="enemy:goblin-1", weapon_ref="item:dagger",
-        hurl_through_hell=True,
+        **selection,
     ), SequenceRng([20, 1]))
 
     assert resolved["ok"] is False
@@ -925,38 +952,24 @@ def test_no_light_kind_is_declared_for_the_aura(devotion20) -> None:
     assert "light_kind" not in applied["holy_nimbus"]["detail"]
 
 
-def test_a_spell_attack_goes_through_the_shared_hit_entry(
-    fiend14, monkeypatch,
-) -> None:
-    """法术攻击与武器攻击在"命中之后"走同一个入口。
-
-    Hurl 只是这个入口的第一个订阅者：规则说的是"用攻击检定命中"，不是
-    "用武器命中"。这里直接盯入口有没有被调用，比追踪骰子序列更能说明
-    这件事——效果本身由武器路径的用例覆盖（同一份实现）。
-    """
-
+@pytest.mark.parametrize("selection", [
+    {"hurl_through_hell": True}, {"attack_declarations": ["hurl_through_hell"]},
+])
+def test_a_spell_attack_hurls_on_the_first_hit_only(fiend14, selection) -> None:
     from tests.rulesets.test_dnd2024_channel_control import SequenceRng, _intent
 
     engine, instance = _setup(fiend14)
     _start(engine, instance, enemies=_two_enemies())
-    seen: list[str] = []
-    original = type(engine)._attack_hit_events
-
-    def spy(self, instance_, combat, attacker, target, intent, rng):
-        seen.append(str(intent.get("type") or ""))
-        return original(self, instance_, combat, attacker, target, intent, rng)
-
-    monkeypatch.setattr(type(engine), "_attack_hit_events", spy)
-
     resolved = engine.resolve_intent(instance, _intent(
-        instance, actor_id="player:gm", type="cast_spell",
-        spell_ref="spell:eldritch_blast", target_ids=["enemy:goblin-1"],
-        slot_level=0,
-    ), SequenceRng([20, 5]))
-    assert resolved["ok"] is True, resolved
-    _apply(engine, instance, resolved)
-
-    assert seen == ["cast_spell"]
+        instance, actor_id="player:gm", type="cast_spell", spell_ref="spell:scorching_ray",
+        target_ids=["enemy:goblin-1", "enemy:goblin-2", "enemy:goblin-1"], slot_level=5,
+        **selection,
+    ), SequenceRng([1, 20, 2, 2, 2, 2, 20, 20, 2, 2, 2, 2]))
+    events = _apply(engine, instance, resolved)
+    uses = _of_type(events, "dnd2024.feature_usage.changed")
+    assert [use["feature_id"] for use in uses] == ["hurl_through_hell"]
+    saves = [row for row in _of_type(events, "check.resolved") if row.get("source_feature") == "hurl_through_hell"]
+    assert [row["actor_id"] for row in saves] == ["enemy:goblin-2"]
 
 
 def test_dismissing_the_vibration_is_harmless(open_hand17) -> None:
@@ -982,6 +995,22 @@ def test_dismissing_the_vibration_is_harmless(open_hand17) -> None:
     assert long_effect_active(
         character, "quivering_palm", world_minutes(instance),
     ) is None
+
+
+def test_declared_hurl_does_not_spend_on_a_miss(fiend14) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _attack
+
+    engine, instance = _setup(fiend14)
+    _start(engine, instance, enemies=_two_enemies())
+    selection = {"attack_declarations": ["hurl_through_hell"]}
+    missed, _ = _attack(engine, instance, "item:dagger", dice=[1], **selection)
+    assert not _of_type(missed, "dnd2024.feature_usage.changed")
+    assert not _of_type(missed, "dnd2024.decision.pending")
+
+    _next_turn(engine, instance, "player:gm")
+    hit, _ = _attack(engine, instance, "item:dagger", dice=[20, 1, 1, 20], **selection)
+    assert len(_of_type(hit, "dnd2024.feature_usage.changed")) == 1
+    assert all("attack_hit_triggers" not in row for row in _of_type(hit, "resource.changed"))
 
 
 def _fiend_with_a_hit_spell(sheet: dict) -> dict:
@@ -1022,26 +1051,37 @@ def test_the_hurl_declaration_is_held_with_the_damage(fiend14) -> None:
     assert decision["kind"] == "melee_hit_spell"
     assert decision["damage_event"]["attack_hit_triggers"] == {"hurl_through_hell": True}
 
+    from src.rulesets.dnd2024.combat.visibility import public_event_batch
 
-def test_the_decision_path_still_hurls(fiend14) -> None:
-    """命中的收尾有两条：经过命中法术决策的那条也必须触发并消耗 Hurl。"""
+    public = public_event_batch({"events": events}, viewer_id=decision["assigned_to"])
+    pending = _of_type(public["events"], "dnd2024.decision.pending")
+    assert len(pending) == 1
+    assert "attack_hit_triggers" not in pending[0]["damage_event"]
 
-    from tests.rulesets.test_dnd2024_channel_control import _attack
 
-    engine, instance = _setup(_fiend_with_a_hit_spell(deepcopy(fiend14)))
-    _start(engine, instance, enemies=_two_enemies())
+def test_the_saved_decision_hurls_with_identical_legacy_and_declared_events(fiend14) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _attack, _decline_hit_spell
 
-    events, decided = _attack(
-        engine, instance, "item:dagger", dice=[20, 1, 1] + [6] * 8,
-        hurl_through_hell=True,
-    )
+    def settle(selection):
+        engine, instance = _setup(_fiend_with_a_hit_spell(deepcopy(fiend14)))
+        _start(engine, instance, enemies=_two_enemies())
+        events, _ = _attack(
+            engine, instance, "item:dagger", dice=[20, 1, 1], decline=False, **selection,
+        )
+        assert not _of_type(events, "dnd2024.feature.used")
+        restored = GameInstance.from_dict(loads(dumps(instance.to_dict())))
+        return events, _decline_hit_spell(engine, restored)
 
-    assert not _of_type(events, "dnd2024.feature.used")
+    legacy = settle({"hurl_through_hell": True})
+    canonical = settle({"attack_declarations": ["hurl_through_hell"]})
+    assert dumps(legacy) == dumps(canonical)
+    _, decided = canonical
+    assert all("attack_hit_triggers" not in row for row in _of_type(decided, "resource.changed"))
     used = [
         row for row in _of_type(decided, "dnd2024.feature.used")
         if row.get("feature_id") == "hurl_through_hell"
     ]
-    assert used
+    assert len(used) == 1
     check = [
         row for row in _of_type(decided, "check.resolved")
         if row.get("ability") == "cha"

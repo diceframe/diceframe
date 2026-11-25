@@ -19,6 +19,10 @@ from ..character.attunement import (
     owned_ref_counts,
 )
 from .action_adapter import is_supported_damage_formula
+from ..features.attack_declarations import (
+    BRUTAL_STRIKE, LIGHT_EXTRA_ATTACK, SACRED_WEAPON, SELECTION_KEY, STUNNING_STRIKE,
+    declaration_value, granted_strike_selection, selection_error, validate_uses, validate_weapon_selection,
+)
 from ..features.kinds import KIND_HANDLERS, KindContext
 from ..features.models import ClassFeatureError, FeatureCapability, ResourceCost
 from ..forms import (
@@ -83,6 +87,7 @@ from .primitives import (
     actor_kind as _actor_kind,
     canonical as _canonical,
     rider_attack_kind,
+    world_minutes,
 )
 from .check_modes import condition_flags, effective_speed, marked_target_id, owned_mark, vision_codes
 from .hands import apply_swap
@@ -828,6 +833,9 @@ class CombatValidationMixin:
             raise CombatIntentError(
                 f"state version conflict: expected {expected}, current {state['version']}"
             )
+        error = selection_error(intent, intent_type)
+        if error:
+            raise CombatIntentError(error)
         combat = state["combat"]
         gm_uid = str(getattr(instance, "gm_uid", "") or "")
         submitted_by = str(intent.get("submitted_by") or "")
@@ -1813,6 +1821,10 @@ class CombatValidationMixin:
             raise CombatIntentError(view.blocked_reason or "class capability is not available")
         if capability is None:  # pragma: no cover - availability already proved it
             raise CombatIntentError("class capability is not available to this actor")
+        if SELECTION_KEY in intent and declaration_value(intent, STUNNING_STRIKE) and not any(
+            KIND_HANDLERS[action.kind].grants_attack for action in capability.actions
+        ):
+            raise CombatIntentError("Stunning Strike requires a granted attack")
         context = KindContext(self, instance, combat, actor, intent)
         for action in capability.actions:
             validate = KIND_HANDLERS[action.kind].validate_available
@@ -1842,8 +1854,9 @@ class CombatValidationMixin:
             "target_id": str(intent.get("target_id") or ""),
             "weapon_ref": UNARMED_STRIKE_REF,
             **{key: intent[key] for key in (
-                "unarmed_damage_type", "rider_damage_type", "stunning_strike",
+                "unarmed_damage_type", "rider_damage_type",
             ) if key in intent},
+            **granted_strike_selection(intent),
         }, rider_actor)
 
     def _validate_bardic_grant(
@@ -2183,7 +2196,7 @@ class CombatValidationMixin:
         weapon this attack uses -- a Melee weapon the actor is carrying.
         """
 
-        declared = intent.get("activate_sacred_weapon")
+        declared = declaration_value(intent, SACRED_WEAPON)
         damage_choice = intent.get("sacred_weapon_damage")
         if declared in (None, False) and damage_choice is None:
             return
@@ -2434,7 +2447,7 @@ class CombatValidationMixin:
         if actor["kind"] not in {"player", "companion"}:
             return
         resource = (
-            "bonus_action" if intent.get("light_extra_attack")
+            "bonus_action" if declaration_value(intent, LIGHT_EXTRA_ATTACK)
             else self._spend_action_resource(combat)
         )
         record = (combat.get("loading_shots") or {}).get(str(actor["actor_id"]))
@@ -2460,7 +2473,7 @@ class CombatValidationMixin:
         otherwise -- that decision lives in resolution, next to the damage roll.
         """
 
-        declared = intent.get("light_extra_attack")
+        declared = declaration_value(intent, LIGHT_EXTRA_ATTACK)
         if declared is None:
             return
         if declared is not True:
@@ -2609,20 +2622,10 @@ class CombatValidationMixin:
     def _validate_attack(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], actor: dict[str, Any],
     ) -> None:
-        if intent.get("hurl_through_hell"):
-            # 要求了 Hurl 却不满足条件时在校验层拒绝：结算层抛异常会冒泡，
-            # 客户端应该拿到 ok=false 与可读原因。
-            character = self._feature_character(actor)
-            if not self.features.has_feature(character, "hurl_through_hell"):
-                raise CombatIntentError(
-                    "Hurl Through Hell is not available to this actor"
-                )
-            if feature_usage_count(
-                character, "hurl_through_hell", "hurl_through_hell",
-            ) >= 1:
-                raise CombatIntentError(
-                    "Hurl Through Hell has no use left until a long rest"
-                )
+        character = self._feature_character(actor)
+        error = validate_uses(self.features, character, intent, "attack")
+        if error:
+            raise CombatIntentError(error)
         target_id = str(intent.get("target_id") or "")
         target = self._actor_view(instance, combat, target_id)
         # 敌我判断基于 side：companion/player 同为 party，互不视为合法攻击目标。
@@ -2656,6 +2659,9 @@ class CombatValidationMixin:
         if distance > long_range:
             raise CombatIntentError(f"target is out of range ({distance} > {long_range} feet)")
         self._validate_hit_riders(actor, intent, combat)
+        error = validate_weapon_selection(self.features, character, intent, weapon, world_minutes(instance))
+        if error:
+            raise CombatIntentError(error)
         self._validate_attack_state_options(instance, combat, intent, actor, weapon, distance)
 
     def _validate_save_action_intent(
@@ -2832,7 +2838,7 @@ class CombatValidationMixin:
         """
 
         reckless = intent.get("reckless_attack")
-        brutal = intent.get("brutal_strike")
+        brutal = declaration_value(intent, BRUTAL_STRIKE)
         effects = intent.get("brutal_strike_effects")
         if reckless is None and brutal is None and effects is None:
             return
@@ -2993,7 +2999,7 @@ class CombatValidationMixin:
 
         unarmed_type = intent.get("unarmed_damage_type")
         rider_type = intent.get("rider_damage_type")
-        stunning = intent.get("stunning_strike")
+        stunning = declaration_value(intent, STUNNING_STRIKE)
         if intent.get("open_hand_choice") is not None:
             raise CombatIntentError(
                 "open hand technique applies only to Flurry of Blows attacks"
@@ -3208,6 +3214,12 @@ class CombatValidationMixin:
             raise CombatIntentError("spell is not prepared or known by the actor")
         if effect["mode"] == "reaction_defense":
             raise CombatIntentError("this spell is cast as a reaction when you are hit")
+        error = validate_uses(
+            self.features, self._feature_character(actor), intent, "cast_spell",
+            attack_roll=effect["mode"] == "spell_attack",
+        )
+        if error:
+            raise CombatIntentError(error)
         trigger = hit_spell_decision(combat, actor["actor_id"])
         if effect["mode"] == "triggered_damage" and trigger is None:
             raise CombatIntentError("this spell requires a pending melee hit")

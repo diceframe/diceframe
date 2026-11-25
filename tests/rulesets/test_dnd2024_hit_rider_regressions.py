@@ -117,10 +117,13 @@ def test_bonus_attacks_forward_force_and_pay_stunning_only_once(combat, capabili
     assert _focus(instance) == before - (2 if capability == "flurry_of_blows" else 1)
 
 
-def test_a_missed_first_flurry_hit_preserves_stunning_for_the_second(combat):
+@pytest.mark.parametrize("selection", [
+    {"stunning_strike": True}, {"attack_declarations": ["stunning_strike"]},
+])
+def test_a_missed_first_flurry_hit_preserves_stunning_for_the_second(combat, selection):
     engine, instance = combat
     before = _focus(instance)
-    events = _apply(engine, instance, _flurry(stunning_strike=True), [1, 19, 2, 1])
+    events = _apply(engine, instance, _flurry(**selection), [1, 19, 2, 1])
     assert len([e for e in events if e.get("source_feature") == "stunning_strike"]) == 1
     assert _focus(instance) == before - 2
 
@@ -128,6 +131,13 @@ def test_a_missed_first_flurry_hit_preserves_stunning_for_the_second(combat):
 @pytest.mark.parametrize("choice", [
     {"unarmed_damage_type": "fire"}, {"stunning_strike": "yes"},
     {"stunning_strike": True, "focus": 1},
+    {"attack_declarations": ["stunning_strike"], "focus": 1},
+    {"attack_declarations": ["stunning_strike", "stunning_strike"]},
+    {"attack_declarations": ["stunning_strike"], "stunning_strike": True},
+    {"attack_declarations": ["hurl_through_hell"]},
+    {"attack_declarations": ["unknown"]},
+    {"attack_declarations": "stunning_strike"},
+    {"attack_hit_triggers": {"hurl_through_hell": True}},
 ])
 def test_bonus_attack_rider_choices_are_validated_before_spending(combat, choice):
     engine, instance = combat

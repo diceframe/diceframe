@@ -65,6 +65,7 @@ class KindHandler:
         Mapping[str, Any],
     ] | None = None
     requires_resource_cost: bool = False
+    grants_attack: bool = False
 
 
 def _validate_hide(
@@ -143,6 +144,7 @@ KIND_HANDLERS: dict[str, KindHandler] = {
     "rage": KindHandler(resolve=effects.rage),
     "unarmed_strike": KindHandler(
         resolve=targets.unarmed_strike, validate_available=targets.validate_unarmed_strike,
+        grants_attack=True,
     ),
     "bardic_grant": KindHandler(
         resolve=targets.bardic_grant, validate_available=targets.validate_bardic_grant,
