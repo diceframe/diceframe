@@ -19,6 +19,15 @@ if TYPE_CHECKING:
 class EffectOperations(Protocol):
     def _feature_character(self, actor: dict[str, Any]) -> dict[str, Any]: ...
 
+    def _capability_heal_events(
+        self, combat: dict[str, Any], actor: dict[str, Any], capability: FeatureCapability,
+        intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]: ...
+
+    def _capability_rage_events(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any], intent: dict[str, Any],
+    ) -> list[dict[str, Any]]: ...
+
     def _basic_action_events(
         self, combat: dict[str, Any], intent_type: str, actor_id: str,
         *, spend_action: bool = True,
@@ -158,6 +167,22 @@ def restore_feature_use(
         "before_count": before,
         "reason": "restored",
     }]
+
+
+def heal(
+    capability: FeatureCapability, action: CapabilityAction, context: KindContext, rng: Any,
+) -> list[dict[str, Any]]:
+    return context.operations._capability_heal_events(
+        context.combat, context.actor, capability, context.intent, rng,
+    )
+
+
+def rage(
+    capability: FeatureCapability, action: CapabilityAction, context: KindContext, rng: Any,
+) -> list[dict[str, Any]]:
+    return context.operations._capability_rage_events(
+        context.instance, context.combat, context.actor, context.intent,
+    )
 
 
 def rage_sustain(

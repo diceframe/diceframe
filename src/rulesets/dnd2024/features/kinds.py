@@ -11,13 +11,17 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 from . import activation_effects as effects
+from . import activation_exchanges as exchanges
+from . import activation_targets as targets
 
 if TYPE_CHECKING:
     from .combat import CombatContext
     from .models import CapabilityAction, CombatCapabilityView, FeatureCapability
 
 
-class CapabilityOperations(effects.EffectOperations, Protocol):
+class CapabilityOperations(
+    effects.EffectOperations, exchanges.ExchangeOperations, targets.TargetOperations, Protocol,
+):
     def hide_preconditions(
         self, instance: Any, combat: dict[str, Any], actor_id: str,
     ) -> dict[str, Any]: ...
@@ -37,6 +41,8 @@ class KindContext:
     combat: dict[str, Any]
     actor: dict[str, Any]
     intent: dict[str, Any]
+    # Resolution only: all costs and effects already staged for this intent.
+    prior_events: tuple[dict[str, Any], ...] = ()
 
     @property
     def actor_id(self) -> str:
@@ -50,6 +56,9 @@ class KindHandler:
     ]
     # Return an authoritative rejection reason, or an empty string if allowed.
     validate: Callable[[FeatureCapability, CapabilityAction, KindContext], str] | None = None
+    # Check effect-specific targets/arguments after shared affordability has
+    # been checked, but before payment. Raises the usual combat rejection.
+    validate_available: Callable[[FeatureCapability, CapabilityAction, KindContext], None] | None = None
     # Additional display fields, never overrides for shared cost/authority fields.
     project: Callable[
         [FeatureCapability, CapabilityAction, CombatContext, CombatCapabilityView],
@@ -130,16 +139,38 @@ KIND_HANDLERS: dict[str, KindHandler] = {
     ),
     "rage_sustain": KindHandler(resolve=effects.rage_sustain),
     "action_surge": KindHandler(resolve=effects.action_surge),
+    "heal": KindHandler(resolve=effects.heal),
+    "rage": KindHandler(resolve=effects.rage),
+    "unarmed_strike": KindHandler(
+        resolve=targets.unarmed_strike, validate_available=targets.validate_unarmed_strike,
+    ),
+    "bardic_grant": KindHandler(
+        resolve=targets.bardic_grant, validate_available=targets.validate_bardic_grant,
+    ),
+    "divine_spark": KindHandler(
+        resolve=targets.divine_spark, validate_available=targets.validate_divine_spark,
+    ),
+    "turn_undead": KindHandler(
+        resolve=targets.turn_undead, validate_available=targets.validate_turn_undead,
+    ),
+    "abjure_foes": KindHandler(
+        resolve=targets.abjure_foes, validate_available=targets.validate_abjure_foes,
+    ),
+    "preserve_life": KindHandler(
+        resolve=targets.preserve_life, validate_available=targets.validate_preserve_life,
+    ),
+    "lay_on_hands": KindHandler(
+        resolve=targets.lay_on_hands, validate_available=targets.validate_lay_on_hands,
+    ),
+    "divine_sense": KindHandler(resolve=targets.divine_sense),
+    "inspiration_slot_exchange": KindHandler(
+        resolve=exchanges.inspiration_slot_exchange,
+        validate_available=exchanges.validate_inspiration_slot_exchange,
+    ),
+    "font_slot_to_points": KindHandler(
+        resolve=exchanges.font_of_magic, validate_available=exchanges.validate_font_slot_to_points,
+    ),
+    "font_create_slot": KindHandler(
+        resolve=exchanges.font_of_magic, validate_available=exchanges.validate_font_create_slot,
+    ),
 }
-
-# Shrink as each handler moves out of the legacy resolution chain. New kinds
-# are registered above; never add to the legacy list.
-_LEGACY_KINDS = frozenset({
-    "unarmed_strike", "heal", "rage", "bardic_grant", "inspiration_slot_exchange",
-    "font_slot_to_points", "font_create_slot", "divine_spark", "turn_undead",
-    "preserve_life", "divine_sense", "lay_on_hands", "abjure_foes",
-})
-
-
-def is_known_kind(kind: str) -> bool:
-    return kind in KIND_HANDLERS or kind in _LEGACY_KINDS

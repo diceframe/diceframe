@@ -3657,9 +3657,10 @@ restore a feature use must declare their price here. A slot exchange sets `excha
 and does not count as casting a spell for the turn's action economy.
 
 New class capability effects register in `features/kinds.py`. Catalog loading rejects
-unknown kinds. Combat validates and pays the declared cost before dispatching to a handler.
-Handlers can add display details but cannot override shared costs or authority checks.
-Unmigrated kinds still use legacy dispatch; reactions and decision windows use separate paths.
+unknown kinds. Combat validates, pays the declared cost once, then dispatches each effect in
+catalog order. Granted strikes use detached state with costs and preceding events applied;
+combat ending stops further dispatch. Handlers can add display details but cannot override
+shared costs or authority checks. Reactions and decision windows use separate paths.
 
 ---
 

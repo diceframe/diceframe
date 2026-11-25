@@ -20,7 +20,7 @@ from ..character.attunement import (
 )
 from .action_adapter import is_supported_damage_formula
 from ..features.kinds import KIND_HANDLERS, KindContext
-from ..features.models import ClassFeatureError, ResourceCost
+from ..features.models import ClassFeatureError, FeatureCapability, ResourceCost
 from ..forms import (
     FormState, FormStateError, bootstrap_known_forms, mode_for, restrictions,
 )
@@ -1775,9 +1775,9 @@ class CombatValidationMixin:
         if capability is not None:
             context = KindContext(self, instance, combat, actor, intent)
             for action in capability.actions:
-                handler = KIND_HANDLERS.get(action.kind)
-                if handler is not None and handler.validate is not None:
-                    reason = handler.validate(capability, action, context)
+                validate = KIND_HANDLERS[action.kind].validate
+                if validate is not None:
+                    reason = validate(capability, action, context)
                     if reason:
                         raise CombatIntentError(reason)
         choice = intent.get("open_hand_choice")
@@ -1813,115 +1813,102 @@ class CombatValidationMixin:
             raise CombatIntentError(view.blocked_reason or "class capability is not available")
         if capability is None:  # pragma: no cover - availability already proved it
             raise CombatIntentError("class capability is not available to this actor")
-        has_unarmed_strike = any(
-            action.kind == "unarmed_strike" for action in capability.actions
-        )
-        has_bardic_grant = any(
-            action.kind == "bardic_grant" for action in capability.actions
-        )
-        if has_unarmed_strike:
-            # 复用 canonical 徒手打击校验：目标必须存活且敌对、射程由同一份
-            # 攻击档案决定，Combat 不自己算命中/伤害。
-            rider_actor = deepcopy(actor)
-            # The capability's own spend precedes every granted hit. Validate
-            # rider affordability against that balance, not the original pool.
-            for cost in capability.cost.resources:
-                if not isinstance(cost, ResourceCost):
-                    continue
-                for pool in rider_actor.get("class_resources") or []:
-                    if pool.get("id") == cost.resource_id:
-                        pool["current"] = int(pool.get("current", 0)) - cost.amount
-            self._validate_attack(instance, combat, {
-                "target_id": str(intent.get("target_id") or ""),
-                "weapon_ref": UNARMED_STRIKE_REF,
-                **{key: intent[key] for key in (
-                    "unarmed_damage_type", "rider_damage_type", "stunning_strike",
-                ) if key in intent},
-            }, rider_actor)
-        elif has_bardic_grant:
-            # 授予目标是另一位、能看见或听见你、且在 60 尺内的友方活体，并且
-            # 对方此刻没有一枚未过期的骰。这些事实在校验期就能用同一组权威
-            # 状态判定，所以非法提交在这里得到结构化拒绝，而不是等到结算时
-            # 抛异常；resolution 仍会重验一遍（纵深防御，且它要写缩略视图）。
-            target_id = str(intent.get("target_id") or "")
-            target = self._actor_view(instance, combat, target_id)
-            if target_id == actor["actor_id"]:
-                raise CombatIntentError("you cannot grant Bardic Inspiration to yourself")
-            if str(target.get("side") or "") != str(actor.get("side") or "") or target["hp"] <= 0:
-                raise CombatIntentError("Bardic Inspiration targets a living ally")
-            range_ft = self.features.feature_value(
-                self._feature_character(actor), "bardic_inspiration", "range_ft", 0,
-            )
-            if not isinstance(range_ft, int) or range_ft <= 0:
-                raise CombatIntentError("no Bardic Inspiration range is declared")
-            self._require_range(combat, actor["actor_id"], target_id, range_ft)
-            # "can see or hear you"：现有状态词表里能同时切断两条通道的只有
-            # 隐身施予者 + 目盲承受者；deafened 未建模，因此不参与判定。
-            if (
-                "invisible" in (actor.get("conditions") or {})
-                and "blinded" in (target.get("conditions") or {})
-            ):
-                raise CombatIntentError("the target can neither see nor hear you")
-            if self._active_bardic_instance(instance, combat, target_id) is not None:
-                raise CombatIntentError("the target already holds a Bardic Inspiration die")
-        elif any(action.kind == "inspiration_slot_exchange" for action in capability.actions):
-            # Font 的槽换次数：必须有已消耗次数、且该法术位仍然可用。
-            character = self._canonical_actor(instance, actor)
-            pool = dict(resource_state(character, "bardic_inspiration"))
-            if int(pool.get("current", 0) or 0) >= int(pool.get("maximum", 0) or 0):
-                raise CombatIntentError("no expended Bardic Inspiration use to regain")
-            slot_level = intent.get("slot_level")
-            if isinstance(slot_level, bool) or not isinstance(slot_level, int) or slot_level < 1:
-                raise CombatIntentError("a spell slot level is required")
-            slots = dict(
-                ((character.get("spellcasting") or {}).get("class") or {}).get("slots_current") or {}
-            )
-            if int(slots.get(str(slot_level), 0) or 0) < 1:
-                raise CombatIntentError("the spell slot is already spent")
-        elif any(action.kind == "font_slot_to_points" for action in capability.actions):
-            # 槽换点没有动作成本，所以"能不能换"全在这里判：源槽必须是真槽、
-            # 目标点数不能超过上限（超了整笔拒绝，不静默截断）。
-            try:
-                slot_to_points_plan(
-                    self._canonical_actor(instance, actor),
-                    intent.get("slot_level"),
-                )
-            except FontOfMagicError as exc:
-                raise CombatIntentError(str(exc)) from exc
-        elif any(action.kind == "font_create_slot" for action in capability.actions):
-            # 点换槽的五行走内容表；等级下限按"授予该特性的职业等级"算，
-            # 不是角色总等级——兼职时两者不是一回事。
-            character = self._canonical_actor(instance, actor)
-            definition = self.features.feature_definition(capability.feature_id)
-            class_id = str(getattr(definition, "class_id", "") or "")
-            try:
-                costs = parse_created_slot_costs(
-                    self.features.feature_value(
-                        character, capability.feature_id, "created_slot_costs", (),
-                    )
-                )
-                create_slot_plan(
-                    character, intent.get("slot_level"), costs,
-                    declaring_class_level(character, class_id),
-                )
-            except FontOfMagicError as exc:
-                raise CombatIntentError(str(exc)) from exc
-        elif any(action.kind == "divine_spark" for action in capability.actions):
-            self._validate_divine_spark(instance, combat, intent, actor, capability)
-        elif any(action.kind == "turn_undead" for action in capability.actions):
-            self._validate_turn_undead(instance, combat, intent, actor, capability)
-        elif any(action.kind == "preserve_life" for action in capability.actions):
-            self._validate_preserve_life(instance, combat, intent, actor, capability)
-        elif any(action.kind == "lay_on_hands" for action in capability.actions):
-            self._validate_lay_on_hands(instance, combat, intent, actor, capability)
-        elif any(action.kind == "abjure_foes" for action in capability.actions):
-            self._validate_abjure_foes(instance, combat, intent, actor, capability)
-        elif capability.requires_hostile_target:
+        context = KindContext(self, instance, combat, actor, intent)
+        for action in capability.actions:
+            validate = KIND_HANDLERS[action.kind].validate_available
+            if validate is not None:
+                validate(capability, action, context)
+        if capability.requires_hostile_target:
             target = self._actor_view(
                 instance, combat, str(intent.get("target_id") or ""),
             )
             if str(target.get("side") or "") == str(actor.get("side") or "") or target["hp"] <= 0:
                 raise CombatIntentError("this capability requires a living hostile target")
+
+    def _validate_capability_unarmed_strike(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        actor: dict[str, Any], capability: FeatureCapability,
+    ) -> None:
+        # The capability's own spend precedes every granted hit. Validate
+        # rider affordability against that balance, not the original pool.
+        rider_actor = deepcopy(actor)
+        for cost in capability.cost.resources:
+            if not isinstance(cost, ResourceCost):
+                continue
+            for pool in rider_actor.get("class_resources") or []:
+                if pool.get("id") == cost.resource_id:
+                    pool["current"] = int(pool.get("current", 0)) - cost.amount
+        self._validate_attack(instance, combat, {
+            "target_id": str(intent.get("target_id") or ""),
+            "weapon_ref": UNARMED_STRIKE_REF,
+            **{key: intent[key] for key in (
+                "unarmed_damage_type", "rider_damage_type", "stunning_strike",
+            ) if key in intent},
+        }, rider_actor)
+
+    def _validate_bardic_grant(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], actor: dict[str, Any],
+    ) -> None:
+        target_id = str(intent.get("target_id") or "")
+        target = self._actor_view(instance, combat, target_id)
+        if target_id == actor["actor_id"]:
+            raise CombatIntentError("you cannot grant Bardic Inspiration to yourself")
+        if str(target.get("side") or "") != str(actor.get("side") or "") or target["hp"] <= 0:
+            raise CombatIntentError("Bardic Inspiration targets a living ally")
+        range_ft = self.features.feature_value(
+            self._feature_character(actor), "bardic_inspiration", "range_ft", 0,
+        )
+        if not isinstance(range_ft, int) or range_ft <= 0:
+            raise CombatIntentError("no Bardic Inspiration range is declared")
+        self._require_range(combat, actor["actor_id"], target_id, range_ft)
+        # A blinded target cannot see an invisible bard; deafened is not modeled.
+        if (
+            "invisible" in (actor.get("conditions") or {})
+            and "blinded" in (target.get("conditions") or {})
+        ):
+            raise CombatIntentError("the target can neither see nor hear you")
+        if self._active_bardic_instance(instance, combat, target_id) is not None:
+            raise CombatIntentError("the target already holds a Bardic Inspiration die")
+
+    def _validate_inspiration_slot_exchange(
+        self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],
+    ) -> None:
+        character = self._canonical_actor(instance, actor)
+        pool = resource_state(character, "bardic_inspiration")
+        if int(pool.get("current", 0) or 0) >= int(pool.get("maximum", 0) or 0):
+            raise CombatIntentError("no expended Bardic Inspiration use to regain")
+        slot_level = intent.get("slot_level")
+        if isinstance(slot_level, bool) or not isinstance(slot_level, int) or slot_level < 1:
+            raise CombatIntentError("a spell slot level is required")
+        slots = ((character.get("spellcasting") or {}).get("class") or {}).get("slots_current") or {}
+        if int(slots.get(str(slot_level), 0) or 0) < 1:
+            raise CombatIntentError("the spell slot is already spent")
+
+    def _validate_font_slot_to_points(
+        self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],
+    ) -> None:
+        try:
+            slot_to_points_plan(self._canonical_actor(instance, actor), intent.get("slot_level"))
+        except FontOfMagicError as exc:
+            raise CombatIntentError(str(exc)) from exc
+
+    def _validate_font_create_slot(
+        self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],
+        capability: FeatureCapability,
+    ) -> None:
+        character = self._canonical_actor(instance, actor)
+        definition = self.features.feature_definition(capability.feature_id)
+        class_id = str(getattr(definition, "class_id", "") or "")
+        try:
+            costs = parse_created_slot_costs(
+                self.features.feature_value(character, capability.feature_id, "created_slot_costs", ()),
+            )
+            create_slot_plan(
+                character, intent.get("slot_level"), costs,
+                declaring_class_level(character, class_id),
+            )
+        except FontOfMagicError as exc:
+            raise CombatIntentError(str(exc)) from exc
 
     def _capability_range(
         self, actor: dict[str, Any], capability: Any, key: str, default: int,
