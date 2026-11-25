@@ -5424,34 +5424,12 @@ class CombatResolutionMixin:
                     ):
                         # 战斗已经结束：不再追加注定落空的后续打击。
                         return events
-            elif action.kind in {"dash", "dodge", "disengage"}:
-                events.extend(self._basic_action_events(
-                    combat, action.kind, actor_id, spend_action=False,
-                ))
             elif action.kind == "divine_spark":
                 events.extend(self._divine_spark_events(
                     instance, combat, actor_id, actor, capability, intent, rng,
                 ))
             elif action.kind == "turn_undead":
                 events.extend(self._turn_undead_events(
-                    instance, combat, actor_id, actor, capability, intent, rng,
-                ))
-            elif action.kind == "restore_feature_use":
-                events.append(self._restore_feature_use_event(actor_id, actor, capability))
-            elif action.kind == "quivering_palm_end":
-                events.extend(self._quivering_palm_end_events(
-                    instance, combat, actor_id, actor, capability, rng,
-                ))
-            elif action.kind == "holy_nimbus":
-                events.extend(self._holy_nimbus_events(
-                    instance, actor_id, actor, capability,
-                ))
-            elif action.kind == "dragon_wings":
-                events.extend(self._dragon_wings_events(
-                    instance, actor_id, actor, capability,
-                ))
-            elif action.kind == "intimidating_presence":
-                events.extend(self._intimidating_presence_events(
                     instance, combat, actor_id, actor, capability, intent, rng,
                 ))
             elif action.kind == "abjure_foes":
@@ -5515,16 +5493,6 @@ class CombatResolutionMixin:
                 events.extend(
                     self._rider_move_events(combat, actor, capability_id, intent)
                 )
-            elif action.kind == "temp_hp":
-                events.extend(self._temp_hp_grant_events(
-                    actor, capability.feature_id, rng,
-                ))
-            elif action.kind == "invisible":
-                events.extend(self._self_invisible_events(actor, capability.feature_id))
-            elif action.kind == "resistance_all":
-                events.extend(self._resistance_all_events(
-                    instance, combat, actor, capability.feature_id,
-                ))
             elif action.kind == "rage":
                 # 狂暴不能维持专注：进入狂暴即结束正在维持的专注法术。
                 if actor.get("concentration"):
@@ -5554,22 +5522,6 @@ class CombatResolutionMixin:
                 events.extend(
                     self._rider_move_events(combat, actor, "rage", intent)
                 )
-            elif action.kind == "rage_sustain":
-                # 只刷新续期标记；``turns_remaining`` 由回合结束的到期检查递减，
-                # 延长一次不等于重置 10 分钟上限。
-                events.append({
-                    "type": "dnd2024.condition.sustained", "target_id": actor_id,
-                    "condition": "rage",
-                })
-            elif action.kind == "action_surge":
-                # Action Surge 本身不消耗动作，只写入一份独立的 surge_action。
-                # 施法成本只读 action/bonus_action，因此这份额外动作天然不能
-                # 用于魔法动作；``action_surge_used`` 在同一回合阻止第二次使用。
-                events.append({
-                    "type": "dnd2024.economy.granted", "actor_id": actor_id,
-                    "grants": {"surge_action": 1},
-                    "flags": {"action_surge_used": True},
-                })
             elif action.kind == "bardic_grant":
                 events.extend(self._bardic_grant_events(instance, combat, intent, rng))
             elif action.kind == "inspiration_slot_exchange":
@@ -6064,24 +6016,6 @@ class CombatResolutionMixin:
                     # 灼烧亡灵是这次驱散的实际伤害来源：它同样可以结束战斗。
                     events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         return events
-
-    def _restore_feature_use_event(
-        self, actor_id: str, actor: dict[str, Any], capability: FeatureCapability,
-    ) -> dict[str, Any]:
-        """Regain one use; the capability's declared price is paid separately."""
-
-        character = self._feature_character(actor)
-        feature_id = capability.feature_id
-        before = feature_usage_count(
-            character, feature_id, feature_id, USAGE_SCOPE_LONG_REST,
-        )
-        return {
-            "type": "dnd2024.feature_usage.restored", "actor_id": actor_id,
-            "owner": feature_id, "feature_id": feature_id,
-            "scope": USAGE_SCOPE_LONG_REST,
-            "before_count": before,
-            "reason": "restored",
-        }
 
     def _quivering_palm_end_events(
         self, instance: Any, combat: dict[str, Any], actor_id: str,

@@ -843,6 +843,26 @@ def test_ending_without_a_same_plane_assertion_is_refused(open_hand17) -> None:
     assert "same-plane" in resolved["error"]
 
 
+def test_an_expired_vibration_cannot_be_ended(open_hand17) -> None:
+    from src.engine.world_state import clock_from_minutes
+
+    engine, instance = _setup(open_hand17)
+    _start(engine, instance, enemies=_two_enemies())
+    _apply_vibration(engine, instance)
+    character = instance.get_character_sheet("gm")["ruleset_character"]
+    # Use a bounded expiry in the fixture rather than advancing the world clock
+    # to the sentinel used for an indefinite vibration.
+    character["long_effects"]["quivering_palm"]["expires_at"] = 1
+    instance.world_state["clock"] = clock_from_minutes(1)
+    before = ruleset_runtime.state(instance)["combat"]["economy"]["action"]
+
+    resolved = _capability(engine, instance, "quivering_palm_end", [1], same_plane=True)
+
+    assert resolved["ok"] is False
+    assert resolved["error"] == "no creature is under Quivering Palm"
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["action"] == before
+
+
 def test_a_lower_slot_cannot_impersonate_the_level_five_cost(devotion20) -> None:
     engine, instance = _setup(devotion20)
     _start(engine, instance, enemies=_two_enemies())

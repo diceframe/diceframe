@@ -25,7 +25,6 @@ from ..forms import (
     FormState, FormStateError, bootstrap_known_forms, mode_for, restrictions,
 )
 from ..features.resources import (
-    long_effect_active,
     OVERCHANNEL_FEATURE_ID,
     OVERCHANNEL_OWNER,
     OVERCHANNEL_SPELL_CLASS,
@@ -60,7 +59,6 @@ from .obscurement import (
 )
 from .primitives import (
     slot_available,
-    world_minutes,
     CONDITION_CODES,
     DICE_RE,
     GM_CONDITION_DURATIONS,
@@ -1733,30 +1731,6 @@ class CombatValidationMixin:
             self._feature_character(actor), capability_id,
         )
         if capability is not None:
-            # 特性自身的使用次数：这里的拒绝与资源不足同形，客户端拿到的
-            # 是 ok=false 而不是运行期异常。
-            if any(
-                action.kind == "restore_feature_use"
-                for action in capability.actions
-            ):
-                # 没有已用次数时"恢复"是无意义的支付：拒绝而不是白扣一格槽。
-                character = self._feature_character(actor)
-                used = feature_usage_count(
-                    character, capability.feature_id, capability.feature_id,
-                )
-                if used < 1:
-                    raise CombatIntentError(
-                        "this feature has no use left to restore"
-                    )
-                # Keep the established restore-specific pool diagnostic. Spell
-                # slot shortages use the shared capability availability below.
-                for cost in capability.cost.resources:
-                    if isinstance(cost, ResourceCost):
-                        state = resource_state(character, cost.resource_id)
-                        if int(state.get("current", 0) or 0) < cost.amount:
-                            raise CombatIntentError(
-                                f"not enough {cost.resource_id} to restore this feature"
-                            )
             if capability.uses_per_long_rest:
                 used = feature_usage_count(
                     self._feature_character(actor), capability.feature_id,
@@ -1778,21 +1752,6 @@ class CombatValidationMixin:
                 raise CombatIntentError(
                     f"{self.features.catalog.label(capability_id, capability_id)} cannot be "
                     f"used while {self.features.catalog.label(forbidden, forbidden)} is active"
-                )
-        if capability_id == "quivering_palm_end":
-            # 结束振动必须先有振动：放在校验层，客户端拿到 ok=false 而不是
-            # 运行期异常。
-            if long_effect_active(
-                self._feature_character(actor), "quivering_palm",
-                world_minutes(instance),
-            ) is None:
-                raise CombatIntentError("no creature is under Quivering Palm")
-            # 规则要求持有者与目标同处一个位面。仓库没有权威位面系统，所以
-            # 这里要求调用方**显式断言**，而不是默认成立——默认成立等于偷偷
-            # 替玩家做了一个它无法验证的判断。
-            if intent.get("same_plane") is not True:
-                raise CombatIntentError(
-                    "Quivering Palm requires an explicit same-plane assertion"
                 )
         rider_move = intent.get("rider_move")
         if rider_move is not None:

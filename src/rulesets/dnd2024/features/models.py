@@ -21,8 +21,6 @@ from typing import Any, Mapping
 
 from src.rulesets.bundle import LoadedRulesetBundle
 
-from .kinds import is_known_kind
-
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 _OWNER_RE = re.compile(r"^(class|subclass):[a-z0-9][a-z0-9_.-]*$")
@@ -769,6 +767,9 @@ class Dnd2024ClassFeatureCatalog:
 
     @classmethod
     def _parse_capability(cls, feature_id: str, raw: Any) -> FeatureCapability:
+        # Handlers depend on declaration types, so look up the registry only at load time.
+        from .kinds import KIND_HANDLERS, is_known_kind
+
         if not isinstance(raw, dict):
             raise ClassFeatureError(f"{feature_id} contains an invalid capability")
         capability_id = _require_id(raw.get("id"), f"{feature_id} capability id")
@@ -864,7 +865,8 @@ class Dnd2024ClassFeatureCatalog:
             kind = str(raw_action.get("kind") or "")
             if not is_known_kind(kind):
                 raise ClassFeatureError(f"{capability_id} declares an unknown action kind: {kind!r}")
-            if kind == "restore_feature_use" and not resources:
+            handler = KIND_HANDLERS.get(kind)
+            if handler is not None and handler.requires_resource_cost and not resources:
                 raise ClassFeatureError(f"{capability_id} must declare its price in cost.resources")
             effect_id = str(raw_action.get("effect_id") or "")
             if effect_id:
