@@ -105,6 +105,7 @@ Counterspell 的触发条件，SRD p120：
 1. Innate Sorcery 剩余次数为 0 时，7 级持有者可额外支付 2 Sorcery Points 激活；次数大于 0 时仍走普通激活，不多收 2 点。
 2. 一分钟状态、每回合免费使用、资源与选择均进入 canonical/战斗状态并支持存档、加载、历史重建和 apply/replay。结束、到期或长休不得留下 DC/优势或免费权限。
 3. 所有效果必须同时经过 available_intents/validation/resolution/reducer；UI 只消费服务端结果，不自算价格、范围或有效等级。
+4. 激活入口是**能力声明**而不是专用意图（`ENGINEERING_RULES` §25）：两条付法是同一个特性下的两个 `capability`，差别写在 `cost` 与门禁字段里——`exhausted_resource_id: innate_sorcery` 表示"次数用完才成立"，`requires_feature_id: sorcery_incarnate` 表示"第二份价格从 7 级那条特性开始"。这样它才会出现在 `combat_capabilities` 投影里，面板有瓦片可用。
 
 ### 4.5 术士法术判定：Innate Sorcery 的适用面，不是施法前置
 

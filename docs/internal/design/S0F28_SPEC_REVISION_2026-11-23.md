@@ -208,3 +208,39 @@ tests/rulesets/test_dnd2024_metamagic.py   16 passed
 全量 tests/rulesets                      2739 passed（10:17）
 ruff / mypy                              干净
 ```
+
+## 7. §6.1b 的返工：Innate 从专用意图迁到 `class_capability`（2026-11-25）
+
+`## 6.1b` 记的是"Innate 本体已落地"，落地形态是**专用意图** `innate_sorcery`：自己的
+校验分支、自己的事件分支、自己的 `INTENT_TYPES` 条目。这个形态有一个当时没写进来的
+问题——**它不在 `combat_capabilities` 投影里，所以面板上没有瓦片承载它**。引擎能结算，
+玩家点不到，正是 `#836` / `#838` 的同一个毛病。
+
+按 `ENGINEERING_RULES` §25（主动职业特性的唯一入口）重做：
+
+| 原 | 现 |
+|---|---|
+| 意图类型 `innate_sorcery` | `class_capability` + `capability_id: innate_sorcery` / `innate_sorcery_from_points` |
+| `_validate_innate_sorcery`（次数、附赠动作、等级、术法点四处判定） | 声明里的 `cost` + `exhausted_resource_id` + `requires_feature_id`；剩下"做成什么"交给结算 |
+| `_innate_sorcery_events` 自己发 `action.spent` / `class_resource.spent` | 只发 `condition.applied`（`paid_with` 区分两种价格）；成本由通用块统一落账 |
+| `INTENT_TYPES` 里的 `innate_sorcery` | 删除 |
+
+两条声明（`innate_sorcery` 特性 → `capabilities`）：
+
+```json
+{"id": "innate_sorcery",
+ "cost": {"slot": "bonus_action", "resources": [{"id": "innate_sorcery", "amount": 1}]},
+ "forbidden_condition": "innate_sorcery", "actions": [{"kind": "innate_sorcery"}]}
+{"id": "innate_sorcery_from_points",
+ "cost": {"slot": "bonus_action", "resources": [{"id": "sorcery_points", "amount": 2}]},
+ "forbidden_condition": "innate_sorcery",
+ "exhausted_resource_id": "innate_sorcery", "requires_feature_id": "sorcery_incarnate",
+ "actions": [{"kind": "innate_sorcery"}]}
+```
+
+`exhausted_resource_id` 与 `requires_feature_id` 是本片为这件事新补的两个门禁字段：
+前者表达"次数先用完，这条路才成立"（与 `pool_resource_id` 的"要有余额"正好相反），
+后者表达"第二条价格挂在 7 级的另一条特性上"。两者都只影响可用性，不参与结算。
+
+成本写的是 `#848` 引入的新形态（`slot` / `resources`），旧的 `{"bonus_action": 1}`
+仍被解析器接受，但新代码不再产生它。

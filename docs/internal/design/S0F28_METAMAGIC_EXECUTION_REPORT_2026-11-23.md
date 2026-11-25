@@ -179,3 +179,26 @@ _TURN_SCOPED_DURATIONS`、`== "combat"`、`== "target_turn_start"`）。写成
 | **2/10/17 各给 2 个选项** | 数据、`metamagic_choices_at`、测试三处一致，所以不是内部矛盾；但总数 6 与我对 2024 PHB 的印象（各 +1，总数 4）不符，需对 SRD 5.2 原文确认。 |
 | `_check_requires` 的死参数 | 收了 `cast_level_one_plus_this_turn` 只为 `del` 掉它。 |
 | `Plan._parameters` 的字段位置 | 声明在所有方法之后、靠第 4 个位置参数传入；行为正确但下次加字段必踩。 |
+
+## 8. 第五轮（2026-11-25）：Innate 的入口从专用意图换成 capability
+
+第四轮修完时长与射程之后，`Innate Sorcery` 的形态仍是个缺口：它走专用意图
+`innate_sorcery`，因此不在 `combat_capabilities` 投影里，**面板上没有瓦片**。这与
+本片对 `#836` / `#838` 的判定是同一件事——引擎有实现、玩家点不到。
+
+本轮把它迁到 `class_capability`（详见 `S0F28_SPEC_REVISION` §7）：
+
+- 补两个门禁字段：`exhausted_resource_id`（池必须为空）与 `requires_feature_id`
+  （第二条价格挂在另一条特性上）。`combat_capabilities` 与 `_validate_class_capability`
+  各自读同一份声明，不复制判据。
+- 删 `_validate_innate_sorcery`、`_innate_sorcery_events` 里的两笔成本事件、
+  `INTENT_TYPES` 的那一条、以及 engine 的分派。
+- 新增一条用例锁住"入口在投影里"：还有次数时只出"花一次"的瓦片，次数归零后换成
+  "2 点术法点"的瓦片，且旧意图类型不再出现在入口清单里。
+
+代价与边界：
+
+| 项 | 说明 |
+|---|---|
+| 基线 | `DECLARED_INTENT_TYPES` 减一条；新增 `resolution.py` 的 `kind_branch: innate_sorcery`；`validation.py` 的 `has_feature:innate_sorcery` 变成 stale 条目并删除。 |
+| 其余四个特性 | Wild Shape / Wild Resurgence / Nature Magician / Nature's Sanctuary 仍是专用意图，属于另一个切片（capability 迁移），登记在 §25.1。 |
