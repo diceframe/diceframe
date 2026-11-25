@@ -27,8 +27,8 @@ class CapabilityOperations(
     ) -> dict[str, Any]: ...
 
     def _hide_events(
-        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
-        *, spend_action: bool = True,
+        self, instance: Any, combat: dict[str, Any], actor_id: str, rng: Any,
+        *, intent_id: str = "", spend_action: bool = True,
     ) -> list[dict[str, Any]]: ...
 
     def has_moved_this_turn(self, combat: dict[str, Any], actor_id: str) -> bool: ...
@@ -79,7 +79,7 @@ def _resolve_hide(
     capability: FeatureCapability, action: CapabilityAction, context: KindContext, rng: Any,
 ) -> list[dict[str, Any]]:
     return context.operations._hide_events(
-        context.instance, context.combat, {"actor_id": context.actor_id}, rng,
+        context.instance, context.combat, context.actor_id, rng,
         spend_action=False,
     )
 

@@ -3665,7 +3665,8 @@ catalog order. Granted strikes use detached state with costs and preceding event
 combat ending stops further dispatch. Handlers can add display details but cannot override
 shared costs or authority checks. Reactions and decision windows use separate paths.
 `combat/divine_actions.py` owns target validation and events for Channel Divinity
-capabilities (such as Divine Spark, Turn Undead, and Abjure Foes) and Lay On Hands.
+capabilities (such as Divine Spark, Turn Undead, and Abjure Foes), Lay On Hands,
+and the Life Domain's spell-healing riders.
 The common capability flow still owns shared prerequisites and declared costs.
 `combat/ongoing_effects.py` owns persistent class effects, including effects that outlast
 encounters, turn-limited buffs, and Sacred Weapon binding. It uses the common combat
@@ -3673,6 +3674,9 @@ helpers for saving throws, damage, and conditions.
 `combat/support_actions.py` owns Bardic Inspiration grants and class spell-slot exchanges.
 The registered adapters pass the selected target or slot level; the combat methods still
 validate the choice against authoritative state.
+`combat/martial_actions.py` owns granted strikes, self-healing and movement, and Monk hit
+conditions. `combat/stealth_actions.py` shares Hide eligibility and settlement between
+ordinary and capability-granted Hide actions.
 
 Attack add-ons register in `features/attack_declarations.py`. New intents select IDs in
 `attack_declarations`: `sacred_weapon`, `light_extra_attack`, `brutal_strike`,

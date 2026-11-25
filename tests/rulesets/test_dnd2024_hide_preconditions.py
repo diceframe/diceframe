@@ -174,7 +174,7 @@ def test_the_resolver_itself_refuses_regardless_of_entry_point() -> None:
     combat = _state(instance)["combat"]
     with pytest.raises(CombatIntentError) as excinfo:
         engine._hide_events(
-            instance, combat, {"actor_id": "player:gm"}, SequenceRng([13]),
+            instance, combat, "player:gm", SequenceRng([13]),
             spend_action=False,
         )
     assert "no heavy obscurement or three-quarters cover" in str(excinfo.value)

@@ -88,6 +88,8 @@ files = [
     "src/rulesets/dnd2024/binding.py",
     "src/rulesets/dnd2024/character/builder.py",
     "src/rulesets/dnd2024/combat/divine_actions.py",
+    "src/rulesets/dnd2024/combat/stealth_actions.py",
+    "src/rulesets/dnd2024/combat/martial_actions.py",
     "src/rulesets/dnd2024/combat/support_actions.py",
     "src/rulesets/dnd2024/combat/ongoing_effects.py",
     "src/rulesets/dnd2024/features/__init__.py",

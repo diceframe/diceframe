@@ -806,3 +806,75 @@ class CombatDivineActionsMixin:
                 "condition": condition_id, "reason": "lay_on_hands",
             })
         return events
+
+    def _healing_rider_events(
+        self, actor: dict[str, Any], target_id: str, target: dict[str, Any],
+        slot_level: int, spell: dict[str, Any], actor_id: str,
+    ) -> list[dict[str, Any]]:
+        """Disciple of Life: 2 plus the slot's level, per healed creature.
+
+        The feature's sentence is "a spell you cast with a spell slot", so a
+        free cast, a Channel Divinity option and Lay On Hands are all outside
+        it -- those restore Hit Points without spending a slot.  ``slot_level``
+        is therefore the whole test, and it is the *real* level of the slot
+        that was spent, so an upcast Cure Wounds pays 2 + the higher level.
+        """
+
+        if slot_level <= 0:
+            return []
+        character = self._feature_character(actor)
+        flat = self.features.feature_value(
+            character, "disciple_of_life", "rider_flat", 0,
+        )
+        if not flat:
+            return []
+        per_level = int(self.features.feature_value(
+            character, "disciple_of_life", "rider_per_slot_level", 1,
+        ) or 0)
+        bonus = int(flat) + per_level * slot_level
+        blocked = "cannot_regain_hp" in (target.get("conditions") or {})
+        return [{
+            "type": "resource.changed", "resource": "hp", "target_id": target_id,
+            "delta": 0 if blocked else bonus,
+            "amount": 0 if blocked else bonus,
+            "healing": True, "rolls": [],
+            "feature_id": "disciple_of_life", "rider": "disciple_of_life",
+            "source_spell_ref": f"spell:{spell['id']}",
+            "slot_level": slot_level, "rider_target_id": target_id,
+            **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
+        }]
+
+    def _blessed_healer_events(
+        self, actor: dict[str, Any], actor_id: str, slot_level: int,
+        spell: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Blessed Healer: heal yourself once per qualifying cast.
+
+        "One or more creatures other than yourself" is a property of the whole
+        cast, so the caller decides whether the condition held; this method
+        only prices the once-per-cast amount.
+        """
+
+        if slot_level <= 0:
+            return []
+        character = self._feature_character(actor)
+        flat = self.features.feature_value(
+            character, "blessed_healer", "rider_flat", 0,
+        )
+        if not flat:
+            return []
+        per_level = int(self.features.feature_value(
+            character, "blessed_healer", "rider_per_slot_level", 1,
+        ) or 0)
+        bonus = int(flat) + per_level * slot_level
+        blocked = "cannot_regain_hp" in (actor.get("conditions") or {})
+        return [{
+            "type": "resource.changed", "resource": "hp", "target_id": actor_id,
+            "delta": 0 if blocked else bonus,
+            "amount": 0 if blocked else bonus,
+            "healing": True, "rolls": [],
+            "feature_id": "blessed_healer", "rider": "blessed_healer",
+            "source_spell_ref": f"spell:{spell['id']}",
+            "slot_level": slot_level, "rider_target_id": actor_id,
+            **({"blocked_by": "cannot_regain_hp"} if blocked else {}),
+        }]
