@@ -11,24 +11,24 @@ if TYPE_CHECKING:
 
 class ExchangeOperations(Protocol):
     def _validate_inspiration_slot_exchange(
-        self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],
+        self, instance: Any, actor: dict[str, Any], slot_level: Any,
     ) -> None: ...
 
     def _font_slot_exchange_events(
-        self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],
+        self, instance: Any, actor: dict[str, Any], slot_level: Any,
     ) -> list[dict[str, Any]]: ...
 
     def _validate_font_slot_to_points(
-        self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],
+        self, instance: Any, actor: dict[str, Any], slot_level: Any,
     ) -> None: ...
 
     def _validate_font_create_slot(
-        self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],
+        self, instance: Any, actor: dict[str, Any], slot_level: Any,
         capability: FeatureCapability,
     ) -> None: ...
 
     def _font_of_magic_events(
-        self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],
+        self, instance: Any, actor: dict[str, Any], slot_level: Any,
         kind: str, feature_id: str,
     ) -> list[dict[str, Any]]: ...
 
@@ -36,30 +36,32 @@ class ExchangeOperations(Protocol):
 def validate_inspiration_slot_exchange(
     capability: FeatureCapability, action: CapabilityAction, ctx: KindContext,
 ) -> None:
-    ctx.operations._validate_inspiration_slot_exchange(ctx.instance, ctx.actor, ctx.intent)
+    ctx.operations._validate_inspiration_slot_exchange(ctx.instance, ctx.actor, ctx.intent.get("slot_level"))
 
 
 def inspiration_slot_exchange(
     capability: FeatureCapability, action: CapabilityAction, ctx: KindContext, rng: Any,
 ) -> list[dict[str, Any]]:
-    return ctx.operations._font_slot_exchange_events(ctx.instance, ctx.actor, ctx.intent)
+    return ctx.operations._font_slot_exchange_events(ctx.instance, ctx.actor, ctx.intent.get("slot_level"))
 
 
 def validate_font_slot_to_points(
     capability: FeatureCapability, action: CapabilityAction, ctx: KindContext,
 ) -> None:
-    ctx.operations._validate_font_slot_to_points(ctx.instance, ctx.actor, ctx.intent)
+    ctx.operations._validate_font_slot_to_points(ctx.instance, ctx.actor, ctx.intent.get("slot_level"))
 
 
 def validate_font_create_slot(
     capability: FeatureCapability, action: CapabilityAction, ctx: KindContext,
 ) -> None:
-    ctx.operations._validate_font_create_slot(ctx.instance, ctx.actor, ctx.intent, capability)
+    ctx.operations._validate_font_create_slot(
+        ctx.instance, ctx.actor, ctx.intent.get("slot_level"), capability,
+    )
 
 
 def font_of_magic(
     capability: FeatureCapability, action: CapabilityAction, ctx: KindContext, rng: Any,
 ) -> list[dict[str, Any]]:
     return ctx.operations._font_of_magic_events(
-        ctx.instance, ctx.actor, ctx.intent, action.kind, capability.feature_id,
+        ctx.instance, ctx.actor, ctx.intent.get("slot_level"), action.kind, capability.feature_id,
     )

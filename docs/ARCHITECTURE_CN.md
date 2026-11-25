@@ -3599,6 +3599,8 @@ validate → resolve → events → reducer
 由 `combat/divine_actions.py` 负责；通用前提和声明成本仍由职业能力流程处理。
 `combat/ongoing_effects.py` 负责职业持续效果，包括跨遭遇的长时效果、回合增益与神圣武器绑定；
 它复用战斗的豁免、伤害与状态权威。
+`combat/support_actions.py` 负责诗人激励授予与职业法术位兑换。注册适配器传入所选目标
+或法术位环阶，合法性仍由战斗方法根据权威状态判定。
 
 攻击附加选项在 `features/attack_declarations.py` 注册。新意图使用
 `attack_declarations` ID 数组，可选 `sacred_weapon`、`light_extra_attack`、

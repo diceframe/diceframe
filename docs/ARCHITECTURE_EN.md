@@ -3670,6 +3670,9 @@ The common capability flow still owns shared prerequisites and declared costs.
 `combat/ongoing_effects.py` owns persistent class effects, including effects that outlast
 encounters, turn-limited buffs, and Sacred Weapon binding. It uses the common combat
 helpers for saving throws, damage, and conditions.
+`combat/support_actions.py` owns Bardic Inspiration grants and class spell-slot exchanges.
+The registered adapters pass the selected target or slot level; the combat methods still
+validate the choice against authoritative state.
 
 Attack add-ons register in `features/attack_declarations.py`. New intents select IDs in
 `attack_declarations`: `sacred_weapon`, `light_extra_attack`, `brutal_strike`,

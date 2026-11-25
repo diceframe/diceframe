@@ -22,11 +22,11 @@ class TargetOperations(Protocol):
     ) -> list[dict[str, Any]]: ...
 
     def _validate_bardic_grant(
-        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], actor: dict[str, Any],
+        self, instance: Any, combat: dict[str, Any], target_id: str, actor: dict[str, Any],
     ) -> None: ...
 
     def _bardic_grant_events(
-        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
+        self, instance: Any, combat: dict[str, Any], actor_id: str, holder_id: str, intent_id: Any,
     ) -> list[dict[str, Any]]: ...
 
     def _validate_divine_spark(
@@ -96,11 +96,16 @@ def unarmed_strike(capability: FeatureCapability, action: CapabilityAction, ctx:
 
 
 def validate_bardic_grant(capability: FeatureCapability, action: CapabilityAction, ctx: KindContext) -> None:
-    ctx.operations._validate_bardic_grant(ctx.instance, ctx.combat, ctx.intent, ctx.actor)
+    ctx.operations._validate_bardic_grant(
+        ctx.instance, ctx.combat, str(ctx.intent.get("target_id") or ""), ctx.actor,
+    )
 
 
 def bardic_grant(capability: FeatureCapability, action: CapabilityAction, ctx: KindContext, rng: Any) -> list[dict[str, Any]]:
-    return ctx.operations._bardic_grant_events(ctx.instance, ctx.combat, ctx.intent, rng)
+    return ctx.operations._bardic_grant_events(
+        ctx.instance, ctx.combat, str(ctx.intent["actor_id"]),
+        str(ctx.intent.get("target_id") or ""), ctx.intent.get("intent_id", ""),
+    )
 
 
 def validate_divine_spark(capability: FeatureCapability, action: CapabilityAction, ctx: KindContext) -> None:
