@@ -19,6 +19,7 @@ from .models import (
     FeatureCapability,
     FeatureView,
     ResourceCost,
+    SpellSlotCost,
     WEAPON_KINDS,
 )
 from .resolver import Dnd2024ClassFeatureResolver
@@ -46,6 +47,7 @@ __all__ = [
     "FeatureView",
     "ResourceCost",
     "ResourceDefinition",
+    "SpellSlotCost",
     "WEAPON_KINDS",
     "weapon_matches_kind",
 ]

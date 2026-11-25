@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.engine.modules import adventure_runtime_state, economy_state, game_config
+from src.engine.modules import adventure_runtime_state, economy_state
 from src.adventures.outcomes import OutcomeError
 from src.adventures.progress import ProgressError
 from src.assistant_agent_limits import DEFAULT_TASK_MAX_TOKENS
@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
 from src.engine.character_utils import calc_hp_from_rule, get_rule_attr_config, make_default_character, parse_tavern_card, roll_attributes
-from src.engine.economy import queue_proposal, resolve_auto_reward_policy
+from src.engine.economy import resolve_auto_reward_policy
 from src.engine.game_instance import GameRegistry
 from src.engine.game_state import GameState
 from src.engine import persistence
@@ -31,12 +31,10 @@ from src.creator.worker import WorkerPolicy, run_worker
 
 from src.engine.participant_view import Viewer
 from src.lorebook.store import LorebookStore
-from src.adventures import AdventureBundleLoader, AdventureResolver
+from src.adventures import AdventureResolver
 from src.adventures.scene_context import AdventureSceneContext
-from src.adventures.registry import AdventureSource, AdventureSourceRegistry
 from src.memory.delta import MemoryStore
-from src.rules.rule_system import RuleSystem, apply_currency_context
-from src.rules.loader import RuleBundleLoader
+from src.rules.rule_system import RuleSystem
 from src.rulesets.builtin import (
     build_default_ruleset_registry,
     default_adventure_runtime_requirement,
@@ -44,14 +42,14 @@ from src.rulesets.builtin import (
 )
 from src.rulesets.plugin_runtime_source import PluginRulesetRuntimeSource
 from src.rulesets.registry import RulesetRuntimeRegistry
-from src.engine.world_template import load_world_template
 from src.content_modules.projection import ContentProjectionService
+from src.webui import content_sources, rule_loading
 from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, lorebooks, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls, check_reveals, seat_tokens, storytelling
 from src.webui.services import lorebook_usage
 from src.webui.services.ui_actions import UiActionDependencies, dispatch_ui_action
 from src.webui.services import standing_portraits
 from src.webui.services import combat_extension as combat_extension_service
-from src.webui.services import adventure_runtime
+from src.webui.services import adventure_rewards, adventure_runtime
 from src.gameplays.builtin import DEFAULT_GAMEPLAYS
 from src.gameplays.contracts import GameplayProviderRegistry, project_gameplay_view
 from src.game_profiles.service import ProfileService, ProfileDependencies
@@ -2149,168 +2147,34 @@ class WebAPI:
         return self._system.export_runtime_logs()
 
     def _load_world_template(self, world_id: str, language: str = "") -> dict[str, Any] | None:
-        """按 world_id 读取世界模板；不存在或非法时返回 None。"""
-        if not self._worlds_dir:
-            return None
-        data = load_world_template(self._worlds_dir, world_id, language)
-        if data:
-            return data
-        if self._plugins:
-            return self._plugins.load_world_template(world_id, language)
-        return None
+        return rule_loading.load_world_template(self._worlds_dir, self._plugins, world_id, language)
 
     def _load_rule_for_game(self, inst) -> RuleSystem | None:
-        """优先按存档自身规则加载；旧存档缺失时回退世界默认规则。"""
-        if not inst.world_id or not self._worlds_dir:
-            return None
-        language = getattr(inst, "language", "") or ""
-        world_data = self._load_world_template(inst.world_id, language)
-        if not world_data:
-            return None
-        language = language or world_data.get("active_locale") or world_data.get("language", "")
-        rule_id = str(
-            getattr(inst, "rule_id", "")
-            or world_data.get("default_rule")
-            or "freeform_fantasy"
-        )
-        rule = self._load_rule_by_id(rule_id, language)
-        return apply_currency_context(
-            rule,
-            game_config.currency_label(inst),
-            game_config.currency_system(inst),
+        return rule_loading.load_rule_for_game(
+            inst, self._worlds_dir, self._load_world_template, self._load_rule_by_id,
         )
 
     def _resolve_ruleset_check(self, instance: Any, uid: str, check: dict[str, Any]):
-        """G4：把 GM 发起的技能/属性检定交给规则集结算（通用服务不认规则表）。"""
-
-        runtime = self._load_runtime_for_game(instance)
-        hook = getattr(runtime, "resolve_ability_check", None)
-        if not callable(hook):
-            raise ValueError("this ruleset does not support ability checks")
-        return hook(instance, uid, check)
+        return rule_loading.resolve_ruleset_check(self._load_runtime_for_game, instance, uid, check)
 
     def _agent_ruleset_runtime_ids(self) -> tuple[str, ...]:
-        """Runtimes that declare agent tools, in stable order.
-
-        The mapping is explicit: a runtime opts in by appearing here, and the
-        registry records source -> runtime_id.  Adding a second ruleset means
-        adding its id here, not teaching the agent layer about it.
-        """
-
-        return ("core:dnd2024",)
+        return rule_loading.AGENT_RULESET_RUNTIME_IDS
 
     def _visible_ruleset_domains(self, owner: str, context: dict) -> frozenset[str]:
-        """Which ruleset domains one agent session may see.
-
-        ``context`` only *names* a game; membership is proven here.  A session
-        belongs to the game by being its GM or one of its players — anything
-        else (unknown key, wrong game, spectator) gets no ruleset scope at all,
-        which is also how "same rule, other table" is rejected.
-        """
-
-        game_key = str((context or {}).get("game_key") or "").strip()
-        if not game_key or not isinstance(owner, str) or not owner:
-            return frozenset()
-        try:
-            instance = self._reg.get(_parse_game_key(game_key))
-        except (ValueError, TypeError):
-            return frozenset()
-        if instance is None:
-            return frozenset()
-        gm_uid = str(getattr(instance, "gm_uid", "") or "")
-        if owner != gm_uid and owner not in (getattr(instance, "players", {}) or {}):
-            return frozenset()
-        try:
-            runtime = self._load_runtime_for_game(instance)
-        except Exception:  # noqa: BLE001 - 解析失败只降级到全局能力
-            return frozenset()
-        runtime_id = str(getattr(runtime, "runtime_id", "") or "")
-        domain = self._ruleset_agent_domains.get(runtime_id)
-        return frozenset({domain}) if domain else frozenset()
+        return rule_loading.visible_ruleset_domains(
+            self._reg.get, self._load_runtime_for_game, self._ruleset_agent_domains, owner, context,
+        )
 
     def _load_runtime_for_game(self, inst):
-        rule = self._load_rule_for_game(inst)
-        return self._ruleset_registry.resolve(rule.template) if rule else None
+        return rule_loading.load_runtime_for_game(inst, self._load_rule_for_game, self._ruleset_registry)
 
     def _adventure_runtime_adapter(self, instance: Any, hook: str) -> Any:
-        """Ask the instance's ruleset runtime for an adventure adapter (FIX-04).
-
-        ``rules.*`` gate 求值与 ``item_reward`` 转换都属于 ruleset 的职责
-        （D&D 实现见 Dnd2024Runtime）；其它 runtime 没有该能力时返回 None →
-        gate 证据不足 = 不放行 / reward 缺少转换器 = fail closed。
-        """
-
-        try:
-            runtime = self._load_runtime_for_game(instance)
-        except Exception:  # noqa: BLE001 - 适配器缺席不等于放行
-            return None
-        getter = getattr(runtime, hook, None)
-        if not callable(getter):
-            return None
-        try:
-            return getter(instance)
-        except Exception:  # noqa: BLE001
-            return None
+        return rule_loading.adventure_runtime_adapter(self._load_runtime_for_game, instance, hook)
 
     def _queue_adventure_reward_intents(
         self, instance: Any, intents: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """FIX-08 §10 步骤 12：adventure item_reward → 既有奖励提案权威。
-
-        Adventure 的 ``item_reward`` 只声明"该给什么"（reward intent）；发放必须走
-        既有 proposal/settlement 权威，**绝不直接写 inventory**：
-        ``kind="reward"`` 且 ``amount=0``（纯物品、无货币）、``approval_policy="gm"``
-        → 提案 pending，GM 用既有的支付确认路径结算，物品才由
-        ``characters.grant_reward`` 写入角色卡（带 before-image，整轮回滚可还原）。
-
-        幂等：``source_ref`` 由奖励内容 + 收件人确定（同一批奖励不会被排两次队），
-        重放/中止后同一身份会走 ``_existing_by_source`` 的既有语义。
-        """
-
-        named = []
-        for intent in intents or []:
-            if str(intent.get("kind") or "") != "item_grant":
-                continue
-            name = str(intent.get("name") or "")
-            if not name.strip():
-                continue
-            reward = {
-                "name": name,
-                "category": str(intent.get("category") or ""),
-            }
-            # 身份映射是不透明的 metadata：通用 webui 层不解释 D&D 规则，
-            # 只保证它随奖励一起到达 grant_reward（缺失时保持旧形状）。
-            item_ref = str(intent.get("item_ref") or "")
-            if item_ref:
-                reward["item_ref"] = item_ref
-            named.append(reward)
-        if not named:
-            return []
-        recipient_uid = str((intents or [{}])[0].get("recipient_uid") or "")
-        if not recipient_uid:
-            raise ValueError("adventure reward intent has no recipient")
-        refs = sorted({
-            f"{intent.get('ref', {}).get('source', '')}:{intent.get('ref', {}).get('id', '')}"
-            for intent in intents or []
-            if isinstance(intent.get("ref"), dict)
-        } | {reward["name"] for reward in named})
-        proposal = queue_proposal(
-            instance,
-            kind="reward",
-            amount=0,
-            recipient_uid=recipient_uid,
-            reason="冒险奖励",
-            source="adventure",
-            source_ref=f"adventure_reward:{recipient_uid}:{'|'.join(refs)}",
-            approval_policy="gm",
-            rewards=named,
-            visibility="party",
-        )
-        return [{
-            "proposal_id": str(proposal.get("id") or ""),
-            "status": str(proposal.get("status") or ""),
-            "kind": "reward",
-        }]
+        return adventure_rewards.queue_adventure_reward_intents(instance, intents)
 
     def _project_game_rule_id(self, instance) -> str:
         return game_queries.projected_rule_id(
@@ -2319,23 +2183,7 @@ class WebAPI:
         )
 
     def _load_rule_by_id(self, rule_id: str, language: str = "") -> RuleSystem | None:
-        rule_id = (rule_id or "").strip()
-        if not rule_id or not rules.is_valid_rule_id(rule_id):
-            return None
-        core_path = self._rules_dir / f"{rule_id}.json"
-        if core_path.exists():
-            return RuleSystem(RuleBundleLoader().load_rule(self._rules_dir, rule_id, language))
-        if self._plugins:
-            item = self._plugins.contributions.find("rule", rule_id)
-            if item:
-                localized = self._plugins.load_rule_template(
-                    rule_id, language, plugin_id=item.plugin_id,
-                )
-                if localized:
-                    return RuleSystem(localized)
-                return RuleSystem.load(item.path)
-        legacy_path = RuleSystem.path_for(self._rules_dir, rule_id, language)
-        return RuleSystem.load(legacy_path) if legacy_path.exists() else None
+        return rule_loading.load_rule_by_id(self._rules_dir, self._plugins, rule_id, language)
 
     # ---- 游戏总览 ----
 
@@ -3894,88 +3742,29 @@ class WebAPI:
         self._sync_module_catalogs()
 
     def _sync_plugin_adventure_sources(self) -> None:
-        """MOD-03：把启用的 content-pack 模组声明的 adventure_packages 同步为
-        registry 的 plugin 来源（declared-only loader）。
-
-        只读 plugin runtime 状态，幂等重建 plugin 来源集合；插件禁用/卸载后
-        其来源自动消失。
-        """
-
         if self._adventure_source_registry is None or self._plugins is None:
             return
-        sources = []
-        for runtime in self._plugins.plugins.values():
-            root = getattr(runtime, "adventure_packages_root", None)
-            if root is None or runtime.status == "disabled":
-                continue
-            sources.append(AdventureSource(
-                "plugin",
-                str(runtime.manifest.get("id") or ""),
-                AdventureBundleLoader(
-                    root,
-                    allowed_directory_ids=getattr(runtime, "adventure_package_directories", ()),
-                ),
-            ))
-        self._adventure_source_registry.sync_plugin_sources(sources)
+        content_sources.sync_plugin_adventure_sources(
+            self._adventure_source_registry, self._plugins.plugins.values(),
+        )
 
     def _sync_module_catalogs(self) -> None:
-        """DNDMOD-04：把启用的 content-pack 模组声明的 ruleset_catalogs 装载为
-        模块目录来源（DNDMOD-01 契约校验，fail closed；坏包让该模块目录缺席
-        并记日志，不拖垮其它模块）。"""
-
         if self._plugins is None:
             return
-        from src.rulesets.dnd2024.content.catalog import load_catalog_dir
-
-        sources: list[tuple[str, Any]] = []
-        for runtime in self._plugins.plugins.values():
-            root = getattr(runtime, "ruleset_catalogs_root", None)
-            if root is None or runtime.status == "disabled":
-                continue
-            label = f"module:{runtime.manifest.get('id') or ''}"
-            for directory in getattr(runtime, "ruleset_catalog_directories", ()):
-                try:
-                    source = load_catalog_dir(Path(root) / directory, source_label=label)
-                except Exception as exc:
-                    logger.warning(
-                        "module catalog load failed: %s: %s", label, exc,
-                    )
-                    continue
-                # catalog_from_sources / 运行时期望 {kind: {record_id: record}}；
-                # CatalogSource.records 是 (kind, id) 键——这里统一成嵌套形状。
-                nested: dict[str, dict[str, Any]] = {}
-                for (kind, record_id), record in source.records.items():
-                    nested.setdefault(str(kind), {})[str(record_id)] = record
-                sources.append((source.label, nested))
-        self._dnd_module_catalogs = sources
+        self._dnd_module_catalogs = content_sources.load_module_catalogs(self._plugins.plugins.values())
 
     def module_catalog(self) -> Any:
         """DNDMOD-04：合并的模块内容目录（每次调用前同步）。"""
 
         self._sync_plugin_adventure_sources()
         self._sync_module_catalogs()
-        from src.rulesets.dnd2024.content.catalog import catalog_from_sources
-
-        if not self._dnd_module_catalogs:
-            return catalog_from_sources([])
-        return catalog_from_sources(self._dnd_module_catalogs)
+        return content_sources.module_catalog(self._dnd_module_catalogs)
 
     def module_content_sources(self, instance: Any = None) -> list[tuple[str, Any]]:
-        """FIX-03 §5.1：模组 catalog 来源链（owning module 优先，其余按 label）。
-
-        只提供"哪些模组声明了哪些 catalog"这一事实；链路语义由 runtime 决定。
-        """
+        """FIX-03 §5.1：模组 catalog 来源链，绑定冒险所属模块优先。"""
 
         self._sync_module_catalogs()
-        sources = list(self._dnd_module_catalogs)
-        owning = ""
-        binding = getattr(instance, "adventure_binding", None)
-        if isinstance(binding, dict) and str(binding.get("source_kind") or "") == "plugin":
-            owning = str(binding.get("source_id") or "")
-        if owning:
-            owner_label = f"module:{owning}"
-            sources.sort(key=lambda item: 0 if item[0] == owner_label else 1)
-        return sources
+        return content_sources.ordered_module_sources(self._dnd_module_catalogs, instance)
 
     def list_adventures(
         self, rule_id: str = "", world_id: str = "", language: str = "",

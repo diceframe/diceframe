@@ -280,7 +280,10 @@ def _two_light_weapons(runtime, *, style: bool) -> _Inputs:
 
 
 @pytest.mark.parametrize("style", [False, True])
-def test_light_extra_attack_damage_follows_the_fighting_style(runtime, style: bool) -> None:
+@pytest.mark.parametrize("selection", [
+    {"light_extra_attack": True}, {"attack_declarations": ["light_extra_attack"]},
+])
+def test_light_extra_attack_damage_follows_the_fighting_style(runtime, style: bool, selection) -> None:
     inputs = _two_light_weapons(runtime, style=style)
     engine, instance = inputs.engine, inputs.instance
 
@@ -296,7 +299,7 @@ def test_light_extra_attack_damage_follows_the_fighting_style(runtime, style: bo
     _turn(engine, instance)
     result = _resolve(
         engine, instance,
-        _attack_intent(instance, weapon="dagger", light_extra_attack=True),
+        _attack_intent(instance, weapon="dagger", **selection),
     )
     _apply(engine, instance, result)
     damage = _damage_event(result["event_batch"])

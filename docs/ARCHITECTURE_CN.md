@@ -3584,6 +3584,35 @@ validate → resolve → events → reducer
 怪物与 NPC 档案可选 `creature_type` 使用 canonical 类型；遭遇实例保留该字段，至圣斩对
 `fiend` / `undead` 的附加伤害不依赖名称或翻译。
 
+职业能力通过 `cost.resources` 声明固定资源成本：`{"id": "rages", "amount": 1}`
+消耗职业资源，`{"spell_slot": 5}` 则消耗权威职业法术位表中一格指定环阶的法术位，
+不使用临时槽。校验、可用行动投影和扣费都读取这份声明。恢复次数的能力必须在这里
+声明价格；法术位扣费使用 `exchange: true`，不占用本回合的施法额度。
+`requires` 声明与成本、效果类型无关的前提。例如 `["active_long_effect:dragon_wings"]`
+要求施作者身上有未过期的效果；行动投影与权威校验共用同一份按世界时钟过滤的角色视图。
+
+新增职业能力效果由 `features/kinds.py` 注册。目录加载时拒绝未知 kind；
+战斗流程统一校验、支付一次声明成本，再按声明顺序派发各效果。同一批次内的连击
+使用已扣费、已应用前序事件的隔离状态；战斗结束后不再派发后续效果。处理器可以补充
+展示资料，不能改写成本或权威判定。反应和决策窗口不使用此注册表。
+引导神力能力（如神圣火花、驱散亡灵、呵斥敌人）与圣疗的目标校验及事件生成
+由 `combat/divine_actions.py` 负责，生命领域的法术治疗增益也由此模块结算。
+通用前提和声明成本仍由职业能力流程处理。
+`combat/ongoing_effects.py` 负责职业持续效果，包括跨遭遇的长时效果、回合增益与神圣武器绑定；
+它复用战斗的豁免、伤害与状态权威。
+`combat/support_actions.py` 负责诗人激励授予与职业法术位兑换。注册适配器传入所选目标
+或法术位环阶，合法性仍由战斗方法根据权威状态判定。
+`combat/martial_actions.py` 负责能力授予的连击、自疗与移动，以及武僧命中效果；
+`combat/stealth_actions.py` 供普通躲藏与能力躲藏共用前提和结算。
+
+攻击附加选项在 `features/attack_declarations.py` 注册。新意图使用
+`attack_declarations` ID 数组，可选 `sacred_weapon`、`light_extra_attack`、
+`brutal_strike`、`stunning_strike`、`quivering_palm` 和 `hurl_through_hell`。
+注册表校验 ID 和入口，但不改变各选项的规则时机；例如神圣武器影响本次掷骰，
+震慑打击在命中后扣 Focus。旧布尔字段只作为兼容输入，不得与 ID 数组混用。
+命中法术决策继续从暂存伤害的 `attack_hit_triggers` 读取声明；该字段不进入
+最终伤害事件或非 GM 的决策投影。
+
 ---
 
 ## 27.2 Encounter Access
@@ -4851,6 +4880,8 @@ World locale 只能修改：
 ```text
 src/plugin_host/
 ├─ host.py
+├─ manifest_validation.py
+├─ package_io.py
 ├─ support.py
 ├─ descriptors.py
 ├─ capabilities.py
@@ -4860,6 +4891,11 @@ src/plugin_host/
 ├─ mirrors.py
 └─ ...
 ```
+
+`host.py` 编排运行时加载和安装事务；`manifest_validation.py` 负责包内声明、配置 schema
+和权限声明的校验，不加载运行时、不发布插件。权限定义与推导仍由 `policy.py` 负责。
+`package_io.py` 负责 ZIP 打包与解压、定位包根目录和原子写入 JSON；`PluginHost.package_files`
+仍是对外入口，安装事务及其发布、恢复和回滚仍由 `host.py` 负责。
 
 ---
 
@@ -5838,6 +5874,11 @@ core:dnd2024
 - 保持 facade compatibility；
 - 继续让实际 domain logic 下沉到 services/core；
 - 不因“文件大”就盲目拆出新的 cross-service coupling。
+
+`WebAPI` 保留内容源刷新入口及其调用顺序；`src/webui/content_sources.py` 从已加载的插件
+重建冒险来源和 D&D 模块目录，并将绑定冒险所属的模块排在其他目录之前。
+`src/webui/rule_loading.py` 负责世界、规则与运行时查找以及 Agent 的规则域判定。
+冒险物品奖励由 `services/adventure_rewards.py` 转交既有提案权威，不直接修改物品栏。
 
 ---
 

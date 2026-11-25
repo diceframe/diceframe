@@ -518,6 +518,7 @@ class CombatViewMixin:
             "spell_refs": casting["spell_refs"],
             "class_spell_refs": casting["class_spell_refs"],
             "slots": deepcopy(class_magic.get("slots_current") or {}),
+            "slots_max": deepcopy(class_magic.get("slots_max") or {}),
             # Font of Magic 造的临时槽：单独一栏，绝不并进普通槽表，否则
             # "最多 5 环"和"长休消失"这两件事就没地方可查了。
             "font_slots": casting["font_slots"],
@@ -990,6 +991,10 @@ class CombatViewMixin:
             "features": features,
             "abilities": actor.get("abilities") or {},
             "resources": {"class": class_state},
+            "spellcasting": {"class": {
+                "slots_current": actor.get("slots") or {},
+                "slots_max": actor.get("slots_max") or {},
+            }},
             "equipment": {"item_refs": list(actor.get("equipment_refs") or [])},
             "heroic_inspiration": deepcopy(actor.get("heroic_inspiration")),
             # 长时效果也是特性边界要读的人：光环是否生效、飞行多快都看它。

@@ -838,3 +838,46 @@ def test_a_shared_declaration_keeps_one_owner_while_every_granting_class_owns_it
 
     # A class the table never grants it to owns nothing at all.
     assert resolver.has_feature(_character(5, "class:rogue"), "extra_attack") is False
+
+
+def test_dismissing_without_a_vibration_reports_a_reason() -> None:
+    """结束类能力在效果不存在时不该是可点的按钮。
+
+    空成本让它绕过了资源与动作两道门，所以如果没有这条原因，它会一直出现在
+    列表里；点下去只会对 reducer 发一条针对不存在 id 的事件，而 reducer 对
+    未知 id 是静默 no-op——玩家看到的是"点了没反应"。
+    """
+
+    _runtime, resolver = _resolver()
+    character = _character(
+        17, "class:monk", subclass_ref="subclass:warrior_of_the_open_hand",
+        resources={"class": {"focus_points": {"current": 4, "maximum": 17}}},
+    )
+    character["long_effects"] = {}
+
+    views = {
+        item.id: item
+        for item in resolver.combat_capabilities(character, {}, include_unavailable=True)
+    }
+
+    assert views["quivering_palm_dismiss"].available is False
+    assert views["quivering_palm_dismiss"].blocked_reason == "no effect to dismiss"
+
+
+def test_dismissing_a_live_vibration_is_available() -> None:
+    _runtime, resolver = _resolver()
+    character = _character(
+        17, "class:monk", subclass_ref="subclass:warrior_of_the_open_hand",
+        resources={"class": {"focus_points": {"current": 0, "maximum": 17}}},
+    )
+    character["long_effects"] = {
+        "quivering_palm": {"expires_at": 10_000, "detail": {"target_id": "enemy:x"}},
+    }
+
+    views = {
+        item.id: item
+        for item in resolver.combat_capabilities(character, {}, include_unavailable=True)
+    }
+
+    assert views["quivering_palm_dismiss"].available is True
+    assert views["quivering_palm_dismiss"].blocked_reason == ""

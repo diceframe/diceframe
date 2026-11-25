@@ -647,15 +647,18 @@ def test_frenzy_needs_rage_a_strength_attack_and_the_declaration(
 # 7-9. Brutal Strike: who may declare it, what it forgoes, what it pays
 # --------------------------------------------------------------------------
 
+@pytest.mark.parametrize("selection", [
+    {"brutal_strike": True}, {"attack_declarations": ["brutal_strike"]},
+])
 def test_brutal_strike_needs_reckless_a_strength_attack_and_a_free_budget(
-    runtime: Dnd2024Runtime,
+    runtime: Dnd2024Runtime, selection,
 ) -> None:
     """Matrix 7: every refusal is a rejection, never a silent plain attack."""
 
     engine, instance = _combat(runtime, {"gm": barbarian(17)}, initiative={"gm": 20})
     assert "requires reckless attack" in _rejected(
         engine, instance,
-        _attack_intent(instance, weapon_ref="item:greataxe", brutal_strike=True),
+        _attack_intent(instance, weapon_ref="item:greataxe", **selection),
     )
     # The panel still offers Brutal at the top of the turn, because Reckless may
     # be declared in the same intent; it is the *pair* that is legal, never the
@@ -669,16 +672,16 @@ def test_brutal_strike_needs_reckless_a_strength_attack_and_a_free_budget(
     )
     assert "Strength-based attack" in _rejected(
         engine, instance,
-        _attack_intent(instance, weapon_ref="item:shortbow", brutal_strike=True),
+        _attack_intent(instance, weapon_ref="item:shortbow", **selection),
     )
 
     # Once used -- hit or miss -- the turn's Brutal is gone.
     engine, instance = _combat(runtime, {"gm": barbarian(17)}, initiative={"gm": 20})
     _attack(engine, instance, weapon_ref="item:greataxe", reckless_attack=True,
-            brutal_strike=True, rolls=[12, 3, 5, 5])
+            rolls=[12, 3, 5, 5], **selection)
     assert "already used this turn" in _rejected(
         engine, instance,
-        _attack_intent(instance, weapon_ref="item:greataxe", brutal_strike=True),
+        _attack_intent(instance, weapon_ref="item:greataxe", **selection),
     )
     assert _attack_options(engine, instance)["brutal_strike"]["available"] is False
 

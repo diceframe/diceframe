@@ -134,15 +134,9 @@ class CombatTriggeredSpellsMixin:
         events.extend(self._hit_condition_events(
             instance, combat, attacker_id, target, decision["damage_event"], rng,
         ))
-        # 这条路径同样是"命中落地"。攻击命中触发（Hurl）从伤害事件上读到
-        # 声明再跑，而不是依赖原始意图——决策路径没有意图。
-        triggers = decision["damage_event"].get("attack_hit_triggers") or {}
-        if triggers:
-            events.extend(self._attack_hit_events(
-                instance, combat,
-                self._actor_view(instance, combat, attacker_id),
-                target, triggers, rng,
-            ))
+        events.extend(self._held_attack_hit_events(
+            instance, combat, attacker_id, target, decision["damage_event"], rng,
+        ))
         events.extend(self._enemy_zero_hp_feature_events(
             instance, combat, attacker_id, target, total,
         ))

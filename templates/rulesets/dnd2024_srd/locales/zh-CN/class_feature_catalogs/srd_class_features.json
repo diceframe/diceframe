@@ -42,6 +42,8 @@
       "barbarian": "野蛮人",
       "rage": "狂暴",
       "rages": "狂暴次数",
+      "sorcery_points": "术法点",
+      "spell_slot_cost": "{level} 环法术位",
       "rage_sustain": "延长狂暴",
       "retaliation": "报复",
       "rogue": "游荡者",

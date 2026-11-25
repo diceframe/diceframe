@@ -23,7 +23,8 @@ from src.rulesets.dnd2024.character.reconciliation import (
 )
 from src.rulesets.dnd2024.combat.catalog import Dnd2024CombatCatalog
 from src.rulesets.dnd2024.content.encounter import expand_encounter_enemies
-from src.rulesets.dnd2024.features.models import TURN_START_TIMING
+from src.rulesets.dnd2024.features.combat import spell_slot_count
+from src.rulesets.dnd2024.features.models import SpellSlotCost, TURN_START_TIMING
 from src.rulesets.dnd2024.features import (
     CombatCapabilityView,
     Dnd2024ClassFeatureResolver,
@@ -61,6 +62,11 @@ from .check_windows import (
     DAMAGE_WINDOW_DECISION,
     LUCKY_RESOURCE,
 )
+from .divine_actions import CombatDivineActionsMixin
+from .stealth_actions import CombatStealthActionsMixin
+from .martial_actions import CombatMartialActionsMixin
+from .support_actions import CombatSupportActionsMixin
+from .ongoing_effects import CombatOngoingEffectsMixin
 from .obscurement import (
     LAND_AID_RANGE_FT,
     SANCTUARY_MOVE_LIMIT_FT,
@@ -149,7 +155,11 @@ def _level_for_bonus(bonus: int) -> str:
 @dataclass(slots=True)
 class Dnd2024CombatEngine(
     CombatValidationMixin, CombatResolutionMixin, CombatReducerMixin, CombatViewMixin, CombatTriggeredSpellsMixin,
-    CombatReactionSpellsMixin, CombatCheckWindowsMixin,
+    CombatReactionSpellsMixin, CombatCheckWindowsMixin, CombatDivineActionsMixin,
+    CombatStealthActionsMixin,
+    CombatMartialActionsMixin,
+    CombatSupportActionsMixin,
+    CombatOngoingEffectsMixin,
 ):
     bundle: LoadedRulesetBundle
     encounter_access: EncounterAccess = field(default_factory=EncounterAccess.blocked)
@@ -1267,7 +1277,10 @@ class Dnd2024CombatEngine(
         elif intent_type in {"dash", "dodge", "disengage"}:
             events.extend(self._basic_action_events(combat, intent_type, str(intent["actor_id"])))
         elif intent_type == "hide":
-            events.extend(self._hide_events(instance, combat, intent, rng))
+            events.extend(self._hide_events(
+                instance, combat, str(intent["actor_id"]), rng,
+                intent_id=str(intent.get("intent_id") or ""),
+            ))
         elif intent_type == "land_aid":
             events.extend(self._land_aid_events(instance, combat, intent, rng))
         elif intent_type == "nature_sanctuary":
@@ -2161,7 +2174,9 @@ class Dnd2024CombatEngine(
                 if capability.cost.timing != TURN_START_TIMING:
                     continue
                 affordable = all(
-                    int(resource_state(character, cost.resource_id).get("current", 0) or 0)
+                    spell_slot_count(actor.get("slots") or {}, cost.level) >= 1
+                    if isinstance(cost, SpellSlotCost)
+                    else int(resource_state(character, cost.resource_id).get("current", 0) or 0)
                     >= cost.amount
                     for cost in capability.cost.resources
                 )
@@ -2491,44 +2506,6 @@ class Dnd2024CombatEngine(
             return str(row.get("level") or "none")
         finally:
             self._cover_depth -= 1
-
-    HIDE_COVER_LEVELS = ("three_quarters", "total")
-
-    def hide_preconditions(
-        self, instance: Any, combat: dict[str, Any], actor_id: str,
-    ) -> dict[str, Any]:
-        """Whether this creature may attempt to Hide here, and why not.
-
-        默认拒绝：SRD 把"能藏"写成一种**例外**（重度遮蔽、¾ 或 Total Cover），
-        the rest of the world being open ground. 一个判定位，三处消费者共用
-        （validation 拒绝、available_intents 投影、结算前复核）。
-        """
-
-        level = self.obscurement_level(combat, actor_id)
-        if level == "heavily":
-            return {"allowed": True, "source": "obscurement", "reason": ""}
-        cover = self.cover_level(instance, combat, actor_id)
-        if cover in self.HIDE_COVER_LEVELS:
-            return {"allowed": True, "source": "cover", "reason": ""}
-        return {
-            "allowed": False, "source": "",
-            "reason": "no heavy obscurement or three-quarters cover",
-        }
-
-    def has_moved_this_turn(
-        self, combat: dict[str, Any], actor_id: str,
-    ) -> bool:
-        """Whether the *current* actor has spent movement this turn.
-
-        ``economy.moved`` is written by the reducer only when the acting
-        creature pays movement, so a target shoved across the field does not
-        count as having moved -- which is what Steady Aim's wording means.
-        """
-
-        economy = combat.get("economy") or {}
-        if str(economy.get("actor_id") or "") != str(actor_id):
-            return False
-        return bool(economy.get("moved"))
 
     def obscurement_level(
         self, combat: dict[str, Any], actor_id: str,
