@@ -136,3 +136,46 @@ feat/物种授予、扩展法表这些**合法的跨表来源**一起挡回去�
 
 §3 只剩 Twinned 的两种数据形态一条，不阻塞本切片交付。十项、容器、升级通道（选择 + 替换）、
 Innate 的适用面（判定 + 对账 + 视图）、前端面板均已接好并有回归。
+
+## 6. 第四轮（2026-11-24）：独立审一遍，按真实目录数据核对
+
+前几轮的用例大多用人造 `spell` / `effect` 字面量，因此"字段读错"这类缺陷不会
+现形。本轮改成拿目录里的真实数据回放，发现三处只读了半个答案的地方：
+
+| 症状 | 根因 | 处理 |
+|---|---|---|
+| Extended Spell 对专注法术完全失效：`as_condition_text()` 返回空串，既不翻倍也不保留"由专注结束" | Hex 的 effect 只写 `condition_duration: "concentration"`，长度在 spell 的 "up to 1 hour" 里；`base()` 读到 code 就短路，`effective()` 重建 `Duration` 时又丢掉 `raw` | 三个字段各答各的问题：`duration_rounds` = 推进单位、`condition_duration` = 结束规则、spell 的 duration 文本 = 上限；`effective()` 透传 `raw` |
+| Fog Cloud 的区域只有 10 轮（原文 "up to 1 hour"），提前五十九分钟消失 | `duration_rounds: 10` 被当成总长度 | `base()` 在 rounds 分支里与 spell 的上限取长，`Duration` 新增 `total_rounds` 统一三单位 |
+| Distant Spell 对 Self 法术扣 1 点、什么也没变 | 数据里 Self 也带 `range` 数值（Burning Hands 锥长 15、Shield 5），`range_min_ft: 5` 放行；结算期又因原文是 Self 原样返回 | 门禁先按原文排除 Self |
+
+另外去掉 `rounds // 10 or 1`：三轮被写成 `1_minute`，条件会多撑两个回合。现在只有
+整十轮才有等值的分钟写法。
+
+### 6.1 一条踩过的边界：`as_condition_text()` 不能"长度优先"
+
+修完前两条之后，"补上限"看起来应该一路补到 `as_condition_text()`——让 Hex 的
+`condition.applied.duration` 从 `concentration` 变成 `1_hour`。**这是错的**，而且
+第一批回归当场抓住：
+
+```
+test_dnd2024_hold_person:  assert '1_minute' == 'concentration'
+test_dnd2024_stoneskin:    assert '1_hour'   == 'concentration'
+```
+
+那个字符串是 reducer 判断"条件何时消失"的依据（`duration in
+_TURN_SCOPED_DURATIONS`、`== "combat"`、`== "target_turn_start"`）。写成
+`1_hour`，条件就会在专注断开之后继续站着——把"由专注结束"降级成"一小时后结束"。
+
+所以三者各归各位：`as_condition_text()` 答**怎么结束**（`raw` 优先），`hours` /
+`total_rounds` 答**能持续多久**，区域推进读 `rounds`。两条失败用例各留了一条断言
+锁住这个顺序。
+
+### 6.2 本轮未修，需要单独决策
+
+| 项 | 说明 |
+|---|---|
+| **Twinned 的"有效环阶 +1"** | §4.3 记的是"只把有效环阶 +1 用于目标数"。但任务书 §4.4 第 10 条要求"由既有升环规则计算目标和**所有有效等级效果**"。两者矛盾：当前 Cure Wounds 被 Twinned 后治疗量不变。要修得让"有效环阶"贯穿伤害骰与升环时长，属于独立一刀，不宜搭在修 bug 的提交里。 |
+| **十选项清单有两份** | `spells/metamagic.OPTIONS` 与 `progression/advancement.METAMAGIC_OPTION_IDS` 各硬编码一遍，后者注释还写着"运行时权威在 OPTIONS"。这正是 `ENGINEERING_RULES` §25 要消除的形态。 |
+| **2/10/17 各给 2 个选项** | 数据、`metamagic_choices_at`、测试三处一致，所以不是内部矛盾；但总数 6 与我对 2024 PHB 的印象（各 +1，总数 4）不符，需对 SRD 5.2 原文确认。 |
+| `_check_requires` 的死参数 | 收了 `cast_level_one_plus_this_turn` 只为 `del` 掉它。 |
+| `Plan._parameters` 的字段位置 | 声明在所有方法之后、靠第 4 个位置参数传入；行为正确但下次加字段必踩。 |
