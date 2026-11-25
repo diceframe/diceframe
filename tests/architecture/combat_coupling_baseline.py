@@ -258,6 +258,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "retarget_mark"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "rider_damage_type"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "rider_move"),
+    DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "ritual"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "second_target_id"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "second_target_of"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "self_restoration_condition"),
