@@ -68,6 +68,55 @@ class Dnd2024SpellSelection:
         self.progression = Dnd2024ProgressionCatalog.from_bundle(self.bundle)
         self.features = Dnd2024ClassFeatureResolver(self.bundle)
 
+    def free_spellbook_allowance(
+        self, class_ref: str, level: int, character: Mapping[str, Any] | None,
+    ) -> tuple[int, int]:
+        """Evocation Savant's free book picks for this level: ``(count, max_level)``.
+
+        3 级给两个 1–2 环；此后只有**新开一环槽位**的等级才再给一个。没有这条
+        特性一律 ``(0, 0)``——调用方据此决定"书还能多几本""多出来的必须是什么"。
+        """
+
+        if character is None or not self.features.has_feature(
+            character, "evocation_savant",
+        ):
+            return 0, 0
+        on_gain = int(
+            self.features.feature_value(
+                character, "evocation_savant", "free_picks_on_gain", 0,
+            ) or 0
+        )
+        initial_cap = int(
+            self.features.feature_value(
+                character, "evocation_savant", "max_gained_spell_level", 0,
+            ) or 0
+        )
+        per_level = int(
+            self.features.feature_value(
+                character, "evocation_savant", "free_picks_per_new_slot_level", 0,
+            ) or 0
+        )
+        definition = self.features.catalog.features.get("evocation_savant")
+        minimum = int(getattr(definition, "minimum_level", 0) or 0)
+        if minimum and level == minimum:
+            return on_gain, initial_cap
+        if level <= minimum or per_level <= 0:
+            return 0, 0
+        current = {
+            int(key) for key in self.progression.snapshot(
+                class_ref, level,
+            )["spell_slots"]
+        }
+        before = {
+            int(key) for key in self.progression.snapshot(
+                class_ref, level - 1,
+            )["spell_slots"]
+        }
+        if not (current - before):
+            # 没开新环阶的等级不额外授予：否则"每升一级送一个"会变成免费额度。
+            return 0, 0
+        return per_level, max(current or {0})
+
     def requirements(
         self, class_ref: str, level: int, character: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -314,9 +363,14 @@ class Dnd2024SpellSelection:
                 if not set(prepared).issubset(spellbook):
                     errors.append("prepared_spell_refs must be in spellbook_refs")
         if previous is not None and policy is not None:
+            free_picks, free_cap = (
+                self.free_spellbook_allowance(class_ref, level, character)
+                if context == "level_up" else (0, 0)
+            )
             errors.extend(
                 self._replacement_errors(
                     policy, previous, cantrips, prepared, spellbook, context,
+                    free_picks=free_picks, free_max_level=free_cap,
                 )
             )
         grants, grant_errors = self._validate_grants(
@@ -461,6 +515,9 @@ class Dnd2024SpellSelection:
         prepared: Sequence[str],
         spellbook: Sequence[str],
         context: str,
+        *,
+        free_picks: int = 0,
+        free_max_level: int = 0,
     ) -> list[str]:
         """The swap budget for this context, per the class's declared policy.
 
@@ -502,11 +559,31 @@ class Dnd2024SpellSelection:
                         "spellbook_refs must keep the spells the book already holds"
                     )
                 added = set(spellbook) - self._previous_refs(previous, "spellbook_refs")
-                if len(added) != policy.spellbook_gain_per_level:
+                expected = policy.spellbook_gain_per_level + free_picks
+                if len(added) != expected:
                     errors.append(
                         "spellbook_refs must add exactly "
-                        f"{policy.spellbook_gain_per_level} spell(s) at this level"
+                        f"{expected} spell(s) at this level"
                     )
+                if free_picks:
+                    # 免费名额不是"书里随便多两本"：多出来的必须是 Wizard 的
+                    # Evocation 法术，且不高于本级的额度。正常位不受此限。
+                    free_ok = 0
+                    for ref in added:
+                        spell = self.catalog.get(ref) or {}
+                        level_of_spell = int(spell.get("level", 0) or 0)
+                        lists = [str(item) for item in spell.get("class_refs") or []]
+                        if (
+                            str(spell.get("school") or "") == "evocation"
+                            and 1 <= level_of_spell <= free_max_level
+                            and "class:wizard" in lists
+                        ):
+                            free_ok += 1
+                    if free_ok < free_picks:
+                        errors.append(
+                            "the free Evocation Savant picks must be Wizard "
+                            "evocation spells of a level you have slots for"
+                        )
         elif policy.source == "spellbook":
             # 休息只重排准备位，不往法术书里加东西。
             if set(spellbook) != self._previous_refs(previous, "spellbook_refs"):

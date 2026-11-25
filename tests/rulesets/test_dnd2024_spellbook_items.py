@@ -16,6 +16,7 @@ from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.play import EncounterAccess
 from src.rulesets.dnd2024.progression.advancement import Dnd2024AdvancementEngine
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
+from src.rulesets.dnd2024.spells.catalog import Dnd2024SpellCatalog
 from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 from tests.rulesets.dnd2024_monk_common import advancement_choices
 from tests.rulesets.test_dnd2024_item_activation import (
@@ -91,42 +92,54 @@ def test_the_bonus_never_leaks_to_another_class() -> None:
 def _spell_choices(bundle: Any, character: dict, row: dict) -> dict:
     """A legal answer for one level's spell selection, built on the real book.
 
-    升级要求书目"只增不减且恰好加 2"，准备法术必须都在书里，所以这里不是
-    "挑前几个"，而是在**现有书**上补齐到 minimum 再选准备列表。
+    升级要求书目"只增不减且恰好加 N"，准备法术必须都在书里，所以这里不是
+    "挑前几个"。N 已含 Evocation Savant 的免费名额，而免费那几个必须是
+    Wizard 的 Evocation、且不高于本级额度——校验会照着查，这里照着挑。
     """
 
-    requirements = Dnd2024SpellSelection(bundle).options(
-        str(row["class_ref"]), int(row["level"]),
-    )
-    limits = requirements["requirements"]
+    catalog = Dnd2024SpellCatalog.from_bundle(bundle)
     block = (character.get("spellcasting") or {}).get("class") or {}
     book = [str(ref) for ref in block.get("spellbook_refs") or []]
     candidates = [
-        row_["ref"] for row_ in requirements["leveled_spells"]
-        if row_["ref"] not in book
+        entry["ref"] for entry in row["leveled_spells"] if entry["ref"] not in book
     ]
-    for ref in candidates:
-        if len(book) >= int(limits["spellbook_minimum"]):
-            break
-        book.append(ref)
-    # 准备位与戏法在升级时不许换（replace_limit 0），只能在**原有**的基上补足：
-    # 从 leveled_spells 重新挑前 N 个会被判成"替换了一堆法术"。
-    old_prepared = [str(ref) for ref in block.get("prepared_spell_refs") or []]
-    prepared = [ref for ref in old_prepared if ref in book][
-        : int(limits["prepared_spell_count"])
-    ]
+    free_picks = int(row.get("free_spellbook_picks") or 0)
+    free_cap = int(row.get("free_spellbook_max_level") or 0)
+
+    def _is_free(ref: str) -> bool:
+        spell = catalog.get(ref) or {}
+        lists = [str(item) for item in spell.get("class_refs") or []]
+        return (
+            str(spell.get("school") or "") == "evocation"
+            and 1 <= int(spell.get("level", 0) or 0) <= free_cap
+            and "class:wizard" in lists
+        )
+
+    free_part = [ref for ref in candidates if _is_free(ref)][:free_picks]
+    total = int(row["spellbook_additions"])
+    rest = [
+        ref for ref in candidates if ref not in free_part
+    ][: max(0, total - len(free_part))]
+    book = book + free_part + rest
+    # 准备位与戏法在升级时不许换（replace_limit 0），只能在原有的基上补足。
+    prepared = [
+        str(ref) for ref in block.get("prepared_spell_refs") or [] if ref in book
+    ][: int(row["prepared_spell_count"])]
     for ref in book:
-        if len(prepared) >= int(limits["prepared_spell_count"]):
+        if len(prepared) >= int(row["prepared_spell_count"]):
             break
         if ref not in prepared:
             prepared.append(ref)
-    old_cantrips = [str(ref) for ref in block.get("cantrip_refs") or []]
-    cantrips = old_cantrips[: int(limits["cantrip_count"])]
-    for row_ in requirements["cantrips"]:
-        if len(cantrips) >= int(limits["cantrip_count"]):
+    cantrips = [str(ref) for ref in block.get("cantrip_refs") or []][
+        : int(row["cantrip_count"])
+    ]
+    # 戏法数量会随等级涨（3 级多一个），涨出来的那一个必须补上，否则
+    # "exactly N" 直接不过；但已在列表里的不能动（replace_limit 0）。
+    for entry in row.get("cantrips") or []:
+        if len(cantrips) >= int(row["cantrip_count"]):
             break
-        if row_["ref"] not in cantrips:
-            cantrips.append(row_["ref"])
+        if entry["ref"] not in cantrips:
+            cantrips.append(entry["ref"])
     return {
         "cantrip_refs": cantrips,
         "prepared_spell_refs": prepared,
@@ -159,8 +172,11 @@ def _advance(
             choices["subclass_ref"] = (
                 subclass if subclass in allowed else (allowed[0] if allowed else subclass)
             )
+        # 再预览一次：这一级的法术选择要按"选完子职之后"的身份算，否则
+        # 3 级 Evoker 的免费名额在 requirements 里是 0。
+        probe = engine.preview_next_level(character, choices)["requirements"]
         spell_row = next(
-            (row for row in requirements if row.get("kind") == "spell_selection"), None,
+            (row for row in probe if row.get("kind") == "spell_selection"), None,
         )
         if spell_row is not None:
             choices["class_spell_choices"] = _spell_choices(
@@ -478,3 +494,101 @@ def test_memorize_spell_is_not_a_long_rest_option() -> None:
         )
 
     assert "short rest" in str(excinfo.value)
+
+
+# --------------------------------------------------------------------------
+# Evocation Savant: two free picks, then one per newly opened slot level
+# --------------------------------------------------------------------------
+
+
+def _evoker_preview(runtime: Dnd2024Runtime, character: dict, *, free_ok: bool = True):
+    """Preview one level-up as an Evoker, with a hand-built spellbook."""
+
+    engine = Dnd2024AdvancementEngine(runtime.load_bundle("en"))
+    requirements = engine.preview_next_level(character)["requirements"]
+    choices = advancement_choices({"requirements": requirements})
+    choices["subclass_ref"] = "subclass:evoker"
+    probe = engine.preview_next_level(character, choices)["requirements"]
+    row = next(item for item in probe if item.get("kind") == "spell_selection")
+    catalog = Dnd2024SpellCatalog.from_bundle(runtime.load_bundle("en"))
+    block = character["spellcasting"]["class"]
+    book = [str(ref) for ref in block.get("spellbook_refs") or []]
+    candidates = [item["ref"] for item in row["leveled_spells"] if item["ref"] not in book]
+    free_cap = int(row.get("free_spellbook_max_level") or 0)
+
+    def _is_free(ref: str) -> bool:
+        spell = catalog.get(ref) or {}
+        return (
+            str(spell.get("school") or "") == "evocation"
+            and 1 <= int(spell.get("level", 0) or 0) <= free_cap
+        )
+
+    free_picks = int(row.get("free_spellbook_picks") or 0)
+    picked = [
+        ref for ref in candidates if _is_free(ref) == free_ok
+    ][:free_picks]
+    total = int(row["spellbook_additions"])
+    rest = [ref for ref in candidates if ref not in picked][: max(0, total - len(picked))]
+    full_book = book + picked + rest
+    count = int(row["prepared_spell_count"])
+    prepared = [
+        str(ref) for ref in block.get("prepared_spell_refs") or [] if ref in full_book
+    ][:count]
+    # 3 级准备位从 5 涨到 6：涨出来的那个必须补上，但已有的不能换。
+    for ref in full_book:
+        if len(prepared) >= count:
+            break
+        if ref not in prepared:
+            prepared.append(ref)
+    choices["class_spell_choices"] = {
+        "cantrip_refs": [str(ref) for ref in block.get("cantrip_refs") or []],
+        "prepared_spell_refs": prepared,
+        "spellbook_refs": full_book,
+    }
+    return engine, choices, row, picked
+
+
+def test_evocation_savant_adds_two_free_spells_at_third_level() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime, level=2)
+    character = sheet["ruleset_character"]
+    engine, choices, row, picked = _evoker_preview(runtime, character)
+
+    assert int(row["free_spellbook_picks"]) == 2
+    assert int(row["spellbook_additions"]) == 4      # 正常 2 + 免费 2
+    assert len(picked) == 2
+    preview = engine.preview_next_level(character, choices)
+    assert preview["ok"] is True, preview["errors"]
+
+
+def test_the_free_picks_must_be_evocation_spells() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime, level=2)
+    character = sheet["ruleset_character"]
+    engine, choices, _row, _picked = _evoker_preview(runtime, character, free_ok=False)
+
+    preview = engine.preview_next_level(character, choices)
+
+    assert preview["ok"] is False
+    assert any("Evocation Savant" in error for error in preview["errors"])
+
+
+def test_a_level_without_a_new_slot_level_grants_no_free_pick() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime, level=3)
+    character = sheet["ruleset_character"]
+    engine = Dnd2024AdvancementEngine(runtime.load_bundle("en"))
+
+    requirements = engine.preview_next_level(character)["requirements"]
+    choices = advancement_choices({"requirements": requirements})
+    choices["class_spell_choices"] = _spell_choices(
+        runtime.load_bundle("en"), character,
+        next(item for item in requirements if item.get("kind") == "spell_selection"),
+    )
+
+    row = next(
+        item for item in engine.preview_next_level(character, choices)["requirements"]
+        if item.get("kind") == "spell_selection"
+    )
+    assert int(row["free_spellbook_picks"]) == 0
+    assert int(row["spellbook_additions"]) == 2

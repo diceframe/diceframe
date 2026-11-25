@@ -702,11 +702,16 @@ class Dnd2024AdvancementEngine:
             # 一份书目：旧书恰好等于下一级的下限，只能说明以前的账平了，
             # 不能说明本级的 N 个已经选过。宁可多要一次输入，也不放过一条
             # 靠"总数刚好对得上"通过的空升级。
+            free_picks, free_cap = spell_selection.free_spellbook_allowance(
+                class_ref, target_level, spell_state,
+            )
+            # 免费名额与正常增量是**两笔账**，但客户端只填一份书目，所以增长
+            # 数取和；校验那边用同样的和，并额外要求多出来的部分是 Evocation。
             spellbook_growth = (
                 int(policy.spellbook_gain_per_level or 0)
                 if policy is not None and policy.source == "spellbook"
                 else 0
-            )
+            ) + free_picks
             open_slots = [
                 slot for slot in spell_selection.grant_slots(target_level, spell_state)
                 if not slot["selected_refs"]
@@ -749,6 +754,10 @@ class Dnd2024AdvancementEngine:
                         1 if policy and policy.cantrip_swap_on == "level_up" else 0
                     ),
                     "spellbook_additions": spellbook_growth,
+                    # Evocation Savant 的免费名额：数量与上限分开给，面板才能
+                    # 说清"这 2 个必须是 1–2 环的 Evocation"。
+                    "free_spellbook_picks": free_picks,
+                    "free_spellbook_max_level": free_cap,
                     "cantrips": spell_options["cantrips"],
                     "leveled_spells": spell_options["leveled_spells"],
                     "grant_slots": spell_options["grant_slots"],
