@@ -191,6 +191,13 @@ class ResourceCost:
 
 
 @dataclass(frozen=True, slots=True)
+class SpellSlotCost:
+    """Exchange one slot of an exact level from the class spell slot table."""
+
+    level: int
+
+
+@dataclass(frozen=True, slots=True)
 class CapabilityCost:
     """The action-slot, resource and timing price of one capability.
 
@@ -211,7 +218,7 @@ class CapabilityCost:
     """
 
     slot: str = ""
-    resources: tuple[ResourceCost, ...] = ()
+    resources: tuple[ResourceCost | SpellSlotCost, ...] = ()
     timing: str = ""
 
     @property
@@ -820,10 +827,26 @@ class Dnd2024ClassFeatureCatalog:
         raw_resources = raw_cost.get("resources") or []
         if not isinstance(raw_resources, list):
             raise ClassFeatureError(f"{capability_id}.cost.resources must be an array")
-        resources: list[ResourceCost] = []
+        resources: list[ResourceCost | SpellSlotCost] = []
+        spell_levels: set[int] = set()
         for raw_resource in raw_resources:
             if not isinstance(raw_resource, dict):
                 raise ClassFeatureError(f"{capability_id} contains an invalid resource cost")
+            if "spell_slot" in raw_resource:
+                if raw_resource.keys() != {"spell_slot"}:
+                    raise ClassFeatureError(
+                        f"{capability_id} spell slot cost must contain only spell_slot"
+                    )
+                level = _require_positive_int(
+                    raw_resource["spell_slot"], f"{capability_id}.cost.resources.spell_slot",
+                )
+                if level > 9:
+                    raise ClassFeatureError(f"{capability_id} spell slot level must be at most 9")
+                if level in spell_levels:
+                    raise ClassFeatureError(f"{capability_id} repeats a spell slot cost level")
+                spell_levels.add(level)
+                resources.append(SpellSlotCost(level))
+                continue
             resources.append(ResourceCost(
                 resource_id=_require_id(
                     raw_resource.get("id"), f"{capability_id} resource cost id",
@@ -870,6 +893,8 @@ class Dnd2024ClassFeatureCatalog:
             kind = str(raw_action.get("kind") or "")
             if kind not in ACTION_KINDS:
                 raise ClassFeatureError(f"{capability_id} declares an unknown action kind")
+            if kind == "restore_feature_use" and not resources:
+                raise ClassFeatureError(f"{capability_id} must declare its price in cost.resources")
             effect_id = str(raw_action.get("effect_id") or "")
             if effect_id:
                 _require_id(effect_id, f"{capability_id} action effect_id")

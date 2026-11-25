@@ -3584,6 +3584,11 @@ validate → resolve → events → reducer
 怪物与 NPC 档案可选 `creature_type` 使用 canonical 类型；遭遇实例保留该字段，至圣斩对
 `fiend` / `undead` 的附加伤害不依赖名称或翻译。
 
+职业能力通过 `cost.resources` 声明固定资源成本：`{"id": "rages", "amount": 1}`
+消耗职业资源，`{"spell_slot": 5}` 则消耗权威职业法术位表中一格指定环阶的法术位，
+不使用临时槽。校验、可用行动投影和扣费都读取这份声明。恢复次数的能力必须在这里
+声明价格；法术位扣费使用 `exchange: true`，不占用本回合的施法额度。
+
 ---
 
 ## 27.2 Encounter Access

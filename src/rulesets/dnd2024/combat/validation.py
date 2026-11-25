@@ -19,7 +19,7 @@ from ..character.attunement import (
     owned_ref_counts,
 )
 from .action_adapter import is_supported_damage_formula
-from ..features.models import ClassFeatureError
+from ..features.models import ClassFeatureError, ResourceCost
 from ..forms import (
     FormState, FormStateError, bootstrap_known_forms, mode_for, restrictions,
 )
@@ -1739,40 +1739,23 @@ class CombatValidationMixin:
                 for action in capability.actions
             ):
                 # 没有已用次数时"恢复"是无意义的支付：拒绝而不是白扣一格槽。
+                character = self._feature_character(actor)
                 used = feature_usage_count(
-                    self._feature_character(actor), capability.feature_id,
-                    capability.feature_id,
+                    character, capability.feature_id, capability.feature_id,
                 )
                 if used < 1:
                     raise CombatIntentError(
                         "this feature has no use left to restore"
                     )
-                # 支付能力也要挡在这里：零槽/零点时不能让 reducer 抛
-                # EventBatchError，客户端应该拿到 ok=false。
-                character = self._feature_character(actor)
-                slot_level = int(self.features.feature_value(
-                    character, capability.feature_id, "restore_slot_level", 0,
-                ) or 0)
-                if slot_level:
-                    # 槽表在视图的 ``slots`` 上；``_feature_character`` 的切片
-                    # 不带施法块，读它只会得到"零槽"的假结论。
-                    slots = actor.get("slots") or {}
-                    if int(slots.get(str(slot_level), 0) or 0) < 1:
-                        raise CombatIntentError(
-                            f"no level {slot_level} spell slot is available"
-                        )
-                resource_id = str(self.features.feature_value(
-                    character, capability.feature_id, "restore_resource", "",
-                ) or "")
-                amount = int(self.features.feature_value(
-                    character, capability.feature_id, "restore_resource_amount", 0,
-                ) or 0)
-                if resource_id:
-                    state = resource_state(character, resource_id)
-                    if int(state.get("current", 0) or 0) < amount:
-                        raise CombatIntentError(
-                            f"not enough {resource_id} to restore this feature"
-                        )
+                # Keep the established restore-specific pool diagnostic. Spell
+                # slot shortages use the shared capability availability below.
+                for cost in capability.cost.resources:
+                    if isinstance(cost, ResourceCost):
+                        state = resource_state(character, cost.resource_id)
+                        if int(state.get("current", 0) or 0) < cost.amount:
+                            raise CombatIntentError(
+                                f"not enough {cost.resource_id} to restore this feature"
+                            )
             if capability.uses_per_long_rest:
                 used = feature_usage_count(
                     self._feature_character(actor), capability.feature_id,
@@ -1884,6 +1867,8 @@ class CombatValidationMixin:
             # The capability's own spend precedes every granted hit. Validate
             # rider affordability against that balance, not the original pool.
             for cost in capability.cost.resources:
+                if not isinstance(cost, ResourceCost):
+                    continue
                 for pool in rider_actor.get("class_resources") or []:
                     if pool.get("id") == cost.resource_id:
                         pool["current"] = int(pool.get("current", 0)) - cost.amount

@@ -1555,10 +1555,15 @@ class Dnd2024ClassFeatureResolver:
         definitions = {
             definition.id: definition for definition in self.resource_definitions(character)
         }
+        spellcasting = (character or {}).get("spellcasting")
+        class_magic = spellcasting.get("class") if isinstance(spellcasting, Mapping) else None
         return _project_capabilities(
             self.catalog,
             active,
-            CombatContext.from_economy(combat_context, actor_id),
+            CombatContext.from_economy(
+                combat_context, actor_id,
+                class_magic=class_magic if isinstance(class_magic, Mapping) else None,
+            ),
             definitions,
             include_unavailable=include_unavailable,
         )

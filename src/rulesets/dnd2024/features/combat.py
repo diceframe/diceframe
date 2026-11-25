@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
 from .models import (
@@ -19,6 +19,7 @@ from .models import (
     Dnd2024ClassFeatureCatalog,
     CapabilityCostView,
     FeatureCapability,
+    SpellSlotCost,
     TURN_START_TIMING,
 )
 from .resources import ResourceDefinition
@@ -57,9 +58,13 @@ def martial_arts_die_is_better(candidate: str, current: str) -> bool:
     return candidate_mean > current_mean
 
 
+def spell_slot_count(slots: Mapping[str, Any], level: int) -> int:
+    return int(slots.get(str(level), 0) or 0)
+
+
 @dataclass(frozen=True, slots=True)
 class CombatContext:
-    """The action-economy budget a capability is evaluated against."""
+    """The turn and spell-slot budgets a capability is evaluated against."""
 
     action: int = 0
     bonus_action: int = 0
@@ -70,10 +75,13 @@ class CombatContext:
     turn_start: bool = False
     # Fleet Step：一个非 Step 的附赠动作结算后，本回合还剩一次免费的 Step。
     fleet_step: bool = False
+    spell_slots: Mapping[str, Any] = field(default_factory=dict)
+    spell_slot_maxima: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_economy(
         cls, economy: Mapping[str, Any] | None, actor_id: str = "",
+        *, class_magic: Mapping[str, Any] | None = None,
     ) -> CombatContext:
         source: Mapping[str, Any] = economy if isinstance(economy, Mapping) else {}
 
@@ -85,12 +93,16 @@ class CombatContext:
 
         window = source.get("turn_start_window")
         window = window if isinstance(window, Mapping) else {}
+        slots = (class_magic or {}).get("slots_current")
+        maxima = (class_magic or {}).get("slots_max")
         return cls(
             action=budget("action"),
             bonus_action=budget("bonus_action"),
             reaction=budget("reaction"),
             turn_start=bool(actor_id) and str(window.get("actor_id") or "") == actor_id,
             fleet_step=bool(source.get("fleet_step_available")),
+            spell_slots=slots if isinstance(slots, Mapping) else {},
+            spell_slot_maxima=maxima if isinstance(maxima, Mapping) else {},
         )
 
     def remaining(self, action: str) -> int:
@@ -126,6 +138,18 @@ def _cost_views(
             maximum=1,
         ))
     for resource_cost in capability.cost.resources:
+        if isinstance(resource_cost, SpellSlotCost):
+            level = resource_cost.level
+            views.append(CapabilityCostView(
+                kind="spell_slot",
+                name=catalog.label("spell_slot_cost", "Level {level} spell slot").replace(
+                    "{level}", str(level),
+                ),
+                amount=1,
+                current=spell_slot_count(context.spell_slots, level),
+                maximum=spell_slot_count(context.spell_slot_maxima, level),
+            ))
+            continue
         definition = definitions.get(resource_cost.resource_id)
         views.append(CapabilityCostView(
             kind="resource",
@@ -150,6 +174,10 @@ def _blocked_reason(
     definitions: Mapping[str, ResourceDefinition],
 ) -> str:
     for resource_cost in capability.cost.resources:
+        if isinstance(resource_cost, SpellSlotCost):
+            if spell_slot_count(context.spell_slots, resource_cost.level) < 1:
+                return f"no level {resource_cost.level} spell slot is available"
+            continue
         definition = definitions.get(resource_cost.resource_id)
         name = catalog.label(resource_cost.resource_id, resource_cost.resource_id)
         if definition is None:

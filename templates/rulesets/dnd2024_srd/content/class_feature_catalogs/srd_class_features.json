@@ -39,6 +39,8 @@
     "barbarian": "Barbarian",
     "rage": "Rage",
     "rages": "Rage Uses",
+    "sorcery_points": "Sorcery Points",
+    "spell_slot_cost": "Level {level} spell slot",
     "rage_sustain": "Sustain Rage",
     "retaliation": "Retaliation",
     "rogue": "Rogue",
@@ -927,8 +929,7 @@
             "holy_ward_creature_types": [
               "fiend",
               "undead"
-            ],
-            "restore_slot_level": 5
+            ]
           },
           "capabilities": [
             {
@@ -946,7 +947,9 @@
             },
             {
               "id": "holy_nimbus_restore",
-              "cost": {},
+              "cost": {
+                "resources": [{"spell_slot": 5}]
+              },
               "actions": [
                 {
                   "kind": "restore_feature_use",
@@ -1440,9 +1443,7 @@
             "dc_ability": "str",
             "condition": "frightened",
             "condition_minutes": 1,
-            "repeat_save": true,
-            "restore_resource": "rages",
-            "restore_resource_amount": 1
+            "repeat_save": true
           },
           "capabilities": [
             {
@@ -1461,7 +1462,9 @@
             },
             {
               "id": "intimidating_presence_restore",
-              "cost": {},
+              "cost": {
+                "resources": [{"id": "rages", "amount": 1}]
+              },
               "actions": [
                 {
                   "kind": "restore_feature_use",
@@ -2184,9 +2187,7 @@
           "summary": "As a Bonus Action, you sprout dragon wings for 1 hour or until you dismiss them (no action required). For the duration you have a Fly Speed of 60 feet. Once you use this feature, you can't use it again until you finish a Long Rest, unless you spend 3 Sorcery Points (no action required) to restore it.",
           "parameters": {
             "fly_speed_ft": 60,
-            "duration_minutes": 60,
-            "restore_resource": "sorcery_points",
-            "restore_resource_amount": 3
+            "duration_minutes": 60
           },
           "capabilities": [
             {
@@ -2204,7 +2205,9 @@
             },
             {
               "id": "dragon_wings_restore",
-              "cost": {},
+              "cost": {
+                "resources": [{"id": "sorcery_points", "amount": 3}]
+              },
               "actions": [
                 {
                   "kind": "restore_feature_use",
@@ -2406,13 +2409,14 @@
             ],
             "condition": "incapacitated",
             "condition_turns": 1,
-            "uses_per_long_rest": 1,
-            "restore_slot_level": 5
+            "uses_per_long_rest": 1
           },
           "capabilities": [
             {
               "id": "hurl_through_hell_restore",
-              "cost": {},
+              "cost": {
+                "resources": [{"spell_slot": 5}]
+              },
               "actions": [
                 {
                   "kind": "restore_feature_use",

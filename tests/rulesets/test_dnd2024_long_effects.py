@@ -6,6 +6,7 @@
 """
 
 from copy import deepcopy
+from json import dumps
 
 import pytest
 
@@ -18,6 +19,7 @@ from tests.rulesets.test_dnd2024_channel_control import (
     _capability,
     _conditions,
     _enemy,
+    _inject,
     _of_type,
     _setup,
     _start,
@@ -497,6 +499,19 @@ def test_holy_ward_ignores_a_humanoid_source(devotion20) -> None:
     assert "holy_nimbus" not in codes
 
 
+def _assert_restore_events(events: list[dict], feature_id: str, spend: dict) -> None:
+    # Snapshot the complete wire event sequence from before the cost migration.
+    expected = [
+        {"type": "intent.submitted", "intent_type": "class_capability",
+         "actor_id": "player:gm", "submitted_by": "gm"},
+        spend,
+        {"type": "dnd2024.feature_usage.restored", "actor_id": "player:gm",
+         "owner": feature_id, "feature_id": feature_id, "scope": "long_rest",
+         "before_count": 1, "reason": "restored"},
+    ]
+    assert dumps(events) == dumps(expected)
+
+
 def test_holy_nimbus_is_restored_by_spending_a_level_five_slot(devotion20) -> None:
     engine, instance = _setup(devotion20)
     _start(engine, instance, enemies=_two_enemies())
@@ -506,10 +521,11 @@ def test_holy_nimbus_is_restored_by_spending_a_level_five_slot(devotion20) -> No
         engine, instance, _capability(engine, instance, "holy_nimbus_restore"),
     )
 
-    slot = _of_type(events, "dnd2024.spell.slot_spent")
-    assert slot[0]["slot_level"] == 5
-    usage = _of_type(events, "dnd2024.feature_usage.restored")
-    assert usage[0]["before_count"] == 1
+    _assert_restore_events(events, "holy_nimbus", {
+        "type": "dnd2024.spell.slot_spent", "actor_id": "player:gm",
+        "slot_level": 5, "exchange": True,
+    })
+    assert not ruleset_runtime.state(instance)["combat"]["economy"].get("slot_spell_cast")
     # 恢复后同一次战斗里还能再点亮（先过一回合拿回附赠动作）。
     _next_turn(engine, instance, "player:gm")
     _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
@@ -534,10 +550,10 @@ def test_dragon_wings_is_restored_with_three_sorcery_points(draconic) -> None:
         engine, instance, _capability(engine, instance, "dragon_wings_restore"),
     )
 
-    spend = _of_type(events, "dnd2024.class_resource.spent")
-    assert [(row["resource_id"], row["amount"]) for row in spend] == [
-        ("sorcery_points", 3),
-    ]
+    _assert_restore_events(events, "dragon_wings", {
+        "type": "dnd2024.class_resource.spent", "actor_id": "player:gm",
+        "resource_id": "sorcery_points", "amount": 3,
+    })
     _next_turn(engine, instance, "player:gm")
     _apply(engine, instance, _capability(engine, instance, "dragon_wings"))
 
@@ -554,9 +570,10 @@ def test_hurl_is_restored_by_spending_a_pact_slot(fiend14) -> None:
         _capability(engine, instance, "hurl_through_hell_restore"),
     )
 
-    slot = _of_type(events, "dnd2024.spell.slot_spent")
-    assert slot[0]["slot_level"] == 5
-    assert _of_type(events, "dnd2024.feature_usage.restored")
+    _assert_restore_events(events, "hurl_through_hell", {
+        "type": "dnd2024.spell.slot_spent", "actor_id": "player:gm",
+        "slot_level": 5, "exchange": True,
+    })
 
 
 def test_dragon_wings_can_be_dismissed_without_an_action(draconic) -> None:
@@ -601,9 +618,10 @@ def test_intimidating_presence_is_restored_with_a_rage_use(berserker) -> None:
         engine, instance, "intimidating_presence_restore",
     ))
 
-    spend = _of_type(events, "dnd2024.class_resource.spent")
-    assert [(row["resource_id"], row["amount"]) for row in spend] == [("rages", 1)]
-    assert _of_type(events, "dnd2024.feature_usage.restored")
+    _assert_restore_events(events, "intimidating_presence", {
+        "type": "dnd2024.class_resource.spent", "actor_id": "player:gm",
+        "resource_id": "rages", "amount": 1,
+    })
 
 
 def test_a_long_effect_without_an_expiry_is_rejected(berserker) -> None:
@@ -663,17 +681,54 @@ def test_the_view_stops_showing_an_expired_effect(draconic) -> None:
     assert "dragon_wings" not in (view.get("long_effects") or {})
 
 
-def test_restoring_without_a_level_five_slot_is_refused(devotion20) -> None:
-    engine, instance = _setup(devotion20)
+@pytest.mark.parametrize(("sheet", "feature_id", "kind", "amount", "resource", "name"), [
+    ("devotion20", "holy_nimbus", "spell_slot", 1, "5", "Level 5 spell slot"),
+    ("fiend14", "hurl_through_hell", "spell_slot", 1, "5", "Level 5 spell slot"),
+    ("draconic", "dragon_wings", "resource", 3, "sorcery_points", "Sorcery Points"),
+    ("berserker", "intimidating_presence", "resource", 1, "rages", "Rage Uses"),
+])
+def test_restore_cost_projection_and_rejection(
+    request, sheet, feature_id, kind, amount, resource, name,
+) -> None:
+    engine, instance = _setup(request.getfixturevalue(sheet))
     _start(engine, instance, enemies=_two_enemies())
-    _apply(engine, instance, _capability(engine, instance, "holy_nimbus"))
+    _inject(engine, instance, [{
+        "type": "dnd2024.feature_usage.changed", "actor_id": "player:gm",
+        "owner": feature_id, "feature_id": feature_id, "scope": "long_rest",
+        "before_count": 0, "after_count": 1, "use_index": 1,
+    }])
     character = instance.get_character_sheet("gm")["ruleset_character"]
-    character["spellcasting"]["class"]["slots_current"]["5"] = 0
+    if kind == "spell_slot":
+        magic = character["spellcasting"]["class"]
+        balance, key = magic["slots_current"], resource
+        maximum = magic["slots_max"][resource]
+        # Even an equal-level temporary slot cannot pay this exchange.
+        magic["font_slots"] = {resource: 1}
+        error = f"no level {resource} spell slot is available"
+    else:
+        balance, key = character["resources"]["class"][resource], "current"
+        maximum = balance["maximum"]
+        error = f"not enough {resource} to restore this feature"
+    balance[key] = amount
+    capability_id = f"{feature_id}_restore"
 
-    resolved = _capability(engine, instance, "holy_nimbus_restore")
+    def restore_actions() -> list[dict]:
+        return [
+            action for action in engine.available_intents(instance, "gm")
+            if action.get("capability_id") == capability_id
+        ]
 
+    assert [action["costs"] for action in restore_actions()] == [[{
+        "kind": kind, "name": name, "amount": amount, "current": amount, "maximum": maximum,
+    }]]
+    balance[key] = amount - 1
+    before = deepcopy(character)
+
+    assert restore_actions() == []
+    resolved = _capability(engine, instance, capability_id)
     assert resolved["ok"] is False
-    assert "level 5 spell slot" in resolved["error"]
+    assert resolved["error"] == error
+    assert instance.get_character_sheet("gm")["ruleset_character"] == before
 
 
 def test_asking_for_hurl_after_the_use_is_gone_fails_loudly(fiend14) -> None:
