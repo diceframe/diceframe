@@ -7,7 +7,6 @@ from copy import deepcopy
 from typing import Any
 
 from src.engine.player_control import is_ai_controlled
-from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.content.contracts import CREATURE_TYPES
 
 from ..character.attunement import (
@@ -20,7 +19,7 @@ from ..character.attunement import (
 )
 from .action_adapter import is_supported_damage_formula
 from ..features.attack_declarations import (
-    BRUTAL_STRIKE, LIGHT_EXTRA_ATTACK, SACRED_WEAPON, SELECTION_KEY, STUNNING_STRIKE,
+    BRUTAL_STRIKE, LIGHT_EXTRA_ATTACK, SELECTION_KEY, STUNNING_STRIKE,
     declaration_value, granted_strike_selection, selection_error, validate_uses, validate_weapon_selection,
 )
 from ..features.kinds import KIND_HANDLERS, KindContext
@@ -77,7 +76,6 @@ from .primitives import (
     RIDER_PUSH_MAXIMUM_FT,
     RIDER_PUSH_MINIMUM_FT,
     LEGENDARY_RESISTANCE_DEFAULT_PER_DAY,
-    SACRED_WEAPON_CONDITION,
     stand_up_declaration,
     UNARMED_STRIKE_REF,
     SIZE_CODES,
@@ -1922,71 +1920,6 @@ class CombatValidationMixin:
             )
         except FontOfMagicError as exc:
             raise CombatIntentError(str(exc)) from exc
-
-    def _validate_sacred_weapon(
-        self, intent: dict[str, Any], actor: dict[str, Any],
-        weapon: dict[str, Any], combat: dict[str, Any],
-    ) -> None:
-        """Sacred Weapon is declared on an attack, not as its own action.
-
-        Two facts are re-derived here rather than trusted from the panel: that
-        this is the *first* attack of a real Attack action (a Channel use
-        cannot be bolted on to the second swing of a round, nor to an
-        opportunity attack), and that the weapon being imbued is the very
-        weapon this attack uses -- a Melee weapon the actor is carrying.
-        """
-
-        declared = declaration_value(intent, SACRED_WEAPON)
-        damage_choice = intent.get("sacred_weapon_damage")
-        if declared in (None, False) and damage_choice is None:
-            return
-        character = self._feature_character(actor)
-        if not self.features.has_feature(character, "sacred_weapon"):
-            raise CombatIntentError("sacred weapon is not available to this actor")
-        weapon_ref = str(weapon.get("weapon_ref") or "")
-        binding = (actor.get("conditions") or {}).get(SACRED_WEAPON_CONDITION)
-        bound_here = (
-            isinstance(binding, dict)
-            and str(binding.get("weapon_ref") or "") == weapon_ref
-        )
-        if declared not in (None, False):
-            if declared is not True:
-                raise CombatIntentError("activate_sacred_weapon must be a boolean")
-            if weapon.get("ranged") or weapon.get("unarmed"):
-                raise CombatIntentError(
-                    "sacred weapon imbues a Melee weapon you are holding"
-                )
-            economy = combat.get("economy") or {}
-            if int(economy.get("attacks_remaining", 0) or 0) > 0:
-                raise CombatIntentError(
-                    "sacred weapon is imbued when you take the Attack action, "
-                    "not after its first attack"
-                )
-            if (
-                int(economy.get("action", 0) or 0) < 1
-                and int(economy.get("surge_action", 0) or 0) < 1
-            ):
-                raise CombatIntentError("sacred weapon requires the Attack action")
-            pool = resource_state(character, "channel_divinity")
-            if int(pool.get("current", 0) or 0) < 1:
-                raise CombatIntentError("channel divinity is already spent")
-        if damage_choice is not None:
-            if not bound_here and declared is not True:
-                raise CombatIntentError(
-                    "this weapon carries no sacred weapon bond"
-                )
-            allowed = [
-                str(value) for value in (
-                    self.features.feature_value(
-                        character, "sacred_weapon", "weapon_damage_type_choices",
-                        ["normal", "radiant"],
-                    ) or []
-                )
-            ]
-            if str(damage_choice) not in allowed:
-                raise CombatIntentError(
-                    "the declared sacred weapon damage type is not available"
-                )
 
     def _validate_two_handed(
         self, actor: dict[str, Any], intent: dict[str, Any], weapon: dict[str, Any],

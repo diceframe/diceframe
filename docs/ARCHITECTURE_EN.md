@@ -3667,6 +3667,9 @@ shared costs or authority checks. Reactions and decision windows use separate pa
 `combat/divine_actions.py` owns target validation and events for Channel Divinity
 capabilities (such as Divine Spark, Turn Undead, and Abjure Foes) and Lay On Hands.
 The common capability flow still owns shared prerequisites and declared costs.
+`combat/ongoing_effects.py` owns persistent class effects, including effects that outlast
+encounters, turn-limited buffs, and Sacred Weapon binding. It uses the common combat
+helpers for saving throws, damage, and conditions.
 
 Attack add-ons register in `features/attack_declarations.py`. New intents select IDs in
 `attack_declarations`: `sacred_weapon`, `light_extra_attack`, `brutal_strike`,
