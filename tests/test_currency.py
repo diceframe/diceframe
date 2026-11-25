@@ -9,14 +9,17 @@ import pytest
 
 from src.engine.currency import (
     CurrencySystemError,
+    declared_currency_display_label,
     format_currency_amount,
     legacy_currency_spec,
     parse_currency_amount,
     validate_currency_system,
 )
 from src.engine.currency.validation import is_v2_currency_system
+from src.engine.game_instance import GameInstance
+from src.engine.modules import game_config
 from src.rules.loader import RuleBundleLoader
-from src.rules.rule_system import RuleSystem
+from src.rules.rule_system import RuleSystem, apply_currency_context
 
 DOLLAR_SPEC = validate_currency_system({
     "schema_version": 2,
@@ -213,6 +216,103 @@ def test_rule_system_v2_currency_spec(tmp_path):
     assert spec.base_unit == "cent"
     assert parse_currency_amount("0.25", "dollar", spec) == 25
     assert rule.currency_system["display_unit"] == "dollar"
+
+
+def test_currency_context_overlays_rule_without_mutating_shared_template():
+    rule = RuleSystem.load("templates/rules/freeform_coc.json")
+    overlay = {
+        "schema_version": 2,
+        "base_unit": "copper",
+        "display_unit": "yuan",
+        "units": [
+            {"id": "copper", "name": "铜元", "rate": 1},
+            {"id": "yuan", "name": "元", "rate": 100},
+        ],
+    }
+
+    contextual = apply_currency_context(rule, "法币", overlay)
+
+    assert contextual is not rule
+    assert contextual.currency == "法币"
+    assert contextual.currency_spec.base_unit == "copper"
+    assert contextual.currency_spec.display_unit == "yuan"
+    assert contextual.mechanics_snapshot() == rule.mechanics_snapshot()
+    assert rule.currency == "美元"
+    assert rule.currency_spec.base_unit == "cent"
+
+
+def test_game_currency_context_round_trips_through_save():
+    instance = GameInstance(("web", "currency", "bot"))
+    instance.configure_game(
+        world_id="republican",
+        rule_id="freeform_coc",
+        world_name="民国",
+        group_name="测试",
+        seed_code="seed",
+        difficulty="标准",
+        language="zh-CN",
+        currency_label="法币",
+        currency_system={
+            "schema_version": 2,
+            "base_unit": "copper",
+            "display_unit": "yuan",
+            "units": [
+                {"id": "copper", "name": "铜元", "rate": 1},
+                {"id": "yuan", "name": "元", "rate": 100},
+            ],
+        },
+    )
+
+    restored = GameInstance.from_dict(instance.to_dict())
+
+    assert game_config.currency_label(restored) == "法币"
+    assert game_config.currency_system(restored)["base_unit"] == "copper"
+    assert game_config.currency_system(restored)["display_unit"] == "yuan"
+
+
+def test_uninterpretable_stored_currency_snapshot_is_kept_and_rejected():
+    """A snapshot this runtime cannot read must not fall back to the rule default.
+
+    Dropping it on load would silently reinterpret every balance of that game
+    under the rule file's currency.  The stored value is kept verbatim and the
+    read path refuses instead.
+    """
+    instance = GameInstance(("web", "currency", "bot"))
+    instance.configure_game(
+        world_id="republican",
+        rule_id="freeform_coc",
+        world_name="民国",
+        group_name="测试",
+        seed_code="seed",
+        difficulty="标准",
+        language="zh-CN",
+        currency_label="法币",
+        currency_system={
+            "schema_version": 2,
+            "base_unit": "copper",
+            "display_unit": "yuan",
+            "units": [
+                {"id": "copper", "name": "铜元", "rate": 1},
+                {"id": "yuan", "name": "元", "rate": 100},
+            ],
+        },
+    )
+    stored = instance.to_dict()
+    stored["modules"]["game_config"]["currency_system"]["schema_version"] = 99
+
+    restored = GameInstance.from_dict(stored)
+
+    slot = restored.to_dict()["modules"]["game_config"]
+    assert slot["currency_system"]["schema_version"] == 99
+    assert slot["currency_label"] == "法币"
+    with pytest.raises(CurrencySystemError):
+        game_config.currency_system(restored)
+
+    # A value of the wrong shape is refused the same way; it is not "no snapshot".
+    stored["modules"]["game_config"]["currency_system"] = "copper"
+    restored = GameInstance.from_dict(stored)
+    with pytest.raises(CurrencySystemError):
+        game_config.currency_system(restored)
 
 
 def test_rule_system_rejects_invalid_v2_currency_system(tmp_path):
@@ -552,6 +652,18 @@ def test_versionless_system_stays_legacy():
     assert declares_currency_schema({"schema_version": None})
     with pytest.raises(CurrencySystemError):
         validate_declared_currency_system({"schema_version": None})
+
+
+def test_declared_currency_display_label_uses_the_display_unit_name():
+    assert declared_currency_display_label({
+        "schema_version": 2,
+        "base_unit": "copper",
+        "display_unit": "yuan",
+        "units": [
+            {"id": "copper", "name": "铜元", "rate": 1},
+            {"id": "yuan", "name": "法币", "rate": 100},
+        ],
+    }) == "法币"
 
 
 @pytest.mark.parametrize("version", ["abc", 3])

@@ -85,7 +85,12 @@ async function loadCapabilities(reset = false) {
   const requestId = ++capabilityRequestId
   capabilitiesBusy.value = true; capabilitiesError.value = ''
   try {
-    const result = await getAssistantAgentCapabilities({ q: capabilityQuery.value, domain: capabilityDomain.value, offset: requestedOffset })
+    const result = await getAssistantAgentCapabilities({
+      q: capabilityQuery.value,
+      domain: capabilityDomain.value,
+      offset: requestedOffset,
+      game_key: currentScope.value.game_key,
+    })
     if (requestId === capabilityRequestId) {
       if (capabilityRevision.value && result.revision !== capabilityRevision.value && requestedOffset > 0) {
         capabilityRevision.value = result.revision

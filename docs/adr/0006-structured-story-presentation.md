@@ -69,3 +69,17 @@ Projection and future rosters resolve these links, preserving original log beats
 target portrait overrides take priority. Invalid or cyclic links fail closed.
 The operation is GM-only, rejects generation/rewrite overlap, and rolls back its
 owner slot if saving fails. Guest links are dropped across run transitions.
+
+## Oversized story bounding
+
+The bound is a runaway guard, not a length target. A story is shortened only when
+its `story_text` exceeds a per-language ceiling (1500 characters for Chinese and
+Japanese, 3600 for English, German and Russian), well above the 3–8 beats the
+prompt asks for, so a regular reply is never cut. Whole beats are kept in order
+and trailing beats are dropped; the first beat is cut at a sentence end only
+when it alone is oversized. Rounds, swipes and the opening share one ceiling
+(`story_output.story_limit`) and log a warning whenever it applies.
+
+An earlier bound cut every reply longer than 500 characters down to 400. Because
+the prompt allows up to eight beats, regular replies ended mid-sentence and the
+trailing beats, often the narration of a check result, were discarded silently.

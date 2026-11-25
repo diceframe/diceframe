@@ -851,7 +851,8 @@ class Dnd2024AdvancementEngine:
                 entry for catalog in self.bundle.list("monster_catalog")
                 for entry in catalog.get("entries") or []
             ]
-            # 提交了就必须恰好 N 个且合法；没提交由通用规则统一判"必填"。
+            # 选择是**可选的一步**：没提交就不拦升级（角色会走推荐形态兜底），
+            # 提交了就必须恰好 N 个且合法——否则"选了 3 个"会被静默接受。
             if "known_form_refs" in choices:
                 errors.extend(validate_selection(
                     choices.get("known_form_refs"),

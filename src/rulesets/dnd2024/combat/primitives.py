@@ -35,6 +35,20 @@ def size_at_most(size: str, limit: str) -> bool:
     if size not in SIZE_CODES or limit not in SIZE_CODES:
         return False
     return SIZE_CODES.index(size) <= SIZE_CODES.index(limit)
+
+
+def slot_available(economy: Mapping[str, Any] | None, slot: str) -> bool:
+    """Whether the actor still holds the named action-economy slot.
+
+    ``slot`` is an economy key such as ``action`` or ``bonus_action``.  This is
+    the availability question only; the matching payment is the ``spent`` event
+    a resolution emits, so the two never read the economy in different ways.
+    """
+
+    if not slot:
+        return False
+    return int((economy or {}).get(slot, 0) or 0) > 0
+
 # 18 级卓越防御：一条自带"除 Force 外全部抗性"的条件。它既不是 ``combat``
 # （战斗结束不等于一分钟到）也不是回合域（它按分钟计时），因此有自己的
 # duration，并靠 duration_minutes + 到期轮数两个上限之一结束。
@@ -63,9 +77,48 @@ SMITE_OF_PROTECTION_DURATION = "actor_turn_start"
 # 的限制。一分钟在回合制里同样是十个自己的回合，所以和 Turn Undead 共用同一套
 # 计数逻辑，而不是另立一个计时器。
 ABJURE_FOES_DURATION = "abjure_foes"
-TURNS_SCOPED_DURATIONS = frozenset({TURN_UNDEAD_DURATION, ABJURE_FOES_DURATION})
+#: S0-F30：恐惧来自 Berserker 的特性而不是圣武士的引导神力，时长同为一分钟，
+#: 但解除条件与免疫来源不同，所以它是自己的 duration 而不是复用上面那条。
+MINUTES_PER_DAY = 1440
+
+
+def world_minutes(instance: Any) -> int:
+    """Absolute logical minute of the world clock; 0 when unset.
+
+    与 ``ruleset_rest._rest_tick`` 同一口径。这里**不 import** ``world_state``：
+    ``src.rulesets`` 不许直接触达 World Runtime，只能读已经投影在 instance 上的
+    时钟字段——换算公式与 ``engine.world.contracts.clock_minutes`` 一致。
+    """
+
+    state = getattr(instance, "world_state", None)
+    raw = state.get("clock") if isinstance(state, dict) else None
+    if not isinstance(raw, dict):
+        payload = getattr(state, "payload", None)
+        raw = payload.get("clock") if isinstance(payload, dict) else None
+    if not isinstance(raw, dict):
+        return 0
+    day, minute = raw.get("day"), raw.get("minute")
+    if isinstance(day, bool) or not isinstance(day, int) or day < 1:
+        return 0
+    if isinstance(minute, bool) or not isinstance(minute, int):
+        return 0
+    if not 0 <= minute < MINUTES_PER_DAY:
+        return 0
+    return (day - 1) * MINUTES_PER_DAY + minute
+
+
+INTIMIDATING_PRESENCE_DURATION = "intimidating_presence"
+TURNS_SCOPED_DURATIONS = frozenset({
+    TURN_UNDEAD_DURATION, ABJURE_FOES_DURATION, INTIMIDATING_PRESENCE_DURATION,
+})
 # 只有世界时钟能结束的效果：它们不参与回合域到期，也不随战斗结束消失。
 WORLD_CLOCK_DURATIONS = frozenset({DIVINE_SENSE_DURATION, SACRED_WEAPON_DURATION})
+# GM 用裁定原语施加的状态没有"来源生物"，也不带额外的回合计数，所以只认
+# 不依赖这两样东西的时长标记。带来源的（caster_turn_end、attacker_next_turn_start）
+# 对它永远不会到期，认计数器的（TURNS_SCOPED / WORLD_CLOCK）则会立刻或永不结束。
+GM_CONDITION_DURATIONS = frozenset({
+    "combat", "actor_turn_start", "target_turn_start", "target_turn_end",
+})
 
 
 def combat_turn_slots(combat: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -123,6 +176,9 @@ INTENT_TYPES = frozenset({
     # C2A：GM 声明某个目标当前处于什么掩护等级（剧场模式）。
     "combat.set_cover",
     "combat.set_obscurement",
+    # G16：GM 裁定原语——施加/移除规则书里的状态。法术/特性/物品自己产生的
+    # 效应不在施加范围内，但 GM 可以移除它们（清理动作）。
+    "gm_condition",
     "attack", "cast_spell", "activate_item", "move", "dash", "dodge", "disengage", "hide", "end_turn",
     "death_save", "stabilize", "decision.resolve",
     # 一次裸属性检定。成本由调用方声明（可能是动作、附赠动作或免费）：

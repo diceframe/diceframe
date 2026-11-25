@@ -206,7 +206,9 @@ def catalog_bundle(base, *, pop_conditions: bool = False, **override):
             if kind == "combat_catalog":
                 raw = deepcopy(base.get(kind, ident))
                 if pop_conditions:
+                    # 状态与来源绑定效应分表之后，"没有注册表"意味着两段都没有。
                     raw.pop("conditions", None)
+                    raw.pop("condition_effects", None)
                 raw.update(deepcopy(override))
                 return raw
             return base.get(kind, ident)
@@ -223,7 +225,8 @@ def test_catalog_accepts_missing_conditions_and_rejects_malicious_entries() -> N
     runtime = Dnd2024Runtime()
     bundle = runtime.load_bundle("en")
 
-    assert Dnd2024CombatCatalog.from_bundle(catalog_bundle(bundle, pop_conditions=True)).conditions == {}
+    bare = Dnd2024CombatCatalog.from_bundle(catalog_bundle(bundle, pop_conditions=True))
+    assert bare.conditions == {} and bare.effects == {}
 
     bad_side = {"blurred": {"attack_modes": [{"side": "somewhere", "mode": "advantage"}]}}
     bad_mode = {"blurred": {"attack_modes": [{"side": "target", "mode": "neutral"}]}}

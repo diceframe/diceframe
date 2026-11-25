@@ -19,6 +19,7 @@ from .models import (
     Dnd2024ClassFeatureCatalog,
     CapabilityCostView,
     FeatureCapability,
+    TURN_START_TIMING,
 )
 from .resources import ResourceDefinition
 
@@ -107,7 +108,7 @@ def _cost_views(
     definitions: Mapping[str, ResourceDefinition],
 ) -> tuple[CapabilityCostView, ...]:
     views: list[CapabilityCostView] = []
-    if capability.cost.turn_start:
+    if capability.cost.timing == TURN_START_TIMING:
         # 窗口本身就是这份成本的"剩余":1 表示还没被跳过也没被别的动作关掉。
         views.append(CapabilityCostView(
             kind="turn_start",
@@ -116,12 +117,12 @@ def _cost_views(
             current=1 if context.turn_start else 0,
             maximum=1,
         ))
-    if capability.cost.action:
+    if capability.cost.slot:
         views.append(CapabilityCostView(
-            kind=capability.cost.action,
-            name=catalog.label(capability.cost.action, capability.cost.action),
+            kind=capability.cost.slot,
+            name=catalog.label(capability.cost.slot, capability.cost.slot),
             amount=1,
-            current=context.remaining(capability.cost.action),
+            current=context.remaining(capability.cost.slot),
             maximum=1,
         ))
     for resource_cost in capability.cost.resources:
@@ -168,12 +169,12 @@ def _blocked_reason(
             return f"{name} is not available to this character"
         if int(pool.current) < 1:
             return f"{name} is empty"
-    action = capability.cost.action
+    action = capability.cost.slot
     if action and context.remaining(action) < 1:
         if not (action == "bonus_action" and context.fleet_step
                 and _is_step_of_the_wind(capability)):
             return f"the {action.replace('_', ' ')} has already been spent"
-    if capability.cost.turn_start and not context.turn_start:
+    if capability.cost.timing == TURN_START_TIMING and not context.turn_start:
         # 窗口一旦被动作或跳过关掉，就不能回头再激活：这就是"at the start of
         # your turn"的可执行含义。
         return "the start of your turn has already passed"

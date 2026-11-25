@@ -78,9 +78,12 @@ def health_payload(instance, include_resolved: bool = False) -> dict:
             e for e in events
             if not e.get("resolved") and not e.get("ignored")
         ]
+    from src.engine.modules import narrative_quality_metrics
+
     return {
         "ok": True,
         "status": module_hooks.read_value(instance, module_hooks.HEALTH_STATUS) or {},
         "events": events[-_MAX_HEALTH_EVENTS:],
         "total": len(events),
+        "narrative_quality": narrative_quality_metrics.metrics(instance),
     }

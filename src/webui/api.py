@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.engine.modules import adventure_runtime_state, economy_state
+from src.engine.modules import adventure_runtime_state, economy_state, game_config
 from src.adventures.outcomes import OutcomeError
 from src.adventures.progress import ProgressError
 from src.assistant_agent_limits import DEFAULT_TASK_MAX_TOKENS
@@ -35,7 +35,7 @@ from src.adventures import AdventureBundleLoader, AdventureResolver
 from src.adventures.scene_context import AdventureSceneContext
 from src.adventures.registry import AdventureSource, AdventureSourceRegistry
 from src.memory.delta import MemoryStore
-from src.rules.rule_system import RuleSystem
+from src.rules.rule_system import RuleSystem, apply_currency_context
 from src.rules.loader import RuleBundleLoader
 from src.rulesets.builtin import (
     build_default_ruleset_registry,
@@ -1127,6 +1127,28 @@ class WebAPI:
             list_tools=self.list_plugin_tools, invoke=self.invoke_plugin_tool,
         )
         self.application_actions.register_source('plugins', lambda: plugin_tools(plugin_action_dependencies))
+        # 规则域：source → runtime 的归属在这里显式记账。runtime id 带冒号
+        # （core:dnd2024），而 source/domain 只允许 [a-z0-9_-]，所以名字由
+        # 规范化生成、归属查表，绝不从 domain 反解 runtime。
+        from src.webui.services.assistant_ruleset_tools import (
+            RulesetToolDependencies, ruleset_domain, ruleset_source_name, ruleset_tools,
+        )
+        ruleset_tool_dependencies = RulesetToolDependencies(
+            get_game=self.get_game_instance,
+            viewer_for=lambda instance, owner: resolve_viewer(
+                instance, user_id=owner, owner_authenticated=True, player_preview=False),
+            submit_ruleset_intent=self.ruleset_submit_intent,
+        )
+        self._ruleset_agent_sources: dict[str, str] = {}
+        self._ruleset_agent_domains: dict[str, str] = {}
+        for runtime_id in self._agent_ruleset_runtime_ids():
+            source_name = ruleset_source_name(runtime_id)
+            self._ruleset_agent_sources[source_name] = runtime_id
+            self._ruleset_agent_domains[runtime_id] = ruleset_domain(runtime_id)
+            self.application_actions.register_source(
+                source_name,
+                lambda runtime_id=runtime_id: ruleset_tools(ruleset_tool_dependencies, runtime_id),
+            )
         self._assistant_agent = AgentRuntime(AgentDependencies(
             llm_client=lambda: self._llm_client, configuration_error=self._llm_configuration_error,
             tools=(), registry=self.application_actions, storage_dir=self._reg.save_dir.parent / "assistant_agent",
@@ -1134,6 +1156,7 @@ class WebAPI:
             review_content=agent_content.review, max_tokens=assistant_agent_max_tokens,
             task_max_tokens=assistant_agent_task_max_tokens,
             creator_projects=self._creator_projects,
+            ruleset_scope=self._visible_ruleset_domains,
         ))
 
     def register_application_actions(self, actions):
@@ -1475,8 +1498,9 @@ class WebAPI:
     def assistant_agent_session(self, owner, session_id):
         return self._assistant_agent.snapshot(owner, session_id)
 
-    def assistant_agent_capabilities(self, owner, query='', domain='', offset=0):
-        return self._assistant_agent.capabilities(owner, query, domain, offset)
+    def assistant_agent_capabilities(self, owner, query='', domain='', offset=0, game_key=''):
+        return self._assistant_agent.capabilities(
+            owner, query, domain, offset, game_key=game_key)
 
     async def assistant_agent_resume(self, owner, session_id, approval_id, plan_digest, emit=None):
         return await self._assistant_agent.resume(owner, session_id, approval_id, plan_digest, emit=emit)
@@ -2149,7 +2173,12 @@ class WebAPI:
             or world_data.get("default_rule")
             or "freeform_fantasy"
         )
-        return self._load_rule_by_id(rule_id, language)
+        rule = self._load_rule_by_id(rule_id, language)
+        return apply_currency_context(
+            rule,
+            game_config.currency_label(inst),
+            game_config.currency_system(inst),
+        )
 
     def _resolve_ruleset_check(self, instance: Any, uid: str, check: dict[str, Any]):
         """G4：把 GM 发起的技能/属性检定交给规则集结算（通用服务不认规则表）。"""
@@ -2159,6 +2188,45 @@ class WebAPI:
         if not callable(hook):
             raise ValueError("this ruleset does not support ability checks")
         return hook(instance, uid, check)
+
+    def _agent_ruleset_runtime_ids(self) -> tuple[str, ...]:
+        """Runtimes that declare agent tools, in stable order.
+
+        The mapping is explicit: a runtime opts in by appearing here, and the
+        registry records source -> runtime_id.  Adding a second ruleset means
+        adding its id here, not teaching the agent layer about it.
+        """
+
+        return ("core:dnd2024",)
+
+    def _visible_ruleset_domains(self, owner: str, context: dict) -> frozenset[str]:
+        """Which ruleset domains one agent session may see.
+
+        ``context`` only *names* a game; membership is proven here.  A session
+        belongs to the game by being its GM or one of its players — anything
+        else (unknown key, wrong game, spectator) gets no ruleset scope at all,
+        which is also how "same rule, other table" is rejected.
+        """
+
+        game_key = str((context or {}).get("game_key") or "").strip()
+        if not game_key or not isinstance(owner, str) or not owner:
+            return frozenset()
+        try:
+            instance = self._reg.get(_parse_game_key(game_key))
+        except (ValueError, TypeError):
+            return frozenset()
+        if instance is None:
+            return frozenset()
+        gm_uid = str(getattr(instance, "gm_uid", "") or "")
+        if owner != gm_uid and owner not in (getattr(instance, "players", {}) or {}):
+            return frozenset()
+        try:
+            runtime = self._load_runtime_for_game(instance)
+        except Exception:  # noqa: BLE001 - 解析失败只降级到全局能力
+            return frozenset()
+        runtime_id = str(getattr(runtime, "runtime_id", "") or "")
+        domain = self._ruleset_agent_domains.get(runtime_id)
+        return frozenset({domain}) if domain else frozenset()
 
     def _load_runtime_for_game(self, inst):
         rule = self._load_rule_for_game(inst)

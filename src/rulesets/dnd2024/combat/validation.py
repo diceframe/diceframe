@@ -24,6 +24,7 @@ from ..forms import (
     FormState, FormStateError, bootstrap_known_forms, mode_for, restrictions,
 )
 from ..features.resources import (
+    long_effect_active,
     OVERCHANNEL_FEATURE_ID,
     OVERCHANNEL_OWNER,
     OVERCHANNEL_SPELL_CLASS,
@@ -59,8 +60,11 @@ from .obscurement import (
     sanctuary_zone_id,
 )
 from .primitives import (
+    slot_available,
+    world_minutes,
     CONDITION_CODES,
     DICE_RE,
+    GM_CONDITION_DURATIONS,
     INITIATIVE_CHOICES,
     INTENT_TYPES,
     MAX_ATTACK_DAMAGE_PARTS,
@@ -950,6 +954,44 @@ class CombatValidationMixin:
             else:
                 raise CombatIntentError("obscurement target must be a combat actor")
             return
+        if intent_type == "gm_condition":
+            # 状态是规则书事实，所以只有 GM 能裁定；客户端提交的是状态 id
+            # 与动作，永远不是"这个状态会做什么"（那由 catalog 解释器回答）。
+            if submitted_by != gm_uid:
+                raise CombatIntentError("only the GM can apply or remove a condition")
+            target_id = str(intent.get("target_id") or "")
+            condition = str(intent.get("condition") or "")
+            action = str(intent.get("action") or "")
+            if action not in {"apply", "remove"}:
+                raise CombatIntentError("condition action must be apply or remove")
+            if not condition:
+                raise CombatIntentError("condition id is required")
+            # 施加只认规则书状态：法术/特性/物品自己制造的效应不能手工授予，
+            # 否则规则就会凭空多出一个来源。移除则宽松——摘掉什么都是清理动作。
+            if action == "apply" and condition not in self.catalog.gm_appliable_conditions():
+                raise CombatIntentError(
+                    f"{condition} is not a condition the GM can apply"
+                )
+            duration = intent.get("duration")
+            if duration is not None and (
+                not isinstance(duration, str) or duration not in GM_CONDITION_DURATIONS
+            ):
+                # 时长是引擎的标记，不是自由文本：认不出的标记既不会到期，也不随
+                # 战斗结束清除，状态会一直留在角色卡上。
+                raise CombatIntentError(
+                    "condition duration must be one of "
+                    f"{sorted(GM_CONDITION_DURATIONS)}"
+                )
+            kind, raw_id = _actor_kind(target_id)
+            if kind == "player":
+                if raw_id not in instance.players:
+                    raise CombatIntentError("condition target actor does not exist")
+            elif kind == "enemy":
+                if raw_id not in (combat.get("enemies") or {}):
+                    raise CombatIntentError("condition target actor does not exist")
+            else:
+                raise CombatIntentError("condition target must be a combat actor")
+            return
         if intent_type == "combat.message":
             if submitted_by not in instance.players:
                 raise CombatIntentError("only a party member can send a combat message")
@@ -1218,11 +1260,11 @@ class CombatValidationMixin:
             )
             if capability is None:
                 return ""
-            # ``cost.action`` 是经济槽位的名字本身（action / bonus_action /
+            # ``cost.slot`` 是经济槽位的名字本身（action / bonus_action /
             # reaction），不是一个布尔。
-            if capability.cost.action == "bonus_action":
+            if capability.cost.slot == "bonus_action":
                 return "bonus_action"
-            return "action" if capability.cost.action == "action" else ""
+            return "action" if capability.cost.slot == "action" else ""
         return ""
 
     ABILITY_CHECK_COSTS = frozenset({"action", "bonus_action", "none"})
@@ -1247,7 +1289,7 @@ class CombatValidationMixin:
         if cost not in self.ABILITY_CHECK_COSTS:
             raise CombatIntentError("ability check cost is not supported")
         economy = combat.get("economy") or {}
-        if cost != "none" and int(economy.get(cost, 0) or 0) < 1:
+        if cost != "none" and not slot_available(economy, cost):
             raise CombatIntentError(f"the {cost.replace('_', ' ')} has already been spent")
 
     _WILD_SHAPE_CR_BY_LEVEL = ((4, "1/4"), (8, "1/2"), (99, "1"))
@@ -1806,6 +1848,56 @@ class CombatValidationMixin:
             self._feature_character(actor), capability_id,
         )
         if capability is not None:
+            # 特性自身的使用次数：这里的拒绝与资源不足同形，客户端拿到的
+            # 是 ok=false 而不是运行期异常。
+            if any(
+                action.kind == "restore_feature_use"
+                for action in capability.actions
+            ):
+                # 没有已用次数时"恢复"是无意义的支付：拒绝而不是白扣一格槽。
+                used = feature_usage_count(
+                    self._feature_character(actor), capability.feature_id,
+                    capability.feature_id,
+                )
+                if used < 1:
+                    raise CombatIntentError(
+                        "this feature has no use left to restore"
+                    )
+                # 支付能力也要挡在这里：零槽/零点时不能让 reducer 抛
+                # EventBatchError，客户端应该拿到 ok=false。
+                character = self._feature_character(actor)
+                slot_level = int(self.features.feature_value(
+                    character, capability.feature_id, "restore_slot_level", 0,
+                ) or 0)
+                if slot_level:
+                    # 槽表在视图的 ``slots`` 上；``_feature_character`` 的切片
+                    # 不带施法块，读它只会得到"零槽"的假结论。
+                    slots = actor.get("slots") or {}
+                    if int(slots.get(str(slot_level), 0) or 0) < 1:
+                        raise CombatIntentError(
+                            f"no level {slot_level} spell slot is available"
+                        )
+                resource_id = str(self.features.feature_value(
+                    character, capability.feature_id, "restore_resource", "",
+                ) or "")
+                amount = int(self.features.feature_value(
+                    character, capability.feature_id, "restore_resource_amount", 0,
+                ) or 0)
+                if resource_id:
+                    state = resource_state(character, resource_id)
+                    if int(state.get("current", 0) or 0) < amount:
+                        raise CombatIntentError(
+                            f"not enough {resource_id} to restore this feature"
+                        )
+            if capability.uses_per_long_rest:
+                used = feature_usage_count(
+                    self._feature_character(actor), capability.feature_id,
+                    capability.feature_id,
+                )
+                if used >= capability.uses_per_long_rest:
+                    raise CombatIntentError(
+                        "this feature has no use left until a long rest"
+                    )
             conditions = actor.get("conditions") or {}
             required = capability.requires_condition
             if required and required not in conditions:
@@ -1818,6 +1910,21 @@ class CombatValidationMixin:
                 raise CombatIntentError(
                     f"{self.features.catalog.label(capability_id, capability_id)} cannot be "
                     f"used while {self.features.catalog.label(forbidden, forbidden)} is active"
+                )
+        if capability_id == "quivering_palm_end":
+            # 结束振动必须先有振动：放在校验层，客户端拿到 ok=false 而不是
+            # 运行期异常。
+            if long_effect_active(
+                self._feature_character(actor), "quivering_palm",
+                world_minutes(instance),
+            ) is None:
+                raise CombatIntentError("no creature is under Quivering Palm")
+            # 规则要求持有者与目标同处一个位面。仓库没有权威位面系统，所以
+            # 这里要求调用方**显式断言**，而不是默认成立——默认成立等于偷偷
+            # 替玩家做了一个它无法验证的判断。
+            if intent.get("same_plane") is not True:
+                raise CombatIntentError(
+                    "Quivering Palm requires an explicit same-plane assertion"
                 )
         if capability_id == "steady_aim":
             if self.has_moved_this_turn(combat, str(actor["actor_id"])):
@@ -2687,6 +2794,20 @@ class CombatValidationMixin:
     def _validate_attack(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], actor: dict[str, Any],
     ) -> None:
+        if intent.get("hurl_through_hell"):
+            # 要求了 Hurl 却不满足条件时在校验层拒绝：结算层抛异常会冒泡，
+            # 客户端应该拿到 ok=false 与可读原因。
+            character = self._feature_character(actor)
+            if not self.features.has_feature(character, "hurl_through_hell"):
+                raise CombatIntentError(
+                    "Hurl Through Hell is not available to this actor"
+                )
+            if feature_usage_count(
+                character, "hurl_through_hell", "hurl_through_hell",
+            ) >= 1:
+                raise CombatIntentError(
+                    "Hurl Through Hell has no use left until a long rest"
+                )
         target_id = str(intent.get("target_id") or "")
         target = self._actor_view(instance, combat, target_id)
         # 敌我判断基于 side：companion/player 同为 party，互不视为合法攻击目标。
@@ -2800,7 +2921,7 @@ class CombatValidationMixin:
         if chosen not in allowed:
             raise CombatIntentError("escape check must be one of the declared abilities")
         cost = str(escape.get("cost") or "action")
-        if int(economy.get(cost, 0) or 0) < 1:
+        if not slot_available(economy, cost):
             raise CombatIntentError(f"escaping costs a {cost.replace('_', ' ')}")
 
     def _validate_stand_up(
@@ -3205,7 +3326,7 @@ class CombatValidationMixin:
                 "companion consumable activation requires an authoritative backpack"
             )
         cost = declaration["cost"]
-        if int(economy.get(cost, 0) or 0) < 1:
+        if not slot_available(economy, cost):
             raise CombatIntentError(f"the {cost.replace('_', ' ')} has already been spent")
         # Quickened 的双向互斥都靠这一条：本回合只要施放过 1 环+ 法术（含免费
         # 施法与专长来源），就不能再 Quickened，也不能在被 Quickened 之后放。
@@ -3299,7 +3420,7 @@ class CombatValidationMixin:
         cost = "bonus_action" if (
             quickened or str(spell["casting_time"]).startswith("Bonus Action")
         ) else "action"
-        if int(economy.get(cost, 0) or 0) < 1:
+        if not slot_available(economy, cost):
             raise CombatIntentError(f"the {cost.replace('_', ' ')} has already been spent")
         # Quickened 的双向互斥都靠这一条：本回合只要施放过 1 环+ 法术（含免费
         # 施法与专长来源），就不能再 Quickened，也不能在被 Quickened 之后放。

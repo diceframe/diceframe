@@ -54,6 +54,18 @@ Agent 初始只加载必要动作；运行时 compact catalog 最多提供 160 �
 
 Agent 在一次框架运行内累计各 HTTP 尝试实际报告的用量（含协商、回退与截断）；缺失用量单独标记，不能当作真实零用量。硬预算在收到模型结果后、派发动作前检查；已达到预算时不开始下一轮模型规划。上下文在每次请求前单独裁剪，不通过软预算异常重启框架运行。`trpg.llm_usage` 的 INFO 事件以运行 ID 关联请求级用量和工程快照读取，只记录元数据与字符数，不记录正文、提示词、地址或凭据。每次回复上限 `assistant_agent_max_tokens`（默认 4096）与单次任务预算 `assistant_agent_task_max_tokens`（默认 256000，范围 16000..2000000）独立，不再以回复上限乘步骤推导任务预算。默认请求/工具调用上限为 24，较大显式授权可提高至 64；写入授权余量仍独立约束。预算触顶保留结果、标明 token 或步骤原因，由用户手动继续，不自动重试。这不是费用、余额或 provider 账单硬上限；领域工具保留各自子调用预算。
 
+## Amendment (2026-11-24)：规则集自有的工具按会话所看的对局限定作用域
+
+规则集可以声明自己的 Agent 工具（首个消费者是 D&D 2024 的 `set_cover`，掩护裁定）。这类工具属于**规则**而不是产品全局功能，因此发现面多出一个判定维度：会话当前解析到哪个对局、该对局用哪条规则。工具集原本全局一套，规则特有的裁定能力因此没有落脚处；一旦直接注册，所有规则集的会话都会看到它。
+
+- **归属与命名**：一条运行时的工具同属一个 `ruleset-<runtime>` domain。`runtime_id` 含冒号（`core:dnd2024`），而 source 与 domain 只允许 `[a-z][a-z0-9_-]{0,39}`，所以两者由规范化生成；`source → runtime_id` 与 `runtime_id → domain` 由 composition root 显式记账，不从 domain 反解运行时。
+- **作用域由服务端证明**：`context.game_key` 只是一个名字。owner 必须是该对局的 GM 或玩家；无 game_key、未知对局、解析不到 runtime 一律得到空集（只剩全局能力），而不是“全部可见”。会话可跨对局复用，所以每次 `run()` 现算，不写进会话文件。这也是“同一条规则、另一桌”被拒绝的地方。
+- **不可见与不存在是同一回事**：初始目录、`search_capabilities`、`describe_capability`、HTTP capabilities 以及初始 payload 的域列表都按作用域过滤，且过滤早于统计与分页——只藏列表会把“存在哪些域、各有多少”照样报出去。调用层再校一次，“搜不到但能直接调”因此不成立。
+- **授权语义不变**：规则域与其它域一样必须出现在 `grant.domains` 里；“空列表 = 不限域”与显式列表的既有含义都不改，也没有新增一个不归 `domains` 管的域族。
+- **领域权威不被 Agent 取代**：规则层适配器只把参数翻成结构化意图，经与桌面相同的 `submit_ruleset_intent` 提交；GM 身份、actor 归属、版本与机制仍由规则集校验。目录发现、聊天内容和授权模式都不能绕过领域拒绝。
+
+当前边界：运行时登记在 composition root 显式列出（现为 `core:dnd2024`），动作名全局唯一——第二条规则接入同名工具时需要加前缀，或改为由运行时通过 capability 声明自己的工具。
+
 ## Consequences
 
 正面结果：
@@ -78,6 +90,7 @@ Agent 在一次框架运行内累计各 HTTP 尝试实际报告的用量（含�
 - `src/application_actions.py`
 - `src/webui/services/assistant_agent.py`
 - `src/webui/services/assistant_authorization.py`
+- `src/webui/services/assistant_ruleset_tools.py`
 - `src/webui/routes/assistant_agent.py`
 - `docs/internal/design/DF_AGENT_IMPLEMENTATION.md`
 - `docs/internal/design/DF_AGENT_CAPABILITY_EVOLUTION.md`
@@ -87,4 +100,4 @@ Agent 在一次框架运行内累计各 HTTP 尝试实际报告的用量（含�
 
 ## Validation
 
-行为验证应覆盖 registry revision/digest、动态 source fail-closed、按需 search/describe、scope/domain/期限/步数、suggest/routine/task effect、设置和插件人工确认、live UID/GM visibility、worldops、取消 shield、重复 receipt、重启后的 recovery_required，以及 owner/private 数据隔离。测试保护这些行为 contract，不绑定某个内部文件形状。
+行为验证应覆盖 registry revision/digest、动态 source fail-closed、按需 search/describe、规则域作用域（成员资格由服务端证明、各发现入口与初始 payload 一致过滤、调用层复核、非成员与无 game_key 得到空集）、scope/domain/期限/步数、suggest/routine/task effect、设置和插件人工确认、live UID/GM visibility、worldops、取消 shield、重复 receipt、重启后的 recovery_required，以及 owner/private 数据隔离。测试保护这些行为 contract，不绑定某个内部文件形状。

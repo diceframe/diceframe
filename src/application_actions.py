@@ -78,6 +78,26 @@ def _digest(value) -> str:
                                                 separators=(',', ':')).encode()).hexdigest()
 
 
+#: Ruleset-owned tools live under one domain per runtime.  Every other
+#: domain belongs to the product itself and stays visible regardless of which
+#: game is open.
+RULESET_DOMAIN_PREFIX = 'ruleset-'
+
+
+def visible_domain(domain: str, visible_domains: frozenset[str] | None) -> bool:
+    """Whether one action belongs to a domain this session may see.
+
+    ``None`` means "not scoped": every domain is visible, so every existing
+    caller keeps its exact behaviour.  A concrete set filters *only* ruleset
+    domains — a rule scope answers "which rule owns this tool", not "which
+    product features are enabled", so global domains are never removed by it.
+    """
+
+    if visible_domains is None:
+        return True
+    return not domain.startswith(RULESET_DOMAIN_PREFIX) or domain in visible_domains
+
+
 class ActionRegistry:
     _MAX_SEARCH_OFFSET = 1_000_000
     _DISCOVERY_HINT = (
@@ -167,14 +187,17 @@ class ActionRegistry:
     def revision(self) -> str:
         return _digest([action.descriptor() for action in sorted(self.values(), key=lambda item: item.name)])
 
-    def describe(self, name: str) -> dict:
+    def describe(self, name: str, *,
+                 visible_domains: frozenset[str] | None = None) -> dict:
         action = self.get(name)
-        if action is None:
+        # 不可见与不存在返回同一个错误：报“存在但你不能看”本身就是泄漏。
+        if action is None or not visible_domain(action.domain, visible_domains):
             raise ValueError('Application capability unavailable')
         return action.descriptor()
 
     def search(self, query: str = '', domain: str = '', *, limit: int = 80,
-               offset: int = 0) -> dict:
+               offset: int = 0,
+               visible_domains: frozenset[str] | None = None) -> dict:
         if not isinstance(query, str) or len(query) > 200 or not isinstance(domain, str) or len(domain) > 40:
             raise ValueError('Invalid capability query')
         if (type(offset) is not int or offset < 0 or
@@ -184,6 +207,10 @@ class ActionRegistry:
         matches = []
         domain_counts: dict[str, int] = {}
         for action in sorted(self.values(), key=lambda item: item.name):
+            # 过滤必须早于统计与分页：否则域计数与 total 仍会把不可见工具
+            # 报出去，等于只藏了列表、没藏存在性。
+            if not visible_domain(action.domain, visible_domains):
+                continue
             domain_counts[action.domain] = domain_counts.get(action.domain, 0) + 1
             haystack = f'{action.name} {action.label} {action.domain} {action.instructions}'.casefold()
             if (not domain or action.domain == domain) and all(word in haystack for word in words):

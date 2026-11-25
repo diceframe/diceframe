@@ -426,10 +426,11 @@ export function getAssistantAgentSession(sessionId: string): Promise<AgentSessio
   return agentJson<AgentSession>(`/assistant/agent/session/${encodeURIComponent(sessionId)}`)
 }
 
-export function getAssistantAgentCapabilities(query: { q?: string; domain?: string; offset?: number } = {}): Promise<{ ok: true; revision: string; capabilities: AgentCapability[]; domains?: AgentCapabilityDomain[]; offset?: number; has_more?: boolean; total?: number; discovery_hint?: string }> {
+export function getAssistantAgentCapabilities(query: { q?: string; domain?: string; offset?: number; game_key?: string } = {}): Promise<{ ok: true; revision: string; capabilities: AgentCapability[]; domains?: AgentCapabilityDomain[]; offset?: number; has_more?: boolean; total?: number; discovery_hint?: string }> {
   const params = new URLSearchParams()
   if (query.q?.trim()) params.set('q', query.q.trim())
   if (query.domain?.trim()) params.set('domain', query.domain.trim())
+  if (query.game_key?.trim()) params.set('game_key', query.game_key.trim())
   if (typeof query.offset === 'number' && query.offset > 0) params.set('offset', String(Math.floor(query.offset)))
   const suffix = params.toString() ? `?${params.toString()}` : ''
   return agentJson(`/assistant/agent/capabilities${suffix}`)

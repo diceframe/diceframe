@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import time
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from src.commands.narrative_application import apply_parsed_data_to_response as _apply_parsed
+from src.commands.narrative_quality import NarrativeQualityError
 from src.commands.round_helpers import should_multi_step, validate_dice_constraint
 from src.commands.protocol_repair import append_protocol_repair_instruction
 from src.commands.tag_json import safe_parse_json
@@ -16,7 +19,7 @@ from src.engine.health import record_health_event
 from src.engine.language import localized_text, normalize_language
 from src.engine.modules import progression_state
 from src.engine.story import StoryFormatError, StorySink, StoryStream, read_story_mode
-from src.commands.story_output import bound_story_response, decode_story_response
+from src.commands.story_output import bound_story_response, decode_story_response, story_limit
 from src.llm.client import OutputTruncatedError, length_retry_budgets
 from src.llm.parser import (
     find_protocol_suffix_start,
@@ -536,12 +539,15 @@ async def call_llm_with_tag_retry(
     on_delta=None,
     on_reset=None,
     public_narration_context: str = "",
+    quality_gate: Callable[[Any, dict], Sequence[str] | Awaitable[Sequence[str]]] | None = None,
+    quality_repair_instruction: Callable[[Sequence[str]], str] | None = None,
 ) -> tuple[Any, dict]:
-    """调用 LLM，解析标签；若叙事违反骰子约束则最多重试 1 次。
+    """调用 LLM、解析标签并执行有界的协议/质量修复。
 
     传入 on_delta 时走流式调用（call_stream），逐段叙事经 _NarrationDeltaFilter 过滤掉
     --- 之后的结构化标签后推给前端；骰子矛盾或截断重试前调 on_reset 让前端清空已显示
-    的流式文本。流式与非流式截断均按 1×、2×、4× 预算重试，且不占用骰子矛盾重试次数。
+    的流式文本。流式与非流式截断均按 1×、2×、4× 预算重试，质量门最多触发一次
+    完整重写。
     """
     response = None
     data: dict = {}
@@ -551,6 +557,8 @@ async def call_llm_with_tag_retry(
     retry_kind = ""
     protocol_retry_used = False
     story_retry_used = False
+    quality_retry_used = False
+    quality_issues: list[str] = []
     dialogue = read_story_mode(instance) == "dialogue"
     streamed_story = None
     started = time.perf_counter()
@@ -578,6 +586,13 @@ async def call_llm_with_tag_retry(
                 "Rewrite it as one narration/dialogue JSON object per line, using only roster IDs "
                 "or new:local_handle, followed by the required --- state-tag block."
             )
+        elif retry_kind == "quality":
+            repair = (
+                quality_repair_instruction(quality_issues)
+                if quality_repair_instruction is not None else
+                "Rewrite the complete response and fix the structured output contract."
+            )
+            retry_context = context + "\n\n" + repair
         if stream:
             response = await _call_stream_with_length_retry(
                 llm_client,
@@ -665,21 +680,45 @@ async def call_llm_with_tag_retry(
                 )
 
         narration = response.narration or response.content
-        if not dice_block or validate_dice_constraint(dice_block, narration):
-            break
-        if dice_retry >= 1:
+        dice_conflict = bool(dice_block) and not validate_dice_constraint(dice_block, narration)
+        if dice_conflict and dice_retry < 1:
+            dice_retry += 1
+            retry_kind = "dice"
+            logger.warning(
+                "叙事重试: 骰子约束矛盾，第%d次重试 (round=%d, 本次耗时=%dms)",
+                dice_retry,
+                progression_state.round_value(instance),
+                int((time.perf_counter() - attempt_started) * 1000),
+            )
+            if on_reset:
+                await on_reset()
+            continue
+        if dice_conflict:
+            # 骰子矛盾到第二次就接受，但质量门不能一并跳过：规则集的状态过滤、
+            # 玩家白名单和结构校验对这份输出同样生效。
             logger.error("骰子约束连续2次矛盾，接受最后输出 (round=%d)", progression_state.round_value(instance))
-            break
-        dice_retry += 1
-        retry_kind = "dice"
-        logger.warning(
-            "叙事重试: 骰子约束矛盾，第%d次重试 (round=%d, 本次耗时=%dms)",
-            dice_retry,
-            progression_state.round_value(instance),
-            int((time.perf_counter() - attempt_started) * 1000),
-        )
-        if on_reset:
-            await on_reset()
+
+        if quality_gate is not None:
+            gate_result = quality_gate(response, data)
+            if inspect.isawaitable(gate_result):
+                gate_result = await gate_result
+            quality_issues = [
+                str(issue) for issue in gate_result
+                if str(issue).strip()
+            ]
+            if quality_issues:
+                if quality_retry_used:
+                    raise NarrativeQualityError(quality_issues)
+                quality_retry_used = True
+                retry_kind = "quality"
+                logger.warning(
+                    "叙事质量门拒绝输出，进行一次修复重写 (round=%d issues=%s)",
+                    progression_state.round_value(instance), quality_issues,
+                )
+                if on_reset:
+                    await on_reset()
+                continue
+        break
 
     logger.info(
         "GM 叙事: 完成 (round=%d, 总耗时=%dms)",
@@ -687,8 +726,7 @@ async def call_llm_with_tag_retry(
         int((time.perf_counter() - started) * 1000),
     )
     if dialogue:
-        limits = _NARRATION_LIMITS.get(normalize_language(instance.language), _NARRATION_LIMITS["zh-CN"])
-        bound_story_response(response, data, trigger=limits["trigger"], limit=limits["combat"])
+        bound_story_response(response, data, limit=story_limit(instance.language))
         if stream and streamed_story != response.story:
             if on_reset:
                 await on_reset()

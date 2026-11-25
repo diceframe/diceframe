@@ -105,7 +105,67 @@ class Dnd2024CombatCatalog:
     # condition -> 攻击掷骰模式注册表：condition 自己声明它挂在攻击者还是
     # 受击者身上、贡献优势还是劣势、被哪些感官 condition 抵消、何时消耗。
     conditions: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # 来源绑定效应与规则书状态分表存放，但解释器只需要一张合并注册表；
+    # 这里两者都留着：``conditions`` 是合并视图（运行时读），``effects``
+    # 是效应自己的目录（反查来源用）。
+    effects: dict[str, dict[str, Any]] = field(default_factory=dict)
     labels: dict[str, str] = field(default_factory=dict)
+
+    def gm_appliable_conditions(self) -> dict[str, dict[str, Any]]:
+        """The states a GM may hand out, i.e. the rulebook conditions.
+
+        ``conditions`` remains the merged runtime registry so every existing
+        reader (``condition_flags`` 等) keeps working; the split between state
+        and source-bound effect is data-level (``kind``).  Effects are produced
+        by a spell / feature / item and are never handed out by hand.
+        """
+
+        return {
+            condition_id: entry
+            for condition_id, entry in self.conditions.items()
+            if str(entry.get("kind") or "") == "condition"
+        }
+
+    def condition_definition(self, condition_id: str) -> dict[str, Any] | None:
+        """A rulebook state's three facts: name, rules summary, mechanical flags.
+
+        名称与摘要是 locale 文本（``labels`` 通道），机械 flag 留在 canonical
+        条目里。GM 选择器、战斗面板与将来的规则查询都从这里读，不各自拼。
+        """
+
+        entry = self.conditions.get(condition_id)
+        if entry is None or str(entry.get("kind") or "") != "condition":
+            return None
+        return {
+            "id": condition_id,
+            "name": self.labels.get(f"condition.{condition_id}") or condition_id,
+            "summary": self.labels.get(f"condition.{condition_id}.summary") or "",
+            "effects": {
+                key: deepcopy(value) for key, value in entry.items() if key != "kind"
+            },
+        }
+
+    def effects_for_source(self, source_ref: str) -> list[str]:
+        """Effects produced by one source, e.g. ``feature:brutal_strike``.
+
+        来源侧不写反向指针：两份表各存一次同一个关系，只会在改名时漂移。
+        反查由效应目录派生，永远和 ``source_ref`` 一致。
+        """
+
+        return sorted(
+            effect_id
+            for effect_id, entry in self.effects.items()
+            if str(entry.get("source_ref") or "") == source_ref
+        )
+
+    def condition_catalog(self) -> list[dict[str, Any]]:
+        """Every state a GM may hand out, in stable id order."""
+
+        rows = (
+            self.condition_definition(condition_id)
+            for condition_id in sorted(self.gm_appliable_conditions())
+        )
+        return [row for row in rows if row is not None]
 
     @classmethod
     def from_bundle(
@@ -266,7 +326,20 @@ class Dnd2024CombatCatalog:
                 )
             if not 5 <= int(effect.get("range", 0) or 0) <= 600:
                 raise CombatCatalogError(f"combat spell range is invalid: {spell_id}")
-        conditions = cls._validated_conditions(raw.get("conditions"))
+        states = cls._validated_conditions(raw.get("conditions"))
+        # 顶层 ``effects`` 是 bundle 自己保留的字段（实体效果操作数组），
+        # 所以状态效应目录用 ``condition_effects``，避免撞名。
+        condition_effects = cls._validated_conditions(raw.get("condition_effects"))
+        overlap = sorted(set(states) & set(condition_effects))
+        if overlap:
+            # 合并视图里后者会无声盖掉前者：一条规则书状态就这样变成不可手工施加
+            # 的效应，而没有任何地方报错。
+            raise CombatCatalogError(
+                f"combat condition is declared in both sections: {overlap}"
+            )
+        # 解释器（condition_flags / attack_modes / resist）只按 flag 取值，
+        # 所以运行时必须看到合并视图；分表的目的是"谁能被手工施加"。
+        conditions = {**states, **condition_effects}
         labels = raw.get("labels") or {}
         if not isinstance(labels, dict):
             raise CombatCatalogError("combat catalog labels must be an object")
@@ -276,6 +349,7 @@ class Dnd2024CombatCatalog:
             spell_effects=deepcopy(effects),
             unarmed_strike=deepcopy(cls._validated_unarmed_strike(raw.get("unarmed_strike"))),
             conditions=deepcopy(conditions),
+            effects=deepcopy(condition_effects),
             labels={str(key): str(value) for key, value in labels.items()},
         )
 
@@ -299,7 +373,7 @@ class Dnd2024CombatCatalog:
                     f"combat condition must be an object: {condition_id}"
                 )
             if set(entry) - {
-                "attack_modes", "resist_damage_types", "implies_incapacitated",
+                "kind", "source_ref", "attack_modes", "resist_damage_types", "implies_incapacitated",
                 "speed_zero", "auto_fail_saves", "crit_on_hit_within_5",
                 "speed_modifier", "speed_halved", "check_bonus_dice",
                 "initiative_advantage", "cannot_attack_source", "cannot_approach_source",
@@ -308,6 +382,23 @@ class Dnd2024CombatCatalog:
             }:
                 raise CombatCatalogError(
                     f"combat condition has unknown fields: {condition_id}"
+                )
+            # 状态与来源绑定效应共用一个运行时注册表（解释器只按 flag 取值），
+            # 但只有 ``condition`` 是规则书里的公共状态、可以由 GM 直接施加；
+            # ``effect`` 是法术/特性/物品自己制造的产物，一对一绑在来源上。
+            kind = entry.get("kind")
+            if kind is not None and str(kind) not in {"condition", "effect"}:
+                raise CombatCatalogError(
+                    f"combat condition kind is invalid: {condition_id}"
+                )
+            # 效应是某个来源的产物，必须说清它来自哪里；状态是规则书条目，
+            # 来源就是规则书本身，不需要反向指针。
+            source_ref = entry.get("source_ref")
+            if kind == "effect" and not (
+                isinstance(source_ref, str) and source_ref.strip()
+            ):
+                raise CombatCatalogError(
+                    f"combat effect must name its source: {condition_id}"
                 )
             for flag in (
                 "implies_incapacitated", "speed_zero", "crit_on_hit_within_5",

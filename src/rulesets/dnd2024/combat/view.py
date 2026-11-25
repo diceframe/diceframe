@@ -19,6 +19,7 @@ from src.rulesets.dnd2024.features.resources import (
     OVERCHANNEL_FEATURE_ID,
     OVERCHANNEL_OWNER,
     OVERCHANNEL_SPELL_CLASS,
+    fly_speed_from,
 )
 from src.rulesets.dnd2024.spells.casting import spell_caster, spellcasting_projection
 
@@ -26,6 +27,8 @@ from .check_modes import marked_target_id, sense_declarations
 from .obscurement import zone_covers
 from .check_windows import LUCKY_RESOURCE
 from .primitives import (
+    slot_available,
+    world_minutes,
     DIVINE_SENSE_CONDITION,
     FEATURE_STATE_KEYS,
     CombatIntentError,
@@ -91,7 +94,10 @@ class CombatViewMixin:
             if raw_id not in instance.players:
                 raise CombatIntentError("player actor does not exist")
             character = _canonical(instance.get_character_sheet(raw_id))
-            view = self._with_hands(combat, self._player_view(raw_id, character))
+            view = self._with_hands(
+                combat,
+                self._player_view(raw_id, character, world_minutes(instance)),
+            )
             view = self._shaped_view(view, character)
             view["cover"] = cover
             view["obscurement"] = self.obscurement_row(combat, actor_id)
@@ -104,7 +110,7 @@ class CombatViewMixin:
             # Companion 是"己方角色"：复用 player canonical 视图结构与装备/法术
             # 目录，不走 enemy attack profile。
             character = self._companion(instance, raw_id).get("ruleset_character") or {}
-            view = self._player_view(raw_id, character)
+            view = self._player_view(raw_id, character, world_minutes(instance))
             view["actor_id"] = _companion_actor(raw_id)
             view["kind"] = "companion"
             view = self._with_hands(combat, view)
@@ -181,10 +187,16 @@ class CombatViewMixin:
     ) -> dict[str, Any]:
         kind, raw_id = _actor_kind(actor_id)
         if kind == "player":
-            return self._player_view(raw_id, _canonical(instance.get_character_sheet(raw_id)))
+            return self._player_view(
+                raw_id, _canonical(instance.get_character_sheet(raw_id)),
+                world_minutes(instance),
+            )
         if kind == "companion":
             companion = (companions or {}).get(raw_id) or self._companion(instance, raw_id)
-            view = self._player_view(raw_id, companion.get("ruleset_character") or {})
+            view = self._player_view(
+                raw_id, companion.get("ruleset_character") or {},
+                world_minutes(instance),
+            )
             view["actor_id"] = _companion_actor(raw_id)
             view["kind"] = "companion"
             return view
@@ -416,7 +428,9 @@ class CombatViewMixin:
                     return dict(entry)
         return None
 
-    def _player_view(self, uid: str, character: dict[str, Any]) -> dict[str, Any]:
+    def _player_view(
+        self, uid: str, character: dict[str, Any], now_minutes: int = 0,
+    ) -> dict[str, Any]:
         class_magic = character.get("spellcasting", {}).get("class")
         class_magic = class_magic if isinstance(class_magic, dict) else {}
         conditions = character.get("conditions")
@@ -470,6 +484,21 @@ class CombatViewMixin:
             # 两个不同的速度（力量 8 穿链甲：卡 20 尺、战斗 10 尺），而两边
             # 都不报错。派生值只有一份，投影只搬不重算。
             "speed": max(0, int(character.get("derived", {}).get("speed", 30) or 30)),
+            # 飞行不住在静态派生里：它来自 long_effects（每个来源取最高），
+            # 到期按世界时钟的绝对分钟判定。
+            "fly_speed": fly_speed_from(character, now_minutes),
+            # 过期项不投出去：同一份视图里 fly_speed 已按到期判定归零，
+            # long_effects 若原样搬出去，两个字段会互相矛盾。
+            "long_effects": {
+                effect_id: deepcopy(effect)
+                for effect_id, effect in (character.get("long_effects") or {}).items()
+                if not (
+                    isinstance(effect, dict)
+                    and isinstance(effect.get("expires_at"), int)
+                    and not isinstance(effect.get("expires_at"), bool)
+                    and now_minutes >= effect["expires_at"]
+                )
+            },
             "armor_training": deepcopy(
                 character.get("derived", {}).get("armor_training") or {}
             ),
@@ -791,7 +820,7 @@ class CombatViewMixin:
                 reason = "finish_melee_hit"
             elif ref not in available:
                 cost = "bonus_action" if str(spell["casting_time"]).startswith("Bonus Action") else "action"
-                reason = "action_spent" if int(economy.get(cost, 0)) < 1 else "slot_already_spent" if economy.get("slot_spell_cast") else "no_spell_slot"
+                reason = "action_spent" if not slot_available(economy, cost) else "slot_already_spent" if economy.get("slot_spell_cast") else "no_spell_slot"
             statuses.append({"spell_ref": ref, "name": spell["name"], "blocked_reason": reason})
         return statuses
 
@@ -963,6 +992,8 @@ class CombatViewMixin:
             "resources": {"class": class_state},
             "equipment": {"item_refs": list(actor.get("equipment_refs") or [])},
             "heroic_inspiration": deepcopy(actor.get("heroic_inspiration")),
+            # 长时效果也是特性边界要读的人：光环是否生效、飞行多快都看它。
+            "long_effects": deepcopy(actor.get("long_effects") or {}),
         }
 
     def _available_class_capabilities(
@@ -1001,7 +1032,7 @@ class CombatViewMixin:
                 # 只能在被攻击命中时，通过 hit_reaction_spell 决策施放。
                 continue
             cost = "bonus_action" if str(spell["casting_time"]).startswith("Bonus Action") else "action"
-            if int(economy.get(cost, 0) or 0) < 1:
+            if not slot_available(economy, cost):
                 continue
             available_slots = [
                 int(level) for level, count in actor["slots"].items()

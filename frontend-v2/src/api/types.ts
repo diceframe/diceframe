@@ -1274,6 +1274,13 @@ export interface RulesetRestResponse extends JsonObject {
   party_results?: Array<{ user_id: string; character_name: string; events: JsonObject[] }>
 }
 
+export interface RuleConditionDefinition {
+  id: string
+  name: string
+  summary: string
+  effects: Record<string, unknown>
+}
+
 export interface RulesetCombatTarget {
   actor_id: string
   kind: 'player' | 'enemy'
@@ -1608,6 +1615,8 @@ export interface RulesetGameplayView {
     economy: Record<string, number | boolean | string>
     reactions: Record<string, number>
     pending_decisions: RulesetPendingDecision[]
+    /** 只有 GM 拿得到：可施加的规则书状态（G16），玩家侧为空数组。 */
+    condition_catalog?: RuleConditionDefinition[]
     actors: RulesetCombatTarget[]
     encounter_instance_id?: string
     encounter_preset_id?: string
