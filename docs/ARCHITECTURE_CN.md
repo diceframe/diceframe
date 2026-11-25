@@ -4880,6 +4880,7 @@ World locale 只能修改：
 ```text
 src/plugin_host/
 ├─ host.py
+├─ manifest_validation.py
 ├─ support.py
 ├─ descriptors.py
 ├─ capabilities.py
@@ -4889,6 +4890,9 @@ src/plugin_host/
 ├─ mirrors.py
 └─ ...
 ```
+
+`host.py` 编排运行时加载和安装事务；`manifest_validation.py` 负责包内声明、配置 schema
+和权限声明的校验，不加载运行时、不发布插件。权限定义与推导仍由 `policy.py` 负责。
 
 ---
 
