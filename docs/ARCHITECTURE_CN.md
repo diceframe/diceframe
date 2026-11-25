@@ -5841,6 +5841,8 @@ core:dnd2024
 
 `WebAPI` 保留内容源刷新入口及其调用顺序；`src/webui/content_sources.py` 从已加载的插件
 重建冒险来源和 D&D 模块目录，并将绑定冒险所属的模块排在其他目录之前。
+`src/webui/rule_loading.py` 负责世界、规则与运行时查找以及 Agent 的规则域判定。
+冒险物品奖励由 `services/adventure_rewards.py` 转交既有提案权威，不直接修改物品栏。
 
 ---
 
