@@ -62,6 +62,7 @@ from .check_windows import (
     DAMAGE_WINDOW_DECISION,
     LUCKY_RESOURCE,
 )
+from .divine_actions import CombatDivineActionsMixin
 from .obscurement import (
     LAND_AID_RANGE_FT,
     SANCTUARY_MOVE_LIMIT_FT,
@@ -150,7 +151,7 @@ def _level_for_bonus(bonus: int) -> str:
 @dataclass(slots=True)
 class Dnd2024CombatEngine(
     CombatValidationMixin, CombatResolutionMixin, CombatReducerMixin, CombatViewMixin, CombatTriggeredSpellsMixin,
-    CombatReactionSpellsMixin, CombatCheckWindowsMixin,
+    CombatReactionSpellsMixin, CombatCheckWindowsMixin, CombatDivineActionsMixin,
 ):
     bundle: LoadedRulesetBundle
     encounter_access: EncounterAccess = field(default_factory=EncounterAccess.blocked)
