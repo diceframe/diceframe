@@ -23,6 +23,7 @@ from src.rulesets.dnd2024.character.reconciliation import (
 )
 from src.rulesets.dnd2024.combat.catalog import Dnd2024CombatCatalog
 from src.rulesets.dnd2024.content.encounter import expand_encounter_enemies
+from src.rulesets.dnd2024.features.models import TURN_START_TIMING
 from src.rulesets.dnd2024.features import (
     CombatCapabilityView,
     Dnd2024ClassFeatureResolver,
@@ -74,6 +75,7 @@ from src.rulesets.dnd2024.features.resources import (
     long_effect_active,
 )
 from .primitives import (
+    slot_available,
     world_minutes,
     INTENT_TYPES,
     PERSISTENT_RAGE_DURATION,
@@ -756,7 +758,7 @@ class Dnd2024CombatEngine(
             if declaration is None:
                 continue
             cost = declaration["cost"]
-            if int(economy.get(cost, 0) or 0) < 1:
+            if not slot_available(economy, cost):
                 continue
             if (
                 item_requires_attunement(self.bundle, item_ref)
@@ -2156,7 +2158,7 @@ class Dnd2024CombatEngine(
         character = self._feature_character(actor)
         for definition in self.features.active_features_for(character):
             for capability in definition.capabilities:
-                if not capability.cost.turn_start:
+                if capability.cost.timing != TURN_START_TIMING:
                     continue
                 affordable = all(
                     int(resource_state(character, cost.resource_id).get("current", 0) or 0)

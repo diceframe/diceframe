@@ -27,6 +27,7 @@ from .check_modes import marked_target_id, sense_declarations
 from .obscurement import zone_covers
 from .check_windows import LUCKY_RESOURCE
 from .primitives import (
+    slot_available,
     world_minutes,
     DIVINE_SENSE_CONDITION,
     FEATURE_STATE_KEYS,
@@ -819,7 +820,7 @@ class CombatViewMixin:
                 reason = "finish_melee_hit"
             elif ref not in available:
                 cost = "bonus_action" if str(spell["casting_time"]).startswith("Bonus Action") else "action"
-                reason = "action_spent" if int(economy.get(cost, 0)) < 1 else "slot_already_spent" if economy.get("slot_spell_cast") else "no_spell_slot"
+                reason = "action_spent" if not slot_available(economy, cost) else "slot_already_spent" if economy.get("slot_spell_cast") else "no_spell_slot"
             statuses.append({"spell_ref": ref, "name": spell["name"], "blocked_reason": reason})
         return statuses
 
@@ -1031,7 +1032,7 @@ class CombatViewMixin:
                 # 只能在被攻击命中时，通过 hit_reaction_spell 决策施放。
                 continue
             cost = "bonus_action" if str(spell["casting_time"]).startswith("Bonus Action") else "action"
-            if int(economy.get(cost, 0) or 0) < 1:
+            if not slot_available(economy, cost):
                 continue
             available_slots = [
                 int(level) for level, count in actor["slots"].items()

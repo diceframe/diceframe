@@ -58,6 +58,7 @@ from .obscurement import (
     sanctuary_zone_id,
 )
 from .primitives import (
+    slot_available,
     world_minutes,
     CONDITION_CODES,
     DICE_RE,
@@ -1255,11 +1256,11 @@ class CombatValidationMixin:
             )
             if capability is None:
                 return ""
-            # ``cost.action`` 是经济槽位的名字本身（action / bonus_action /
+            # ``cost.slot`` 是经济槽位的名字本身（action / bonus_action /
             # reaction），不是一个布尔。
-            if capability.cost.action == "bonus_action":
+            if capability.cost.slot == "bonus_action":
                 return "bonus_action"
-            return "action" if capability.cost.action == "action" else ""
+            return "action" if capability.cost.slot == "action" else ""
         return ""
 
     ABILITY_CHECK_COSTS = frozenset({"action", "bonus_action", "none"})
@@ -1284,7 +1285,7 @@ class CombatValidationMixin:
         if cost not in self.ABILITY_CHECK_COSTS:
             raise CombatIntentError("ability check cost is not supported")
         economy = combat.get("economy") or {}
-        if cost != "none" and int(economy.get(cost, 0) or 0) < 1:
+        if cost != "none" and not slot_available(economy, cost):
             raise CombatIntentError(f"the {cost.replace('_', ' ')} has already been spent")
 
     _WILD_SHAPE_CR_BY_LEVEL = ((4, "1/4"), (8, "1/2"), (99, "1"))
@@ -2804,7 +2805,7 @@ class CombatValidationMixin:
         if chosen not in allowed:
             raise CombatIntentError("escape check must be one of the declared abilities")
         cost = str(escape.get("cost") or "action")
-        if int(economy.get(cost, 0) or 0) < 1:
+        if not slot_available(economy, cost):
             raise CombatIntentError(f"escaping costs a {cost.replace('_', ' ')}")
 
     def _validate_stand_up(
@@ -3209,7 +3210,7 @@ class CombatValidationMixin:
                 "companion consumable activation requires an authoritative backpack"
             )
         cost = declaration["cost"]
-        if int(economy.get(cost, 0) or 0) < 1:
+        if not slot_available(economy, cost):
             raise CombatIntentError(f"the {cost.replace('_', ' ')} has already been spent")
         canonical = self._canonical_actor(instance, actor)
         payload = self._activation_payload(instance, actor)
@@ -3290,7 +3291,7 @@ class CombatValidationMixin:
             raise CombatIntentError("spend_luck requires a spell attack roll")
         self._validate_lucky_spend(instance, intent, actor)
         cost = "bonus_action" if str(spell["casting_time"]).startswith("Bonus Action") else "action"
-        if int(economy.get(cost, 0) or 0) < 1:
+        if not slot_available(economy, cost):
             raise CombatIntentError(f"the {cost.replace('_', ' ')} has already been spent")
         slot_level = intent.get("slot_level", spell["level"])
         if isinstance(slot_level, bool) or not isinstance(slot_level, int):

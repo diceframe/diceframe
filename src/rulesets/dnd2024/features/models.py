@@ -55,10 +55,18 @@ ACTION_KINDS = frozenset({
     # 与 Divine Spark 的单目标、Turn Undead 的固定类型都不同形。
     "abjure_foes",
 })
-ACTION_COST_KINDS = ("bonus_action", "action")
-# 回合开始窗口的支付键。与动作成本互斥：一个能力要么花动作，要么只在自己
+# 动作槽的名字。一个能力最多占一个槽。目录里的旧写法把槽名当键
+# （``action: 1`` / ``bonus_action: 1``），新写法是 ``slot: "action"``；两种都
+# 读，同时出现视为声明错误，不让"占不占动作"有两个来源。
+ACTION_COST_KINDS = ("action", "bonus_action")
+SLOT_COST_KEY = "slot"
+# 回合开始窗口的支付时机。与动作槽互斥：一个能力要么花动作，要么只在自己
 # 回合开始时花资源 —— 两者同时声明会让"这个能力到底占不占动作"没有唯一答案。
+# 旧写法是 ``turn_start: true``，新写法是 ``timing: "turn_start"``。
 TURN_START_COST_KEY = "turn_start"
+TURN_START_TIMING = "turn_start"
+TIMING_COST_KEY = "timing"
+COST_TIMINGS = frozenset({TURN_START_TIMING})
 # 装备前提里可声明的武器类别；同样 fail closed。``simple_melee`` 是 SRD 的
 # Simple Melee 武器栏，``martial_melee_light`` 是带 Light 的 Martial Melee 武器。
 WEAPON_KINDS = frozenset({"simple_melee", "martial_melee_light"})
@@ -184,20 +192,35 @@ class ResourceCost:
 
 @dataclass(frozen=True, slots=True)
 class CapabilityCost:
-    """The action-economy and resource price of one capability.
+    """The action-slot, resource and timing price of one capability.
 
-    ``turn_start`` is a third kind of price next to the two action slots: the
-    capability can only be paid inside the window that opened when the actor's
-    own turn began, and it consumes no action, Bonus Action or Reaction.
-    Superior Defense is written that way -- "at the start of your turn" is a
-    timing restriction, not a cheaper action -- so it cannot be expressed as
-    ``action="action"`` without inventing a free action, nor left unpriced
-    without becoming usable at any moment of the turn.
+    The three fields answer three separate questions, so none of them can be
+    derived from another:
+
+    * ``slot`` -- which action-economy slot it occupies (``action`` or
+      ``bonus_action``); empty means it occupies none.
+    * ``resources`` -- what it spends: spell slots, Focus, uses, resource pools.
+    * ``timing`` -- when it may be paid. ``turn_start`` is a timing
+      restriction, not a cheaper action: Superior Defense is "at the start of
+      your turn", so it consumes no slot and cannot be declared later in the
+      turn.  Folding it into ``slot`` would make one field answer both
+      "what does it cost" and "when can I pay".
+
+    ``action`` and ``turn_start`` remain as read-only aliases for callers that
+    predate the split; writes go through the fields above.
     """
 
-    action: str = ""
+    slot: str = ""
     resources: tuple[ResourceCost, ...] = ()
-    turn_start: bool = False
+    timing: str = ""
+
+    @property
+    def action(self) -> str:
+        return self.slot
+
+    @property
+    def turn_start(self) -> bool:
+        return self.timing == TURN_START_TIMING
 
 
 @dataclass(frozen=True, slots=True)
@@ -774,30 +797,25 @@ class Dnd2024ClassFeatureCatalog:
         raw_cost = raw.get("cost") or {}
         if not isinstance(raw_cost, dict):
             raise ClassFeatureError(f"{capability_id}.cost must be an object")
-        action = ""
-        for action_kind in ACTION_COST_KINDS:
-            if action_kind not in raw_cost:
+        keyed_slot = ""
+        for slot_kind in ACTION_COST_KINDS:
+            if slot_kind not in raw_cost:
                 continue
-            if action:
+            if keyed_slot:
                 raise ClassFeatureError(f"{capability_id} declares more than one action cost")
-            if _require_positive_int(raw_cost[action_kind], f"{capability_id}.{action_kind}") != 1:
-                raise ClassFeatureError(f"{capability_id}.{action_kind} must be 1")
-            action = action_kind
-        turn_start = TURN_START_COST_KEY in raw_cost
-        if turn_start:
-            if raw_cost[TURN_START_COST_KEY] is not True:
+            if _require_positive_int(raw_cost[slot_kind], f"{capability_id}.{slot_kind}") != 1:
+                raise ClassFeatureError(f"{capability_id}.{slot_kind} must be 1")
+            keyed_slot = slot_kind
+        slot = keyed_slot
+        if SLOT_COST_KEY in raw_cost:
+            slot = str(raw_cost[SLOT_COST_KEY] or "")
+            if slot not in ACTION_COST_KINDS:
                 raise ClassFeatureError(
-                    f"{capability_id}.{TURN_START_COST_KEY} must be true"
+                    f"{capability_id}.{SLOT_COST_KEY} is not a known action slot: {slot!r}"
                 )
-            if action:
+            if keyed_slot:
                 raise ClassFeatureError(
-                    f"{capability_id} cannot cost an action and a turn-start window at once"
-                )
-            if not (raw_cost.get("resources") or []):
-                # 既不要动作也不要资源，等于一个任意时刻可用的免费能力：
-                # "只能在回合开始支付" 就失去意义，必须当成声明错误。
-                raise ClassFeatureError(
-                    f"{capability_id} turn-start capability must cost a resource"
+                    f"{capability_id} declares both {SLOT_COST_KEY} and an action cost"
                 )
         raw_resources = raw_cost.get("resources") or []
         if not isinstance(raw_resources, list):
@@ -814,6 +832,34 @@ class Dnd2024ClassFeatureCatalog:
                     raw_resource.get("amount"), f"{capability_id} resource cost amount",
                 ),
             ))
+        timing = ""
+        if TURN_START_COST_KEY in raw_cost:
+            if raw_cost[TURN_START_COST_KEY] is not True:
+                raise ClassFeatureError(
+                    f"{capability_id}.{TURN_START_COST_KEY} must be true"
+                )
+            if TIMING_COST_KEY in raw_cost:
+                raise ClassFeatureError(
+                    f"{capability_id} declares both {TURN_START_COST_KEY} and {TIMING_COST_KEY}"
+                )
+            timing = TURN_START_TIMING
+        if TIMING_COST_KEY in raw_cost:
+            timing = str(raw_cost[TIMING_COST_KEY] or "")
+            if timing not in COST_TIMINGS:
+                raise ClassFeatureError(
+                    f"{capability_id}.{TIMING_COST_KEY} is not a known timing: {timing!r}"
+                )
+        if timing:
+            if slot:
+                raise ClassFeatureError(
+                    f"{capability_id} cannot cost an action and a turn-start window at once"
+                )
+            if not resources:
+                # 既不要动作也不要资源，等于一个任意时刻可用的免费能力：
+                # "只能在回合开始支付" 就失去意义，必须当成声明错误。
+                raise ClassFeatureError(
+                    f"{capability_id} turn-start capability must cost a resource"
+                )
         raw_actions = raw.get("actions")
         if not isinstance(raw_actions, list) or not raw_actions:
             raise ClassFeatureError(f"{capability_id}.actions must be a non-empty array")
@@ -872,7 +918,7 @@ class Dnd2024ClassFeatureCatalog:
             id=capability_id,
             feature_id=feature_id,
             cost=CapabilityCost(
-                action=action, resources=tuple(resources), turn_start=turn_start,
+                slot=slot, resources=tuple(resources), timing=timing,
             ),
             requires_hostile_target=bool(raw.get("requires_hostile_target")),
             actions=tuple(actions),
