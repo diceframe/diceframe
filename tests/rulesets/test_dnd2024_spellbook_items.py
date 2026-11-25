@@ -592,3 +592,33 @@ def test_a_level_without_a_new_slot_level_grants_no_free_pick() -> None:
     )
     assert int(row["free_spellbook_picks"]) == 0
     assert int(row["spellbook_additions"]) == 2
+
+
+# --------------------------------------------------------------------------
+# Spell Scroll: still a descriptive entry, so the scroll子能力 stays not_automated
+# --------------------------------------------------------------------------
+
+
+def test_no_spell_scroll_item_reaches_the_runtime() -> None:
+    """卷轴没有物品身份，"从卷轴施法"就没有可读的事实。
+
+    目录文件里确实有 `spell_scroll_cantrip` / `spell_scroll_level_1` 两个条目，
+    但它们只有 `name`/`desc`/`cost_gp`——没有 `spell_ref`、没有等级、没有
+    `activation`，而且**没有装进运行时 item 实体**（115 条里一条都没有）。
+    这不是"还没接上"，是缺物品身份本身：自造一个 id 或猜一个法术，都会让
+    Use Magic Device 的卷轴部分假装自动化。所以卷轴子能力保持 `not_automated`。
+    """
+
+    bundle = Dnd2024Runtime().load_bundle("en")
+
+    assert [key for key in bundle.entities["item"] if "spell_scroll" in key] == []
+
+
+def test_use_magic_device_declares_no_scroll_automation() -> None:
+    """声明里不能出现"看起来支持卷轴"的参数，否则面板会给出假按钮。"""
+
+    definition = _resolver().catalog.features["use_magic_device"]
+
+    assert not [
+        key for key in definition.parameters if key.startswith("scroll")
+    ]
