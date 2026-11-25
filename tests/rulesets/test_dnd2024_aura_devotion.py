@@ -8,6 +8,7 @@ import pytest
 
 from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.features.models import ClassFeatureError
+from src.rulesets.dnd2024.features.validation import validate_aura_parameters
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 from src.rulesets.events import stable_batch_id
@@ -520,7 +521,7 @@ def test_malformed_aura_declarations_fail_closed(feature_id, overrides) -> None:
 
     SP6 patched the catalog at runtime and asserted the malformed declaration
     yielded no immunity.  S0-E2 moved the whole shape check to the load
-    boundary (``_validate_aura_parameters``), which is strictly stronger: the
+    boundary (``validate_aura_parameters``), which is strictly stronger: the
     bundle is rejected instead of quietly projecting an aura that does nothing.
     The four shapes are the same four, retargeted at the surviving keys --
     ``aura_range``/``aura_immune_conditions`` no longer exist, so patching them
@@ -536,4 +537,4 @@ def test_malformed_aura_declarations_fail_closed(feature_id, overrides) -> None:
         definition, parameters={**definition.parameters, **overrides},
     )
     with pytest.raises(ClassFeatureError):
-        engine.features._validate_aura_parameters(malformed)
+        validate_aura_parameters(malformed, engine.features.catalog)

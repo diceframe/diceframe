@@ -35,6 +35,11 @@ from src.rulesets.dnd2024.character.reconciliation import (
 )
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.features.models import ClassFeatureError
+from src.rulesets.dnd2024.features.validation import (
+    validate_ability_bonus_parameters,
+    validate_passive_parameters,
+    validate_saving_throw_proficiency_parameters,
+)
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 
 from dnd2024_monk_common import SequenceRng, advancement_choices
@@ -596,7 +601,7 @@ def test_malformed_ability_bonuses_fail_closed(features, key, overrides) -> None
         definition, parameters={**definition.parameters, **overrides},
     )
     with pytest.raises(ClassFeatureError):
-        features._validate_ability_bonus_parameters(malformed)
+        validate_ability_bonus_parameters(malformed)
 
 
 @pytest.mark.parametrize(
@@ -615,7 +620,7 @@ def test_malformed_proficiency_grants_fail_closed(features, overrides) -> None:
         definition, parameters={**definition.parameters, **overrides},
     )
     with pytest.raises(ClassFeatureError):
-        features._validate_saving_throw_proficiency_parameters(malformed)
+        validate_saving_throw_proficiency_parameters(malformed)
 
 
 def test_a_truthy_replacement_flag_fails_closed(features) -> None:
@@ -627,7 +632,7 @@ def test_a_truthy_replacement_flag_fails_closed(features) -> None:
         parameters={"strength_total_replacement": "yes"},
     )
     with pytest.raises(ClassFeatureError):
-        features._validate_passive_parameters(malformed)
+        validate_passive_parameters(malformed)
 
 
 def test_a_cap_without_a_bonus_fails_closed(features) -> None:
@@ -637,7 +642,7 @@ def test_a_cap_without_a_bonus_fails_closed(features) -> None:
         parameters={"ability_score_cap": 25},
     )
     with pytest.raises(ClassFeatureError):
-        features._validate_ability_bonus_parameters(malformed)
+        validate_ability_bonus_parameters(malformed)
 
 
 # ---------------------------------------------------------------------------
