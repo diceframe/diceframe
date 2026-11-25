@@ -5971,6 +5971,10 @@ The current direction is:
 - continue moving real domain logic down into services/core;
 - do not create new cross-service coupling merely because “the file is large.”
 
+`WebAPI` retains the content refresh entry points and their call order. `src/webui/content_sources.py`
+rebuilds adventure sources and D&D module catalogs from installed plugin runtimes and puts the
+module that owns the bound adventure first in the catalog source list.
+
 ---
 
 ## 50.5 GameInstance Is Still a Large Aggregate

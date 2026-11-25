@@ -31,9 +31,8 @@ from src.creator.worker import WorkerPolicy, run_worker
 
 from src.engine.participant_view import Viewer
 from src.lorebook.store import LorebookStore
-from src.adventures import AdventureBundleLoader, AdventureResolver
+from src.adventures import AdventureResolver
 from src.adventures.scene_context import AdventureSceneContext
-from src.adventures.registry import AdventureSource, AdventureSourceRegistry
 from src.memory.delta import MemoryStore
 from src.rules.rule_system import RuleSystem, apply_currency_context
 from src.rules.loader import RuleBundleLoader
@@ -46,6 +45,7 @@ from src.rulesets.plugin_runtime_source import PluginRulesetRuntimeSource
 from src.rulesets.registry import RulesetRuntimeRegistry
 from src.engine.world_template import load_world_template
 from src.content_modules.projection import ContentProjectionService
+from src.webui import content_sources
 from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, lorebooks, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls, check_reveals, seat_tokens, storytelling
 from src.webui.services import lorebook_usage
 from src.webui.services.ui_actions import UiActionDependencies, dispatch_ui_action
@@ -3894,88 +3894,29 @@ class WebAPI:
         self._sync_module_catalogs()
 
     def _sync_plugin_adventure_sources(self) -> None:
-        """MOD-03：把启用的 content-pack 模组声明的 adventure_packages 同步为
-        registry 的 plugin 来源（declared-only loader）。
-
-        只读 plugin runtime 状态，幂等重建 plugin 来源集合；插件禁用/卸载后
-        其来源自动消失。
-        """
-
         if self._adventure_source_registry is None or self._plugins is None:
             return
-        sources = []
-        for runtime in self._plugins.plugins.values():
-            root = getattr(runtime, "adventure_packages_root", None)
-            if root is None or runtime.status == "disabled":
-                continue
-            sources.append(AdventureSource(
-                "plugin",
-                str(runtime.manifest.get("id") or ""),
-                AdventureBundleLoader(
-                    root,
-                    allowed_directory_ids=getattr(runtime, "adventure_package_directories", ()),
-                ),
-            ))
-        self._adventure_source_registry.sync_plugin_sources(sources)
+        content_sources.sync_plugin_adventure_sources(
+            self._adventure_source_registry, self._plugins.plugins.values(),
+        )
 
     def _sync_module_catalogs(self) -> None:
-        """DNDMOD-04：把启用的 content-pack 模组声明的 ruleset_catalogs 装载为
-        模块目录来源（DNDMOD-01 契约校验，fail closed；坏包让该模块目录缺席
-        并记日志，不拖垮其它模块）。"""
-
         if self._plugins is None:
             return
-        from src.rulesets.dnd2024.content.catalog import load_catalog_dir
-
-        sources: list[tuple[str, Any]] = []
-        for runtime in self._plugins.plugins.values():
-            root = getattr(runtime, "ruleset_catalogs_root", None)
-            if root is None or runtime.status == "disabled":
-                continue
-            label = f"module:{runtime.manifest.get('id') or ''}"
-            for directory in getattr(runtime, "ruleset_catalog_directories", ()):
-                try:
-                    source = load_catalog_dir(Path(root) / directory, source_label=label)
-                except Exception as exc:
-                    logger.warning(
-                        "module catalog load failed: %s: %s", label, exc,
-                    )
-                    continue
-                # catalog_from_sources / 运行时期望 {kind: {record_id: record}}；
-                # CatalogSource.records 是 (kind, id) 键——这里统一成嵌套形状。
-                nested: dict[str, dict[str, Any]] = {}
-                for (kind, record_id), record in source.records.items():
-                    nested.setdefault(str(kind), {})[str(record_id)] = record
-                sources.append((source.label, nested))
-        self._dnd_module_catalogs = sources
+        self._dnd_module_catalogs = content_sources.load_module_catalogs(self._plugins.plugins.values())
 
     def module_catalog(self) -> Any:
         """DNDMOD-04：合并的模块内容目录（每次调用前同步）。"""
 
         self._sync_plugin_adventure_sources()
         self._sync_module_catalogs()
-        from src.rulesets.dnd2024.content.catalog import catalog_from_sources
-
-        if not self._dnd_module_catalogs:
-            return catalog_from_sources([])
-        return catalog_from_sources(self._dnd_module_catalogs)
+        return content_sources.module_catalog(self._dnd_module_catalogs)
 
     def module_content_sources(self, instance: Any = None) -> list[tuple[str, Any]]:
-        """FIX-03 §5.1：模组 catalog 来源链（owning module 优先，其余按 label）。
-
-        只提供"哪些模组声明了哪些 catalog"这一事实；链路语义由 runtime 决定。
-        """
+        """FIX-03 §5.1：模组 catalog 来源链，绑定冒险所属模块优先。"""
 
         self._sync_module_catalogs()
-        sources = list(self._dnd_module_catalogs)
-        owning = ""
-        binding = getattr(instance, "adventure_binding", None)
-        if isinstance(binding, dict) and str(binding.get("source_kind") or "") == "plugin":
-            owning = str(binding.get("source_id") or "")
-        if owning:
-            owner_label = f"module:{owning}"
-            sources.sort(key=lambda item: 0 if item[0] == owner_label else 1)
-        return sources
+        return content_sources.ordered_module_sources(self._dnd_module_catalogs, instance)
 
     def list_adventures(
         self, rule_id: str = "", world_id: str = "", language: str = "",

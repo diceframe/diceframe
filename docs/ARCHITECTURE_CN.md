@@ -5875,6 +5875,9 @@ core:dnd2024
 - 继续让实际 domain logic 下沉到 services/core；
 - 不因“文件大”就盲目拆出新的 cross-service coupling。
 
+`WebAPI` 保留内容源刷新入口及其调用顺序；`src/webui/content_sources.py` 从已加载的插件
+重建冒险来源和 D&D 模块目录，并将绑定冒险所属的模块排在其他目录之前。
+
 ---
 
 ## 50.5 GameInstance 仍是大 Aggregate
