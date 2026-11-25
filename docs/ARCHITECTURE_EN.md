@@ -5974,6 +5974,9 @@ The current direction is:
 `WebAPI` retains the content refresh entry points and their call order. `src/webui/content_sources.py`
 rebuilds adventure sources and D&D module catalogs from installed plugin runtimes and puts the
 module that owns the bound adventure first in the catalog source list.
+`src/webui/rule_loading.py` handles world, rule, and runtime lookups and agent ruleset scope.
+`services/adventure_rewards.py` sends adventure item rewards to the existing proposal authority
+instead of writing inventories directly.
 
 ---
 
