@@ -45,13 +45,7 @@ from ..items.charges import (
     validate_charges_declaration,
     validate_destroy_declaration,
 )
-from ..spells.font_of_magic import (
-    FontOfMagicError,
-    create_slot_plan,
-    declaring_class_level,
-    parse_created_slot_costs,
-    slot_to_points_plan,
-)
+from ..spells.font_of_magic import declaring_class_level
 from .cover import COVER_LEVELS
 from .obscurement import (
     LAND_AID_RANGE_FT,
@@ -1856,70 +1850,6 @@ class CombatValidationMixin:
             ) if key in intent},
             **granted_strike_selection(intent),
         }, rider_actor)
-
-    def _validate_bardic_grant(
-        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], actor: dict[str, Any],
-    ) -> None:
-        target_id = str(intent.get("target_id") or "")
-        target = self._actor_view(instance, combat, target_id)
-        if target_id == actor["actor_id"]:
-            raise CombatIntentError("you cannot grant Bardic Inspiration to yourself")
-        if str(target.get("side") or "") != str(actor.get("side") or "") or target["hp"] <= 0:
-            raise CombatIntentError("Bardic Inspiration targets a living ally")
-        range_ft = self.features.feature_value(
-            self._feature_character(actor), "bardic_inspiration", "range_ft", 0,
-        )
-        if not isinstance(range_ft, int) or range_ft <= 0:
-            raise CombatIntentError("no Bardic Inspiration range is declared")
-        self._require_range(combat, actor["actor_id"], target_id, range_ft)
-        # A blinded target cannot see an invisible bard; deafened is not modeled.
-        if (
-            "invisible" in (actor.get("conditions") or {})
-            and "blinded" in (target.get("conditions") or {})
-        ):
-            raise CombatIntentError("the target can neither see nor hear you")
-        if self._active_bardic_instance(instance, combat, target_id) is not None:
-            raise CombatIntentError("the target already holds a Bardic Inspiration die")
-
-    def _validate_inspiration_slot_exchange(
-        self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],
-    ) -> None:
-        character = self._canonical_actor(instance, actor)
-        pool = resource_state(character, "bardic_inspiration")
-        if int(pool.get("current", 0) or 0) >= int(pool.get("maximum", 0) or 0):
-            raise CombatIntentError("no expended Bardic Inspiration use to regain")
-        slot_level = intent.get("slot_level")
-        if isinstance(slot_level, bool) or not isinstance(slot_level, int) or slot_level < 1:
-            raise CombatIntentError("a spell slot level is required")
-        slots = ((character.get("spellcasting") or {}).get("class") or {}).get("slots_current") or {}
-        if int(slots.get(str(slot_level), 0) or 0) < 1:
-            raise CombatIntentError("the spell slot is already spent")
-
-    def _validate_font_slot_to_points(
-        self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],
-    ) -> None:
-        try:
-            slot_to_points_plan(self._canonical_actor(instance, actor), intent.get("slot_level"))
-        except FontOfMagicError as exc:
-            raise CombatIntentError(str(exc)) from exc
-
-    def _validate_font_create_slot(
-        self, instance: Any, actor: dict[str, Any], intent: dict[str, Any],
-        capability: FeatureCapability,
-    ) -> None:
-        character = self._canonical_actor(instance, actor)
-        definition = self.features.feature_definition(capability.feature_id)
-        class_id = str(getattr(definition, "class_id", "") or "")
-        try:
-            costs = parse_created_slot_costs(
-                self.features.feature_value(character, capability.feature_id, "created_slot_costs", ()),
-            )
-            create_slot_plan(
-                character, intent.get("slot_level"), costs,
-                declaring_class_level(character, class_id),
-            )
-        except FontOfMagicError as exc:
-            raise CombatIntentError(str(exc)) from exc
 
     def _validate_two_handed(
         self, actor: dict[str, Any], intent: dict[str, Any], weapon: dict[str, Any],

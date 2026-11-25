@@ -63,6 +63,7 @@ from .check_windows import (
     LUCKY_RESOURCE,
 )
 from .divine_actions import CombatDivineActionsMixin
+from .support_actions import CombatSupportActionsMixin
 from .ongoing_effects import CombatOngoingEffectsMixin
 from .obscurement import (
     LAND_AID_RANGE_FT,
@@ -153,6 +154,7 @@ def _level_for_bonus(bonus: int) -> str:
 class Dnd2024CombatEngine(
     CombatValidationMixin, CombatResolutionMixin, CombatReducerMixin, CombatViewMixin, CombatTriggeredSpellsMixin,
     CombatReactionSpellsMixin, CombatCheckWindowsMixin, CombatDivineActionsMixin,
+    CombatSupportActionsMixin,
     CombatOngoingEffectsMixin,
 ):
     bundle: LoadedRulesetBundle
