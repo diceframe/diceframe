@@ -1662,10 +1662,14 @@ class Dnd2024ClassFeatureResolver:
         definitions = {
             definition.id: definition for definition in self.resource_definitions(character)
         }
+        effects = character.get("long_effects") if isinstance(character, Mapping) else None
         return _project_capabilities(
             self.catalog,
             active,
-            CombatContext.from_economy(combat_context, actor_id),
+            CombatContext.from_economy(
+                combat_context, actor_id,
+                active_effects=frozenset(effects) if isinstance(effects, Mapping) else frozenset(),
+            ),
             definitions,
             include_unavailable=include_unavailable,
         )

@@ -70,10 +70,14 @@ class CombatContext:
     turn_start: bool = False
     # Fleet Step：一个非 Step 的附赠动作结算后，本回合还剩一次免费的 Step。
     fleet_step: bool = False
+    # 当前活跃的长时效果 id。结束类能力（end_long_effect）在效果不存在时
+    # 不该是可点的按钮：点下去只会对 reducer 发一条针对不存在 id 的事件。
+    active_effects: frozenset[str] = frozenset()
 
     @classmethod
     def from_economy(
         cls, economy: Mapping[str, Any] | None, actor_id: str = "",
+        active_effects: frozenset[str] = frozenset(),
     ) -> CombatContext:
         source: Mapping[str, Any] = economy if isinstance(economy, Mapping) else {}
 
@@ -91,6 +95,7 @@ class CombatContext:
             reaction=budget("reaction"),
             turn_start=bool(actor_id) and str(window.get("actor_id") or "") == actor_id,
             fleet_step=bool(source.get("fleet_step_available")),
+            active_effects=active_effects,
         )
 
     def remaining(self, action: str) -> int:
@@ -169,6 +174,14 @@ def _blocked_reason(
             return f"{name} is not available to this character"
         if int(pool.current) < 1:
             return f"{name} is empty"
+    for declared in capability.actions:
+        if declared.kind != "end_long_effect":
+            continue
+        # 结束哪个效果由声明给出。效果不在时给出原因，而不是让它成为一个
+        # 点了也没事发生的按钮（reducer 对未知 id 是静默 no-op）。
+        target = declared.effect_id or capability.feature_id
+        if target and target not in context.active_effects:
+            return "no effect to dismiss"
     action = capability.cost.slot
     if action and context.remaining(action) < 1:
         if not (action == "bonus_action" and context.fleet_step
