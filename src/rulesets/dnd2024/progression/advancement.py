@@ -707,11 +707,14 @@ class Dnd2024AdvancementEngine:
             )
             # 免费名额与正常增量是**两笔账**，但客户端只填一份书目，所以增长
             # 数取和；校验那边用同样的和，并额外要求多出来的部分是 Evocation。
+            # 免费名额是**可选的**（SRD: "you can add"），所以增量仍按正常值给；
+            # `free_spellbook_picks` 只说明"最多还能免费多几个"。把它并进增量会
+            # 让所有既有调用方（只加正常那几个）立刻不合法。
             spellbook_growth = (
                 int(policy.spellbook_gain_per_level or 0)
                 if policy is not None and policy.source == "spellbook"
                 else 0
-            ) + free_picks
+            )
             open_slots = [
                 slot for slot in spell_selection.grant_slots(target_level, spell_state)
                 if not slot["selected_refs"]

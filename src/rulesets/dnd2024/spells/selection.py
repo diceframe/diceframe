@@ -559,15 +559,21 @@ class Dnd2024SpellSelection:
                         "spellbook_refs must keep the spells the book already holds"
                     )
                 added = set(spellbook) - self._previous_refs(previous, "spellbook_refs")
-                expected = policy.spellbook_gain_per_level + free_picks
-                if len(added) != expected:
+                expected = policy.spellbook_gain_per_level
+                ceiling = expected + free_picks
+                if not expected <= len(added) <= ceiling:
                     errors.append(
-                        "spellbook_refs must add exactly "
-                        f"{expected} spell(s) at this level"
+                        "spellbook_refs must add "
+                        + (
+                            f"exactly {expected} spell(s) at this level"
+                            if ceiling == expected
+                            else f"between {expected} and {ceiling} spell(s) at this level"
+                        )
                     )
-                if free_picks:
-                    # 免费名额不是"书里随便多两本"：多出来的必须是 Wizard 的
-                    # Evocation 法术，且不高于本级的额度。正常位不受此限。
+                extra = len(added) - expected
+                if extra > 0:
+                    # 多出来的部分是免费名额，必须是 Wizard 的 Evocation、且不高于
+                    # 本级额度。正常那几个不受此限——规则只限定免费的那几个。
                     free_ok = 0
                     for ref in added:
                         spell = self.catalog.get(ref) or {}
@@ -579,10 +585,10 @@ class Dnd2024SpellSelection:
                             and "class:wizard" in lists
                         ):
                             free_ok += 1
-                    if free_ok < free_picks:
+                    if free_ok < extra:
                         errors.append(
-                            "the free Evocation Savant picks must be Wizard "
-                            "evocation spells of a level you have slots for"
+                            "extra spellbook spells must be Wizard evocation "
+                            "spells of a level you have slots for"
                         )
         elif policy.source == "spellbook":
             # 休息只重排准备位，不往法术书里加东西。

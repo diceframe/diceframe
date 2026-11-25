@@ -90,6 +90,23 @@ mypy                                                      102 files, no issues
 - 一次短休换多个：`_plan_memorize_spell` 只接受一对（`replace_ref`/`with_ref`），
   提交两个需要两次休息；缺"多个"的负例。
 
+**一次几乎交付出去的破坏性契约变更（必读）**
+
+Evocation Savant 的第一版把免费名额**并进了** `spellbook_additions`（3 级从 2 变成 4），
+于是所有既有升级夹具（只交正常那几个）立刻不合法：全量跑出 **214 failed / 37 error**，
+集中在 paladin_auras、overchannel、hold_person、stoneskin、free_casting 等 12 个用
+Wizard 升级路径的文件。
+
+根因不是实现错，而是**语义错**：SRD 写的是 "you **can** add"，免费名额是可选的。
+把它并进增量等于宣布"必须多加"，这是对既有契约的破坏。现在的做法：
+
+- `spellbook_additions` 仍为正常值（2），`free_spellbook_picks` 单独给（2，表示上限）；
+- 校验接受 `正常..正常+免费` 区间，多出来的部分才必须是 Wizard Evocation；
+- 新增一条用例锁住"只交正常那两个也合法"。
+
+教训：动 `requirements` 里的数字前，先问"这个字段是下限还是上限"。改成上限是兼容的，
+改成下限会让所有既有调用方同时失效。
+
 **与上游 GAP-43 栈的关系**
 
 `_activate_item_events` 在栈顶分支里仍在 `resolution.py`（未搬走），所以本片的

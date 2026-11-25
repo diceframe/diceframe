@@ -527,7 +527,8 @@ def _evoker_preview(runtime: Dnd2024Runtime, character: dict, *, free_ok: bool =
     picked = [
         ref for ref in candidates if _is_free(ref) == free_ok
     ][:free_picks]
-    total = int(row["spellbook_additions"])
+    # 免费是"可以多加"，所以一次全用：正常增量 + 免费名额。
+    total = int(row["spellbook_additions"]) + free_picks
     rest = [ref for ref in candidates if ref not in picked][: max(0, total - len(picked))]
     full_book = book + picked + rest
     count = int(row["prepared_spell_count"])
@@ -555,9 +556,30 @@ def test_evocation_savant_adds_two_free_spells_at_third_level() -> None:
     engine, choices, row, picked = _evoker_preview(runtime, character)
 
     assert int(row["free_spellbook_picks"]) == 2
-    assert int(row["spellbook_additions"]) == 4      # 正常 2 + 免费 2
+    # 正常增量仍是 2：免费名额是"可以多加"，不是"必须多加"。
+    assert int(row["spellbook_additions"]) == 2
     assert len(picked) == 2
     preview = engine.preview_next_level(character, choices)
+    assert preview["ok"] is True, preview["errors"]
+
+
+def test_the_free_picks_are_optional() -> None:
+    """只交正常那两个也合法：SRD 写的是 "you can add"。"""
+
+    runtime = Dnd2024Runtime()
+    character = _wizard_sheet(runtime, level=2)["ruleset_character"]
+    engine = Dnd2024AdvancementEngine(runtime.load_bundle("en"))
+    requirements = engine.preview_next_level(character)["requirements"]
+    choices = advancement_choices({"requirements": requirements})
+    choices["subclass_ref"] = "subclass:evoker"
+    probe = engine.preview_next_level(character, choices)["requirements"]
+    row = next(item for item in probe if item.get("kind") == "spell_selection")
+    choices["class_spell_choices"] = _spell_choices(runtime.load_bundle("en"), character, {
+        **row, "free_spellbook_picks": 0,
+    })
+
+    preview = engine.preview_next_level(character, choices)
+
     assert preview["ok"] is True, preview["errors"]
 
 
@@ -570,7 +592,7 @@ def test_the_free_picks_must_be_evocation_spells() -> None:
     preview = engine.preview_next_level(character, choices)
 
     assert preview["ok"] is False
-    assert any("Evocation Savant" in error for error in preview["errors"])
+    assert any("evocation" in error for error in preview["errors"])
 
 
 def test_a_level_without_a_new_slot_level_grants_no_free_pick() -> None:
