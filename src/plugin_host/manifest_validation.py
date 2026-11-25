@@ -17,8 +17,13 @@ from src.localization.messages import t
 from .policy import PERMISSION_DETAILS, effective_plugin_permissions
 from .support import STATIC_PLUGIN_TYPES, plugin_type_descriptor
 
+_PLUGIN_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _RULEBOOK_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _ALLOWED_CONTROLS = {"switch", "text", "secret", "number", "select", "string-list"}
+
+
+def valid_plugin_id(plugin_id: str) -> bool:
+    return _PLUGIN_ID_RE.fullmatch(plugin_id) is not None
 
 
 def validate_ruleset_catalogs(

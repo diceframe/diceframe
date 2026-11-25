@@ -4975,6 +4975,7 @@ Primary boundary:
 src/plugin_host/
 ├─ host.py
 ├─ manifest_validation.py
+├─ package_io.py
 ├─ support.py
 ├─ descriptors.py
 ├─ capabilities.py
@@ -4988,6 +4989,9 @@ src/plugin_host/
 `host.py` orchestrates runtime loading and installation transactions. `manifest_validation.py`
 validates package declarations, configuration schemas, and permission declarations without
 loading a runtime or publishing a plugin. `policy.py` still defines and infers permissions.
+`package_io.py` owns ZIP packing and extraction, package-root lookup, and atomic JSON writes.
+`PluginHost.package_files` remains the public entry point; `host.py` still owns installation,
+publication, recovery, and rollback.
 
 ---
 
