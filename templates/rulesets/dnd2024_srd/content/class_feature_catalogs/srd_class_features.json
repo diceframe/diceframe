@@ -615,6 +615,44 @@
             "ability_bonus_wis": 4,
             "ability_score_cap": 25
           }
+        },
+        {
+          "id": "quivering_palm",
+          "owner": "subclass:warrior_of_the_open_hand",
+          "minimum_level": 17,
+          "source_ref": "srd-5.2.1:p52:quivering-palm",
+          "summary": "When you hit a creature with an Unarmed Strike, you can expend 4 Focus Points to start imperceptible vibrations that last a number of days equal to your Monk level. You can end them harmlessly (no action required), or take an action to end them: the target then makes a Constitution saving throw, taking 10d12 Force damage on a failure or half as much on a success. You and the target must be on the same plane. You can have only one creature under this effect at a time.",
+          "parameters": {
+            "focus_cost": 4,
+            "damage_dice": "10d12",
+            "damage_type": "force",
+            "save_ability": "con",
+            "dc_ability": "wis"
+          },
+          "capabilities": [
+            {
+              "id": "quivering_palm_dismiss",
+              "cost": {},
+              "actions": [
+                {
+                  "kind": "end_long_effect",
+                  "effect_id": "quivering_palm"
+                }
+              ]
+            },
+            {
+              "id": "quivering_palm_end",
+              "cost": {
+                "action": 1
+              },
+              "actions": [
+                {
+                  "kind": "quivering_palm_end",
+                  "count": 1
+                }
+              ]
+            }
+          ]
         }
       ]
     },
@@ -873,6 +911,61 @@
               "unarmed_strike"
             ]
           }
+        },
+        {
+          "id": "holy_nimbus",
+          "owner": "subclass:oath_of_devotion",
+          "minimum_level": 20,
+          "source_ref": "srd-5.2.1:p57:holy-nimbus",
+          "summary": "As a Bonus Action, you radiate a 30-foot Emanation for 10 minutes or until you end it (no action required). You have Advantage on saving throws forced by a Fiend or an Undead, an enemy that starts its turn in the aura takes Radiant damage equal to your Charisma modifier plus your Proficiency Bonus, and the aura is filled with Bright Light.",
+          "parameters": {
+            "aura_range_ft": 30,
+            "requires_long_effect": "holy_nimbus",
+            "duration_minutes": 10,
+            "turn_start_aura_damage": "radiant",
+            "aura_damage_ability": "cha",
+            "holy_ward_creature_types": [
+              "fiend",
+              "undead"
+            ],
+            "restore_slot_level": 5
+          },
+          "capabilities": [
+            {
+              "id": "holy_nimbus",
+              "cost": {
+                "bonus_action": 1
+              },
+              "uses_per_long_rest": 1,
+              "actions": [
+                {
+                  "kind": "holy_nimbus",
+                  "count": 1
+                }
+              ]
+            },
+            {
+              "id": "holy_nimbus_restore",
+              "cost": {},
+              "actions": [
+                {
+                  "kind": "restore_feature_use",
+                  "count": 1
+                }
+              ]
+            },
+            {
+              "id": "holy_nimbus_end",
+              "cost": {},
+              "actions": [
+                {
+                  "kind": "end_long_effect",
+                  "count": 1,
+                  "effect_id": "holy_nimbus"
+                }
+              ]
+            }
+          ]
         }
       ]
     },
@@ -1334,6 +1427,49 @@
             "ability_bonus_con": 4,
             "ability_score_cap": 25
           }
+        },
+        {
+          "id": "intimidating_presence",
+          "owner": "subclass:path_of_the_berserker",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p30:intimidating-presence",
+          "summary": "As a Bonus Action, each creature of your choice in a 30-foot Emanation originating from you must make a Wisdom saving throw (DC 8 + your Strength modifier + Proficiency Bonus). On a failed save, it has the Frightened condition for 1 minute, and repeats the save at the end of each of its turns. Once you use this feature, you can't use it again until you finish a Long Rest, unless you expend a use of your Rage (no action required) to restore it.",
+          "parameters": {
+            "target_range_ft": 30,
+            "save_ability": "wis",
+            "dc_ability": "str",
+            "condition": "frightened",
+            "condition_minutes": 1,
+            "repeat_save": true,
+            "restore_resource": "rages",
+            "restore_resource_amount": 1
+          },
+          "capabilities": [
+            {
+              "id": "intimidating_presence",
+              "target_kind": "creature",
+              "uses_per_long_rest": 1,
+              "cost": {
+                "bonus_action": 1
+              },
+              "actions": [
+                {
+                  "kind": "intimidating_presence",
+                  "count": 1
+                }
+              ]
+            },
+            {
+              "id": "intimidating_presence_restore",
+              "cost": {},
+              "actions": [
+                {
+                  "kind": "restore_feature_use",
+                  "count": 1
+                }
+              ]
+            }
+          ]
         }
       ]
     },
@@ -2039,6 +2175,55 @@
             "max_hp_bonus_first": 3,
             "max_hp_bonus_per_level_after": 1
           }
+        },
+        {
+          "id": "dragon_wings",
+          "owner": "subclass:draconic_sorcery",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p70:dragon-wings",
+          "summary": "As a Bonus Action, you sprout dragon wings for 1 hour or until you dismiss them (no action required). For the duration you have a Fly Speed of 60 feet. Once you use this feature, you can't use it again until you finish a Long Rest, unless you spend 3 Sorcery Points (no action required) to restore it.",
+          "parameters": {
+            "fly_speed_ft": 60,
+            "duration_minutes": 60,
+            "restore_resource": "sorcery_points",
+            "restore_resource_amount": 3
+          },
+          "capabilities": [
+            {
+              "id": "dragon_wings",
+              "cost": {
+                "bonus_action": 1
+              },
+              "uses_per_long_rest": 1,
+              "actions": [
+                {
+                  "kind": "dragon_wings",
+                  "count": 1
+                }
+              ]
+            },
+            {
+              "id": "dragon_wings_restore",
+              "cost": {},
+              "actions": [
+                {
+                  "kind": "restore_feature_use",
+                  "count": 1
+                }
+              ]
+            },
+            {
+              "id": "dragon_wings_end",
+              "cost": {},
+              "actions": [
+                {
+                  "kind": "end_long_effect",
+                  "count": 1,
+                  "effect_id": "dragon_wings"
+                }
+              ]
+            }
+          ]
         }
       ]
     },
@@ -2205,6 +2390,37 @@
           "minimum_level": 20,
           "source_ref": "srd-5.2.1:p72:eldritch-master",
           "summary": "When you use your Magical Cunning feature, you regain all your expended Pact Magic spell slots instead of half of them."
+        },
+        {
+          "id": "hurl_through_hell",
+          "owner": "subclass:fiend_patron",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p76:hurl-through-hell",
+          "summary": "Once per turn when you hit a creature with an attack roll, you can force it to make a Charisma saving throw against your spell save DC. On a failure, the target takes 8d10 Psychic damage if it isn't a Fiend and has the Incapacitated condition until the end of your next turn. Once you use this feature, you can't use it again until you finish a Long Rest, unless you expend a Pact Magic spell slot (no action required) to restore it.",
+          "parameters": {
+            "save_ability": "cha",
+            "damage_dice": "8d10",
+            "damage_type": "psychic",
+            "damage_exempt_creature_types": [
+              "fiend"
+            ],
+            "condition": "incapacitated",
+            "condition_turns": 1,
+            "uses_per_long_rest": 1,
+            "restore_slot_level": 5
+          },
+          "capabilities": [
+            {
+              "id": "hurl_through_hell_restore",
+              "cost": {},
+              "actions": [
+                {
+                  "kind": "restore_feature_use",
+                  "count": 1
+                }
+              ]
+            }
+          ]
         }
       ]
     },

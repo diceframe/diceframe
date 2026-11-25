@@ -38,6 +38,12 @@ ACTION_KINDS = frozenset({
     # Steady Aim 只给自己两件事：下一次攻击优势、以及本回合剩余速度 0。两个
     # 后果都落条件，所以它是一个独立的封闭 kind，而不是"buff"的另一种拼法。
     "steady_aim",
+    # 长时状态类：附赠动作施加一个跨日存在的事实（恐惧、光环、飞行、振动）。
+    # 各自封闭，因为它们的到期与解除规则完全不同，拼成一个 "buff" 就只能靠
+    # intent 里的字段猜是哪一种。
+    "intimidating_presence",
+    "dragon_wings", "end_long_effect", "holy_nimbus", "quivering_palm_end",
+    "restore_feature_use",
     # Channel Divinity 的效果各自是一个封闭 kind：它们的成本同为一次引导，
     # 但目标数量、是否要豁免、以及"分配一个预算"这三件事没有任何共同形状，
     # 合成一个 kind 只会让结算按 intent 字段猜分支。
@@ -196,10 +202,19 @@ class CapabilityCost:
 
 @dataclass(frozen=True, slots=True)
 class CapabilityAction:
-    """One underlying canonical action a capability performs."""
+    """One underlying canonical action a capability performs.
+
+    ``effect_id`` names *what* the action acts on when the kind alone is not
+    enough.  ``end_long_effect`` was the first case: it used to infer the
+    effect from ``capability.feature_id``, which only worked because every
+    ending capability happened to share the effect's id -- a harmless-dismiss
+    capability named ``quivering_palm_dismiss`` would have asked to end an
+    effect that does not exist.
+    """
 
     kind: str
     count: int = 1
+    effect_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,6 +244,9 @@ class FeatureCapability:
     once_per_turn: bool = False
     target_kind: str = "none"
     pool_resource_id: str = ""
+    # 特性自身的使用次数（每长休）。资源表达不了"特性还剩几次"：资源是
+    # 角色卡上的条，特性使用是一次性开关，两者在投影上不该混在一起。
+    uses_per_long_rest: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -806,11 +824,15 @@ class Dnd2024ClassFeatureCatalog:
             kind = str(raw_action.get("kind") or "")
             if kind not in ACTION_KINDS:
                 raise ClassFeatureError(f"{capability_id} declares an unknown action kind")
+            effect_id = str(raw_action.get("effect_id") or "")
+            if effect_id:
+                _require_id(effect_id, f"{capability_id} action effect_id")
             actions.append(CapabilityAction(
                 kind=kind,
                 count=_require_positive_int(
                     raw_action.get("count", 1), f"{capability_id} action count",
                 ),
+                effect_id=effect_id,
             ))
         requires_condition = str(raw.get("requires_condition") or "")
         forbidden_condition = str(raw.get("forbidden_condition") or "")
@@ -837,6 +859,15 @@ class Dnd2024ClassFeatureCatalog:
             raise ClassFeatureError(
                 f"{capability_id}.pool_resource_id is not a canonical id"
             )
+        uses_per_long_rest = raw.get("uses_per_long_rest", 0)
+        if (
+            isinstance(uses_per_long_rest, bool)
+            or not isinstance(uses_per_long_rest, int)
+            or uses_per_long_rest < 0
+        ):
+            raise ClassFeatureError(
+                f"{capability_id}.uses_per_long_rest must be a non-negative integer"
+            )
         return FeatureCapability(
             id=capability_id,
             feature_id=feature_id,
@@ -850,6 +881,7 @@ class Dnd2024ClassFeatureCatalog:
             once_per_turn=once_per_turn,
             target_kind=target_kind,
             pool_resource_id=pool_resource_id,
+            uses_per_long_rest=uses_per_long_rest,
         )
 
     def label(self, key: str, default: str = "") -> str:

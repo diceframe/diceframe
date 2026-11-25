@@ -50,8 +50,16 @@ from .action_adapter import (
     roll_damage_node,
     spell_formula_node,
 )
+from ..features.resources import (
+    feature_usage_count,
+    long_effect_active,
+)
+from ..character.derivation import proficiency_bonus
 from .primitives import (
+    world_minutes,
+    roll,
     ABJURE_FOES_DURATION,
+    INTIMIDATING_PRESENCE_DURATION,
     INITIATIVE_CHOICES,
     PERSISTENT_RAGE_DURATION,
     RELENTLESS_RAGE_DECISION,
@@ -523,7 +531,7 @@ class CombatResolutionMixin:
                 for uid in (intent.get("mounted_player_ids") or [])
                 if str(uid)
             },
-        }, *refills, *opening, *self._turn_start_events(first, rng)]
+        }, *refills, *opening, *self._turn_start_events(instance, None, first, rng)]
 
     @staticmethod
     def _initiative_choices(intent: dict[str, Any]) -> dict[str, dict[str, bool]]:
@@ -2133,6 +2141,7 @@ class CombatResolutionMixin:
                 "turn_index": int(combat.get("turn_index", 0)),
             })
         riders = self._hit_rider_declarations(
+            instance,
             actor, weapon, intent, combat, damage_type=damage_type, check=check,
         )
         if riders:
@@ -2140,10 +2149,19 @@ class CombatResolutionMixin:
             # 把命中改判落空时，不给这些骰子白掷一次的机会。
             damage_event["hit_riders"] = riders
         conditions = self._hit_condition_declarations(
+            instance,
             actor, weapon, intent, combat, granted_by,
         )
         if conditions:
             damage_event["hit_condition_effects"] = conditions
+        # "这一击声明了哪些攻击命中触发"随伤害事件走，和 hit_riders 同一个
+        # 道理：决策路径（至圣斩窗口之后）拿不到原始意图，若只把触发挂在
+        # 直通路径上，那条路径会悄悄少掉半个特性。
+        triggers = {
+            "hurl_through_hell": bool(intent.get("hurl_through_hell")),
+        }
+        if any(triggers.values()):
+            damage_event["attack_hit_triggers"] = triggers
         brutal_effects = self._brutal_effect_declarations(actor, intent, check)
         if brutal_effects:
             damage_event["brutal_strike_effects"] = brutal_effects
@@ -2186,10 +2204,11 @@ class CombatResolutionMixin:
             return [{"type": "dnd2024.decision.pending", **(reaction or damage_window or offer)}]
         return self._resolve_committed_hit(
             instance, combat, actor_id, target, damage_event, damage, rng,
+            intent=intent,
         )
 
     def _hit_rider_declarations(
-        self, actor: dict[str, Any], weapon: dict[str, Any],
+        self, instance: Any, actor: dict[str, Any], weapon: dict[str, Any],
         intent: dict[str, Any], combat: dict[str, Any], *,
         damage_type: str = "", check: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
@@ -2787,7 +2806,7 @@ class CombatResolutionMixin:
         return event, damage
 
     def _hit_condition_declarations(
-        self, actor: dict[str, Any], weapon: dict[str, Any],
+        self, instance: Any, actor: dict[str, Any], weapon: dict[str, Any],
         intent: dict[str, Any], combat: dict[str, Any], granted_by: str = "",
     ) -> list[dict[str, Any]]:
         """Hit-triggered conditions this attack declares (Stunning Strike).
@@ -2837,6 +2856,25 @@ class CombatResolutionMixin:
                         parameter("open_hand_technique", "topple_condition") or ""
                     ),
                 })
+
+        if (
+            intent.get("quivering_palm")
+            and bool(weapon.get("unarmed"))
+            and self.features.has_feature(character, "quivering_palm")
+            # 规则只限制"同时只有一个目标"，没有"每回合一次"：这道门读的
+            # 账从不写入，等于永不生效的假防御。
+            and long_effect_active(
+                character, "quivering_palm", world_minutes(instance),
+            ) is None
+        ):
+            declarations.append({
+                "kind": "quivering_palm",
+                "feature_id": "quivering_palm",
+                "focus_cost": int(parameter("quivering_palm", "focus_cost") or 4),
+                "duration_minutes": int(
+                    (character.get("build") or {}).get("level", 1) or 1
+                ) * 1440,
+            })
 
         if not intent.get("stunning_strike"):
             return declarations
@@ -2916,6 +2954,27 @@ class CombatResolutionMixin:
                 events.extend(self._open_hand_events(
                     instance, combat, attacker_id, target, row, dc, rng,
                 ))
+                continue
+            if row.get("kind") == "quivering_palm":
+                # 无需豁免：命中即成立，随后由"结束"动作触发体质豁免。
+                cost = int(row.get("focus_cost") or 0)
+                if cost:
+                    events.append({
+                        "type": "dnd2024.class_resource.spent",
+                        "actor_id": attacker_id,
+                        "resource_id": "focus_points", "amount": cost,
+                    })
+                events.append({
+                    "type": "dnd2024.long_effect.applied",
+                    "actor_id": attacker_id,
+                    "effect_id": "quivering_palm",
+                    "effect": {
+                        "feature_id": "quivering_palm",
+                        "expires_at": world_minutes(instance)
+                        + int(row.get("duration_minutes") or 0),
+                        "detail": {"target_id": str(target["actor_id"])},
+                    },
+                })
                 continue
             if row.get("kind") != "stunning_strike":
                 continue
@@ -3300,6 +3359,7 @@ class CombatResolutionMixin:
     def _resolve_committed_hit(
         self, instance: Any, combat: dict[str, Any], attacker_id: str,
         target: dict[str, Any], damage_event: dict[str, Any], damage: int, rng: Any,
+        *, intent: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Submit a final hit's damage and run its trailing consequences."""
 
@@ -3321,11 +3381,135 @@ class CombatResolutionMixin:
         events.extend(self._hit_condition_events(
             instance, combat, attacker_id, target, damage_event, rng,
         ))
+        # 命中成立之后的一切"攻击命中触发"效果都在这里统一处理：它不跟着
+        # 武器/法术两条判定分叉，也正因为如此，只写一次就两条路都生效。
+        # 反应窗收尾（Cutting Words 之后）拿不到原始 intent，那条路径上
+        # 就不触发——它已经越过了"命中成立"的那一刻。
+        if intent is not None:
+            events.extend(self._attack_hit_events(
+                instance, combat, self._actor_view(instance, combat, attacker_id),
+                target, intent, rng,
+            ))
         events.extend(self._enemy_zero_hp_feature_events(
             instance, combat, attacker_id, target, total_damage,
         ))
         if self._last_hostile_defeated(combat, target, total_damage):
             events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
+        return events
+
+    def _attack_hit_events(
+        self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
+        target: dict[str, Any], intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Everything that triggers on "you hit a creature with an attack roll".
+
+        The two hit resolutions are deliberately separate -- a weapon rolls
+        ``attack_bonus`` and a spell rolls ``spell_attack_bonus`` -- but what
+        happens **after** a hit lands should not fork with them: the rule text
+        says "with an attack roll", not "with a weapon".  Both funnels end
+        their success branch here, so a new on-hit effect is written once.
+
+        Today the only subscriber is Hurl Through Hell.  A "replace one attack"
+        Grapple or Shove would subscribe here too.
+        """
+
+        events: list[dict[str, Any]] = []
+        if intent.get("hurl_through_hell"):
+            events.extend(self._hurl_through_hell_hit_events(
+                instance, combat, attacker, target, rng,
+            ))
+        return events
+
+    def _hurl_through_hell_hit_events(
+        self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
+        target: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Once per turn: a failed Charisma save hurls the target through Hell.
+
+        要求了却不满足条件时直接失败——静默降级成一次普通命中会让客户端
+        以为能力已经生效。
+        """
+
+        feature_id = "hurl_through_hell"
+        character = self._feature_character(attacker)
+        attacker_id = str(attacker["actor_id"])
+        if not self.features.has_feature(character, feature_id):
+            raise CombatIntentError(
+                "Hurl Through Hell is not available to this actor"
+            )
+        if self._feature_used_this_turn(combat, attacker_id, feature_id):
+            raise CombatIntentError(
+                "Hurl Through Hell was already used this turn"
+            )
+        used = feature_usage_count(character, feature_id, feature_id)
+        limit = int(self.features.feature_value(
+            character, feature_id, "uses_per_long_rest", 1,
+        ) or 1)
+        if used >= limit:
+            raise CombatIntentError(
+                "Hurl Through Hell has no use left until a long rest"
+            )
+        events: list[dict[str, Any]] = [{
+            "type": "dnd2024.feature.used", "actor_id": attacker_id,
+            "feature_id": feature_id,
+            "round": int((combat.get("economy") or {}).get("round", 0) or 0),
+            "turn_index": int(
+                (combat.get("economy") or {}).get("turn_index", 0) or 0
+            ),
+        }]
+        events.append({
+            "type": "dnd2024.feature_usage.changed",
+            "actor_id": attacker_id,
+            "owner": feature_id, "feature_id": feature_id,
+            "scope": USAGE_SCOPE_LONG_REST,
+            "before_count": used, "after_count": used + 1,
+            "use_index": used + 1,
+        })
+        ability = str(self.features.feature_value(
+            character, feature_id, "save_ability", "cha",
+        ) or "cha")
+        dc = int(attacker.get("spell_save_dc", 0) or 0)
+        check = self._saving_throw_check(
+            instance, combat, target, str(target["actor_id"]),
+            ability, dc, attacker_id, events, rng,
+        )
+        check["source_feature"] = feature_id
+        events.append(check)
+        if check["success"]:
+            return events
+        declared = self.features.feature_value(
+            character, feature_id, "damage_exempt_creature_types", None,
+        )
+        exempt = {str(code).lower() for code in (declared or ["fiend"])}
+        creature_type = str(target.get("creature_type") or "").lower()
+        if creature_type not in exempt:
+            damage_type = str(self.features.feature_value(
+                character, feature_id, "damage_type", "psychic",
+            ) or "psychic")
+            dice = str(self.features.feature_value(
+                character, feature_id, "damage_dice", "8d10",
+            ) or "8d10")
+            damage, _total = self._damage_instance_event(
+                dice, damage_type, target, False, rng,
+            )
+            if damage is not None:
+                damage["feature_id"] = feature_id
+                damage["source_actor_id"] = attacker_id
+                events.append(damage)
+        events.append({
+            "type": "condition.applied",
+            "target_id": str(target["actor_id"]),
+            "condition": str(self.features.feature_value(
+                character, feature_id, "condition", "incapacitated",
+            ) or "incapacitated"),
+            # "until the end of your next turn" 里的 your 是邪术师：归属是
+            # 施法者，不是被失能的目标自己。
+            "duration": "caster_next_turn_end",
+            "turns_remaining": 2,
+            "source_actor_id": attacker_id,
+            "feature_id": feature_id,
+            "banishment": "guided",
+        })
         return events
 
     def _hit_tail_events(
@@ -3737,6 +3921,11 @@ class CombatResolutionMixin:
                         events.extend(self._enemy_zero_hp_feature_events(
                             instance, combat, actor_id, target, total_dealt,
                         ))
+                    # 法术攻击同样是一次"用攻击检定命中"：命中触发效果在这里
+                    # 走同一入口，不在两条判定里各写一份。
+                    events.extend(self._attack_hit_events(
+                        instance, combat, actor, target, intent, rng,
+                    ))
                 consumed_events = self._consume_attack_conditions(
                     actor_id, target_id, visible_actor, visible_target,
                 )
@@ -4235,6 +4424,9 @@ class CombatResolutionMixin:
         # 它们是独立事件，不能混进主伤害的线上形状。
         event.pop("extra_damage_parts", None)
         event.pop("statblock_riders", None)
+        # 命中触发的声明只给决策路径用：待定的命中法术决策在创建时留了一份
+        # 伤害事件的副本，这里从线上形状里摘掉，客户端不会看到一个它用不上的键。
+        event.pop("attack_hit_triggers", None)
         events: list[dict[str, Any]] = [event]
         if isinstance(feature_use, dict):
             events.append({"type": "dnd2024.feature.used", **feature_use})
@@ -5114,6 +5306,29 @@ class CombatResolutionMixin:
         if capability is None:  # pragma: no cover - validation guards this
             raise CombatIntentError("class capability is not available to this actor")
         events: list[dict[str, Any]] = []
+        # 特性自身的使用次数（每长休）。资源条表达不了"这个特性还剩几次"：
+        # 账记在 feature_usage，长休由 resting 统一清零。
+        if capability.uses_per_long_rest:
+            character = self._feature_character(actor)
+            before = feature_usage_count(
+                character, capability.feature_id, capability.feature_id,
+                USAGE_SCOPE_LONG_REST,
+            )
+            if before >= capability.uses_per_long_rest:
+                raise CombatIntentError(
+                    "this feature has no use left until a long rest"
+                )
+            events.append({
+                "type": "dnd2024.feature_usage.changed",
+                "actor_id": actor_id,
+                "owner": capability.feature_id,
+                "feature_id": capability.feature_id,
+                "scope": USAGE_SCOPE_LONG_REST,
+                "before_count": before,
+                "after_count": before + 1,
+                "use_index": before + 1,
+                "feature_kind": "intimidating_presence",
+            })
         via_fleet_step = bool(intent.get("via_fleet_step"))
         if capability.cost.action and not via_fleet_step:
             events.append({
@@ -5191,6 +5406,39 @@ class CombatResolutionMixin:
                 ))
             elif action.kind == "turn_undead":
                 events.extend(self._turn_undead_events(
+                    instance, combat, actor_id, actor, capability, intent, rng,
+                ))
+            elif action.kind == "end_long_effect":
+                # 主动结束不花任何经济：声明成空成本的能力，只是为了让
+                # "结束"也有一个可审计的意图入口。
+                #
+                # 结束哪个效果由声明给出，不由 capability id 反推：前者是
+                # 契约，后者只是"目前恰好同名"的巧合（quivering_palm_dismiss
+                # 会去结束一个不存在的 quivering_palm_dismiss）。
+                events.append({
+                    "type": "dnd2024.long_effect.ended",
+                    "actor_id": actor_id,
+                    "effect_id": action.effect_id or capability.feature_id,
+                    "reason": "dismissed",
+                })
+            elif action.kind == "restore_feature_use":
+                events.extend(self._restore_feature_use_events(
+                    instance, actor_id, actor, capability,
+                ))
+            elif action.kind == "quivering_palm_end":
+                events.extend(self._quivering_palm_end_events(
+                    instance, combat, actor_id, actor, capability, rng,
+                ))
+            elif action.kind == "holy_nimbus":
+                events.extend(self._holy_nimbus_events(
+                    instance, actor_id, actor, capability,
+                ))
+            elif action.kind == "dragon_wings":
+                events.extend(self._dragon_wings_events(
+                    instance, actor_id, actor, capability,
+                ))
+            elif action.kind == "intimidating_presence":
+                events.extend(self._intimidating_presence_events(
                     instance, combat, actor_id, actor, capability, intent, rng,
                 ))
             elif action.kind == "abjure_foes":
@@ -5814,6 +6062,266 @@ class CombatResolutionMixin:
                     events.append({"type": "dnd2024.combat.ended", "reason": "victory"})
         return events
 
+    def _restore_feature_use_events(
+        self, instance: Any, actor_id: str, actor: dict[str, Any],
+        capability: Any,
+    ) -> list[dict[str, Any]]:
+        """Pay a real slot or resource to regain one use of a feature.
+
+        与 ``font_of_inspiration`` 同形：扣的是权威槽表里的一格（``exchange``
+        标记让它不占本回合的施法位），回的是长休作用域的使用计数。拒绝条件
+        在校验层：没有已用次数、或槽位不够，都不该走到这里。
+        """
+
+        character = self._feature_character(actor)
+        feature_id = capability.feature_id
+        slot_level = int(self.features.feature_value(
+            character, feature_id, "restore_slot_level", 0,
+        ) or 0)
+        resource_id = str(self.features.feature_value(
+            character, feature_id, "restore_resource", "",
+        ) or "")
+        amount = int(self.features.feature_value(
+            character, feature_id, "restore_resource_amount", 0,
+        ) or 0)
+        events: list[dict[str, Any]] = []
+        if slot_level:
+            events.append({
+                "type": "dnd2024.spell.slot_spent", "actor_id": actor_id,
+                "slot_level": slot_level, "exchange": True,
+            })
+        if resource_id:
+            events.append({
+                "type": "dnd2024.class_resource.spent", "actor_id": actor_id,
+                "resource_id": resource_id, "amount": amount,
+            })
+        before = feature_usage_count(
+            character, feature_id, feature_id, USAGE_SCOPE_LONG_REST,
+        )
+        events.append({
+            "type": "dnd2024.feature_usage.restored", "actor_id": actor_id,
+            "owner": feature_id, "feature_id": feature_id,
+            "scope": USAGE_SCOPE_LONG_REST,
+            "before_count": before,
+            "reason": "restored",
+        })
+        return events
+
+    def _quivering_palm_end_events(
+        self, instance: Any, combat: dict[str, Any], actor_id: str,
+        actor: dict[str, Any], capability: Any, rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Quivering Palm: ending the vibrations is its own action.
+
+        目标与到期都存在角色级 `long_effects` 里：振动可能持续好几天，跨战斗、
+        跨存档。"同一位面"没有权威系统，这个入口**不判定**——不默认成功，
+        也不假装知道；文档与测试都按 `guided` 记录。
+        """
+
+        character = self._feature_character(actor)
+        feature_id = capability.feature_id
+        effect = long_effect_active(
+            character, "quivering_palm", world_minutes(instance),
+        )
+        if effect is None:
+            raise CombatIntentError("no creature is under Quivering Palm")
+        detail = effect.get("detail") or {}
+        target_id = str(detail.get("target_id") or "")
+        if not target_id:
+            raise CombatIntentError("the vibration has no recorded target")
+        save_ability = str(self.features.feature_value(
+            character, feature_id, "save_ability", "con",
+        ) or "con")
+        dc_ability = str(self.features.feature_value(
+            character, feature_id, "dc_ability", "wis",
+        ) or "wis")
+        dice = str(self.features.feature_value(
+            character, feature_id, "damage_dice", "10d12",
+        ) or "10d12")
+        abilities = actor.get("abilities") or {}
+        level = int((character.get("build") or {}).get("level", 1) or 1)
+        dc = (
+            8
+            + (int(abilities.get(dc_ability, 10) or 10) - 10) // 2
+            + proficiency_bonus(level)
+        )
+        target = self._actor_view(instance, combat, target_id)
+        # 走与法术、重复豁免同一个权威函数：自动失败（麻痹/昏迷）、光环、
+        # 掩护、条件加值与 roll_id 都在里面，手写一份就全丢了。
+        events: list[dict[str, Any]] = []
+        check = self._saving_throw_check(
+            instance, combat, target, target_id,
+            save_ability, dc, actor_id, events, rng,
+        )
+        check["feature_id"] = feature_id
+        check["channel_effect"] = "quivering_palm"
+        # 位面由调用方断言，不由引擎判定：没有权威系统时，把这条事实原样
+        # 写进事件，让日志能看出它来自哪里。
+        check["plane_asserted"] = True
+        events.append(check)
+        saved = bool(check["success"])
+        events.append({
+            "type": "dnd2024.long_effect.ended",
+            "actor_id": actor_id,
+            "effect_id": "quivering_palm",
+            "reason": "ended",
+        })
+        # 抗性与免疫走与其它伤害同一个实例函数：力场抗性必须生效。
+        damage_type = str(self.features.feature_value(
+            character, feature_id, "damage_type", "force",
+        ) or "force")
+        damage, _total = self._damage_instance_event(
+            dice, damage_type, target, False, rng, half=saved,
+        )
+        if damage is not None:
+            damage["feature_id"] = feature_id
+            damage["source_actor_id"] = actor_id
+            damage["reason"] = "quivering_palm"
+            events.append(damage)
+        return events
+
+    def _holy_nimbus_events(
+        self, instance: Any, actor_id: str, actor: dict[str, Any], capability: Any,
+    ) -> list[dict[str, Any]]:
+        """Holy Nimbus: a ten-minute emanation, recorded as a long effect.
+
+        光环的范围与伤害由特性参数声明（`aura_range_ft` + `turn_start_aura_damage`），
+        这里只负责"它现在生效"这个事实。住在 long_effects 而不是条件里：
+        十分钟会跨战斗。
+        """
+
+        character = self._feature_character(actor)
+        feature_id = capability.feature_id
+        minutes = int(self.features.feature_value(
+            character, feature_id, "duration_minutes", 10,
+        ) or 10)
+        radius = int(self.features.feature_value(
+            character, feature_id, "aura_range_ft", 30,
+        ) or 30)
+        return [{
+            "type": "dnd2024.long_effect.applied",
+            "actor_id": actor_id,
+            "effect_id": feature_id,
+            "effect": {
+                "feature_id": feature_id,
+                "expires_at": world_minutes(instance) + minutes,
+                "detail": {"bright_light_radius": radius},
+            },
+        }]
+
+    def _dragon_wings_events(
+        self, instance: Any, actor_id: str, actor: dict[str, Any], capability: Any,
+    ) -> list[dict[str, Any]]:
+        """Dragon Wings: a one-hour Fly Speed as a character-level effect.
+
+        住在 `long_effects` 而不是条件里：战斗结束会清掉按回合计时的条件，
+        而这是一小时的物理事实。到期按世界时钟的绝对分钟判定。
+        """
+
+        character = self._feature_character(actor)
+        feature_id = capability.feature_id
+        minutes = int(self.features.feature_value(
+            character, feature_id, "duration_minutes", 60,
+        ) or 60)
+        fly = int(self.features.feature_value(
+            character, feature_id, "fly_speed_ft", 60,
+        ) or 60)
+        return [{
+            "type": "dnd2024.long_effect.applied",
+            "actor_id": actor_id,
+            "effect_id": feature_id,
+            "effect": {
+                "feature_id": feature_id,
+                "expires_at": world_minutes(instance) + minutes,
+                "detail": {"fly_speed": fly},
+            },
+        }]
+
+    def _intimidating_presence_events(
+        self, instance: Any, combat: dict[str, Any], actor_id: str,
+        actor: dict[str, Any], capability: Any, intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Intimidating Presence: a 30-foot emanation, one Wisdom save each.
+
+        DC 是 8 + 力量调整 + 熟练，不是法术 DC——这条特性由蛮子的威压而不是
+        施法能力驱动。范围在服务端按距离判定：客户端可以把任意 id 塞进
+        target_ids，"我觉得他在 30 尺内"不是事实。
+
+        失败者恐惧一分钟，并在自己每个回合末重复豁免；成功只结束自己的效果，
+        不影响同一次使用里的其他目标。
+        """
+
+        character = self._feature_character(actor)
+        feature_id = capability.feature_id
+        save_ability = str(self.features.feature_value(
+            character, feature_id, "save_ability", "wis",
+        ) or "wis")
+        condition = str(self.features.feature_value(
+            character, feature_id, "condition", "frightened",
+        ) or "frightened")
+        minutes = int(self.features.feature_value(
+            character, feature_id, "condition_minutes", 1,
+        ) or 1)
+        range_ft = int(self.features.feature_value(
+            character, feature_id, "target_range_ft", 30,
+        ) or 30)
+        dc_ability = str(self.features.feature_value(
+            character, feature_id, "dc_ability", "str",
+        ) or "str")
+        abilities = actor.get("abilities") or {}
+        dc = (
+            8
+            + ability_modifier(int(abilities.get(dc_ability, 10) or 10))
+            + int(actor.get("proficiency_bonus", 0) or 0)
+        )
+        events: list[dict[str, Any]] = []
+        for target_id in [str(item) for item in (intent.get("target_ids") or [])]:
+            if target_id == actor_id:
+                continue
+            if self._distance(combat, actor_id, target_id) > range_ft:
+                continue
+            target = self._actor_view(instance, combat, target_id)
+            roll = int(rng.randint(1, 20))
+            modifier = int(
+                (target.get("saving_throws") or {}).get(save_ability, 0) or 0
+            )
+            total = roll + modifier
+            total, replacement = self._strength_total_replacement(
+                target, save_ability, total,
+            )
+            saved = total >= dc
+            check_index = len(events)
+            events.append({
+                "type": "check.resolved", "kind": "saving_throw",
+                "actor_id": target_id, "ability": save_ability,
+                "rolls": [roll], "natural": roll, "modifier": modifier,
+                "total": total, "target": dc, "success": saved,
+                "feature_id": feature_id, "channel_effect": "intimidating_presence",
+                **replacement,
+            })
+            if saved:
+                continue
+            blocker = self._condition_immunity_blocker(
+                instance, combat, target, condition,
+            )
+            if blocker is not None:
+                scope = str(blocker.get("scope") or "")
+                events[check_index]["blocked_condition"] = condition
+                events[check_index][
+                    "blocked_by_aura" if scope == "aura" else "blocked_by_feature"
+                ] = {key: value for key, value in blocker.items() if key != "scope"}
+                continue
+            events.append({
+                "type": "condition.applied", "target_id": target_id,
+                "condition": condition,
+                "duration": INTIMIDATING_PRESENCE_DURATION,
+                "turns_remaining": minutes * 10,
+                "source_actor_id": actor_id, "feature_id": feature_id,
+                "channel_effect": "intimidating_presence",
+                "save_repeat": {"ability": save_ability, "dc": dc},
+            })
+        return events
+
     def _abjure_foes_events(
         self, instance: Any, combat: dict[str, Any], actor_id: str,
         actor: dict[str, Any], capability: Any, intent: dict[str, Any], rng: Any,
@@ -6195,6 +6703,32 @@ class CombatResolutionMixin:
         check["repeat_save"] = True
         return check
 
+    def _holy_ward_applies(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        source_actor_id: str,
+    ) -> bool:
+        """Whether the aura holder is being forced to save by a Fiend or Undead."""
+
+        if not source_actor_id:
+            return False
+        character = self._feature_character(actor)
+        if long_effect_active(
+            character, "holy_nimbus", world_minutes(instance),
+        ) is None:
+            return False
+        try:
+            source = self._actor_view(instance, combat, source_actor_id)
+        except Exception:  # noqa: BLE001 - 来源可能是已离场的叙事对象
+            return False
+        # 名单来自特性参数：改内容不需要改代码。
+        declared = self.features.feature_value(
+            character, "holy_nimbus", "holy_ward_creature_types", None,
+        )
+        accepted = {
+            str(code).lower() for code in (declared or ("fiend", "undead"))
+        }
+        return str(source.get("creature_type") or "").lower() in accepted
+
     def _saving_throw_check(
         self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
         actor_id: str, ability: str, dc: int, source_actor_id: str,
@@ -6227,6 +6761,10 @@ class CombatResolutionMixin:
         save_sources = self._saving_throw_sources(
             actor, ability, against_spell=against_spell,
         )
+        if self._holy_ward_applies(instance, combat, actor, source_actor_id):
+            # Holy Ward：光环持有者被邪魔或亡灵迫使的豁免有优势。来源生物
+            # 类型来自权威视图，不由客户端声明。
+            save_sources.append({"code": "holy_nimbus", "mode": "advantage"})
         traits = actor.get("traits")
         if against_spell and "magic_resistance" in trait_ids(traits):
             save_sources.append({"code": "magic_resistance", "mode": "advantage"})
@@ -6491,7 +7029,7 @@ class CombatResolutionMixin:
                 "previous_actor_id": previous_actor,
                 "economy": self._fresh_economy(next_view),
             },
-            *self._turn_start_events(next_view, rng),
+            *self._turn_start_events(instance, combat, next_view, rng),
         ]
 
     def _superior_defense_expiry_events(
@@ -6556,7 +7094,8 @@ class CombatResolutionMixin:
         return combat_turn_slots(combat)
 
     def _turn_start_events(
-        self, actor: dict[str, Any], rng: Any,
+        self, instance: Any, combat: dict[str, Any],
+        actor: dict[str, Any], rng: Any,
     ) -> list[dict[str, Any]]:
         """Everything a turn beginning does, in registration order.
 
@@ -6570,7 +7109,64 @@ class CombatResolutionMixin:
             *self._turn_start_regen_events(actor),
             *self._turn_start_heroic_events(actor),
             *self._turn_start_recharge_events(actor, rng),
+            *self._turn_start_aura_damage_events(instance, combat, actor),
         ]
+
+    def _turn_start_aura_damage_events(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Holy Nimbus: an enemy that starts its turn inside takes radiant damage.
+
+        只在敌人的回合开始、只在光环内、每个敌人每回合一次。友军与持有者
+        自己不触发；伤害量是持有者的魅力调整 + 熟练，来源记在事件里，
+        重放不会重复结算。
+        """
+
+        # 战斗开始的那一刻还没有 combat 聚合：首个角色的回合开始不结算
+        # 光环伤害，等第一次 advance 之后才有位置与回合。
+        if combat is None or str(actor.get("side") or "") != "enemy":
+            return []
+        events: list[dict[str, Any]] = []
+        for row in self._projected_auras(instance, combat):
+            definition = row["definition"]
+            damage_type = str(
+                definition.parameters.get("turn_start_aura_damage") or ""
+            )
+            if not damage_type:
+                continue
+            holder_id = str(row["holder_id"])
+            if self._distance(combat, holder_id, str(actor["actor_id"])) > int(
+                row["range_ft"]
+            ):
+                continue
+            character = row["character"]
+            ability = str(definition.parameters.get("aura_damage_ability") or "cha")
+            abilities = character.get("abilities") or {}
+            amount = (int(abilities.get(ability, 10) or 10) - 10) // 2
+            # ``_feature_character`` 的切片不含 derived：等级在 build 里，
+            # 熟练加值从等级算，别去读一个不存在的字段。
+            level = int((character.get("build") or {}).get("level", 1) or 1)
+            amount += proficiency_bonus(level)
+            if amount <= 0:
+                continue
+            # 固定值的伤害同样要过抗性：抗性判定只有 _resist_damage 一份。
+            damage, resistance = self._resist_damage(actor, amount, damage_type)
+            event: dict[str, Any] = {
+                "type": "resource.changed",
+                "resource": "hp",
+                "target_id": str(actor["actor_id"]),
+                "delta": -damage,
+                "amount": damage,
+                "damage_type": damage_type,
+                "feature_id": definition.id,
+                "source_actor_id": holder_id,
+                "reason": "holy_nimbus",
+            }
+            if resistance:
+                event["resisted"] = True
+                event["resistance"] = resistance
+            events.append(event)
+        return events
 
     @staticmethod
     def _turn_start_recharge_events(

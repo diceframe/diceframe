@@ -317,6 +317,57 @@ def reset_feature_usage(
     return reset
 
 
+LONG_EFFECTS_KEY = "long_effects"
+
+
+def long_effects(character):
+    """The live long-effect records, defensively copied."""
+
+    raw = (character or {}).get(LONG_EFFECTS_KEY)
+    if not isinstance(raw, Mapping):
+        return {}
+    return {
+        str(key): dict(value)
+        for key, value in raw.items()
+        if isinstance(value, Mapping)
+    }
+
+
+def _expired(effect, now_minutes):
+    expires = effect.get("expires_at")
+    return (
+        isinstance(expires, int)
+        and not isinstance(expires, bool)
+        and now_minutes >= expires
+    )
+
+
+def long_effect_active(character, effect_id, now_minutes):
+    """One live effect, or ``None`` when absent or already expired."""
+
+    effect = long_effects(character).get(str(effect_id))
+    if effect is None or _expired(effect, now_minutes):
+        return None
+    return effect
+
+
+def fly_speed_from(character, now_minutes=0):
+    """The highest Fly Speed any live long-effect grants.
+
+    多个来源取最高而不是相加：飞行速度不是可以叠加的加值。
+    """
+
+    best = 0
+    for effect in long_effects(character).values():
+        if _expired(effect, now_minutes):
+            continue
+        detail = effect.get("detail") or {}
+        if not isinstance(detail, Mapping):
+            continue
+        best = max(best, int(detail.get("fly_speed", 0) or 0))
+    return best
+
+
 def _store_usage(character: dict[str, Any], records: list[dict[str, Any]]) -> None:
     features = character.get("features")
     if not isinstance(features, dict):

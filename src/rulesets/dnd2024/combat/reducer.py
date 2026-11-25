@@ -287,6 +287,50 @@ class CombatReducerMixin:
                     })
                     del history[:-64]
             return
+        if event_type in {"dnd2024.long_effect.applied",
+            "dnd2024.long_effect.ended",
+        }:
+            # 与形态同层：角色级状态，跨战斗、跨存档。战斗结束会清掉按回合
+            # 计时的条件，所以"10 分钟""1 小时"这类事实必须住在这里。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind != "player" or raw_id not in snapshot["characters"]:
+                raise EventBatchError(
+                    "only an existing player can hold a long-lived effect"
+                )
+            character = snapshot["characters"][raw_id]
+            effect_id = str(event.get("effect_id") or "")
+            if not effect_id:
+                raise EventBatchError(f"{event_type} needs an effect id")
+            effects = character.setdefault("long_effects", {})
+            if event_type == "dnd2024.long_effect.ended":
+                effects.pop(effect_id, None)
+                if not effects:
+                    character.pop("long_effects", None)
+                return
+            payload = event.get("effect") or {}
+            if not isinstance(payload, dict) or not payload:
+                raise EventBatchError(
+                    "long_effect.applied needs an effect payload"
+                )
+            expires = payload.get("expires_at")
+            if isinstance(expires, bool) or not isinstance(expires, int):
+                # 缺失或非整数的到期时间会让 _expired 永远判"未过期"，
+                # 效果就此永生。宁可拒绝一个形状不对的载荷。
+                raise EventBatchError(
+                    "long_effect.applied needs an integer expires_at"
+                )
+            if not isinstance(effects, dict):
+                raise EventBatchError("long_effects is not an object")
+            existing = effects.get(effect_id)
+            if isinstance(existing, dict):
+                # 重放同一条 applied 不能续期：到期时间只能由新的、更晚的
+                # 施加推进，否则回放历史事件就能让效果原地续命。
+                previous = existing.get("expires_at")
+                if isinstance(previous, int) and not isinstance(previous, bool):
+                    if expires <= previous:
+                        return
+            effects[effect_id] = dict(payload)
+            return
         if event_type in {"dnd2024.form.assumed", "dnd2024.form.reverted"}:
             # 变形是**角色级**状态而不是战斗状态：Wild Shape 持续等级/2 小时，
             # 跨遭遇、跨存档。写进 combat 会在下一场战斗里凭空变回原形。
@@ -518,6 +562,34 @@ class CombatReducerMixin:
                 if after != current + 1:
                     raise EventBatchError("feature usage must advance by exactly one")
                 set_feature_usage_count(character, owner, feature_id, scope, after)
+            except ClassFeatureError as exc:
+                raise EventBatchError(str(exc)) from exc
+            return
+        if event_type == "dnd2024.feature_usage.restored":
+            # 恢复走独立事件：``feature_usage.changed`` 只允许 +1（它描述的是
+            # "又用了一次"），把减少塞进去会让两条语义共用一个校验。
+            kind, raw_id = _actor_kind(str(event["actor_id"]))
+            if kind not in {"player", "companion"}:
+                raise EventBatchError(
+                    "only player/companion feature usage is canonical"
+                )
+            character = self._canonical_of(snapshot, kind, raw_id)
+            owner = str(event["owner"])
+            feature_id = str(event["feature_id"])
+            scope = str(event["scope"])
+            before = int(event["before_count"])
+            try:
+                current = feature_usage_count(character, owner, feature_id, scope)
+                if current != before:
+                    raise EventBatchError(
+                        f"feature usage for {owner}.{feature_id} moved: "
+                        f"expected {before}, found {current}"
+                    )
+                if before < 1:
+                    raise EventBatchError("feature usage has nothing to restore")
+                set_feature_usage_count(
+                    character, owner, feature_id, scope, before - 1,
+                )
             except ClassFeatureError as exc:
                 raise EventBatchError(str(exc)) from exc
             return
