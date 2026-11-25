@@ -90,6 +90,7 @@ files = [
     "src/rulesets/dnd2024/features/__init__.py",
     "src/rulesets/dnd2024/features/combat.py",
     "src/rulesets/dnd2024/features/equipment.py",
+    "src/rulesets/dnd2024/features/kinds.py",
     "src/rulesets/dnd2024/features/models.py",
     "src/rulesets/dnd2024/features/resolver.py",
     "src/rulesets/dnd2024/features/resources.py",

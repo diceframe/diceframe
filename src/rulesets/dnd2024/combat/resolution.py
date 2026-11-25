@@ -103,6 +103,7 @@ from .check_modes import (
     mode_from_sources,
     owned_mark,
 )
+from src.rulesets.dnd2024.features.kinds import KIND_HANDLERS, KindContext
 from src.rulesets.dnd2024.features.models import FeatureCapability, SpellSlotCost
 from src.rulesets.dnd2024.features.resources import resource_state
 from .check_windows import CHECK_WINDOW_DECISION, DAMAGE_WINDOW_DECISION
@@ -5377,7 +5378,12 @@ class CombatResolutionMixin:
         # approximation of HP, positions, conditions or per-turn usage.
         staged = fork_domain_state(instance)
         simulated = 0
+        context = KindContext(self, instance, combat, actor, intent)
         for action in capability.actions:
+            handler = KIND_HANDLERS.get(action.kind)
+            if handler is not None:
+                events.extend(handler.resolve(capability, action, context, rng))
+                continue
             if action.kind == "unarmed_strike":
                 strike_count = self._strike_count(actor, capability, action.count)
                 for _ in range(strike_count):
@@ -5422,10 +5428,6 @@ class CombatResolutionMixin:
                 events.extend(self._basic_action_events(
                     combat, action.kind, actor_id, spend_action=False,
                 ))
-            elif action.kind == "hide":
-                events.extend(self._hide_events(
-                    instance, combat, {"actor_id": actor_id}, rng, spend_action=False,
-                ))
             elif action.kind == "divine_spark":
                 events.extend(self._divine_spark_events(
                     instance, combat, actor_id, actor, capability, intent, rng,
@@ -5434,19 +5436,6 @@ class CombatResolutionMixin:
                 events.extend(self._turn_undead_events(
                     instance, combat, actor_id, actor, capability, intent, rng,
                 ))
-            elif action.kind == "end_long_effect":
-                # 主动结束不花任何经济：声明成空成本的能力，只是为了让
-                # "结束"也有一个可审计的意图入口。
-                #
-                # 结束哪个效果由声明给出，不由 capability id 反推：前者是
-                # 契约，后者只是"目前恰好同名"的巧合（quivering_palm_dismiss
-                # 会去结束一个不存在的 quivering_palm_dismiss）。
-                events.append({
-                    "type": "dnd2024.long_effect.ended",
-                    "actor_id": actor_id,
-                    "effect_id": action.effect_id or capability.feature_id,
-                    "reason": "dismissed",
-                })
             elif action.kind == "restore_feature_use":
                 events.append(self._restore_feature_use_event(actor_id, actor, capability))
             elif action.kind == "quivering_palm_end":
@@ -5526,16 +5515,6 @@ class CombatResolutionMixin:
                 events.extend(
                     self._rider_move_events(combat, actor, capability_id, intent)
                 )
-            elif action.kind == "steady_aim":
-                events.append({
-                    "type": "condition.applied", "target_id": actor_id,
-                    "condition": "next_attack_advantage", "duration": "combat",
-                })
-                events.append({
-                    "type": "condition.applied", "target_id": actor_id,
-                    "condition": "steady_aim_slow", "duration": "caster_turn_end",
-                    "source_actor_id": actor_id,
-                })
             elif action.kind == "temp_hp":
                 events.extend(self._temp_hp_grant_events(
                     actor, capability.feature_id, rng,
