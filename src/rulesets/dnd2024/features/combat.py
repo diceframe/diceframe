@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import re
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Iterable, Mapping
 
+from .kinds import KIND_HANDLERS
 from .models import (
     ClassFeatureDefinition,
     CombatCapabilityView,
@@ -232,7 +233,7 @@ def combat_capabilities(
             blocked = _blocked_reason(catalog, capability, context, definitions)
             if blocked and not include_unavailable:
                 continue
-            result.append(CombatCapabilityView(
+            view = CombatCapabilityView(
                 id=capability.id,
                 feature_id=definition.id,
                 name=catalog.label(capability.id, capability.id),
@@ -241,7 +242,15 @@ def combat_capabilities(
                 requires_hostile_target=capability.requires_hostile_target,
                 costs=_cost_views(catalog, capability, context, definitions),
                 target_kind=capability.target_kind,
-            ))
+            )
+            details: dict[str, dict[str, Any]] = {}
+            for action in capability.actions:
+                handler = KIND_HANDLERS.get(action.kind)
+                if handler is not None and handler.project is not None:
+                    detail = handler.project(capability, action, context, view)
+                    if detail:
+                        details.setdefault(action.kind, {}).update(detail)
+            result.append(replace(view, kind_details=details) if details else view)
     return tuple(result)
 
 

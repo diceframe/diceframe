@@ -21,40 +21,11 @@ from typing import Any, Mapping
 
 from src.rulesets.bundle import LoadedRulesetBundle
 
+from .kinds import is_known_kind
+
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 _OWNER_RE = re.compile(r"^(class|subclass):[a-z0-9][a-z0-9_.-]*$")
-# v1 只表达本 PR 真正实现的效果原语；未知 kind 必须 fail closed，而不是被静默忽略。
-ACTION_KINDS = frozenset({
-    "unarmed_strike", "dash", "dodge", "disengage", "hide", "heal", "rage",
-    "rage_sustain", "action_surge", "bardic_grant", "inspiration_slot_exchange",
-    # Font of Magic 的两个方向是两条独立动作：槽换点不要动作、点换槽要附赠
-    # 动作，合成一个 kind 就只能靠 intent 里的字段猜哪一半被声明了。
-    "font_slot_to_points", "font_create_slot",
-    # 自身增益类：临时生命值、只作用于自己的隐形、以及"除某一伤害类型外
-    # 全部抗性"。三者都不产生攻击或移动，但都必须走同一套资源/经济结算，
-    # 所以作为封闭 kind 声明而不是让客户端拼事件。
-    "temp_hp", "invisible", "resistance_all",
-    # Steady Aim 只给自己两件事：下一次攻击优势、以及本回合剩余速度 0。两个
-    # 后果都落条件，所以它是一个独立的封闭 kind，而不是"buff"的另一种拼法。
-    "steady_aim",
-    # 长时状态类：附赠动作施加一个跨日存在的事实（恐惧、光环、飞行、振动）。
-    # 各自封闭，因为它们的到期与解除规则完全不同，拼成一个 "buff" 就只能靠
-    # intent 里的字段猜是哪一种。
-    "intimidating_presence",
-    "dragon_wings", "end_long_effect", "holy_nimbus", "quivering_palm_end",
-    "restore_feature_use",
-    # Channel Divinity 的效果各自是一个封闭 kind：它们的成本同为一次引导，
-    # 但目标数量、是否要豁免、以及"分配一个预算"这三件事没有任何共同形状，
-    # 合成一个 kind 只会让结算按 intent 字段猜分支。
-    "divine_spark", "turn_undead", "preserve_life", "divine_sense",
-    # 圣疗从 track 池按请求量扣款，声明里给不出固定 amount，所以池只做可用性
-    # 判定，真实扣减由结算发一条按意图金额的 class_resource.spent。
-    "lay_on_hands",
-    # 斥退敌人是"一次魔法动作 + 一次引导，目标数由魅力决定"的多目标控制，
-    # 与 Divine Spark 的单目标、Turn Undead 的固定类型都不同形。
-    "abjure_foes",
-})
 # 动作槽的名字。一个能力最多占一个槽。目录里的旧写法把槽名当键
 # （``action: 1`` / ``bonus_action: 1``），新写法是 ``slot: "action"``；两种都
 # 读，同时出现视为声明错误，不让"占不占动作"有两个来源。
@@ -891,8 +862,8 @@ class Dnd2024ClassFeatureCatalog:
             if not isinstance(raw_action, dict):
                 raise ClassFeatureError(f"{capability_id} contains an invalid action")
             kind = str(raw_action.get("kind") or "")
-            if kind not in ACTION_KINDS:
-                raise ClassFeatureError(f"{capability_id} declares an unknown action kind")
+            if not is_known_kind(kind):
+                raise ClassFeatureError(f"{capability_id} declares an unknown action kind: {kind!r}")
             if kind == "restore_feature_use" and not resources:
                 raise ClassFeatureError(f"{capability_id} must declare its price in cost.resources")
             effect_id = str(raw_action.get("effect_id") or "")
@@ -1033,9 +1004,11 @@ class CombatCapabilityView:
     requires_hostile_target: bool
     costs: tuple[CapabilityCostView, ...]
     target_kind: str = "none"
+    kind_details: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            **({"kind_details": dict(self.kind_details)} if self.kind_details else {}),
             "capability_id": self.id,
             "feature_id": self.feature_id,
             "label": self.name,

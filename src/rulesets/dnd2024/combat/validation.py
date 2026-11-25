@@ -19,6 +19,7 @@ from ..character.attunement import (
     owned_ref_counts,
 )
 from .action_adapter import is_supported_damage_formula
+from ..features.kinds import KIND_HANDLERS, KindContext
 from ..features.models import ClassFeatureError, ResourceCost
 from ..forms import (
     FormState, FormStateError, bootstrap_known_forms, mode_for, restrictions,
@@ -1793,9 +1794,6 @@ class CombatValidationMixin:
                 raise CombatIntentError(
                     "Quivering Palm requires an explicit same-plane assertion"
                 )
-        if capability_id == "steady_aim":
-            if self.has_moved_this_turn(combat, str(actor["actor_id"])):
-                raise CombatIntentError("you have already moved this turn")
         rider_move = intent.get("rider_move")
         if rider_move is not None:
             allowed = capability is not None and capability_id in {
@@ -1815,12 +1813,14 @@ class CombatValidationMixin:
             ) // 2
             if rider_move > allowance:
                 raise CombatIntentError("granted movement exceeds half your speed")
-        if capability is not None and any(
-            action.kind == "hide" for action in capability.actions
-        ):
-            gate = self.hide_preconditions(instance, combat, str(actor["actor_id"]))
-            if not gate["allowed"]:
-                raise CombatIntentError(str(gate["reason"]))
+        if capability is not None:
+            context = KindContext(self, instance, combat, actor, intent)
+            for action in capability.actions:
+                handler = KIND_HANDLERS.get(action.kind)
+                if handler is not None and handler.validate is not None:
+                    reason = handler.validate(capability, action, context)
+                    if reason:
+                        raise CombatIntentError(reason)
         choice = intent.get("open_hand_choice")
         if choice is not None:
             # Open Hand Technique 只在 Flurry of Blows 授予的攻击上成立；把它
