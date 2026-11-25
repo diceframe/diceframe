@@ -4936,6 +4936,7 @@ Primary boundary:
 ```text
 src/plugin_host/
 ├─ host.py
+├─ manifest_validation.py
 ├─ support.py
 ├─ descriptors.py
 ├─ capabilities.py
@@ -4945,6 +4946,10 @@ src/plugin_host/
 ├─ mirrors.py
 └─ ...
 ```
+
+`host.py` orchestrates runtime loading and installation transactions. `manifest_validation.py`
+validates package declarations, configuration schemas, and permission declarations without
+loading a runtime or publishing a plugin. `policy.py` still defines and infers permissions.
 
 ---
 

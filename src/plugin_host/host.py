@@ -22,8 +22,8 @@ import zipfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import urlsplit
 
+from . import manifest_validation
 from .capabilities import (
     clear_runtime_capabilities,
     find_provider_plugin,
@@ -79,18 +79,14 @@ from .runtime_protocol import (
 from .support import (
     PLUGIN_TYPE_SUPPORT,
     plugin_type_support,
-    plugin_type_descriptor,
     validate_content_module_profile,
-    STATIC_PLUGIN_TYPES as _STATIC_PLUGIN_TYPES,
     RPC_PLUGIN_TYPES as _RPC_PLUGIN_TYPES,
 )
 from src.localization.messages import t
 
 _ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-_RULEBOOK_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _BRIDGE_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 _MAX_BRIDGE_IMAGE_BYTES = 10 * 1024 * 1024
-_ALLOWED_CONTROLS = {"switch", "text", "secret", "number", "select", "string-list"}
 _RESTART_BASE_DELAY = 3.0
 _RESTART_MAX_DELAY = 300.0
 
@@ -107,7 +103,6 @@ PackageValidator = Callable[[Path, dict[str, Any]], None]
 # 被绑定的存档引用时抛 ValueError（实现方决定哪些 plugin_type 受保护）。
 ContentModuleGuard = Callable[[str, str], None]
 _PLUGIN_TYPES = set(PLUGIN_TYPE_SUPPORT)
-_ALLOWED_PERMISSIONS = PERMISSION_DETAILS
 
 _SAFE_PARENT_ENV = {
     "COMSPEC",
@@ -522,7 +517,7 @@ class PluginHost:
     def plugin_type_of(self, plugin_id: str) -> str:
         """返回插件类型（卸载清理等按类型 descriptor 派发用）；未知插件返回空串。"""
         runtime = self.plugins.get(plugin_id)
-        return self._plugin_type(runtime.manifest) if runtime else ""
+        return manifest_validation.plugin_type(runtime.manifest) if runtime else ""
 
     def _is_live(self, runtime: Any) -> bool:
         """插件此刻是否活着——前端启停开关绑的就是这个字段。
@@ -535,7 +530,7 @@ class PluginHost:
 
         if runtime.process and runtime.process.returncode is None:
             return True
-        if self._plugin_type(runtime.manifest) != "ruleset-runtime":
+        if manifest_validation.plugin_type(runtime.manifest) != "ruleset-runtime":
             return False
         return runtime.status in {"active", "running"}
 
@@ -546,7 +541,7 @@ class PluginHost:
             runtime.error = f"插件进程已退出，code={runtime.process.returncode}"
         public_config = dict(runtime.config)
         for key, field_schema in runtime.schema.get("properties", {}).items():
-            if self._sensitive(field_schema):
+            if manifest_validation.sensitive(field_schema):
                 value = runtime.secrets.get(key, "")
                 public_config[key] = {"configured": bool(value), "masked": f"***{value[-4:]}" if value else ""}
         min_app_version = str(runtime.manifest.get("min_app_version") or "").strip()
@@ -559,9 +554,9 @@ class PluginHost:
             "name": runtime.manifest.get("name", plugin_id),
             "version": runtime.manifest.get("version", ""),
             "description": runtime.manifest.get("description", ""),
-            "plugin_type": self._plugin_type(runtime.manifest),
-            "support": plugin_type_support(self._plugin_type(runtime.manifest)),
-            "has_entrypoint": self._has_entrypoint(runtime.manifest),
+            "plugin_type": manifest_validation.plugin_type(runtime.manifest),
+            "support": plugin_type_support(manifest_validation.plugin_type(runtime.manifest)),
+            "has_entrypoint": manifest_validation.has_entrypoint(runtime.manifest),
             "enabled": bool(runtime.config.get("enabled")),
             "running": self._is_live(runtime),
             "status": runtime.status,
@@ -597,7 +592,7 @@ class PluginHost:
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         runtime = self._require(plugin_id)
-        if self._plugin_type(runtime.manifest) != "tool":
+        if manifest_validation.plugin_type(runtime.manifest) != "tool":
             raise ValueError(t("plugin_host.host.not_tool_plugin"))
         if runtime.status != "running" or not runtime.rpc_client:
             raise ValueError(t("plugin_host.host.tool_plugin_not_running"))
@@ -637,7 +632,7 @@ class PluginHost:
     ) -> dict[str, Any]:
         """按 capability 别名调用 provider 插件；默认超时长于普通 RPC。"""
         runtime = self._require(plugin_id)
-        if self._plugin_type(runtime.manifest) != "provider":
+        if manifest_validation.plugin_type(runtime.manifest) != "provider":
             raise ValueError(t("plugin_host.host.not_provider_plugin"))
         if runtime.status != "running" or not runtime.rpc_client:
             raise ValueError(t("plugin_host.host.provider_not_running"))
@@ -746,7 +741,7 @@ class PluginHost:
 
     def bridge_asset_path(self, plugin_id: str, relative_path: str) -> Path:
         runtime = self._require(plugin_id)
-        if self._plugin_type(runtime.manifest) != "bot-extension" or runtime.status != "running":
+        if manifest_validation.plugin_type(runtime.manifest) != "bot-extension" or runtime.status != "running":
             raise KeyError(t("plugin_host.host.bridge_extension_not_running"))
         root = (self.data_dir / plugin_id / "runtime").resolve()
         target = (root / str(relative_path or "")).resolve()
@@ -942,45 +937,6 @@ class PluginHost:
                 lorebook_store.add_entry(entry)
                 total += 1
         return total
-
-    @staticmethod
-    def _validate_ruleset_catalogs(
-        manifest: dict[str, Any], plugin_dir: Path,
-    ) -> tuple[Path, tuple[str, ...]] | None:
-        """Validate manifest ``ruleset_catalogs``（DNDMOD-04，母方案 §7/§107）。
-
-        与 adventure_packages 同规则：相对/不越界/真实目录/共享父目录；目录内
-        是 catalog JSON（装载时经 DNDMOD-01 契约校验）。仅 content-pack。
-        """
-
-        declared = manifest.get("ruleset_catalogs")
-        if declared is None:
-            return None
-        if str(manifest.get("plugin_type") or "") != "content-pack":
-            raise ValueError(t("plugin_host.host.ruleset_catalogs_content_pack_only"))
-        if not isinstance(declared, list) or not declared:
-            raise ValueError(t("plugin_host.host.ruleset_catalogs_not_string_array"))
-        base = plugin_dir.resolve()
-        catalogs: list[Path] = []
-        for pattern in declared:
-            if not isinstance(pattern, str) or not pattern.strip():
-                raise ValueError(t("plugin_host.host.ruleset_catalogs_path_empty"))
-            normalized = pattern.strip().replace("\\", "/")
-            candidate = Path(normalized)
-            if candidate.is_absolute() or any(part in ("..", "") for part in candidate.parts):
-                raise ValueError(t("plugin_host.host.ruleset_catalogs_path_unsafe"))
-            resolved = (base / candidate).resolve()
-            if resolved != base and base not in resolved.parents:
-                raise ValueError(t("plugin_host.host.ruleset_catalogs_path_outside"))
-            if resolved.is_symlink() or not resolved.is_dir():
-                raise ValueError(t("plugin_host.host.ruleset_catalogs_dir_missing", normalized=normalized))
-            catalogs.append(resolved)
-        parents = {catalog.parent for catalog in catalogs}
-        if len(parents) != 1:
-            raise ValueError(t("plugin_host.host.ruleset_catalogs_same_parent"))
-        parent = catalogs[0].parent
-        directories = tuple(sorted(catalog.name for catalog in catalogs))
-        return parent, directories
 
     def set_package_hooks(
         self,
@@ -1668,20 +1624,20 @@ class PluginHost:
         for key, value in changes.items():
             if key not in properties:
                 continue
-            if self._sensitive(properties[key]):
+            if manifest_validation.sensitive(properties[key]):
                 if isinstance(value, dict):
                     # Public plugin details expose secrets as
                     # {"configured": true, "masked": "***xxxx"}.  If the UI
                     # saves an unchanged form, do not persist that mask object
                     # as the real secret.
                     continue
-                normalized = self._normalize_value(properties[key], value)
+                normalized = manifest_validation.normalize_value(properties[key], value)
                 if normalized:
                     new_secrets[key] = normalized
             else:
-                normalized = self._normalize_value(properties[key], value)
+                normalized = manifest_validation.normalize_value(properties[key], value)
                 new_config[key] = normalized
-        self._validate_required(runtime.schema, new_config, new_secrets)
+        manifest_validation.validate_required(runtime.schema, new_config, new_secrets)
         runtime.config, runtime.secrets = new_config, new_secrets
         self._save_config(plugin_id, runtime)
         await self.restart(plugin_id)
@@ -1701,12 +1657,12 @@ class PluginHost:
             return
         generated = False
         for key, field_schema in runtime.schema.get("properties", {}).items():
-            if self._sensitive(field_schema) and (field_schema.get("ui") or {}).get("generate") and not runtime.secrets.get(key):
+            if manifest_validation.sensitive(field_schema) and (field_schema.get("ui") or {}).get("generate") and not runtime.secrets.get(key):
                 runtime.secrets[key] = secrets.token_urlsafe(24)
                 generated = True
         if generated:
             self._save_config(plugin_id, runtime)
-        if not self._has_entrypoint(runtime.manifest) or self._plugin_type(runtime.manifest) == "ruleset-runtime":
+        if not manifest_validation.has_entrypoint(runtime.manifest) or manifest_validation.plugin_type(runtime.manifest) == "ruleset-runtime":
             self._register_contributions(plugin_id, runtime)
             runtime.status, runtime.error = "active", ""
             # 声明型插件没有宿主进程，"启动"就是"启用"：必须持久化，否则主程序重启后
@@ -1731,7 +1687,7 @@ class PluginHost:
         kwargs: dict[str, Any] = {}
         if os.name == "nt":
             kwargs["creationflags"] = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        uses_rpc = self._plugin_type(runtime.manifest) in _RPC_PLUGIN_TYPES
+        uses_rpc = manifest_validation.plugin_type(runtime.manifest) in _RPC_PLUGIN_TYPES
         if uses_rpc:
             kwargs.update({
                 "stdin": asyncio.subprocess.PIPE,
@@ -1747,12 +1703,12 @@ class PluginHost:
                     {
                         "protocol_version": PLUGIN_PROTOCOL_VERSION,
                         "plugin_id": plugin_id,
-                        "plugin_type": self._plugin_type(runtime.manifest),
+                        "plugin_type": manifest_validation.plugin_type(runtime.manifest),
                     },
                     timeout=5,
                 )
                 initialize_runtime_capabilities(
-                    self._plugin_type(runtime.manifest),
+                    manifest_validation.plugin_type(runtime.manifest),
                     runtime,
                     initialized,
                 )
@@ -1800,7 +1756,7 @@ class PluginHost:
             "PYTHONIOENCODING": "utf-8",
             "PYTHONUTF8": "1",
         })
-        if self._plugin_type(runtime.manifest) in _RPC_PLUGIN_TYPES:
+        if manifest_validation.plugin_type(runtime.manifest) in _RPC_PLUGIN_TYPES:
             host_root = Path(__file__).resolve().parents[2]
             env["PYTHONPATH"] = os.pathsep.join((
                 str(host_root),
@@ -1818,7 +1774,7 @@ class PluginHost:
             env_name = str((field_schema.get("ui") or {}).get("env") or "")
             if not env_name:
                 continue
-            value = runtime.secrets.get(key, "") if self._sensitive(field_schema) else runtime.config.get(key, field_schema.get("default"))
+            value = runtime.secrets.get(key, "") if manifest_validation.sensitive(field_schema) else runtime.config.get(key, field_schema.get("default"))
             env[env_name] = json.dumps(value, ensure_ascii=False) if isinstance(value, list) else str(value).lower() if isinstance(value, bool) else str(value or "")
         self._inject_ai_provider_env(runtime, env, permissions)
         return env
@@ -2062,17 +2018,17 @@ class PluginHost:
             field_schema = runtime.schema.get("properties", {}).get(key)
             if not field_schema or value in (None, ""):
                 continue
-            if self._sensitive(field_schema):
+            if manifest_validation.sensitive(field_schema):
                 runtime.secrets[key] = str(value)
             else:
-                runtime.config[key] = self._normalize_value(field_schema, value)
+                runtime.config[key] = manifest_validation.normalize_value(field_schema, value)
         self._save_config(plugin_id, runtime)
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("1\n", encoding="ascii")
 
     def _load_config(self, plugin_id: str, schema: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
         folder = self.data_dir / plugin_id
-        config = {key: field.get("default") for key, field in schema.get("properties", {}).items() if "default" in field and not self._sensitive(field)}
+        config = {key: field.get("default") for key, field in schema.get("properties", {}).items() if "default" in field and not manifest_validation.sensitive(field)}
         secrets_data: dict[str, str] = {}
         for filename, target in (("config.json", config), ("secrets.json", secrets_data)):
             path = folder / filename
@@ -2231,13 +2187,13 @@ class PluginHost:
                     raise ValueError(t("plugin_host.host.field_version_unsupported", field=field, version=version))
         if "default_locale" in manifest and not str(manifest["default_locale"] or "").strip():
             raise ValueError(t("plugin_host.host.default_locale_empty"))
-        plugin_type = self._plugin_type(manifest)
+        plugin_type = manifest_validation.plugin_type(manifest)
         if plugin_type not in _PLUGIN_TYPES:
             raise ValueError(t("plugin_host.host.plugin_type_unsupported", plugin_type=plugin_type))
         schema_path = (plugin_dir / str(manifest.get("config_schema") or "config.schema.json")).resolve()
         self._ensure_inside(plugin_dir, schema_path)
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        self._validate_schema(schema)
+        manifest_validation.validate_schema(schema)
         validate_content_module_profile(manifest)
         # M01: validate the established hard runtime requirement shape before
         # any plugin config or contribution is exposed.  Resolution remains
@@ -2247,20 +2203,20 @@ class PluginHost:
             # T3：外部规则运行时声明在安装时校验一次（fail closed）；注册期
             # 同步桥会重新解析，两处语义一致。
             parse_ruleset_runtime_declaration(manifest)
-        self._validate_manifest_permissions(manifest)
-        self._validate_runtime_permissions(manifest, schema)
-        self._validate_entrypoint(manifest, plugin_type)
+        manifest_validation.validate_manifest_permissions(manifest)
+        manifest_validation.validate_runtime_permissions(manifest, schema)
+        manifest_validation.validate_entrypoint(manifest, plugin_type)
         validate_contributes(manifest, plugin_dir)
-        adventure_packages = self._validate_adventure_packages(manifest, plugin_dir)
+        adventure_packages = manifest_validation.validate_adventure_packages(manifest, plugin_dir)
         adventure_root, adventure_dirs = (
             adventure_packages if adventure_packages is not None else (None, ())
         )
-        ruleset_catalogs = self._validate_ruleset_catalogs(manifest, plugin_dir)
+        ruleset_catalogs = manifest_validation.validate_ruleset_catalogs(manifest, plugin_dir)
         catalog_root, catalog_dirs = (
             ruleset_catalogs if ruleset_catalogs is not None else (None, ())
         )
-        rulebooks = self._validate_rulebooks(manifest, plugin_dir)
-        prebuilt_ui = self._validate_prebuilt_ui(manifest, plugin_dir)
+        rulebooks = manifest_validation.validate_rulebooks(manifest, plugin_dir)
+        prebuilt_ui = manifest_validation.validate_prebuilt_ui(manifest, plugin_dir)
         return plugin_id, PluginRuntime(
             manifest, schema, plugin_dir,
             adventure_packages_root=adventure_root,
@@ -2270,165 +2226,6 @@ class PluginHost:
             rulebooks=rulebooks,
             prebuilt_ui=prebuilt_ui,
         )
-
-    @staticmethod
-    def _validate_prebuilt_ui(
-        manifest: dict[str, Any], plugin_dir: Path,
-    ) -> dict[str, Any] | None:
-        """Validate an optional package-owned U02 prebuilt UI surface."""
-
-        declared = manifest.get("prebuilt_ui")
-        if declared is None:
-            return None
-        if not isinstance(declared, dict) or set(declared) != {"entrypoint", "assets"}:
-            raise ValueError("prebuilt_ui must contain only entrypoint and assets")
-        entrypoint = str(declared.get("entrypoint") or "").replace("\\", "/").strip("/")
-        assets = declared.get("assets")
-        if (
-            not entrypoint.endswith((".html", ".htm"))
-            or not isinstance(assets, list)
-            or len(assets) > 256
-        ):
-            raise ValueError("prebuilt_ui entrypoint/assets are invalid")
-        paths = [entrypoint, *[str(item or "").replace("\\", "/").strip("/") for item in assets]]
-        if len(set(paths)) != len(paths):
-            raise ValueError("prebuilt_ui contains duplicate paths")
-        normalized: list[str] = []
-        for relative in paths:
-            candidate = Path(relative)
-            if (
-                not relative
-                or len(relative) > 240
-                or candidate.is_absolute()
-                or any(part in {"", ".", ".."} for part in candidate.parts)
-            ):
-                raise ValueError("prebuilt_ui path is invalid")
-            target = (plugin_dir / relative).resolve()
-            PluginHost._ensure_inside(plugin_dir, target)
-            if target.is_symlink() or not target.is_file():
-                raise ValueError(f"prebuilt_ui file is missing: {relative}")
-            normalized.append(relative)
-        return {"entrypoint": normalized[0], "assets": normalized[1:]}
-
-    @staticmethod
-    def _validate_rulebooks(
-        manifest: dict[str, Any], plugin_dir: Path,
-    ) -> tuple[dict[str, Any], ...]:
-        """Validate the D01 ``rulebooks`` declaration without exposing files."""
-
-        declared = manifest.get("rulebooks")
-        if declared is None:
-            return ()
-        if not isinstance(declared, list) or len(declared) > 32:
-            raise ValueError("rulebooks 必须是最多 32 项的数组")
-        normalized: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for entry in declared:
-            if not isinstance(entry, dict):
-                raise ValueError("rulebooks entry 必须是对象")
-            fields = set(entry)
-            if fields not in (
-                {"id", "title", "path", "audience"},
-                {"id", "title", "url", "audience"},
-            ):
-                raise ValueError("rulebooks entry fields are invalid")
-            book_id = str(entry.get("id") or "").strip()
-            title = str(entry.get("title") or "").strip()
-            relative = str(entry.get("path") or "").replace("\\", "/").strip("/")
-            external_url = str(entry.get("url") or "").strip()
-            audience = str(entry.get("audience") or "").strip().lower()
-            if not _RULEBOOK_ID_RE.fullmatch(book_id) or book_id in seen:
-                raise ValueError("rulebooks id is invalid or duplicated")
-            if not title or len(title) > 200:
-                raise ValueError("rulebooks title is invalid")
-            if audience not in {"player", "gm"}:
-                raise ValueError("rulebooks audience must be player or gm")
-            if "url" in fields:
-                parsed = urlsplit(external_url)
-                if (
-                    len(external_url) > 2048
-                    or parsed.scheme.lower() != "https"
-                    or not parsed.hostname
-                    or parsed.username is not None
-                    or parsed.password is not None
-                ):
-                    raise ValueError("rulebooks external URL must be a public HTTPS URL")
-                normalized.append({
-                    "id": book_id,
-                    "title": title,
-                    "url": external_url,
-                    "audience": audience,
-                    "kind": "external",
-                })
-                seen.add(book_id)
-                continue
-            candidate = Path(relative)
-            if (
-                not relative
-                or candidate.is_absolute()
-                or any(part in {"", ".", ".."} for part in candidate.parts)
-                or len(relative) > 240
-            ):
-                raise ValueError("rulebooks path is invalid")
-            target = (plugin_dir / relative).resolve()
-            PluginHost._ensure_inside(plugin_dir, target)
-            if target.is_symlink() or not target.is_file():
-                raise ValueError(f"rulebook file is missing: {relative}")
-            suffix = target.suffix.lower()
-            if suffix not in {".md", ".markdown", ".pdf"}:
-                raise ValueError("rulebooks only support Markdown or PDF files")
-            seen.add(book_id)
-            normalized.append({
-                "id": book_id,
-                "title": title,
-                "path": relative,
-                "audience": audience,
-                "kind": "pdf" if suffix == ".pdf" else "markdown",
-            })
-        return tuple(normalized)
-
-    @staticmethod
-    def _validate_adventure_packages(
-        manifest: dict[str, Any], plugin_dir: Path,
-    ) -> tuple[Path, tuple[str, ...]] | None:
-        """Validate manifest ``adventure_packages``（MOD-03，母方案 §107）。
-
-        声明式冒险包：路径相对、不越界、真实目录（非 symlink）、含
-        manifest.json；全部包必须共享同一父目录（v1 约束：一个 plugin =
-        一个 declared-only loader）。仅 content-pack 允许声明。返回
-        (公共父目录, 包目录名集合)，未声明返回 None。
-        """
-
-        declared = manifest.get("adventure_packages")
-        if declared is None:
-            return None
-        if str(manifest.get("plugin_type") or "") != "content-pack":
-            raise ValueError(t("plugin_host.host.adventure_packages_content_pack_only"))
-        if not isinstance(declared, list) or not declared:
-            raise ValueError(t("plugin_host.host.adventure_packages_not_string_array"))
-        base = plugin_dir.resolve()
-        packages: list[Path] = []
-        for pattern in declared:
-            if not isinstance(pattern, str) or not pattern.strip():
-                raise ValueError(t("plugin_host.host.adventure_packages_path_empty"))
-            normalized = pattern.strip().replace("\\", "/")
-            candidate = Path(normalized)
-            if candidate.is_absolute() or any(part in ("..", "") for part in candidate.parts):
-                raise ValueError(t("plugin_host.host.adventure_packages_path_unsafe"))
-            resolved = (base / candidate).resolve()
-            if resolved != base and base not in resolved.parents:
-                raise ValueError(t("plugin_host.host.adventure_packages_path_outside"))
-            if resolved.is_symlink() or not resolved.is_dir():
-                raise ValueError(t("plugin_host.host.adventure_packages_dir_missing", normalized=normalized))
-            if not (resolved / "manifest.json").is_file():
-                raise ValueError(t("plugin_host.host.adventure_packages_manifest_missing", normalized=normalized))
-            packages.append(resolved)
-        parents = {package.parent for package in packages}
-        if len(parents) != 1:
-            raise ValueError(t("plugin_host.host.adventure_packages_same_parent"))
-        parent = packages[0].parent
-        directories = tuple(sorted(package.name for package in packages))
-        return parent, directories
 
     def _expand_entrypoint(self, plugin_id: str, runtime: PluginRuntime, command: list[str]) -> list[str]:
         data_dir = (self.data_dir / plugin_id / "runtime").resolve()
@@ -2570,12 +2367,7 @@ class PluginHost:
             raise ValueError(t("plugin_host.host.package_multiple_manifests"))
         return candidates[0]
 
-    @staticmethod
-    def _ensure_inside(root: Path, target: Path) -> None:
-        root = root.resolve()
-        target = target.resolve()
-        if target != root and root not in target.parents:
-            raise ValueError(t("plugin_host.host.path_outside"))
+    _ensure_inside = staticmethod(manifest_validation.ensure_inside)
 
     @staticmethod
     def _atomic_json(path: Path, value: object) -> None:
@@ -2583,91 +2375,19 @@ class PluginHost:
         temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
         temp.replace(path)
 
-    @staticmethod
-    def _validate_schema(schema: dict[str, Any]) -> None:
-        if schema.get("type") != "object" or not isinstance(schema.get("properties"), dict):
-            raise ValueError(t("plugin_host.host.config_schema_not_object"))
-        for key, field_schema in schema["properties"].items():
-            control = (field_schema.get("ui") or {}).get("control")
-            if control and control not in _ALLOWED_CONTROLS:
-                raise ValueError(t("plugin_host.host.field_control_unsupported", field=key, control=control))
-
     def _status_for_enabled(self, runtime: PluginRuntime) -> str:
         if not runtime.config.get("enabled"):
             return "disabled"
-        return "stopped" if self._has_entrypoint(runtime.manifest) else "active"
-
-    @staticmethod
-    def _plugin_type(manifest: Mapping[str, object]) -> str:
-        return str(manifest.get("plugin_type") or "").strip()
-
-    @staticmethod
-    def _has_entrypoint(manifest: Mapping[str, object]) -> bool:
-        command = manifest.get("entrypoint")
-        return isinstance(command, list) and bool(command)
-
-    @staticmethod
-    def _validate_entrypoint(manifest: dict[str, Any], plugin_type: str) -> None:
-        command = manifest.get("entrypoint")
-        if command is None and plugin_type in _STATIC_PLUGIN_TYPES:
-            return
-        if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
-            raise ValueError(t("plugin_host.host.entrypoint_required", plugin_type=plugin_type))
-
-    @staticmethod
-    def _validate_manifest_permissions(manifest: dict[str, Any]) -> None:
-        permissions = manifest.get("permissions", [])
-        if permissions is None:
-            permissions = []
-        if not isinstance(permissions, list) or not all(isinstance(item, str) and item.strip() for item in permissions):
-            raise ValueError(t("plugin_host.host.permissions_not_string_array"))
-        unknown = sorted({item.strip() for item in permissions} - set(_ALLOWED_PERMISSIONS))
-        if unknown:
-            raise ValueError(
-                t("plugin_host.host.permissions_unknown", unknown=', '.join(unknown))
-            )
-
-    @staticmethod
-    def _validate_runtime_permissions(manifest: dict[str, Any], schema: dict[str, Any]) -> None:
-        plugin_type = str(manifest.get("plugin_type") or "").strip()
-        permissions = set(effective_plugin_permissions(manifest, schema))
-        required = plugin_type_descriptor(plugin_type).get("required_permission")
-        if required and required not in permissions:
-            raise ValueError(t("plugin_host.host.permission_required", plugin_type=plugin_type, required=required))
+        return "stopped" if manifest_validation.has_entrypoint(runtime.manifest) else "active"
 
     def _plugin_permissions(self, runtime: PluginRuntime) -> list[str]:
         return effective_plugin_permissions(runtime.manifest, runtime.schema)
 
     def _plugin_permission_details(self, runtime: PluginRuntime) -> list[dict[str, str]]:
         return [
-            {"id": permission, "description": _ALLOWED_PERMISSIONS.get(permission, permission)}
+            {"id": permission, "description": PERMISSION_DETAILS.get(permission, permission)}
             for permission in self._plugin_permissions(runtime)
         ]
-
-    @staticmethod
-    def _sensitive(field_schema: dict[str, Any]) -> bool:
-        ui = field_schema.get("ui") or {}
-        return bool(ui.get("sensitive") or ui.get("control") == "secret")
-
-    @staticmethod
-    def _normalize_value(field_schema: dict[str, Any], value: Any) -> Any:
-        field_type = field_schema.get("type")
-        if field_type == "boolean": return bool(value)
-        if field_type == "number":
-            number = float(value)
-            if "exclusiveMinimum" in field_schema and number <= float(field_schema["exclusiveMinimum"]): raise ValueError(t("plugin_host.host.value_below_minimum"))
-            return number
-        if field_type == "integer": return int(value)
-        if field_type == "array": return list(dict.fromkeys(str(item).strip() for item in (value if isinstance(value, list) else []) if str(item).strip()))
-        text = str(value or "").strip()
-        if field_schema.get("enum") and text not in field_schema["enum"]: raise ValueError(t("plugin_host.host.option_invalid"))
-        return text
-
-    @staticmethod
-    def _validate_required(schema: dict[str, Any], config: dict[str, Any], secrets_data: dict[str, str]) -> None:
-        for key in schema.get("required", []):
-            if not config.get(key) and not secrets_data.get(key):
-                raise ValueError(t("plugin_host.host.config_required_missing", field=key))
 
     def _require(self, plugin_id: str) -> PluginRuntime:
         if plugin_id not in self.plugins:
