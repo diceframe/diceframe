@@ -42,6 +42,7 @@ from src.rulesets.dnd2024.items.activation import (
 from src.rulesets.dnd2024.items.charges import (
     ChargesError,
     charges_of,
+    charge_waiver_roll,
     destroy_check_events,
     spend_charges,
     validate_charges_declaration,
@@ -76,6 +77,9 @@ _ITEM_EVENT_FIELDS = {
     "dnd2024.item.consumed": frozenset({"type", "actor_id", "item_ref", "amount"}),
     "dnd2024.item.activated": frozenset({"type", "actor_id", "item_ref", "target_id", "cost"}),
     "dnd2024.item.charge_spent": frozenset({"type", "actor_id", "item_ref", "amount"}),
+    "dnd2024.item.charge_waived": frozenset({
+        "type", "actor_id", "item_ref", "declared", "roll", "threshold",
+    }),
 }
 
 # 探索态没有敌方 actor；伤害/豁免/法术攻击模式的确定性结算需要敌对目标，
@@ -709,11 +713,28 @@ class Dnd2024ExplorationEngine:
         maximum = validate_charges_declaration(item)
         events: list[dict[str, Any]] = []
         charge_cost = declaration.get("charge_cost")
+        # 与战斗内同一判定：免收时本次实际扣 0，事件与销毁检查都读这个值。
+        spent: int | None = None
         if maximum is not None and charge_cost is not None:
-            events.append({
-                "type": "dnd2024.item.charge_spent", "actor_id": actor_id,
-                "item_ref": item_ref, "amount": int(charge_cost),
-            })
+            declared = int(charge_cost)
+            spent = declared
+            waiver = charge_waiver_roll(
+                self._canonical_of(instance, actor_id), self.features, rng,
+            )
+            if waiver is not None:
+                roll, threshold = waiver
+                if roll >= threshold:
+                    spent = 0
+                    events.append({
+                        "type": "dnd2024.item.charge_waived", "actor_id": actor_id,
+                        "item_ref": item_ref, "declared": declared,
+                        "roll": roll, "threshold": threshold,
+                    })
+            if spent:
+                events.append({
+                    "type": "dnd2024.item.charge_spent", "actor_id": actor_id,
+                    "item_ref": item_ref, "amount": spent,
+                })
         if validate_consumable_declaration(item):
             events.append({
                 "type": "dnd2024.item.consumed", "actor_id": actor_id,
@@ -743,10 +764,10 @@ class Dnd2024ExplorationEngine:
             "cost": declaration["cost"],
         })
         # 与战斗内同一语义、同一事件形状：效果结算完毕后才判定销毁。
-        if charge_cost is not None:
+        if spent is not None:
             current = charges_of(self._canonical_of(instance, actor_id), item_ref)
             if current is not None:
-                remaining = current - int(charge_cost)
+                remaining = current - spent
                 events.extend(destroy_check_events(
                     item,
                     actor_id=actor_id,

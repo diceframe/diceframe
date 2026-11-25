@@ -34,6 +34,9 @@ _ITEM_EVENT_FIELDS = {
     "dnd2024.item.consumed": frozenset({"type", "actor_id", "item_ref", "amount"}),
     "dnd2024.item.activated": frozenset({"type", "actor_id", "item_ref", "target_id", "cost"}),
     "dnd2024.item.charge_spent": frozenset({"type", "actor_id", "item_ref", "amount"}),
+    "dnd2024.item.charge_waived": frozenset({
+        "type", "actor_id", "item_ref", "declared", "roll", "threshold",
+    }),
     "dnd2024.item.destroy_check": frozenset({
         "type", "actor_id", "item_ref", "roll", "threshold", "destroyed",
     }),
