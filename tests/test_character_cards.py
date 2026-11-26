@@ -246,3 +246,102 @@ def test_export_import_roundtrip_preserves_skill_effect(tmp_path):
     )
     assert imported["ok"] is True
     assert imported["card"]["skills"] == card["skills"]
+
+
+def _table_save_payload(card: dict, **overrides) -> dict:
+    """What a table/game save can legitimately carry: no server bookkeeping."""
+
+    from copy import deepcopy
+
+    payload = {
+        key: deepcopy(card[key]) for key in (
+            "character_name", "race", "class", "background", "attributes", "skills",
+            "equipment", "inventory", "key_items", "gold", "currency", "portrait",
+            "rule_id", "identity",
+        ) if key in card
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_table_save_keeps_plugin_card_ownership(tmp_path):
+    """入席自动存回不得让插件卡失去 source_plugin / plugin_content_id。
+
+    卸载、启用去重和「非房主只能看到插件卡」都按 source_plugin 判定；一旦被
+    普通存回抹掉，插件卡会变成没人拥有的本地卡。
+    """
+
+    import json
+    from src.webui.services.character_cards import save_character_card
+
+    cards_path = tmp_path / "cards.json"
+    dependencies = CharacterCardDependencies(cards_path=cards_path)
+    plugin_card = {
+        "id": "plugin_demo_p1", "schema_version": 2,
+        "character_name": "Vesper", "race": "人类", "class": "游荡者", "background": "罪犯",
+        "attributes": {}, "skills": [],
+        "source": "插件内容包：demo",
+        "source_plugin": "demo", "plugin_content_id": "p1",
+    }
+    cards_path.write_text(json.dumps([plugin_card], ensure_ascii=False), encoding="utf-8")
+
+    saved = save_character_card(
+        dependencies, _table_save_payload(plugin_card, gold=77),
+    )
+
+    assert saved["ok"] is True
+    [stored] = json.loads(cards_path.read_text(encoding="utf-8"))
+    assert stored["id"] == "plugin_demo_p1"
+    assert stored["gold"] == 77
+    assert stored["source_plugin"] == "demo"
+    assert stored["plugin_content_id"] == "p1"
+    assert stored["source"] == "插件内容包：demo"
+
+
+def test_table_save_keeps_the_tavern_original(tmp_path):
+    """酒馆导入卡（无 provenance）被存回时保留 raw_sillytavern 与来源标签。"""
+
+    import json
+    from src.webui.services.character_cards import save_character_card
+
+    cards_path = tmp_path / "cards.json"
+    dependencies = CharacterCardDependencies(cards_path=cards_path)
+    tavern_card = {
+        "id": "st_1", "schema_version": 2,
+        "character_name": "Himmel", "race": "人类", "class": "冒险者", "background": "",
+        "attributes": {}, "skills": [],
+        "source": "SillyTavern: himmel.png",
+        "raw_sillytavern": {"name": "Himmel", "description": "勇者"},
+    }
+    cards_path.write_text(json.dumps([tavern_card], ensure_ascii=False), encoding="utf-8")
+
+    saved = save_character_card(dependencies, _table_save_payload(tavern_card))
+
+    assert saved["ok"] is True
+    [stored] = json.loads(cards_path.read_text(encoding="utf-8"))
+    assert stored["raw_sillytavern"] == {"name": "Himmel", "description": "勇者"}
+    assert stored["source"] == "SillyTavern: himmel.png"
+
+
+def test_an_explicit_source_still_relabels_the_card(tmp_path):
+    """显式来源不是"无来源"：调用方明确写的标签优先。"""
+
+    import json
+    from src.webui.services.character_cards import save_character_card
+
+    cards_path = tmp_path / "cards.json"
+    dependencies = CharacterCardDependencies(cards_path=cards_path)
+    card = {
+        "id": "c1", "schema_version": 2,
+        "character_name": "Aster", "race": "精灵", "class": "法师", "background": "",
+        "attributes": {}, "skills": [], "source": "旧标签",
+    }
+    cards_path.write_text(json.dumps([card], ensure_ascii=False), encoding="utf-8")
+
+    saved = save_character_card(
+        dependencies, _table_save_payload(card, source="新标签"),
+    )
+
+    assert saved["ok"] is True
+    [stored] = json.loads(cards_path.read_text(encoding="utf-8"))
+    assert stored["source"] == "新标签"
