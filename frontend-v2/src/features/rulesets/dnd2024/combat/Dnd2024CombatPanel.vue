@@ -203,9 +203,11 @@ const cunningOverBudget = computed(
   () => cunningSpent.value > Number(cunningMenu.value?.dice ?? 0),
 )
 const cunningValid = computed(() => !cunningTooMany.value && !cunningOverBudget.value)
-// 效果名是内容词汇（服务端只给 id），前端文案表按 id 查；未知 id 原样显示
-// 而不是消失——那样会让"新效果没配文案"变成看不见的选项。
+// 效果名优先用服务端随投影下发的名字（bundle 自己的 locale 表），前端文案
+// 只做兜底：两处都能显示，但只有一处是"权威"，改名时不会两边不一致。
 function cunningEffectName(effect: string): string {
+  const fromServer = cunningMenu.value?.names?.[effect]
+  if (fromServer) return fromServer
   const names = copy.value.cunningStrikeEffects as Record<string, string>
   return names[effect] || effect
 }
@@ -1480,13 +1482,21 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
                   </small>
                 </p>
                 <p class="dock-hint">{{ copy.cunningStrikeHint }}</p>
+                <p v-if="!attackAction.cunning_strike.available" class="cunning-warn" data-testid="cunning-spent">
+                  {{ copy.cunningStrikeSpentTurn }}
+                </p>
                 <label
                   v-for="effect in attackAction.cunning_strike.effects"
                   :key="effect"
                   class="declare-toggle"
                   :data-cunning-effect="effect"
                 >
-                  <input v-model="cunningEffects" type="checkbox" :value="effect" />
+                  <input
+                    v-model="cunningEffects"
+                    type="checkbox"
+                    :value="effect"
+                    :disabled="!attackAction.cunning_strike.available"
+                  />
                   <span>
                     {{ cunningEffectName(effect) }}
                     <small>{{ copy.cunningStrikeEach }} {{ attackAction.cunning_strike.costs[effect] ?? 0 }}d6</small>

@@ -1444,10 +1444,14 @@ export interface RulesetCombatAction extends JsonObject {
  * over-budget combination before submitting — the server re-checks anyway.
  */
 export interface RulesetCunningStrikeMenu extends JsonObject {
+  /** False once this turn's Sneak Attack is spent: the pool below is moot. */
+  available: boolean
   effects: string[]
   count: number
   costs: Record<string, number>
   dice: number
+  /** Display names from the bundle locale; the panel falls back to its own. */
+  names?: Record<string, string>
 }
 
 export interface RulesetActivatableItem {

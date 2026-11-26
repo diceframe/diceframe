@@ -26,6 +26,7 @@ export function combatCopy(locale: string) {
   cunningStrike: '诡诈打击', cunningStrikeHint: '偷袭时花掉偷袭骰换效果；骰子在投掷伤害前扣除，偷袭不成立则不扣。',
   cunningStrikePool: '偷袭骰池', cunningStrikeSpent: '本击已花', cunningStrikeEach: '每项花费',
   cunningStrikeOver: '超过可用偷袭骰，请取消一项。', cunningStrikeTooMany: '这一击最多选', cunningStrikeItem: '项效果',
+  cunningStrikeSpentTurn: '本回合的偷袭已经用过了，这一击不会再触发诡诈打击。',
   cunningStrikeEffects: {
     poison: '淬毒', trip: '摔绊', withdraw: '撤步', daze: '恍惚', knock_out: '击昏', obscure: '眩目',
   },
@@ -122,6 +123,7 @@ export function combatCopy(locale: string) {
   cunningStrike: 'Cunning Strike', cunningStrikeHint: 'Spend Sneak Attack dice on an effect before rolling damage; a hit that is not a Sneak Attack spends nothing.',
   cunningStrikePool: 'Sneak Attack dice', cunningStrikeSpent: 'Spent here', cunningStrikeEach: 'Cost each',
   cunningStrikeOver: 'More dice than you have; clear one effect.', cunningStrikeTooMany: 'At most', cunningStrikeItem: 'effects on one hit',
+  cunningStrikeSpentTurn: 'This turn\'s Sneak Attack is already spent, so this hit cannot trigger Cunning Strike.',
   cunningStrikeEffects: {
     poison: 'Poison', trip: 'Trip', withdraw: 'Withdraw', daze: 'Daze', knock_out: 'Knock Out', obscure: 'Obscure',
   },
