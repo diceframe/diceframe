@@ -90,6 +90,8 @@ files = [
     "src/rulesets/dnd2024/runtime.py",
     "src/rulesets/dnd2024/binding.py",
     "src/rulesets/dnd2024/character/builder.py",
+    "src/rulesets/dnd2024/combat/hit_resolution.py",
+    "src/rulesets/dnd2024/combat/spell_resolution.py",
     "src/rulesets/dnd2024/combat/availability.py",
     "src/rulesets/dnd2024/combat/conditions.py",
     "src/rulesets/dnd2024/combat/environment.py",
