@@ -87,6 +87,11 @@ def free_cast_resource(
     Free casting never upcasts. A free slot must match the spell's own level.
     This preserves combat's source order: unlimited, feat, limited slot, pool.
     """
+    if spell_level is not None and int(spell_level) < 1:
+        # 戏法不消耗法术位，"省一个槽"无从谈起：任何免费来源都不适用于 0 环。
+        # 这道闸放在 helper 里而不是只放在 `spell_cost_events`，因为 callers
+        # 不都传环阶（例如反应法术），只靠调用方兜底会随内容变化漏。
+        return None
     slots = [
         row
         for row in actor.get("free_cast_slots", []) or []
@@ -127,17 +132,22 @@ def free_cast_resource(
             "free_slot_id": limited["slot_id"],
             "spell_level": int(limited["spell_level"]),
         }
-    grant = next((row for row in grants if row.get("resource_id")), None)
-    if grant is None:
-        return None
-    return next(
-        (
-            row
-            for row in actor.get("class_resources", [])
-            if row.get("id") == grant["resource_id"] and int(row.get("current", 0)) > 0
-        ),
-        None,
-    )
+    # 一个法术可能同时由多个带池的授予覆盖（例如两个特性都授予它）。取第一个
+    # 还有余额的池，而不是"第一个带池的授予"——否则第一个池空了，第二个池的
+    # 余额就永远用不上。
+    for grant in (row for row in grants if row.get("resource_id")):
+        pool = next(
+            (
+                row
+                for row in actor.get("class_resources", [])
+                if row.get("id") == grant["resource_id"]
+                and int(row.get("current", 0)) > 0
+            ),
+            None,
+        )
+        if pool is not None:
+            return pool
+    return None
 
 
 def spell_cost_events(

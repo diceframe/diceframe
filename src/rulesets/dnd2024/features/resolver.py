@@ -1466,10 +1466,21 @@ class Dnd2024ClassFeatureResolver:
             if self.feature_is_active(character, definition)
         )
         grants = self._spell_grant_rows(owned, character)
-        # 一条授予行同时可以是一种"免费施放来源"：Natural Recovery 的免费面是
-        # 「当前地形授予的任一法术，无槽一次，每长休一次」，实现上就是"这组授予
-        # 行各自再带一个资源池"。派生在这里而不是写进 `_grant_row`，是为了保住
-        # 上面那条界线——常驻授予只说明"已准备"，挂资源的只有下面这张派生表。
+        resources = [
+            definition.to_dict()
+            for definition in self._resource_definitions(owned, character)
+        ]
+        # 一条授予行可以同时标出"哪个池能替它付账"（Natural Recovery 的免费面
+        # 就是"当前地形授予的任一法术，无槽一次，每长休一次"）。标在原行上而不是
+        # 另起一行：另起一行会让同一法术在 `spell_grants` 里出现两次，而那一行
+        # 只有两个键——provenance 没了，按 `spell_ref` 读发布的消费者也会撞上重复。
+        #
+        # 池必须真的可用才标：`_resource_definitions` 不看 `requires_subclass`
+        # （月德鲁伊的 max 会算成 0），存档里也可能还没有这个池。把不存在的池
+        # 标进去，等于投影在说"这个法术能被它付账"，而付账时会失败。
+        usable_pools = {
+            str(row["id"]) for row in resources if int(row["maximum"] or 0) > 0
+        }
         free_cast_pools = {
             definition.id: str(definition.parameters.get("free_cast_resource_id") or "")
             for definition in owned
@@ -1480,12 +1491,14 @@ class Dnd2024ClassFeatureResolver:
                 # 常驻授予（子职法术表、Land 地形、Magical Discoveries）与
                 # "免费施放" 授予是两种东西：前者只说明"已准备"，不带资源，
                 # 后者挂一个职业资源池。两者同列但都不许对方冒充自己。
-                *grants,
                 *[
-                    {"spell_ref": row["spell_ref"],
-                     "resource_id": free_cast_pools[row["feature_id"]]}
+                    {
+                        **row,
+                        "resource_id": free_cast_pools[row["feature_id"]],
+                    }
+                    if free_cast_pools.get(row["feature_id"]) in usable_pools
+                    else dict(row)
                     for row in grants
-                    if row["feature_id"] in free_cast_pools
                 ],
                 *[
                     {
@@ -1496,9 +1509,10 @@ class Dnd2024ClassFeatureResolver:
                     if definition.parameters.get("granted_spell_id")
                 ],
             ],
+            # 0/0 行对谁都没有意义：子职不对、等级没到、或存档里还没有这个池时，
+            # 放进来只会让 UI 与 API 消费者看见一个"幽灵资源"。
             "class_resources": [
-                definition.to_dict()
-                for definition in self._resource_definitions(owned, character)
+                row for row in resources if int(row["maximum"] or 0) > 0
             ],
             "unarmed_damage_die": self._unarmed_die(active, character),
             "unarmed_ability_choice": list(self._ability_choice(active, character)),
@@ -1563,6 +1577,15 @@ class Dnd2024ClassFeatureResolver:
             source_ref = declaration.source_ref
         if level < minimum_level:
             return None
+        # 子职门禁必须在投影里也成立：`sync_resources` 早就会按 requires_subclass
+        # 把池删掉，但投影读的是记录本身。少了这一道，月德鲁伊的 actor 会拿到
+        # 一个 store 里不存在的自然恢复（1/1），前端过滤 maximum>0 也救不了。
+        required = str(getattr(declaration, "requires_subclass", "") or "")
+        if required:
+            features = character.get("features") if isinstance(character, Mapping) else None
+            held = str((features or {}).get("subclass_ref") or "")
+            if held != required:
+                return None
         entry = resource_state(character, wanted)
         current = entry.get("current", 0)
         maximum = entry.get("maximum", 0)
