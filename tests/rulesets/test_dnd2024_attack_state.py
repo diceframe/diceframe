@@ -910,8 +910,8 @@ def test_forceful_blow_pushes_fifteen_feet_and_licenses_the_follow_move(
     assert granted["target_id"] == "enemy:goblin-1"
     # Half of the barbarian's 40-foot Speed.
     assert granted["amount"] == 20
-    assert _combat_state(instance)["economy"]["brutal_move"] == {
-        "amount": 20, "target_id": "enemy:goblin-1",
+    assert _combat_state(instance)["economy"]["move_allowance"] == {
+        "amount": 20, "reason": "brutal_forceful", "target_id": "enemy:goblin-1",
     }
 
     # Moving back toward the pushed creature is inside the allowance, so the
@@ -923,9 +923,9 @@ def test_forceful_blow_pushes_fifteen_feet_and_licenses_the_follow_move(
         "submitted_by": "gm", "actor_id": "player:gm", "distance": 15,
     })
     step = next(event for event in moved if event["type"] == "dnd2024.position.changed")
-    assert step["brutal_move"] is True
+    assert step["move_allowance"] is True
     assert not any(event["type"] == "dnd2024.decision.pending" for event in moved)
-    assert "brutal_move" not in _combat_state(instance)["economy"]
+    assert "move_allowance" not in _combat_state(instance)["economy"]
 
 
 def test_forceful_follow_move_refuses_the_wrong_direction_and_extra_distance(

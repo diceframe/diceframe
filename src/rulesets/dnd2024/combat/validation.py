@@ -1767,8 +1767,8 @@ class CombatValidationMixin:
             and int(economy.get("surge_action", 0) or 0) > 0
         ):
             raise CombatIntentError(
-                "while frightened this way you can only take one action "
-                "on your turn: Action Surge cannot buy another"
+                "your turn is limited to one of move, one action or one Bonus "
+                "Action: Action Surge cannot buy another action"
             )
         spent = {
             name for name in limit
@@ -1781,8 +1781,8 @@ class CombatValidationMixin:
             }
             used = ", ".join(sorted(labels.get(name, name) for name in spent))
             raise CombatIntentError(
-                "while frightened this way you can only move, take an action, "
-                f"or take a Bonus Action on your turn: you already chose to {used}"
+                "your turn is limited to one of move, one action or one Bonus "
+                f"Action: you already chose to {used}"
             )
 
     def _turn_choice_limit(self, conditions: dict[str, Any]) -> list[str]:
@@ -2367,8 +2367,9 @@ class CombatValidationMixin:
         error = validate_cunning_strike(
             self.features, character, intent,
             target_size=str(target.get("size") or ""),
-            carried_refs=owned_ref_counts(instance.get_character_sheet(actor["id"]))
-            if actor["kind"] == "player" else None,
+            # 伙伴也有自己的背包权威（`_activation_payload` 覆盖两种 actor），
+            # 所以毒药工具的存在性对两边用同一个入口判，不能只给玩家传。
+            carried_refs=owned_ref_counts(self._activation_payload(instance, actor)),
             speed=effective_speed(
                 self.catalog.conditions, actor.get("conditions") or {},
                 max(0, int(actor.get("speed", 0) or 0)),

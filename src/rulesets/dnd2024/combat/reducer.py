@@ -887,14 +887,16 @@ class CombatReducerMixin:
                 and not event.get("forced")
             ):
                 combat["economy"]["moved"] = True
-            if event.get("move_allowance"):
+            if (
+                event.get("move_allowance")
+                or event.get("crit_move")
+                or event.get("brutal_move")
+            ):
                 # 额度只覆盖它自己这一次移动；消费后即失效，其他移动要按
-                # 常规规则判定借机攻击。
+                # 常规规则判定借机攻击。三个标记都清：新事件带 move_allowance，
+                # 旧存档/旧批次可能带另两个，而读取侧认识全部三种。
                 combat["economy"].pop("move_allowance", None)
-            # 兼容读档：旧存档里可能还挂着已经停止写入的两个旧键。
-            if event.get("crit_move"):
                 combat["economy"]["crit_move"] = 0
-            if event.get("brutal_move"):
                 combat["economy"].pop("brutal_move", None)
             return
         if event_type == "resource.changed":

@@ -457,6 +457,7 @@ class CombatMartialActionsMixin:
 
         target_id = str(target["actor_id"])
         attacker_id = str(attacker["actor_id"])
+        currently_acting = str((combat.get("economy") or {}).get("actor_id") or "")
         events: list[dict[str, Any]] = []
         for effect in row.get("effects") or []:
             if not isinstance(effect, dict):
@@ -487,14 +488,16 @@ class CombatMartialActionsMixin:
             if check["success"]:
                 continue
             events.append(
-                self._cunning_condition_event(effect, target_id, attacker_id, ability, dc)
+                self._cunning_condition_event(
+                    effect, target_id, attacker_id, ability, dc, currently_acting,
+                )
             )
         return events
 
     @staticmethod
     def _cunning_condition_event(
         effect: dict[str, Any], target_id: str, attacker_id: str,
-        ability: str, dc: int,
+        ability: str, dc: int, currently_acting: str = "",
     ) -> dict[str, Any]:
         """The condition one failed save carries, with its full metadata."""
 
@@ -517,6 +520,10 @@ class CombatMartialActionsMixin:
             event["turn_choice_limit"] = limit
         if duration == ONE_MINUTE_DURATION:
             event["turns_remaining"] = ONE_MINUTE_ROUNDS
+        if duration == "target_turn_end" and currently_acting == target_id:
+            # 在目标自己的回合里挂上的（借机攻击是最现实的入口）：这一次
+            # 回合结束还不是"下个回合"，要再等一轮。与 statblock rider 同口径。
+            event["expires_after"] = 2
         return event
 
     def _withdraw_move_events(

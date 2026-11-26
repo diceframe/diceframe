@@ -54,6 +54,9 @@ class CunningStrikeEffect:
     id: str
     owner: str
     dice_cost: int
+    #: Display name from the bundle's own locale tables. Empty when the bundle
+    #: ships no label for this effect; the client falls back to its own copy.
+    name: str = ""
     save_ability: str = ""
     #: WHICH ability builds the save DC (Dexterity for every Cunning Strike
     #: effect), as opposed to ``save_ability``, which is the ability the target
@@ -203,10 +206,14 @@ def _cunning_strike_effect(
     def read(suffix: str, default: Any = None) -> Any:
         return features.feature_value(character, owner, f"{effect_id}_{suffix}", default)
 
+    label_key = f"{CUNNING_STRIKE.id}.{effect_id}"
+    label = features.catalog.label(label_key)
     return CunningStrikeEffect(
         id=effect_id,
         owner=owner,
         dice_cost=int(read("dice_cost", 0) or 0),
+        # `label` echoes the key when the bundle has no entry for it.
+        name="" if label == label_key else label,
         save_ability=str(read("save_ability", "") or ""),
         save_dc_ability=str(
             read("save_dc_ability", "")
@@ -283,9 +290,15 @@ def validate_cunning_strike(
     """
 
     submitted = intent.get(CUNNING_STRIKE_EFFECTS_KEY)
-    declared = bool(declaration_value(intent, CUNNING_STRIKE))
     if submitted is None:
         return ""
+    # 只认新的声明通道：`cunning_strike: true` 这种旧式布尔不算声明。否则
+    # 一个不用 `attack_declarations` 的客户端也能给这一击挂效果，而
+    # `selection_error` 只在声明列表存在时才看 legacy flag。
+    declared = (
+        isinstance(intent.get(SELECTION_KEY), list)
+        and CUNNING_STRIKE.id in intent[SELECTION_KEY]
+    )
     if not declared:
         # Effects without the declaration are a forged submission: ignoring
         # them would let a client believe a condition was coming while the

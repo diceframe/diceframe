@@ -733,10 +733,20 @@ class Dnd2024CombatEngine(
         cunning = cunning_strike_options(self.features, character)
         if cunning:
             options["cunning_strike"] = {
+                # 本回合的偷袭已经用掉时，这一击不可能再花骰：面板要能在
+                # 提交前说明原因，而不是让玩家选完只收到一个 skipped。
+                "available": not self._feature_used_this_turn(
+                    combat, actor_id, "sneak_attack",
+                ),
                 "effects": [effect.id for effect in cunning],
                 "count": cunning_strike_capacity(self.features, character),
                 "costs": {effect.id: effect.dice_cost for effect in cunning},
                 "dice": sneak_attack_dice_count(self.features, character),
+                # 效果名来自 bundle 自己的 locale 表，客户端只做兜底，避免
+                # 前后端各存一份"淬毒/摔绊"而在改名时不同步。
+                "names": {
+                    effect.id: effect.name for effect in cunning if effect.name
+                },
             }
         mark_kind = str(parameter("studied_attacks", "mark_kind") or "")
         if mark_kind:

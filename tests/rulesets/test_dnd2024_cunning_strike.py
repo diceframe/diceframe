@@ -125,11 +125,6 @@ def _grant_advantage(instance, enemy_id: str = "goblin-1") -> None:
     _enemy_conditions(instance, enemy_id)["next_attack_advantage"] = {}
 
 
-def _sneak_uses(instance) -> int:
-    usage = _combat(instance).get("feature_usage") or {}
-    return int(usage.get("sneak_attack") or 0)
-
-
 def _sneak_events(events: list[dict]) -> list[dict]:
     return [
         event for event in events
@@ -458,3 +453,130 @@ def test_a_dazed_target_can_only_do_one_thing_on_its_turn() -> None:
     }, SequenceRng([15] + [3] * 10))
     assert batch["ok"] is False, batch
     assert "already chose" in str(batch.get("error") or "")
+
+
+# --- Budget edge cases ------------------------------------------------------
+
+
+def test_a_critical_hit_doubles_the_dice_that_remain_not_the_price() -> None:
+    """The cost is a die count, so critting cannot make an effect cheaper."""
+
+    _runtime, engine, instance = _instance()
+    _grant_advantage(instance)
+    plain = _damage(_attack(engine, instance, rolls=[20] + [3] * 30))
+    _end_turn(engine, instance, "player:gm")
+    _end_turn(engine, instance, "enemy:goblin-1")
+
+    _grant_advantage(instance)
+    crit = _damage(_attack(
+        engine, instance, rolls=[20] + [3] * 30, effects=["trip"],
+    ))
+
+    # Both crit: the dagger's die and every remaining Sneak Attack die double.
+    # One die was spent first, so the gap is two dice (1 spent, doubled).
+    assert len(plain["rolls"]) - len(crit["rolls"]) == 2
+
+
+def test_a_combination_over_the_pool_is_refused() -> None:
+    """Knock Out (6) plus Obscure (3) is nine dice from a seven-die pool."""
+
+    _runtime, engine, instance = _instance(level=14)
+    _grant_advantage(instance)
+    assert "dice" in _rejected(engine, instance, {
+        "intent_id": "attack-1", "type": "attack",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+        "target_id": "enemy:goblin-1", "weapon_ref": "item:dagger",
+        "attack_declarations": ["cunning_strike"],
+        "cunning_strike_effects": ["knock_out", "obscure"],
+    })
+
+
+def test_the_projection_reports_the_pool_as_spent_after_one_sneak_attack() -> None:
+    _runtime, engine, instance = _instance()
+    actor = engine._actor_view(instance, _combat(instance), "player:gm")
+    assert engine._attack_state_options(actor, _combat(instance))["cunning_strike"]["available"] is True
+
+    _grant_advantage(instance)
+    _attack(engine, instance, rolls=list(HIT), effects=["trip"])
+
+    actor = engine._actor_view(instance, _combat(instance), "player:gm")
+    menu = engine._attack_state_options(actor, _combat(instance))["cunning_strike"]
+    assert menu["available"] is False
+
+
+def test_the_projection_carries_the_bundle_display_names() -> None:
+    _runtime, engine, instance = _instance()
+    actor = engine._actor_view(instance, _combat(instance), "player:gm")
+    menu = engine._attack_state_options(actor, _combat(instance))["cunning_strike"]
+    assert menu["names"] == {"poison": "Poison", "trip": "Trip", "withdraw": "Withdraw"}
+
+
+# --- The old allowance keys -------------------------------------------------
+
+
+def test_a_saved_crit_move_allowance_is_still_honoured_and_consumed() -> None:
+    """A save from before the merge carries ``crit_move``; it must still work."""
+
+    _runtime, engine, instance = _instance()
+    economy = _combat(instance)["economy"]
+    economy["movement"] = 60
+    economy["crit_move"] = 15
+
+    moved = _apply(engine, instance, {
+        "intent_id": "move-1", "type": "move",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm", "distance": 10,
+    }, [])
+
+    assert not any(event["type"] == "dnd2024.decision.pending" for event in moved)
+    # 重新取：apply_batch 替换了整个 economy 快照，旧引用看不到清零。
+    assert _combat(instance)["economy"]["crit_move"] == 0
+    step = next(
+        event for event in moved if event["type"] == "dnd2024.position.changed"
+    )
+    assert step["move_allowance"] is True
+
+
+def test_a_move_beyond_the_allowance_still_opens_the_window() -> None:
+    _runtime, engine, instance = _instance()
+    _grant_advantage(instance)
+    _attack(engine, instance, rolls=list(HIT), effects=["withdraw"])
+
+    moved = _apply(engine, instance, {
+        "intent_id": "move-1", "type": "move",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm", "distance": 20,
+    }, [])
+
+    assert any(event["type"] == "dnd2024.decision.pending" for event in moved)
+
+
+# --- Condition lifetimes ----------------------------------------------------
+
+
+def test_daze_ends_when_the_targets_turn_ends() -> None:
+    _runtime, engine, instance = _instance(level=14)
+    _grant_advantage(instance)
+    _attack(engine, instance, rolls=[15] + [3] * 20, effects=["daze"])
+    _end_turn(engine, instance, "player:gm")
+    assert "dazed" in _enemy_conditions(instance)
+
+    _end_turn(engine, instance, "enemy:goblin-1")
+    assert "dazed" not in _enemy_conditions(instance)
+
+
+def test_knock_out_wakes_when_the_target_takes_damage() -> None:
+    _runtime, engine, instance = _instance(level=14)
+    _grant_advantage(instance)
+    _attack(engine, instance, rolls=[15] + [3] * 30, effects=["knock_out"])
+    assert "unconscious" in _enemy_conditions(instance)
+
+    # A Rogue has one attack per action, so the next hit comes on the next
+    # turn; the repeat save fails (a 1) and the condition is still there.
+    _end_turn(engine, instance, "player:gm")
+    _end_turn(engine, instance, "enemy:goblin-1", rolls=[1])
+    assert "unconscious" in _enemy_conditions(instance)
+
+    _attack(engine, instance, rolls=list(HIT), intent_id="attack-2")
+    assert "unconscious" not in _enemy_conditions(instance)
