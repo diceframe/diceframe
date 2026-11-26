@@ -3678,6 +3678,15 @@ validate the choice against authoritative state.
 conditions. `combat/stealth_actions.py` shares Hide eligibility and settlement between
 ordinary and capability-granted Hide actions.
 
+`combat/engine.py` itself keeps only the intent surface (validation, resolution, and batch
+application), the projection entry point, encounter presets, and the small turn, economy,
+and position helpers. Its three own rule surfaces are sibling mixins:
+`combat/availability.py` answers what an actor may do now, including forms, item
+activations, and what an automatic actor picks; `combat/conditions.py` owns condition
+projection, immunity, and expiry; `combat/environment.py` owns cover, obscurement, and aura
+projection. All three are `__slots__ = ()` mixins that hold no instance state of their own;
+engine fields such as the cover recursion depth `_cover_depth` still belong to the engine.
+
 Attack add-ons register in `features/attack_declarations.py`. New intents select IDs in
 `attack_declarations`: `sacred_weapon`, `light_extra_attack`, `brutal_strike`,
 `stunning_strike`, `quivering_palm`, or `hurl_through_hell`. The registry validates IDs

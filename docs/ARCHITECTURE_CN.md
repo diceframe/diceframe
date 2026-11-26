@@ -3605,6 +3605,13 @@ validate → resolve → events → reducer
 `combat/martial_actions.py` 负责能力授予的连击、自疗与移动，以及武僧命中效果；
 `combat/stealth_actions.py` 供普通躲藏与能力躲藏共用前提和结算。
 
+`combat/engine.py` 本身只保留意图入口（校验、结算、批次应用）、投影入口、遭遇预设，
+以及回合、经济与位置的小工具；它自己的三块规则面拆成同级 mixin：
+`combat/availability.py` 回答“这个 actor 现在能做什么”——意图、形态、物品激活，
+以及自动行动替谁选什么；`combat/conditions.py` 负责状态的投影、免疫与到期；
+`combat/environment.py` 负责掩护、遮蔽与灵光投影。三者都是 `__slots__ = ()` 的 mixin，
+不持有自己的实例状态；引擎字段（例如掩护递归深度 `_cover_depth`）仍属于引擎。
+
 攻击附加选项在 `features/attack_declarations.py` 注册。新意图使用
 `attack_declarations` ID 数组，可选 `sacred_weapon`、`light_extra_attack`、
 `brutal_strike`、`stunning_strike`、`quivering_palm` 和 `hurl_through_hell`。
