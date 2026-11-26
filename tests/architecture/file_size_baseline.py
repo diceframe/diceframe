@@ -25,7 +25,7 @@ SIZE_BASELINE: dict[str, int] = {
     "src/plugin_host/host.py": 2299,
     "src/rulesets/dnd2024/combat/check_windows.py": 1854,
     "src/rulesets/dnd2024/combat/engine.py": 3267,
-    "src/rulesets/dnd2024/combat/resolution.py": 5949,
+    "src/rulesets/dnd2024/combat/resolution.py": 3744,
     "src/rulesets/dnd2024/combat/validation.py": 3285,
     "src/rulesets/dnd2024/features/resolver.py": 1871,
     "src/rulesets/dnd2024/progression/advancement.py": 2127,

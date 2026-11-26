@@ -111,6 +111,8 @@ from .primitives import (
 from .readiness import required_encounter_player_ids
 from .reducer import CombatReducerMixin
 from .resolution import CombatResolutionMixin
+from .spell_resolution import CombatSpellResolutionMixin
+from .hit_resolution import CombatHitResolutionMixin
 from .validation import CombatValidationMixin
 from .view import CombatViewMixin
 from .triggered_spells import CombatTriggeredSpellsMixin, HIT_SPELL_DECISION, hit_spell_decision
@@ -159,7 +161,9 @@ def _level_for_bonus(bonus: int) -> str:
 
 @dataclass(slots=True)
 class Dnd2024CombatEngine(
-    CombatValidationMixin, CombatResolutionMixin, CombatReducerMixin, CombatViewMixin, CombatTriggeredSpellsMixin,
+    CombatValidationMixin, CombatResolutionMixin,
+    CombatSpellResolutionMixin, CombatHitResolutionMixin,
+    CombatReducerMixin, CombatViewMixin, CombatTriggeredSpellsMixin,
     CombatReactionSpellsMixin, CombatCheckWindowsMixin, CombatDivineActionsMixin,
     CombatStealthActionsMixin,
     CombatMartialActionsMixin,
