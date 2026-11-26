@@ -953,7 +953,7 @@ class CombatResolutionMixin:
         self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
         target: dict[str, Any], range_disadvantage: bool, *,
         ability: str, declared_reckless: bool, spend_luck: bool = False,
-        use_grant: bool = True,
+        use_grant: bool = True, opportunity: bool = False,
     ) -> dict[str, Any]:
         """Every Advantage/Disadvantage source on a weapon attack roll.
 
@@ -1008,6 +1008,13 @@ class CombatResolutionMixin:
             # Pack Tactics 问的不是"攻击者身边有没有同伙"，而是"目标身边有没有
             # 攻击者的同伙"——那只同伙也是目标的敌人。
             extra.append({"code": "pack_tactics", "mode": "advantage"})
+        # 猎人 7 的防御战术：两个选项都是"这一掷"的事实，不是条件，来源在
+        # 各自的模块里合成（`combat/defensive_tactics.py`）。
+        extra.extend(
+            self._defensive_tactics_sources(
+                combat, actor, target, opportunity=opportunity,
+            )
+        )
         check_mode = attack_mode(
             self, instance, actor, target, range_disadvantage,
             use_grant=use_grant, extra_sources=tuple(extra), combat=combat,
@@ -1450,6 +1457,7 @@ class CombatResolutionMixin:
         target_view: dict[str, Any] | None = None,
         granted_by: str = "",
         attacks_in_action: int = 0,
+        opportunity: bool = False,
     ) -> list[dict[str, Any]]:
         actor_id = str(intent["actor_id"])
         target_id = str(intent["target_id"])
@@ -1558,6 +1566,7 @@ class CombatResolutionMixin:
             ability=ability,
             declared_reckless=declaration["reckless"],
             spend_luck=spend_luck, use_grant=spend_attack_action,
+            opportunity=opportunity,
         )
         if declaration["brutal"]:
             # 放弃全部 Advantage：来源仍写进事件留痕，但这一掷只掷一颗 d20。
@@ -1723,6 +1732,9 @@ class CombatResolutionMixin:
                 "condition": "rage",
             })
         if hit:
+            # Multiattack Defense：命中之后才立标记，所以这一击自己不受影响，
+            # 只有本回合后续对该防御者的攻击骰吃劣势。
+            events.extend(self._multiattack_mark_events(actor, target))
             events.extend(self._hit_settlement_events(
                 instance, combat, actor, target, weapon, check_event, intent, rng,
                 ability=ability, modifier=modifier,
@@ -3723,7 +3735,12 @@ class CombatResolutionMixin:
                 else:
                     attack_intent = None
                 if attack_intent is not None:
-                    opportunity = self._attack_events(instance, combat, attack_intent, rng)
+                    # 借机攻击会在结算后被改写成 reaction.spent；掷骰侧的准入
+                    # （Escape the Horde）要能分辨这一击是不是借机攻击，所以
+                    # 这个事实作为参数进结算链，不写成可被客户端申报的意图键。
+                    opportunity = self._attack_events(
+                        instance, combat, attack_intent, rng, opportunity=True,
+                    )
                     # 借机攻击花的是反应而不是攻击动作：替换支付事件本身，
                     # 而不是列表头部——法术提前终止事件（若有）排在支付之前，
                     # 不能被反应支付覆盖掉。
