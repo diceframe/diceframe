@@ -242,6 +242,9 @@ async function decideRest(approve: boolean): Promise<void> {
 const restOptions = ref<RestOptions | null>(null)
 const restOptionsFailure = ref('')
 const restOptionsLoaded = ref(false)
+// 这份选项是按哪个角色版本算出来的。队伍休息要由 DM 批准，批准时角色卡是被
+// 别人推进的——不记版本的话面板会一直画着休息前的额度。
+const restOptionsRevision = ref<number | null>(null)
 const restTerrain = ref('')
 const restStudySlot = ref('')
 const restStudySpell = ref('')
@@ -268,6 +271,13 @@ const restChoicesReady = computed(() => {
 })
 watch(restStudySlot, () => { restStudySpell.value = '' })
 
+// 恢复数量只能是整数：服务端 `_plan_slot_recovery` / `_plan_point_recovery` 都
+// 要求 int。`<input type="number" step="1">` 挡得住上下箭头，挡不住手输 1.5，
+// 所以这边统一取整，让"显示的总数"与"真正提交的数"是同一个数。
+function recoveryCount(value: unknown): number {
+  const numeric = Number(value ?? 0)
+  return Number.isFinite(numeric) ? Math.max(0, Math.trunc(numeric)) : 0
+}
 // 短休的恢复预算：预算、每级还空着的槽、当日还剩几次，全部由服务端算好下发。
 // 前端只画数字并挡住"超过预算"，不重算 ceil(level/2)——那是规则事实。
 const restRecoveryRows = computed(() => {
@@ -279,13 +289,10 @@ const restRecoveryRows = computed(() => {
     const usesLeft = Number(item.uses_left || 0)
     const slots = (item.slots || []).filter(slot => Number(slot.expended) > 0)
     const picked = restRecoverySlots.value[item.resource_id] || {}
-    const points = Math.max(0, Number(restRecoveryPoints.value[item.resource_id] || 0))
+    const points = recoveryCount(restRecoveryPoints.value[item.resource_id])
     const total = item.mode === 'points'
       ? points
-      : slots.reduce(
-        (sum, slot) => sum + slot.level * Math.max(0, Number(picked[slot.level] || 0)),
-        0,
-      )
+      : slots.reduce((sum, slot) => sum + slot.level * recoveryCount(picked[slot.level]), 0)
     const ceiling = item.mode === 'points'
       ? Math.min(Number(item.spent || 0), Number(item.budget || 0))
       : Number(item.budget || 0)
@@ -293,7 +300,7 @@ const restRecoveryRows = computed(() => {
     // 拒绝（"cannot recover more level N slots than are expended"），但让玩家
     // 先点得动再报错是坏体验。
     const overPicked = slots.reduce(
-      (worst, slot) => Math.max(worst, Number(picked[slot.level] || 0) - Number(slot.expended)),
+      (worst, slot) => Math.max(worst, recoveryCount(picked[slot.level]) - Number(slot.expended)),
       0,
     )
     return {
@@ -326,6 +333,7 @@ async function loadRestOptions(): Promise<void> {
     }
     restOptions.value = response.rest_options || { land_terrain: null, free_cast: [] }
     restOptionsLoaded.value = true
+    restOptionsRevision.value = Number(props.character.ruleset_revision || 0)
     restTerrain.value = restOptions.value.land_terrain?.current || ''
     restStudySlot.value = ''
     restStudySpell.value = ''
@@ -348,6 +356,16 @@ watch([activeTab, restType], ([tab]) => {
   if (tab !== 'magic' || restOptionsLoaded.value) return
   void loadRestOptions()
 }, { immediate: true })
+
+// 角色卡被别人推进（DM 批准了队伍休息、队友结算、外部刷新）时，这份选项立刻
+// 过期：额度、已消耗的槽、当日剩余次数全变了。只认版本号，避免自己刚写完
+// 又被自己的 saved 触发一次重复拉取。
+watch(() => Number(props.character.ruleset_revision || 0), revision => {
+  if (restOptionsRevision.value === null || restOptionsRevision.value === revision) return
+  restOptionsLoaded.value = false
+  void loadRestOptions()
+  void loadRitualOptions()
+})
 
 // 仪式（Magical Cunning / Eldritch Master）不是休息：它自己花掉 1 分钟再回槽。
 // 选项与休息分开拉，因为它的失败不该影响休息面板，反之亦然。
@@ -612,14 +630,14 @@ async function completeRest(): Promise<void> {
     if (!longRest) {
       for (const item of restRecoveryRows.value) {
         if (item.mode === 'points') {
-          const points = Math.max(0, Number(restRecoveryPoints.value[item.resourceId] || 0))
+          const points = recoveryCount(restRecoveryPoints.value[item.resourceId])
           if (points > 0) recovery[item.resourceId] = { points }
           continue
         }
         const picked = restRecoverySlots.value[item.resourceId] || {}
         const slots: Record<string, number> = {}
         for (const slot of item.slots) {
-          const count = Math.max(0, Number(picked[slot.level] || 0))
+          const count = recoveryCount(picked[slot.level])
           if (count > 0) slots[String(slot.level)] = count
         }
         if (Object.keys(slots).length) recovery[item.resourceId] = { slots }
@@ -825,12 +843,12 @@ async function completeRest(): Promise<void> {
             </div>
             <label v-if="item.mode === 'points'" class="rest-recovery-field">
               <span>{{ text('买回点数', 'Points to regain') }}</span>
-              <input v-model.number="restRecoveryPoints[item.resourceId]" type="number" min="0" :max="item.ceiling">
+              <input v-model.number="restRecoveryPoints[item.resourceId]" type="number" min="0" step="1" :max="item.ceiling">
             </label>
             <template v-else>
               <label v-for="slot in item.slots" :key="slot.level" class="rest-recovery-field">
                 <span>{{ text(`${slot.level} 环（已用 ${slot.expended}）`, `Level ${slot.level} (${slot.expended} expended)`) }}</span>
-                <input v-model.number="restRecoverySlots[item.resourceId][slot.level]" type="number" min="0" :max="Math.min(slot.expended, item.budget)">
+                <input v-model.number="restRecoverySlots[item.resourceId][slot.level]" type="number" min="0" step="1" :max="Math.min(slot.expended, item.budget)">
               </label>
             </template>
             <p v-if="item.overPicked > 0" class="rest-options-error" role="alert">{{ text(`有一级买回得比已消耗还多 ${item.overPicked} 个。`, `${item.overPicked} more than were expended at some level.`) }}</p>
@@ -859,6 +877,8 @@ async function completeRest(): Promise<void> {
           <button type="button" class="spell-undo" :disabled="!preparedChanged" @click="resetSpellDraft">{{ text('撤销法术改动', 'Undo spell changes') }}</button>
         </section>
         <p v-if="restType === 'long' && restOptionsFailure" class="rest-options-error" role="alert">{{ restOptionsFailure }}</p>
+        <p v-if="restType === 'short' && restOptionsFailure" class="rest-options-error" role="alert">{{ text('恢复选项没能读到，这次短休不会恢复法术位。', 'The recovery options could not be read, so this Short Rest gives no spell slots back.') }} {{ restOptionsFailure }}</p>
+
         <fieldset v-if="restType === 'long' && restTerrainOptions.length" class="rest-terrain">
           <legend>{{ text('选择地形', 'Land terrain') }}</legend>
           <p class="rest-options-help">{{ text('Circle of the Land 每次长休都要确认地形；确认同一个地形不产生变化。', 'Circle of the Land confirms a terrain on every long rest; repeating the same one changes nothing.') }}</p>
@@ -890,7 +910,7 @@ async function completeRest(): Promise<void> {
         <div class="rest-actions">
           <label class="rest-confirm"><input v-model="restConfirmed" type="checkbox"><span>{{ text('我确认游戏内时间会随本次休息推进', 'I understand that in-game time advances during this rest') }}</span></label>
         </div>
-        <button type="button" class="primary rest-submit" :disabled="busy || !restConfirmed || !preparedReady || !restChoicesReady || myRestStatus === 'submitted' || restSession?.status === 'resolving'" @click="completeRest">{{ busy ? text('结算中…', 'Resolving…') : restAwaitingDecision ? text('已提交，等待 DM 裁决', 'Submitted; waiting for the GM') : myRestStatus === 'submitted' ? text('已提交，等待队伍', 'Submitted, waiting for party') : restSession?.status === 'resolving' ? text('队伍结算中…', 'Resolving party rest…') : text('确认并结算休息', 'Confirm and resolve rest') }}</button>
+        <button type="button" class="primary rest-submit" :disabled="busy || ritualBusy || !restConfirmed || !preparedReady || !restChoicesReady || myRestStatus === 'submitted' || restSession?.status === 'resolving'" @click="completeRest">{{ busy ? text('结算中…', 'Resolving…') : restAwaitingDecision ? text('已提交，等待 DM 裁决', 'Submitted; waiting for the GM') : myRestStatus === 'submitted' ? text('已提交，等待队伍', 'Submitted, waiting for party') : restSession?.status === 'resolving' ? text('队伍结算中…', 'Resolving party rest…') : text('确认并结算休息', 'Confirm and resolve rest') }}</button>
       </section>
       <section v-if="target === 'game' && (ritualRows.length || ritualFailure)" class="ritual-center">
         <div class="section-heading">
@@ -905,7 +925,7 @@ async function completeRest(): Promise<void> {
             <span>{{ text(`${row.minutes} 分钟 · 恢复 ${row.regain} 个 ${row.slot_level} 环 Pact 槽（已用 ${row.expended}/${row.maximum}）`, `${row.minutes} min · regain ${row.regain} level ${row.slot_level} Pact slots (${row.expended}/${row.maximum} expended)`) }}</span>
           </div>
           <p class="rest-options-help">{{ text(`今日剩余 ${row.uses_left} 次`, `${row.uses_left} left today`) }}<template v-if="row.full_budget"> · {{ text('已按全部已消耗恢复', 'regains every expended slot') }}</template></p>
-          <button type="button" class="primary ritual-submit" :disabled="ritualBusy || !ritualConfirmed" @click="performRitual(row)">{{ ritualBusy ? text('举行中…', 'Performing…') : text(`举行仪式（${row.minutes} 分钟）`, `Perform the rite (${row.minutes} min)`) }}</button>
+          <button type="button" class="primary ritual-submit" :disabled="ritualBusy || busy || !ritualConfirmed" @click="performRitual(row)">{{ ritualBusy ? text('举行中…', 'Performing…') : text(`举行仪式（${row.minutes} 分钟）`, `Perform the rite (${row.minutes} min)`) }}</button>
         </div>
         <label v-if="ritualRows.length" class="rest-confirm"><input v-model="ritualConfirmed" type="checkbox"><span>{{ text('我确认仪式会推进游戏内时间', 'I understand the rite advances in-game time') }}</span></label>
         <p v-if="ritualNote" class="rest-options-error" role="alert">{{ ritualNote }}</p>

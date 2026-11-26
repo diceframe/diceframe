@@ -249,7 +249,9 @@ export function resolveLiveCharacterRest(
   if (options?.landTerrain) body.land_terrain = options.landTerrain
   const freeCast = options?.freeCast || {}
   if (Object.keys(freeCast).length) body.free_cast = freeCast
-  // 短休恢复同样是"有才发"：空对象会被服务端拒成 would not change anything。
+  // 短休恢复同样是"有才发"。服务端把空对象当作"没有恢复计划"静默放行
+  // （`_plan_short_recovery` 对 `{}` 直接返回空表），所以空对象不是错误，
+  // 而是一次没有意义的写入——不发它。
   const recovery = options?.recovery || {}
   if (Object.keys(recovery).length) body.recovery = recovery
   return api<RulesetRestResponse>(
