@@ -38,9 +38,15 @@ from src.engine.language import localized_text, normalize_language
 from src.engine.narrative_perspective import narrative_perspective_instruction
 from src.gameplays.builtin import DEFAULT_GAMEPLAYS
 from src.llm.parser import normalize_tag_protocol, sanitize_narration
-from src.rulesets.contracts import RunLifecycleRuntime
+from src.rulesets.contracts import NarrativeProfileRuntime, RunLifecycleRuntime
 
 logger = logging.getLogger("trpg")
+
+#: Characters one seat's narrator excerpt may add to the opening prompt.  The
+#: ruleset already bounds the excerpt (see ``NarrativeProfileRuntime``); this
+#: second bound keeps a full party's worth of biographies small, because the
+#: opening prompt is not the place to spend the whole context budget.
+NARRATIVE_LINE_CHARS = 240
 
 
 class RunInitializationError(RuntimeError):
@@ -230,6 +236,63 @@ class GameLifecycle:
             ) from exc
         return candidate
 
+    def _narrative_profile_runtime(self, instance: GameInstance):
+        """The bound ruleset's narrator-profile hook, when it declares one."""
+
+        accessor = getattr(self.prompt, "runtime", None)
+        if not callable(accessor):
+            return None
+        runtime = accessor(instance)
+        return runtime if isinstance(runtime, NarrativeProfileRuntime) else None
+
+    def _opening_player_lines(self, instance: GameInstance) -> str:
+        """The party block of the opening prompt, one line per seat.
+
+        The bound ruleset contributes the authored narrative excerpt (bounded), so
+        the opening scene can use the character the player actually wrote instead
+        of only race / class / background name.
+        """
+
+        narrative_runtime = self._narrative_profile_runtime(instance)
+        lines: list[str] = []
+        for pdata in instance.players.values():
+            cs = pdata.get("character_sheet", {})
+            line = (
+                f"- {pdata.get('character_name', '冒险者')}："
+                f"{cs.get('race', '人类')} {cs.get('class', '冒险者')}"
+                f"；背景：{cs.get('background', '') or '未填写'}"
+            )
+            narrative = self._narrative_profile_line(narrative_runtime, cs)
+            if narrative:
+                line += f"；人物资料：{narrative}"
+            lines.append(line)
+        return "\n".join(lines) if lines else "尚未创建角色"
+
+    @staticmethod
+    def _narrative_profile_line(runtime: Any, character_sheet: dict) -> str:
+        """One small "key=value" excerpt for the opening narration prompt.
+
+        The ruleset decides which profile fields are narrator material and bounds
+        them; this side only keeps the whole excerpt small enough that a long
+        biography cannot crowd out the rest of the opening prompt.
+        """
+
+        if runtime is None or not isinstance(character_sheet, dict):
+            return ""
+        try:
+            excerpt = runtime.character_narrative_profile(character_sheet)
+        except Exception:
+            # The excerpt is presentation only: never block opening a game.
+            logger.warning("读取角色人物资料失败，已跳过", exc_info=True)
+            return ""
+        if not isinstance(excerpt, dict):
+            return ""
+        parts = [
+            f"{key}={value}" for key, value in excerpt.items()
+            if isinstance(value, str) and value.strip()
+        ]
+        return "；".join(parts)[:NARRATIVE_LINE_CHARS].strip()
+
     def _initialize_ruleset_run(
         self,
         candidate: GameInstance,
@@ -297,15 +360,7 @@ class GameLifecycle:
         world_setting = world_data.get("world_setting", "")
         starter_scene = world_data.get("starter_scene", "")
         sandbox_world = bool(world_data.get("sandbox"))
-        player_lines = []
-        for pdata in instance.players.values():
-            cs = pdata.get("character_sheet", {})
-            player_lines.append(
-                f"- {pdata.get('character_name', '冒险者')}："
-                f"{cs.get('race', '人类')} {cs.get('class', '冒险者')}"
-                f"；背景：{cs.get('background', '') or '未填写'}"
-            )
-        players_text = "\n".join(player_lines) if player_lines else "尚未创建角色"
+        players_text = self._opening_player_lines(instance)
         if sandbox_world:
             opening_instruction = localized_text(
                 instance.language,

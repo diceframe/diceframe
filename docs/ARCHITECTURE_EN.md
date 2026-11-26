@@ -2308,6 +2308,8 @@ LLM
 
 The context builder must not import D&D itself and calculate D&D state.
 
+The narrative profile a player writes in the advanced character center (`ruleset_character.profile`) is projected the same way, and only by the ruleset: D&D 2024 contributes a bounded excerpt as `sheet.narrative_profile` in `build_llm_view` (`src/rulesets/dnd2024/narrative_profile.py`, bounded per field and in total, `notes` never leaves the sheet), and the opening narration takes the same excerpt through the optional `NarrativeProfileRuntime`. It is presentation text: `hp`, resources and level still come only from canonical mechanical fields, and generic engine code neither reads nor writes the profile.
+
 ---
 
 ## 15.4 Player-Safe Q&A
@@ -3047,6 +3049,7 @@ To avoid forcing every runtime to implement an ever-growing method set, addition
 - `TemporaryEncounterPlannerRuntime`
 - `AutomaticIntentRuntime`
 - `GameDetailProjectionRuntime`
+- `NarrativeProfileRuntime` (hands the narrator a bounded narrative excerpt of what the player wrote in the advanced character center; the profile lives only inside that ruleset's own canonical character, so only the writing ruleset may decide which fields are narrator material and how tightly to bound them. The per-round `build_llm_view` `narrative_profile` and the opening narration share the same excerpt; `notes` is labelled personal and never leaves the sheet, and the return value is presentation text only, never mechanics)
 - `PlayerJoinRuntime`
 - `CharacterRevivalRuntime`
 - `LiveAdvancementPolicyRuntime`
@@ -3677,6 +3680,15 @@ validate the choice against authoritative state.
 `combat/martial_actions.py` owns granted strikes, self-healing and movement, and Monk hit
 conditions. `combat/stealth_actions.py` shares Hide eligibility and settlement between
 ordinary and capability-granted Hide actions.
+
+`combat/engine.py` itself keeps only the intent surface (validation, resolution, and batch
+application), the projection entry point, encounter presets, and the small turn, economy,
+and position helpers. Its three own rule surfaces are sibling mixins:
+`combat/availability.py` answers what an actor may do now, including forms, item
+activations, and what an automatic actor picks; `combat/conditions.py` owns condition
+projection, immunity, and expiry; `combat/environment.py` owns cover, obscurement, and aura
+projection. All three are `__slots__ = ()` mixins that hold no instance state of their own;
+engine fields such as the cover recursion depth `_cover_depth` still belong to the engine.
 
 Attack add-ons register in `features/attack_declarations.py`. New intents select IDs in
 `attack_declarations`: `sacred_weapon`, `light_extra_attack`, `brutal_strike`,

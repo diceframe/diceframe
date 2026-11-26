@@ -82,7 +82,14 @@ class PromptComposer:
     def set_auto_storyboard(self, enabled: bool) -> None:
         self.auto_storyboard = bool(enabled)
 
-    def _runtime(self, instance: GameInstance):
+    def runtime(self, instance: GameInstance):
+        """The ruleset runtime bound to this save, or ``None`` without one.
+
+        Callers outside this class (the opening narration, for example) need the
+        bound runtime to ask it for its own projections; the binding is read from
+        the instance, never from the caller.
+        """
+
         binding = dict(ruleset_runtime.binding(instance) or {})
         runtime_id = str(binding.get("id") or "")
         if self.ruleset_registry is None or not runtime_id:
@@ -271,7 +278,7 @@ class PromptComposer:
                 ),
             })
         gm_prompt = gm_prompt + "\n\n" + narrative_perspective_instruction(instance, language)
-        runtime = self._runtime(instance)
+        runtime = self.runtime(instance)
         if isinstance(runtime, NarrativeAdvancementRuntime):
             advancement_prompt = runtime.narrative_advancement_prompt(instance, language)
             if advancement_prompt:
@@ -346,7 +353,7 @@ class PromptComposer:
     ) -> str:
         """调用 context_builder 生成本轮 user context。"""
         state_view = None
-        runtime = self._runtime(instance)
+        runtime = self.runtime(instance)
         if runtime is not None:
             state_view = runtime.build_llm_view(instance)
         return await build_context(

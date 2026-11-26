@@ -1659,6 +1659,63 @@
               "cha"
             ]
           }
+        },
+        {
+          "id": "cunning_strike",
+          "minimum_level": 5,
+          "source_ref": "srd-5.2.1:p62:cunning-strike",
+          "summary": "When you deal Sneak Attack damage, you can spend Sneak Attack dice on one effect before rolling the damage: Poison, Trip, or Withdraw. A save against it uses DC 8 + your Proficiency Bonus + your Dexterity modifier.",
+          "parameters": {
+            "effect_options": ["poison", "trip", "withdraw"],
+            "effects_per_use": 1,
+            "upgrade_level": 11,
+            "effects_per_use_upgrade": 2,
+            "save_dc_ability": "dex",
+            "poison_dice_cost": 1,
+            "poison_save_ability": "con",
+            "poison_condition": "poisoned",
+            "poison_duration": "one_minute",
+            "poison_repeat_save": true,
+            "poison_requires_item": "poisoners_kit",
+            "trip_dice_cost": 1,
+            "trip_save_ability": "dex",
+            "trip_condition": "prone",
+            "trip_max_target_size": "large",
+            "withdraw_dice_cost": 1,
+            "withdraw_speed_divisor": 2,
+            "withdraw_provokes_opportunity": false
+          }
+        },
+        {
+          "id": "improved_cunning_strike",
+          "minimum_level": 11,
+          "source_ref": "srd-5.2.1:p62:improved-cunning-strike",
+          "summary": "You can use two Cunning Strike effects on the same Sneak Attack, paying the dice cost of each.",
+          "parameters": {}
+        },
+        {
+          "id": "devious_strikes",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p62:devious-strikes",
+          "summary": "Daze, Knock Out, and Obscure join your Cunning Strike options.",
+          "parameters": {
+            "additional_effect_options": ["daze", "knock_out", "obscure"],
+            "daze_dice_cost": 2,
+            "daze_save_ability": "con",
+            "daze_condition": "dazed",
+            "daze_duration": "target_turn_end",
+            "daze_turn_choice_limit": ["move", "action", "bonus_action"],
+            "knock_out_dice_cost": 6,
+            "knock_out_save_ability": "con",
+            "knock_out_condition": "unconscious",
+            "knock_out_duration": "one_minute",
+            "knock_out_repeat_save": true,
+            "knock_out_ends_on_damage": true,
+            "obscure_dice_cost": 3,
+            "obscure_save_ability": "dex",
+            "obscure_condition": "blinded",
+            "obscure_duration": "target_turn_end"
+          }
         }
       ]
     },

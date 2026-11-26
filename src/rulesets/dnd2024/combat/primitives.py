@@ -108,8 +108,16 @@ def world_minutes(instance: Any) -> int:
 
 
 INTIMIDATING_PRESENCE_DURATION = "intimidating_presence"
+#: 诡诈打击的淬毒与击昏给的是"一分钟"，按目标自己的回合计数（10 个回合）。
+#: 不复用 ``INTIMIDATING_PRESENCE_DURATION``：那个名字是特性的名字，不是
+#: 时长的名字，借用会让"哪条特性给的"与"持续多久"混成一个键。
+ONE_MINUTE_DURATION = "one_minute"
+#: 一分钟在回合制里是十个自己的回合（与 ``ongoing_effects`` 的 ``minutes * 10``
+#: 同口径），不是十轮——被震慑之类错过的回合不该白送时长。
+ONE_MINUTE_ROUNDS = 10
 TURNS_SCOPED_DURATIONS = frozenset({
     TURN_UNDEAD_DURATION, ABJURE_FOES_DURATION, INTIMIDATING_PRESENCE_DURATION,
+    ONE_MINUTE_DURATION,
 })
 # 只有世界时钟能结束的效果：它们不参与回合域到期，也不随战斗结束消失。
 WORLD_CLOCK_DURATIONS = frozenset({DIVINE_SENSE_DURATION, SACRED_WEAPON_DURATION})

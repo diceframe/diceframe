@@ -34,10 +34,12 @@ from .obscurement import SANCTUARY_DURATION_ROUNDS, sanctuary_zone_id, zone_memb
 from .action_adapter import (
     attack_damage_node,
     average_damage,
+    dice_count,
     double_dice_counts,
     formula_node_from_dice_formula,
     heal_ability_modifier_node,
     maximize_dice_nodes,
+    reduce_dice_count,
     roll_damage_node,
     spell_formula_node,
 )
@@ -2076,6 +2078,38 @@ class CombatResolutionMixin:
         sneak_dice = self._sneak_attack_dice(
             instance, combat, actor, target, weapon, check_mode,
         )
+        # 偷袭是否成立必须在扣骰之前记下：诡诈打击能把骰池花到 0 颗，那时
+        # ``sneak_dice`` 变成 None，可这一回合的偷袭确实用过了。
+        sneak_qualified = sneak_dice is not None
+        # 命中条件提前到掷伤害之前算：诡诈打击的代价是"投掷伤害前扣骰"，
+        # 而伤害在下面几行就掷了。这一步只读内容与 used_this_turn，不掷骰。
+        conditions = self._hit_condition_declarations(
+            instance, actor, weapon, intent, combat, granted_by,
+        )
+        cunning_skip = ""
+        if conditions:
+            spent = sum(
+                int(effect.get("dice_cost") or 0)
+                for row in conditions
+                if isinstance(row, dict) and row.get("kind") == "cunning_strike"
+                for effect in (row.get("effects") or [])
+                if isinstance(effect, dict)
+            )
+            if spent:
+                pool = dice_count(sneak_dice) if sneak_dice else 0
+                if pool <= 0:
+                    # 偷袭不成立（无优势无盟友 / 有劣势 / 武器非灵巧）：
+                    # 盲声明落空不该白扣骰，也不该发半个效果。
+                    cunning_skip = "no_sneak_attack"
+                elif spent > pool:
+                    cunning_skip = "budget"
+                else:
+                    sneak_dice = reduce_dice_count(sneak_dice, spent)
+                if cunning_skip:
+                    conditions = [
+                        row for row in conditions
+                        if not (isinstance(row, dict) and row.get("kind") == "cunning_strike")
+                    ]
         if sneak_dice:
             extra_dice.append(sneak_dice)
         slayer_dice = self._colossus_slayer_dice(instance, combat, actor, target)
@@ -2110,9 +2144,11 @@ class CombatResolutionMixin:
         relentless = self._relentless_rage_marker(instance, target)
         if relentless:
             damage_event["relentless"] = relentless
-        if sneak_dice:
+        if sneak_qualified:
             # 延迟提交：只有这次命中伤害最终落地才记一次偷袭使用。
             # Shield 改判落空时不会走到提交辅助方法，因此不会记账。
+            # 用 ``sneak_qualified`` 而不是 ``sneak_dice``：骰池被诡诈打击
+            # 花到 0 颗时后者是 None，会凭空多给一次偷袭。
             damage_event["feature_use"] = {
                 "actor_id": actor_id,
                 "feature_id": "sneak_attack",
@@ -2144,10 +2180,12 @@ class CombatResolutionMixin:
             # 声明先挂在伤害事件上，掷骰留到真正提交时：Shield/Uncanny Dodge
             # 把命中改判落空时，不给这些骰子白掷一次的机会。
             damage_event["hit_riders"] = riders
-        conditions = self._hit_condition_declarations(
-            instance,
-            actor, weapon, intent, combat, granted_by,
-        )
+        if cunning_skip:
+            # 审计事件也随伤害事件走：Shield 把命中改判落空时这一击根本没
+            # 造成伤害，没有什么要解释的。
+            damage_event["cunning_strike_skipped"] = {
+                "actor_id": actor_id, "reason": cunning_skip,
+            }
         if conditions:
             damage_event["hit_condition_effects"] = conditions
         # "这一击声明了哪些攻击命中触发"随伤害事件走，和 hit_riders 同一个
@@ -3043,6 +3081,9 @@ class CombatResolutionMixin:
             "type": "dnd2024.movement.granted", "actor_id": attacker_id,
             "amount": budget, "reason": "brutal_forceful",
             "target_id": target_id, "source_feature": "brutal_strike",
+            # 免借机由授予方声明，不靠 reducer 按 reason 猜：同一个额度键
+            # （economy.move_allowance）服务三种来源。
+            "provokes_opportunity": False,
         }]
 
     def _critical_hit_move_events(
@@ -3084,6 +3125,7 @@ class CombatResolutionMixin:
             "type": "dnd2024.movement.granted", "actor_id": actor_id,
             "amount": budget, "reason": "critical_hit",
             "source_feature": grant["code"], "source_owner": grant["owner"],
+            "provokes_opportunity": False,
         }]
 
     def _resolve_committed_hit(
@@ -4288,28 +4330,10 @@ class CombatResolutionMixin:
             # 挂在靠飞行移动的 stat block 上，登记为已知简化。
             adjacent_hostiles = []
         disengaged = bool(economy.get("disengaged")) or "disengaged" in actor["conditions"]
-        # Remarkable Athlete 的暴击后移动：这份额度自身免借机攻击，且只免
-        # 这一次移动——阈值是额度（英尺），不是"永久免疫"。
-        crit_budget = int(economy.get("crit_move", 0) or 0)
-        covered_by_crit = bool(crit_budget) and abs(distance) <= crit_budget
-        # Forceful Blow 的跟步额度：同样是"英尺预算 + 方向"。方向是"朝被推开
-        # 的那个目标"，所以只有当这一步真的朝它走、而且没超额度时才免借机攻击；
-        # 朝别处走只是普通移动，照常开窗。
-        follow = economy.get("brutal_move")
-        covered_by_brutal = False
-        if isinstance(follow, dict):
-            budget = int(follow.get("amount", 0) or 0)
-            follow_target = str(follow.get("target_id") or "")
-            toward = (
-                self._position(combat, follow_target)
-                - self._position(combat, actor_id)
-                if follow_target else 0
-            )
-            covered_by_brutal = bool(
-                budget and toward and abs(distance) <= budget
-                and (distance > 0) == (toward > 0)
-            )
-        if adjacent_hostiles and not disengaged and not covered_by_crit and not covered_by_brutal:
+        # 三种一次性额度（暴击后移动 / Forceful Blow 的跟步 / 诡诈打击的撤步）
+        # 形状相同：英尺预算 + 可选的"只能朝某个目标走"。它们共用一个键。
+        covered = self._covered_by_move_allowance(combat, actor_id, distance, economy)
+        if adjacent_hostiles and not disengaged and not covered:
             decision = {
                 "decision_id": f"decision:{intent['intent_id']}",
                 "kind": "opportunity_attack",
@@ -4322,9 +4346,47 @@ class CombatResolutionMixin:
         return None, [{
             "type": "dnd2024.position.changed", "actor_id": actor_id,
             "distance": distance, "movement_cost": abs(distance), "forced": False,
-            **({"crit_move": True} if covered_by_crit else {}),
-            **({"brutal_move": True} if covered_by_brutal else {}),
+            **({"move_allowance": True} if covered else {}),
         }]
+
+    def _covered_by_move_allowance(
+        self, combat: dict[str, Any], actor_id: str, distance: int,
+        economy: dict[str, Any],
+    ) -> bool:
+        """Whether this one move is paid for by a provoke-free allowance.
+
+        A target-bound allowance (Forceful Blow) additionally requires the
+        move to point at that creature; walking anywhere else is ordinary
+        movement and still opens the window.  Older saves may still carry
+        ``crit_move`` / ``brutal_move``: they are read here and nowhere else.
+        """
+
+        allowance = economy.get("move_allowance")
+        if isinstance(allowance, dict):
+            budget = int(allowance.get("amount", 0) or 0)
+            target_id = str(allowance.get("target_id") or "")
+            if not budget or abs(distance) > budget:
+                return False
+            if not target_id:
+                return True
+            toward = self._position(combat, target_id) - self._position(combat, actor_id)
+            return bool(toward) and (distance > 0) == (toward > 0)
+        crit = int(economy.get("crit_move", 0) or 0)
+        if crit and abs(distance) <= crit:
+            return True
+        follow = economy.get("brutal_move")
+        if isinstance(follow, dict):
+            budget = int(follow.get("amount", 0) or 0)
+            target_id = str(follow.get("target_id") or "")
+            toward = (
+                self._position(combat, target_id) - self._position(combat, actor_id)
+                if target_id else 0
+            )
+            return (
+                bool(budget and toward) and abs(distance) <= budget
+                and (distance > 0) == (toward > 0)
+            )
+        return False
 
     @staticmethod
     def _submit_hit_damage(damage_event: dict[str, Any]) -> list[dict[str, Any]]:
@@ -4351,6 +4413,7 @@ class CombatResolutionMixin:
         event.pop("hit_riders", None)
         event.pop("hit_condition_effects", None)
         event.pop("brutal_strike_effects", None)
+        cunning_skip = event.pop("cunning_strike_skipped", None)
         # 第二段伤害与 stat block rider 由 ``_resolve_committed_hit`` 结算：
         # 它们是独立事件，不能混进主伤害的线上形状。
         event.pop("extra_damage_parts", None)
@@ -4361,6 +4424,8 @@ class CombatResolutionMixin:
         events: list[dict[str, Any]] = [event]
         if isinstance(feature_use, dict):
             events.append({"type": "dnd2024.feature.used", **feature_use})
+        if isinstance(cunning_skip, dict):
+            events.append({"type": "dnd2024.cunning_strike.skipped", **cunning_skip})
         if isinstance(extra_feature_uses, list):
             for row in extra_feature_uses:
                 if isinstance(row, dict) and row.get("feature_id"):

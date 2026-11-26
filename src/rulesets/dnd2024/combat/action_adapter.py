@@ -110,6 +110,31 @@ def double_dice_counts(node: Mapping[str, Any]) -> dict[str, Any]:
     return walked
 
 
+def dice_count(formula: str) -> int:
+    """Number of dice in a plain ``NdM`` pool (the Sneak Attack budget)."""
+
+    return _parse_ndm(formula)[0]
+
+
+def reduce_dice_count(formula: str, spent: int) -> str | None:
+    """Remove dice from a plain ``NdM`` pool, or ``None`` when nothing is left.
+
+    Cunning Strike pays for its effects by spending Sneak Attack dice *before*
+    they are rolled, so the pool itself shrinks.  Returning ``None`` instead of
+    ``"0d6"`` is deliberate: ``_NDM_RE`` requires at least one die, and a
+    critical hit would double the zero and raise ``CombatIntentError`` right
+    when the feature is used at full budget.
+    """
+
+    if isinstance(spent, bool) or not isinstance(spent, int) or spent < 0:
+        raise CombatIntentError("spent dice must be a non-negative integer")
+    count, sides = _parse_ndm(formula)
+    remaining = count - spent
+    if remaining <= 0:
+        return None
+    return f"{remaining}d{sides}"
+
+
 def maximize_dice_nodes(node: Mapping[str, Any]) -> dict[str, Any]:
     """骰面最大化（Supreme Healing / Overchannel）：每个骰节点 → 常量节点。
 

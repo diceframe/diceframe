@@ -2310,4 +2310,78 @@ describe('D&D 2024 combat decisions and declarations', () => {
     expect(mocks.submit.mock.calls[1][1]).toMatchObject({ type: 'hide' })
     wrapper.unmount()
   })
+  it('offers the unlocked Cunning Strike effects and sends the payload', async () => {
+    const data = response('active') as any
+    data.available_actions[0].cunning_strike = {
+      available: true,
+      effects: ['poison', 'trip', 'withdraw'],
+      count: 1,
+      costs: { poison: 1, trip: 1, withdraw: 1 },
+      dice: 3,
+    }
+    const wrapper = await mountPanel(data)
+    await flushPromises()
+
+    const attack = await openTile(wrapper, 'attack')
+    expect(attack.text()).toContain('诡诈打击')
+    expect(attack.text()).toContain('3d6')
+    expect(attack.text()).toContain('摔绊')
+    await attack.get('[data-cunning-effect="trip"] input').setValue(true)
+    await stageFromDock(wrapper)
+    await wrapper.get('.confirm-card .combat-primary').trigger('click')
+    await flushPromises()
+
+    expect(mocks.submit).toHaveBeenCalledOnce()
+    expect(mocks.submit.mock.calls[0][1]).toMatchObject({
+      type: 'attack',
+      attack_declarations: ['cunning_strike'],
+      cunning_strike_effects: ['trip'],
+    })
+    wrapper.unmount()
+  })
+
+  it('refuses a second Cunning Strike effect when the server caps one per hit', async () => {
+    const data = response('active') as any
+    data.available_actions[0].cunning_strike = {
+      available: true,
+      effects: ['poison', 'trip', 'withdraw'],
+      count: 1,
+      costs: { poison: 1, trip: 1, withdraw: 1 },
+      dice: 3,
+    }
+    const wrapper = await mountPanel(data)
+    await flushPromises()
+
+    const attack = await openTile(wrapper, 'attack')
+    await attack.get('[data-cunning-effect="trip"] input').setValue(true)
+    await attack.get('[data-cunning-effect="poison"] input').setValue(true)
+
+    expect(wrapper.find('[data-testid="cunning-over-budget"]').exists()).toBe(true)
+    await stageFromDock(wrapper)
+    expect(wrapper.find('.confirm-card').exists()).toBe(false)
+    expect(mocks.submit).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+  it('disables the Cunning Strike menu once this turn is already spent', async () => {
+    const data = response('active') as any
+    data.available_actions[0].cunning_strike = {
+      available: false,
+      effects: ['poison', 'trip', 'withdraw'],
+      count: 1,
+      costs: { poison: 1, trip: 1, withdraw: 1 },
+      dice: 3,
+      names: { trip: '摔绊' },
+    }
+    const wrapper = await mountPanel(data)
+    await flushPromises()
+
+    const attack = await openTile(wrapper, 'attack')
+    expect(wrapper.find('[data-testid="cunning-spent"]').exists()).toBe(true)
+    const box = attack.get('[data-cunning-effect="trip"] input')
+      .element as HTMLInputElement
+    expect(box.disabled).toBe(true)
+    // 服务端下发的名字优先于前端兜底文案。
+    expect(attack.text()).toContain('摔绊')
+    wrapper.unmount()
+  })
 })

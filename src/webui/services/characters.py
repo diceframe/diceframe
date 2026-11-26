@@ -51,6 +51,7 @@ from src.commands.economy_effects import pending_decision_notice
 from src.commands.state_items import grant_classified_item
 from src.rulesets.contracts import GameDetailProjectionRuntime, PlayerJoinRuntime
 from src.webui.character_contracts import MAX_BIO_CHARS
+from src.webui.services import ruleset_characters
 from src.webui.services._common import professional_character_validation_error
 from src.webui.character_sheet_authority import (
     EDITABLE_SHEET_FIELDS,
@@ -1818,10 +1819,14 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
         runtime = dependencies.rules.ruleset_registry.resolve(rule.template)
         professional_character = runtime.capabilities.character_builder == "professional"
         if professional_character:
+            submitted = character
             try:
                 character = runtime.normalize_character_submission(
                     rule, character, getattr(inst, "language", ""),
                 )
+                # 规则重建只负责机制；人物资料 / 头像由 webui 拥有，必须显式带过来，
+                # 否则「高级角色中心」里 authored 的设定会在入席第一步被清空。
+                character = ruleset_characters.carry_narrative_fields(submitted, character)
             except ValueError as exc:
                 error_code, error = professional_character_validation_error(exc)
                 return {

@@ -25,6 +25,7 @@ follow_imports = "skip"
 check_untyped_defs = true
 files = [
     "scripts/architecture_fitness.py",
+    "src/commands/round_media.py",
     "src/engine/action_gate.py",
     "src/engine/participant_view.py",
     "src/engine/visibility_rules.py",
@@ -89,6 +90,9 @@ files = [
     "src/rulesets/dnd2024/runtime.py",
     "src/rulesets/dnd2024/binding.py",
     "src/rulesets/dnd2024/character/builder.py",
+    "src/rulesets/dnd2024/combat/availability.py",
+    "src/rulesets/dnd2024/combat/conditions.py",
+    "src/rulesets/dnd2024/combat/environment.py",
     "src/rulesets/dnd2024/combat/divine_actions.py",
     "src/rulesets/dnd2024/combat/stealth_actions.py",
     "src/rulesets/dnd2024/combat/martial_actions.py",

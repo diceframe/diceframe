@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from src.engine.modules import game_config
 
 from src.engine import module_hooks
@@ -13,6 +15,19 @@ from src.engine.game_instance import GameInstance
 
 
 _DECISION_KEYWORDS = ("是否", "选择", "赌上", "决定", "要么")
+
+
+def log_round(item: Any, default: int = -1) -> int:
+    """Read a persisted log round without turning valid round 0 into -1.
+
+    Shared by the round processor and the scene-media pipeline, which both scan
+    ``instance.log`` for the entry a completed round left behind.
+    """
+    try:
+        value = item.get("round") if isinstance(item, dict) else None
+        return default if value is None or str(value).strip() == "" else int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def should_multi_step(instance: GameInstance, actions_text: str) -> bool:

@@ -289,12 +289,35 @@ def _string_literal(node: ast.AST) -> str | None:
     return None
 
 
+#: ``kind`` also names what sort of *actor* a view holds. Branching on that is
+#: the engine telling a player from an enemy, not a rule written for one feature,
+#: so those comparisons are not recorded.
+_ACTOR_KIND_LITERALS = frozenset({"player", "enemy", "companion", "gm"})
+
+
+def _reads_kind(node: ast.AST) -> bool:
+    """Whether ``node`` reads a ``kind``: ``x.kind``, ``x.get("kind")`` or ``x["kind"]``.
+
+    All three spellings answer the same question, so a branch written with the
+    second or third must not slip past a scanner that only knows the first.
+    """
+
+    if isinstance(node, ast.Attribute):
+        return node.attr == "kind"
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        return node.func.attr == "get" and bool(node.args) and _string_literal(node.args[0]) == "kind"
+    if isinstance(node, ast.Subscript):
+        return _string_literal(node.slice) == "kind"
+    return False
+
+
 def scan_combat_feature_coupling(root: Path) -> set[DependencyDebt]:
     """Find per-feature branches and per-action switches in a ruleset's combat package.
 
     Three shapes are recorded, all keyed by file and symbol:
 
-    - ``kind_branch``: a comparison against ``<something>.kind``,
+    - ``kind_branch``: a comparison against a ``kind`` read off something
+      (``x.kind``, ``x.get("kind")`` or ``x["kind"]``),
     - ``feature_branch``: a comparison against a feature id or ``granted_by``,
     - ``feature_literal``: ``has_feature`` / ``feature_value`` naming a concrete
       feature,
@@ -318,7 +341,7 @@ def scan_combat_feature_coupling(root: Path) -> set[DependencyDebt]:
                         value = _string_literal(right)
                         if value is None:
                             continue
-                        if isinstance(left, ast.Attribute) and left.attr == "kind":
+                        if _reads_kind(left) and value not in _ACTOR_KIND_LITERALS:
                             found.add(DependencyDebt(relative, "kind_branch", value))
                         elif (
                             isinstance(left, ast.Attribute)

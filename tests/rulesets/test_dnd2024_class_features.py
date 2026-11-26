@@ -711,7 +711,7 @@ def test_rogue_uncanny_dodge_declares_no_capability_and_keeps_parameters() -> No
 
     assert [feature.id for feature in resolver.features_for(character)] == [
         "expertise", "sneak_attack", "steady_aim", "cunning_action", "fast_hands",
-        "second_story_work", "uncanny_dodge", "weapon_mastery",
+        "second_story_work", "uncanny_dodge", "cunning_strike", "weapon_mastery",
     ]
     assert resolver.declared_capability(character, "uncanny_dodge") is None
     assert resolver.feature_value(character, "uncanny_dodge", "damage_multiplier") == 0.5
