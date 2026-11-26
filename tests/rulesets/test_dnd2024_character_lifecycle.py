@@ -460,6 +460,146 @@ def test_card_profile_update_preserves_professional_blueprint(
         assert card["ruleset_character"][key] == before[key]
 
 
+@pytest.mark.asyncio
+async def test_card_narrative_profile_survives_seating_and_library_autosave(
+    professional_context,
+) -> None:
+    """An authored card must not reset to a blank sheet when it enters a game.
+
+    The ruleset rebuild only owns mechanics: the profile bag and the portrait
+    are carried over, and the create-time library auto-save keeps them instead
+    of writing the blank projection back over the player's card.
+    """
+
+    api, instance, character = professional_context
+    authored = deepcopy(character)
+    authored["ruleset_character"]["profile"] = {
+        "appearance": "Red hair, dented pauldron.",
+        "personality": "Clipped and practical.",
+        "backstory": "Left the frontier watch after the bridge fell.",
+    }
+    authored["portrait"] = {"kind": "builtin", "id": "wizard-1"}
+    saved = character_cards.save_character_card(
+        api._character_card_dependencies, authored,
+    )["card"]
+
+    created = await characters.create_player(
+        api._character_dependencies,
+        "web|character-lifecycle|web_bot",
+        deepcopy(saved),
+        assign_new_id=True,
+    )
+
+    assert created["ok"] is True
+    sheet = instance.get_character_sheet(created["user_id"])
+    assert sheet["ruleset_character"]["profile"] == authored["ruleset_character"]["profile"]
+    assert sheet["portrait"] == {"kind": "builtin", "id": "wizard-1"}
+    # 机制仍然由规则重建，角色资料不会反过来成为机制输入。
+    assert sheet["ruleset_character"]["build"] == saved["ruleset_character"]["build"]
+    library = [
+        card for card in character_cards.list_character_cards(
+            api._character_card_dependencies,
+        )["cards"]
+        if card.get("id") == saved["id"]
+    ]
+    assert len(library) == 1
+    assert library[0]["ruleset_character"]["profile"] == authored["ruleset_character"]["profile"]
+    assert library[0]["portrait"] == {"kind": "builtin", "id": "wizard-1"}
+
+
+@pytest.mark.asyncio
+async def test_adoption_keeps_the_cards_narrative_profile(
+    professional_context,
+) -> None:
+    api, instance, _character = professional_context
+    replacement = _professional_character(api._runtime)
+    replacement["ruleset_character"]["identity"]["name"] = "Profile Hero"
+    replacement["character_name"] = "Profile Hero"
+    replacement["ruleset_character"]["profile"] = {"notes": "Keeps a field journal."}
+    replacement["portrait"] = {"kind": "builtin", "id": "wizard-1"}
+    saved = character_cards.save_character_card(
+        api._character_card_dependencies, replacement,
+    )["card"]
+
+    result = await ruleset_characters.adopt_character_card(
+        api._ruleset_character_dependencies,
+        "web|character-lifecycle|web_bot", "gm", saved["id"],
+        gm_authority=True,
+    )
+
+    assert result["ok"] is True
+    sheet = instance.get_character_sheet("gm")
+    assert sheet["ruleset_character"]["profile"] == {"notes": "Keeps a field journal."}
+    assert sheet["portrait"] == {"kind": "builtin", "id": "wizard-1"}
+
+
+def test_carry_narrative_fields_never_trusts_unknown_profile_keys() -> None:
+    source = {
+        "portrait": {"kind": "builtin", "id": "wizard-1"},
+        "ruleset_character": {
+            "profile": {"notes": "keep", "hp": "999", "": "blank"},
+            "resources": {"hp": 9999},
+        },
+    }
+    normalized = {
+        "ruleset_character": {"resources": {"hp": 7}, "profile": {"stale": "x"}},
+    }
+
+    carried = ruleset_characters.carry_narrative_fields(source, normalized)
+
+    assert carried["ruleset_character"]["profile"] == {"notes": "keep"}
+    assert carried["ruleset_character"]["resources"] == {"hp": 7}
+    assert carried["portrait"] == {"kind": "builtin", "id": "wizard-1"}
+
+
+def test_carry_narrative_fields_clears_profile_the_source_does_not_have() -> None:
+    normalized = {"ruleset_character": {"profile": {"stale": "leftover"}}}
+
+    carried = ruleset_characters.carry_narrative_fields(
+        {"ruleset_character": {}}, normalized,
+    )
+
+    assert "profile" not in carried["ruleset_character"]
+
+
+def test_carry_narrative_fields_enforces_the_profile_budget() -> None:
+    from src.webui.character_contracts import MAX_BIO_CHARS
+
+    source = {
+        "ruleset_character": {"profile": {"backstory": "x" * (MAX_BIO_CHARS + 1)}},
+    }
+    normalized = {"ruleset_character": {}}
+
+    with pytest.raises(ruleset_characters.RulesetCharacterOperationError) as caught:
+        ruleset_characters.carry_narrative_fields(source, normalized)
+
+    assert caught.value.code == "INVALID_CHARACTER_PROFILE"
+    assert caught.value.error_code == "INVALID_CHARACTER_PROFILE"
+
+
+@pytest.mark.asyncio
+async def test_create_player_rejects_an_oversized_carried_profile(
+    professional_context,
+) -> None:
+    from src.webui.character_contracts import MAX_BIO_CHARS
+
+    api, instance, character = professional_context
+    oversized = deepcopy(character)
+    oversized["ruleset_character"]["profile"] = {"backstory": "x" * (MAX_BIO_CHARS + 1)}
+    before = deepcopy(instance.players)
+
+    created = await characters.create_player(
+        api._character_dependencies,
+        "web|character-lifecycle|web_bot",
+        oversized,
+        assign_new_id=True,
+    )
+
+    assert created["ok"] is False
+    assert created["error_code"]
+    assert instance.players == before
+
+
 def test_dnd_runtime_declares_rules_aware_character_lifecycle() -> None:
     assert Dnd2024Runtime.capabilities.character_lifecycle == "rules_aware"
 

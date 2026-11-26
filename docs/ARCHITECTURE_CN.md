@@ -2325,6 +2325,8 @@ LLM
 
 而不是让 context_builder 自己 import D&D 并计算 D&D 状态。
 
+玩家在高级角色中心写的人物资料（`ruleset_character.profile`）也只能由该规则投影：D&D 2024 在 `build_llm_view` 的 `sheet.narrative_profile` 里给出有界摘要（`src/rulesets/dnd2024/narrative_profile.py`，按字段与总量双重截断，`notes` 不外传），开局叙事通过可选 `NarrativeProfileRuntime` 取同一份摘录。资料是呈现文本，`hp` / 资源 / 等级仍只来自 canonical 机制字段；generic engine 不读也不修 profile。
+
 ---
 
 ## 15.4 Player-safe Q&A
@@ -2991,6 +2993,7 @@ migrate_state
 - `TemporaryEncounterPlannerRuntime`
 - `AutomaticIntentRuntime`
 - `GameDetailProjectionRuntime`
+- `NarrativeProfileRuntime`（把玩家在高级角色中心写的人物资料以有界叙事摘要交给旁白；资料本身只存在于该规则自己的 canonical 角色里，所以只有该规则能决定哪些字段是旁白素材、截断多紧。`build_llm_view` 的 `narrative_profile` 与开局叙事共用同一份摘录；`notes` 标注为“仅供自己记录”，不出角色卡，返回值只能是呈现文本，不能是机制）
 - `PlayerJoinRuntime`
 - `CharacterRevivalRuntime`
 - `LiveAdvancementPolicyRuntime`
@@ -3604,6 +3607,13 @@ validate → resolve → events → reducer
 或法术位环阶，合法性仍由战斗方法根据权威状态判定。
 `combat/martial_actions.py` 负责能力授予的连击、自疗与移动，以及武僧命中效果；
 `combat/stealth_actions.py` 供普通躲藏与能力躲藏共用前提和结算。
+
+`combat/engine.py` 本身只保留意图入口（校验、结算、批次应用）、投影入口、遭遇预设，
+以及回合、经济与位置的小工具；它自己的三块规则面拆成同级 mixin：
+`combat/availability.py` 回答“这个 actor 现在能做什么”——意图、形态、物品激活，
+以及自动行动替谁选什么；`combat/conditions.py` 负责状态的投影、免疫与到期；
+`combat/environment.py` 负责掩护、遮蔽与灵光投影。三者都是 `__slots__ = ()` 的 mixin，
+不持有自己的实例状态；引擎字段（例如掩护递归深度 `_cover_depth`）仍属于引擎。
 
 攻击附加选项在 `features/attack_declarations.py` 注册。新意图使用
 `attack_declarations` ID 数组，可选 `sacred_weapon`、`light_extra_attack`、

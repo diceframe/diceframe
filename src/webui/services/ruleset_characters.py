@@ -50,12 +50,71 @@ PROFILE_PATCH_FIELDS = frozenset({"character_name", "portrait", "profile"})
 MAX_CHARACTER_NAME_CHARS = 120
 
 
+def carry_narrative_fields(
+    source: dict[str, Any],
+    normalized: dict[str, Any],
+) -> dict[str, Any]:
+    """Carry the webui-owned narrative data a ruleset rebuild cannot own.
+
+    ``normalize_character_submission`` rebuilds the canonical blueprint from
+    mechanical choices only, so ``ruleset_character.profile`` and the
+    portrait reference come back empty.  Every boundary that turns a card
+    into a seat (create, join, seed restart, adopt) must carry them over
+    explicitly: dropping them silently resets an authored card to a blank
+    sheet, and the create-time library auto-save then writes that blank state
+    back over the player's card.
+
+    Only non-mechanical fields move here, and only in the tolerant direction:
+    unknown profile keys are never trusted, nothing mechanical is read from
+    ``source``, and the same ``MAX_BIO_CHARS`` budget the profile PATCH
+    endpoint enforces applies here too (a create/join payload must not smuggle
+    an oversized bio past it).  After the carry the canonical profile always
+    mirrors the validated source fields — never a stale rebuild leftover.
+    """
+
+    if not isinstance(source, dict) or not isinstance(normalized, dict):
+        return normalized
+    target = normalized.get("ruleset_character")
+    if not isinstance(target, dict):
+        return normalized
+    source_canonical = source.get("ruleset_character")
+    raw_profile = (
+        source_canonical.get("profile")
+        if isinstance(source_canonical, dict)
+        else None
+    )
+    carried: dict[str, str] = {}
+    for key, value in (raw_profile if isinstance(raw_profile, dict) else {}).items():
+        if key in PROFILE_FIELDS and isinstance(value, str) and value.strip():
+            carried[key] = value.strip()
+    if sum(len(text) for text in carried.values()) > MAX_BIO_CHARS:
+        raise RulesetCharacterOperationError(
+            "INVALID_CHARACTER_PROFILE",
+            t("webui.services.ruleset_characters.profile_too_long", max_bio_chars=MAX_BIO_CHARS),
+        )
+    if carried:
+        target["profile"] = carried
+    else:
+        target.pop("profile", None)
+    portrait = source.get("portrait")
+    if isinstance(portrait, dict) and portrait:
+        normalized["portrait"] = deepcopy(portrait)
+    return normalized
+
+
 class RulesetCharacterOperationError(ValueError):
     """A user-facing ruleset character lifecycle validation failure."""
 
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
+
+    @property
+    def error_code(self) -> str:
+        # ``professional_character_validation_error`` reads ``error_code``;
+        # keep both spellings on one value so create/join preflights map the
+        # same stable code the profile endpoints already return.
+        return self.code
 
 
 def _failure(code: str, message: str) -> dict[str, Any]:
@@ -454,8 +513,11 @@ async def _adopt_character_card_authority(
     ):
         return _failure("INCOMPATIBLE_RULESET_CHARACTER", t("webui.services.ruleset_characters.card_incompatible_with_ruleset"))
     try:
-        normalized = runtime.normalize_character_submission(
-            rule, deepcopy(card), str(getattr(instance, "language", "") or ""),
+        normalized = carry_narrative_fields(
+            card,
+            runtime.normalize_character_submission(
+                rule, deepcopy(card), str(getattr(instance, "language", "") or ""),
+            ),
         )
     except ValueError as exc:
         return _failure(
@@ -472,8 +534,6 @@ async def _adopt_character_card_authority(
         )
     if not isinstance(binding, dict) or not instance.ruleset_binding_matches(binding):
         return _failure("INCOMPATIBLE_RULESET_CHARACTER", t("webui.services.ruleset_characters.card_incompatible_with_save_version"))
-    if isinstance(card.get("portrait"), dict):
-        normalized["portrait"] = deepcopy(card["portrait"])
     name = str(normalized.get("character_name") or card.get("character_name") or "").strip()
     if not name:
         return _failure("INVALID_CHARACTER_PROFILE", t("webui.services.ruleset_characters.name_empty"))
