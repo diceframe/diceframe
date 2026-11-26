@@ -475,13 +475,13 @@ git diff --check
 | `frontend-v2/src/api/types.ts` | `RestShortRecovery` / `RestRecoverySlotRow` / `RitualOption` / `RulesetRitualOptionsResponse` / `RulesetRitualResponse`；`RestOptions.short_recovery` 可选 |
 | `frontend-v2/src/api/rulesets.ts` | `RestSubmissionOptions.recovery`（有才发）；`fetchLiveCharacterRitualOptions` / `performLiveCharacterRitual`（后者固定带 `confirm_elapsed_time: true`，因为服务端在同一次写入里推进时钟） |
 | `ProfessionalCharacterCenter.vue` | 短休恢复小节：按资源池画每个环阶的"已用/预算"、超预算挡住提交、只发选中的格子；仪式小节：读 `/ritual/options`、确认门禁、成功后 `emit('saved')` 并重读剩余次数；打开「法术与资源」页读一次休息选项 |
-| `tests/ProfessionalCharacterCenter.test.ts` | 13 → 18 条；另有三条既有用例（连同 `beforeEach` 的默认桩）绑在"打开面板零请求"这个已过期假设上，一并改写 |
+| `tests/ProfessionalCharacterCenter.test.ts` | 13 → 21 条（含 §17.5 审核后补的两条）；另有三条既有用例（连同 `beforeEach` 的默认桩）绑在"打开面板零请求"这个已过期假设上，一并改写 |
 
 ### 17.2 与 §15 的偏差
 
 1. **第三处（Font 换点/造槽）不需要前端**：复核后确认两条 capability 早已是 `class_capability`，战斗面板对这类条目做通用渲染。缺的是"出战斗后没有入口"，那是探索态意图的缺口（§12.2 第 2 条），属引擎切片。
 2. **§15 的前提句已过期，不是"加一个开关"**：原 watcher 上写着"短休没有任何声明，打开面板也不该产生请求"。这句话从 F6a 合入起就不成立（短休一直有 `short_recovery` 声明），只是没有消费者。这次把 watcher 改成"打开这一页读一次"，并把断言"零请求"的用例改成"只读选项、绝不提交"——后者才是真正要守的性质。
-3. **`recovery` 只在短休发**：长休由服务端按自己的规则回满，带过去会被硬拒。空对象也不发（服务端会拒成 `would not change anything`）。
+3. **`recovery` 只在短休发**：长休由服务端按自己的规则回满，带过去会被硬拒（`validate_rest_options` 只在 short 通过）。空对象也不发——但理由不是"会被拒"：`_plan_short_recovery` 对 `{}` 直接返回空表、静默放行，发它只是每次短休塞一个无意义字段。
 4. **仪式与休息的选项分开拉**：仪式读失败不该拦住休息，反之亦然。两者的失败各自显示在自己的小节里。
 5. **补了逐级上限**（提交 `baf99eae`）：第一版只挡总预算，1 环消耗 2 个、预算 3 环时填 3 个仍能提交，然后被服务端拒成 `cannot recover more level 1 slots than are expended`。服务端 fail-closed 是对的，但 §1 第 2 条要求"客户端只提交合法分配选择"，所以前端也逐级算 `买回 − 已消耗`，为正就挡住并在那一行报错。
 
@@ -491,6 +491,9 @@ git diff --check
 - **点数池模式的"买回几点"上限取 `min(spent, budget)`**：服务端下发的是"已消耗点数"（`spent`）与"预算"（`budget`），没有下发"本次最多能买回多少"这个单值。目前唯一的点数池是 Sorcerous Restoration（`budget = half_level_round_down`，`track = sorcery_points`），预算不可能大于已消耗，所以取小者就是"能回多少"；若以后出现"至少回 1 点"这类下限规则，需要服务端补字段而不是前端自己推。
 - **没有 e2e**：只有组件用例。角色中心的休息页不在 CI 的 e2e smoke 里，所以"面板对着活服务端跑通"没有被自动化覆盖。
 - **兼职仍不可用**：仪式与休息都撞 `_class_state()` 的单职业硬限制（GAP-47）。
+- **仪式每次进入"法术与资源"都请求一次**：对非邪术师也发（返回空表）。与休息选项"打开只读一次 + 版本变化重读"的策略不一致，属可接受的不一致，但要知道它会多打一个 GET。
+- **队伍休息等待裁决期间仍可举行仪式**：服务端只挡战斗（`ruleset_ritual.py`），不挡未结算的队伍休息。若"休息期间不可仪式"是规则，要在服务端补，不能靠前端禁用按钮。
+- **成功后"重读剩余次数"在真实宿主里看不见**：`PlayView` 收到 `saved` 就关掉角色中心，组件随即卸载。这一步只在宿主不关闭面板时有意义（组件测试里就是这种情形）。
 
 ### 17.4 验收
 
@@ -500,8 +503,38 @@ git diff --check
 | `npx vue-tsc -b` | 通过 |
 | `npx eslint src tests --max-warnings 0` | 通过（CI 同命令） |
 | `npm run locales:check` | 通过（ja/de/ru 的既有缺失不变，本次没有新增 i18n 键——面板用内联双语 `text()`） |
-| `npx vitest run` 全量 | **1744 passed / 1746**；两条失败都是计时断言（`mapLayout` 的 300ms 性能上限、`useTheme` 的初始化耗时），单独跑 10 passed |
+| `npx vitest run` 全量 | **1747 passed / 1749**；两条失败都是计时断言（`mapLayout` 的性能上限、`useTheme` 的 15s 超时），单独跑 10 passed |
 | `npx vite build` | 通过（CI 同步骤；产物落在被忽略的 `static-v2/assets/`） |
-| 组件用例 | **18 passed**（13 → +5：短休预算渲染与提交体、超预算拦截、逐级上限拦截、仪式投影渲染、仪式确认门禁与提交体） |
+| 组件用例 | **21 passed**（13 → +8：短休预算渲染与提交体、超预算拦截、逐级上限拦截、points 池上限、版本变化重读、短休失败提示、仪式投影渲染、仪式确认门禁与提交体） |
 
-计时类用例的说明要留在这里：`mapLayout` 与 `useTheme` 的断言读的是墙钟时间，在 `vitest run` 并行时会双双越线（这两轮分别是 `useTheme` 17.1s / 22.0s、`mapLayout` 约 340ms 撞 300ms 上限），单独跑则 10 passed。这不是本次改动引入的，但说明"本机 vitest 全绿"不是一个可靠的验收口径——要判回归必须单独重跑这两个文件。
+计时类用例的说明要留在这里：`mapLayout` 与 `useTheme` 的断言读的是墙钟时间，`vitest run` 并行时会被 CPU 竞争拖垮——三轮里 `mapLayout` 分别撞 800ms 上限（实测 1142ms）、`useTheme` 分别 17.1s / 22.0s / 直接 15s 超时；单独跑这两个文件则 10 passed。这不是本次改动引入的，但说明"本机 vitest 全绿"不是一个可靠的验收口径——判回归必须单独重跑这两个文件。
+
+### 17.5 审核后的修正（2026-11-26）
+
+独立审核给了 7 条应修、0 条阻断、8 条可选。7 条全部采纳，另采纳 1 条可选（`NaN` 兜底）。
+
+| # | 问题 | 处理 |
+|---|---|---|
+| R1 | 队伍休息由 DM 批准时，面板仍画着休息前的额度（`restOptionsLoaded` 只在"没读过"时重拉） | 记 `restOptionsRevision`（加载时角色卡的版本），版本号一变就重拉休息与仪式两份选项；自己刚写完那一次不会触发重复拉取 |
+| R2 | 短休读不到 `/rest/options` 时恢复小节整块消失、无任何提示 | 短休也显示失败原因，并明说"这次短休不会恢复法术位"；仍然不拦休息（读不到选项不该把人锁在休息外面） |
+| R3 | 手输小数（如 1.5）能过前端校验，被服务端以英文拒 | 输入加 `step="1"`；`recoveryCount()` 统一 `trunc` + `Number.isFinite`，让"行里显示的总数"与"真正提交的数"是同一个 |
+| R4 | 休息与仪式的按钮互不相干，可同时点，第二个必然撞 `STALE_CHARACTER_REVISION` | 两个按钮互相看对方的 busy |
+| R5 | 仪式用例的 `expected_revision` 恒为 0，"从 props 取"与"写死 0"都能过 | fixture 改成 7，断言 7 |
+| R6 | points 分支（Sorcerous Restoration）零覆盖，而 §17.3 专门讨论了它 | 新增一条：`spent=3 / budget=2` 显示"预算 2 点"、填 3 被挡、填 2 提交 `{points: 2}` |
+| R7 | 注释与本文把"空 `recovery` 会被拒"当理由 | 那句话（`would not change anything`）只属于 `prepared_spells`；`_plan_short_recovery` 对 `{}` 是静默放行。理由改成"发它没有意义" |
+
+顺带两条：
+- **把"标签映射"真正测到**：仪式渲染用例原来断言裸 id `magical_cunning`（因为夹具没有 `class_resources`），现在夹具给 `class_resources` 并断言中文名。
+- **`NaN` 兜底**（可选 O7）：`recoveryCount()` 用 `Number.isFinite` 挡住，避免将来改成文本输入时出现"按钮禁用但不显示任何错误"的死局。
+
+测试 18 → 21（points 池上限、版本号重读、短休失败提示）。后两条做了变异验证：去掉版本号 watcher、或把短休失败提示退回只给长休，对应用例立刻变红。points 那条靠"填 3 被挡 / 填 2 提交 2 点"两个方向区分，没有做变异（去掉 `min(spent, budget)` 会让 3 通过，被"超出预算"断言抓住）。
+
+未采纳的可选项：
+
+| 项 | 理由 |
+|---|---|
+| O1 `confirm_elapsed_time` 由 API 层写死 | 与既有 `resolveLiveCharacterRest` 同构，真正的门禁在模板的勾选框；只改一个 helper 会让两个入口不一致 |
+| O4 成功后重读在宿主里看不见 | 已写进 §17.3：`PlayView` 收到 `saved` 就关面板，组件随即卸载 |
+| O5 `saved` 不带 `'ritual'` 原因 | 会显示成"角色资料已保存"，属宿主文案，已写进 §17.3 |
+| O6 旧卡显示裸 id | 只影响 F6a 之前写入且从未复算的角色卡；彻底解决要让服务端在选项行里带回 `label` |
+| O8 提交后输入仍可编辑 | 提交期间按钮已禁用，改数字不会被提交；属体验细节 |
