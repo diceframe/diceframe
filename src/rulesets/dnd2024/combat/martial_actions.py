@@ -46,6 +46,7 @@ class CombatMartialActionsMixin:
         def _attack_events(
             self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
             *, spend_attack_action: bool = True, granted_by: str = "",
+            opportunity: bool = False,
         ) -> list[dict[str, Any]]: ...
 
     #: Bonus Action 附带移动的声明表。今天只有两项消费者，所以先写成代码表；

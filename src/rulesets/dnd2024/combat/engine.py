@@ -66,6 +66,7 @@ from .divine_actions import CombatDivineActionsMixin
 from .stealth_actions import CombatStealthActionsMixin
 from .martial_actions import CombatMartialActionsMixin
 from .support_actions import CombatSupportActionsMixin
+from .defensive_tactics import CombatDefensiveTacticsMixin
 from .ongoing_effects import CombatOngoingEffectsMixin
 from .obscurement import (
     LAND_AID_RANGE_FT,
@@ -160,6 +161,7 @@ class Dnd2024CombatEngine(
     CombatMartialActionsMixin,
     CombatSupportActionsMixin,
     CombatOngoingEffectsMixin,
+    CombatDefensiveTacticsMixin,
 ):
     bundle: LoadedRulesetBundle
     encounter_access: EncounterAccess = field(default_factory=EncounterAccess.blocked)

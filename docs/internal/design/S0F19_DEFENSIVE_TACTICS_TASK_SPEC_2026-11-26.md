@@ -25,12 +25,14 @@
    - 判定用行上的 `round` + `turn_index` 与当前值相等，回合一变即失效；
    - 行以 `turns_remaining: 0` 建立，下一次该攻击者回合开始的清扫直接删除。
 3. 两项都只对**持有该选项的人**成立；未拥有、未选择、选择了另一个选项都不产生任何来源。
-4. 借机攻击的标志由机会攻击路径写入攻击意图（`opportunity_attack: true`），与"支付改成 reaction"是同一条路径的两面。
+4. 借机攻击的标志由机会攻击路径**以参数传入** `_attack_events(..., opportunity=True)`，不写成意图键：它既不该是客户端可申报的结算事实，也不该新增 `intent_switch` 耦合债务。它和"支付改成 reaction"是同一条路径的两面。
 5. 战斗结束时清空 `attack_marks`（与 `hands` / `light_attacks` 同组）。这条同时修掉 Studied Attacks 的跨战斗残留：新战斗 round 1 / turn 0 会与新标记同形。
 
 ## 3. 白名单
 
-`combat/resolution.py`（来源合成、标记读写、机会攻击标志）、`combat/reducer.py`（战斗结束清理）、`tests/rulesets/test_dnd2024_defensive_tactics.py`。
+`combat/defensive_tactics.py`（新 mixin：选项读取、来源合成、标记读写）、`combat/resolution.py`（一行接入 + 机会攻击标志透传）、`combat/engine.py`（mixin 组合）、`combat/martial_actions.py`（`_attack_events` 的 Protocol 签名）、`combat/reducer.py`（战斗结束清理）、`pyproject.toml`（mypy 显式清单）、`tests/rulesets/test_dnd2024_defensive_tactics.py`。
+
+> 为什么单独一个模块：`resolution.py` 已在 1500 行尺寸棘轮里，PR 首版把三个 helper 直接放进去，涨了 113 行触发 `test_known_size_hotspots_do_not_grow`；搬进同级 mixin 后 resolution 只多两行，新模块不到 1500 行，与 `divine_actions` / `martial_actions` / `support_actions` / `ongoing_effects` 同一风格。
 
 ## 4. 矩阵与用例
 
