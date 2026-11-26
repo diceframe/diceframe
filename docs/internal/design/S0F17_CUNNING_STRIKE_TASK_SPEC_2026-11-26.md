@@ -459,6 +459,8 @@ F17a–F17e 一次落地，分成三个实现提交加一个文档提交（后�
 4. **`target_turn_end` 的到期时刻取决于施加时机**。它读 `previous_actor_id` 与 `expires_after`：在攻击者回合挂上的 Daze 在目标自己回合结束时过期（正确），在目标回合内挂上才需要多等一轮。这条是复用既有实现，没有新写计时器——但**复用必须显式写 `expires_after: 2`**，第一版漏了（见 §11.8 第 4 条）。
 5. **旧额度只清新键等于永不失效**。读取侧认识 `crit_move` / `brutal_move`，写路径只写 `move_allowance`，消费侧只 `pop("move_allowance")`——旧存档里的一次性额度会一直免借机到回合结束。三个标记任一出现都要清全部三个（见 §11.8 第 2 条）。
 6. **`_activation_payload` 不认敌人**。为了给 companion 也判制毒工具，校验改成对两种 actor 都取 `_activation_payload`；但 `_validate_attack` 是全 actor 共用入口，**敌人攻击也会走到这里**，而 `_activation_payload` 对 `enemy:` 直接调 `_companion()` 并抛「companion actor does not exist」。184 条反应窗口用例同时变红（它们全部由敌人发起攻击）。只看自己的 28 条用例完全看不出来——这是本轮唯一一次靠全量回归才发现的破坏。
+7. **`bundle.get()` 是 deepcopy，放进按特性遍历的循环里就是灾难**。`validate_declarations` 每个特性调一次 `(bundle.get("combat_catalog", ...) or {}).get("conditions", {})`，等于每个特性复制一整份战斗目录；每次 bundle 装载多出几百次大字典拷贝，把**每条用例**从 2 秒推到 5 秒。表现为 CI 的 shard 1 在 45 分钟处超时（同批 main 只需 12.5 分钟），而本地全量只是"变慢"、没有任何红灯。同一文件 46 条用例：基座 147.96s / 修复前 246.26s / 修复后 151.87s。
+8. **新用例自身的构造开销也会被 CI 放大**。28 条用例每条重建 `Dnd2024Runtime` 并把游荡者从 1 级走到 14 级，12 秒/条；`-n 4 --dist loadfile` 让整文件落在同一个 worker 上串行，于是整文件 346 秒。改成 module 级缓存 runtime 与各级 sheet 后 80 秒（2.9 秒/条）。
 
 ### 11.5 变异验证
 
