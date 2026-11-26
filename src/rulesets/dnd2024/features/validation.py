@@ -10,6 +10,7 @@ runs them once each time it is built.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from src.rulesets.bundle import LoadedRulesetBundle
@@ -202,6 +203,10 @@ def validate_declarations(
         validate_movement_parameters(definition)
         validate_overchannel_parameters(definition)
         validate_hit_rider_parameters(definition)
+        validate_cunning_strike_parameters(
+            definition,
+            (bundle.get("combat_catalog", "srd_combat_core") or {}).get("conditions", {}),
+        )
         validate_attack_state_parameters(definition)
         validate_mark_parameters(definition)
         if definition.resource_id:
@@ -917,6 +922,168 @@ def validate_hit_rider_parameters(definition: ClassFeatureDefinition) -> None:
         dice("primal_strike_dice")
         positive_int("range_bonus_ft")
         positive_int("range_minimum_ft")
+
+#: 诡诈打击的效果 id 与各自的参数键。成本、豁免属性、条件、时长全部逐
+#: 效果读，所以"每个效果的键集"本身就是契约：多一个键说明作者期待了没有
+#: 代码实现的行为，少一个键说明代码会退回到规则没说过的默认值。
+_CUNNING_STRIKE_BASE_EFFECTS = ("poison", "trip", "withdraw")
+_CUNNING_STRIKE_ADDITIONAL_EFFECTS = ("daze", "knock_out", "obscure")
+_CUNNING_STRIKE_EFFECT_KEYS: dict[str, frozenset[str]] = {
+    "poison": frozenset({
+        "dice_cost", "save_ability", "condition", "duration", "repeat_save",
+        "requires_item",
+    }),
+    "trip": frozenset({"dice_cost", "save_ability", "condition", "max_target_size"}),
+    "withdraw": frozenset({"dice_cost", "speed_divisor", "provokes_opportunity"}),
+    "daze": frozenset({
+        "dice_cost", "save_ability", "condition", "duration", "turn_choice_limit",
+    }),
+    "knock_out": frozenset({
+        "dice_cost", "save_ability", "condition", "duration", "repeat_save",
+        "ends_on_damage",
+    }),
+    "obscure": frozenset({"dice_cost", "save_ability", "condition", "duration"}),
+}
+#: SRD 5.2.1 p62 的价格，一颗不差。内容里重复写一遍不是为了"可配置"，而是
+#: 为了让这里能把它拦住：定价漂移（多打一个 0、复制粘贴成别的效果）不会
+#: 报错，只会让特性静默变贵。
+_CUNNING_STRIKE_DICE_COSTS: dict[str, int] = {
+    "poison": 1, "trip": 1, "withdraw": 1,
+    "daze": 2, "knock_out": 6, "obscure": 3,
+}
+_CUNNING_STRIKE_DURATIONS = frozenset({"target_turn_end", "one_minute"})
+_CUNNING_STRIKE_TURN_CHOICES = frozenset({"move", "action", "bonus_action"})
+
+
+def validate_cunning_strike_parameters(
+    definition: ClassFeatureDefinition, conditions: dict[str, Any],
+) -> None:
+    """Fail closed on the three Cunning Strike declarations.
+
+    The cost table is authoritative here rather than in content: two places
+    state the same number only so that a typo in one of them fails at load
+    instead of silently re-pricing an effect mid-campaign.
+    """
+
+    feature_id = definition.id
+    if feature_id not in {"cunning_strike", "improved_cunning_strike", "devious_strikes"}:
+        return
+    # 延迟导入：与 ``validate_hit_rider_parameters`` 同一个理由（features ->
+    # combat 的顶层导入会把 character 包也拉成环）。
+    from src.rulesets.dnd2024.combat.catalog import SAVE_ABILITIES
+    from src.rulesets.dnd2024.combat.primitives import SIZE_CODES
+
+    parameters = definition.parameters
+    if feature_id == "improved_cunning_strike":
+        # 11 级只抬个数，个数写在 cunning_strike 的 upgrade 参数上。
+        if parameters:
+            raise ClassFeatureError(
+                f"{feature_id} does not support {', '.join(sorted(parameters))}"
+            )
+        return
+    base = feature_id == "cunning_strike"
+    effects = _CUNNING_STRIKE_BASE_EFFECTS if base else _CUNNING_STRIKE_ADDITIONAL_EFFECTS
+    expected = {"effect_options", "effects_per_use", "upgrade_level", "save_dc_ability"} if base else {
+        "additional_effect_options",
+    }
+    if base:
+        expected.add("effects_per_use_upgrade")
+    for effect in effects:
+        for key in _CUNNING_STRIKE_EFFECT_KEYS[effect]:
+            expected.add(f"{effect}_{key}")
+    unknown = sorted(set(parameters) - expected)
+    if unknown:
+        raise ClassFeatureError(f"{feature_id} does not support {', '.join(unknown)}")
+    missing = sorted(expected - set(parameters))
+    if missing:
+        raise ClassFeatureError(f"{feature_id} is missing {', '.join(missing)}")
+    if base:
+        if parameters["effect_options"] != list(_CUNNING_STRIKE_BASE_EFFECTS):
+            raise ClassFeatureError(
+                f"{feature_id}.effect_options must list {list(_CUNNING_STRIKE_BASE_EFFECTS)}"
+            )
+        positive_int_parameter(feature_id, parameters, "effects_per_use")
+        positive_int_parameter(feature_id, parameters, "effects_per_use_upgrade")
+        if parameters["effects_per_use_upgrade"] < parameters["effects_per_use"]:
+            raise ClassFeatureError(
+                f"{feature_id}.effects_per_use_upgrade cannot lower the cap"
+            )
+        if parameters["upgrade_level"] != 11:
+            raise ClassFeatureError(f"{feature_id}.upgrade_level must be 11")
+    else:
+        if parameters["additional_effect_options"] != list(_CUNNING_STRIKE_ADDITIONAL_EFFECTS):
+            raise ClassFeatureError(
+                f"{feature_id}.additional_effect_options must list "
+                f"{list(_CUNNING_STRIKE_ADDITIONAL_EFFECTS)}"
+            )
+    if base and parameters["save_dc_ability"] not in ABILITY_IDS:
+        raise ClassFeatureError(f"{feature_id} declares an unknown save DC ability")
+    for effect in effects:
+        prefix = f"{effect}_"
+        cost = parameters[f"{prefix}dice_cost"]
+        if isinstance(cost, bool) or cost != _CUNNING_STRIKE_DICE_COSTS[effect]:
+            raise ClassFeatureError(
+                f"{feature_id}.{prefix}dice_cost must be "
+                f"{_CUNNING_STRIKE_DICE_COSTS[effect]}"
+            )
+        if "save_ability" in _CUNNING_STRIKE_EFFECT_KEYS[effect]:
+            ability = parameters[f"{prefix}save_ability"]
+            if ability not in SAVE_ABILITIES:
+                raise ClassFeatureError(
+                    f"{feature_id}.{prefix}save_ability must be one of "
+                    f"{sorted(SAVE_ABILITIES)}"
+                )
+        if "condition" in _CUNNING_STRIKE_EFFECT_KEYS[effect]:
+            condition = parameters[f"{prefix}condition"]
+            if condition not in conditions:
+                raise ClassFeatureError(
+                    f"{feature_id}.{prefix}condition names an unknown condition"
+                )
+        if "duration" in _CUNNING_STRIKE_EFFECT_KEYS[effect]:
+            if parameters[f"{prefix}duration"] not in _CUNNING_STRIKE_DURATIONS:
+                raise ClassFeatureError(
+                    f"{feature_id}.{prefix}duration must be one of "
+                    f"{sorted(_CUNNING_STRIKE_DURATIONS)}"
+                )
+        for flag in ("repeat_save", "ends_on_damage", "provokes_opportunity"):
+            key = f"{prefix}{flag}"
+            if key in _CUNNING_STRIKE_EFFECT_KEYS[effect] and not isinstance(
+                parameters[key], bool
+            ):
+                raise ClassFeatureError(f"{feature_id}.{key} must be a boolean")
+        if "requires_item" in _CUNNING_STRIKE_EFFECT_KEYS[effect]:
+            item = parameters[f"{prefix}requires_item"]
+            if not isinstance(item, str) or not item:
+                raise ClassFeatureError(
+                    f"{feature_id}.{prefix}requires_item must name an item"
+                )
+        if "max_target_size" in _CUNNING_STRIKE_EFFECT_KEYS[effect]:
+            if parameters[f"{prefix}max_target_size"] not in SIZE_CODES:
+                raise ClassFeatureError(
+                    f"{feature_id}.{prefix}max_target_size must be one of {list(SIZE_CODES)}"
+                )
+        if "speed_divisor" in _CUNNING_STRIKE_EFFECT_KEYS[effect]:
+            positive_int_parameter(feature_id, parameters, f"{prefix}speed_divisor")
+        if "turn_choice_limit" in _CUNNING_STRIKE_EFFECT_KEYS[effect]:
+            choices = parameters[f"{prefix}turn_choice_limit"]
+            if (
+                not isinstance(choices, list)
+                or not choices
+                or any(choice not in _CUNNING_STRIKE_TURN_CHOICES for choice in choices)
+            ):
+                raise ClassFeatureError(
+                    f"{feature_id}.{prefix}turn_choice_limit must be drawn from "
+                    f"{sorted(_CUNNING_STRIKE_TURN_CHOICES)}"
+                )
+
+
+def positive_int_parameter(
+    feature_id: str, parameters: Mapping[str, Any], key: str,
+) -> None:
+    value = parameters[key]
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ClassFeatureError(f"{feature_id}.{key} must be a positive integer")
+
 
 def validate_attack_state_parameters(definition: ClassFeatureDefinition) -> None:
     """Fail closed on the pre-roll declaration and persistent-state contract.

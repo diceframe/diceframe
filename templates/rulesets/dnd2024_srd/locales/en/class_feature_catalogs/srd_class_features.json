@@ -238,7 +238,16 @@
       "colossus_slayer": "Colossus Slayer",
       "horde_breaker": "Horde Breaker",
       "escape_the_horde": "Escape the Horde",
-      "multiattack_defense": "Multiattack Defense"
+      "multiattack_defense": "Multiattack Defense",
+      "cunning_strike": "Cunning Strike",
+      "improved_cunning_strike": "Improved Cunning Strike",
+      "devious_strikes": "Devious Strikes",
+      "cunning_strike.poison": "Poison",
+      "cunning_strike.trip": "Trip",
+      "cunning_strike.withdraw": "Withdraw",
+      "cunning_strike.daze": "Daze",
+      "cunning_strike.knock_out": "Knock Out",
+      "cunning_strike.obscure": "Obscure"
     }
   }
 }
