@@ -19,7 +19,8 @@ from ..character.attunement import (
 from .action_adapter import is_supported_damage_formula
 from ..features.attack_declarations import (
     BRUTAL_STRIKE, LIGHT_EXTRA_ATTACK, SELECTION_KEY, STUNNING_STRIKE,
-    declaration_value, selection_error, validate_uses, validate_weapon_selection,
+    declaration_value, selection_error, validate_cunning_strike, validate_uses,
+    validate_weapon_selection,
 )
 from ..features.kinds import KIND_HANDLERS, KindContext
 from ..features.models import ClassFeatureError
@@ -2361,6 +2362,18 @@ class CombatValidationMixin:
             raise CombatIntentError(f"target is out of range ({distance} > {long_range} feet)")
         self._validate_hit_riders(actor, intent, combat)
         error = validate_weapon_selection(self.features, character, intent, weapon, world_minutes(instance))
+        if error:
+            raise CombatIntentError(error)
+        error = validate_cunning_strike(
+            self.features, character, intent,
+            target_size=str(target.get("size") or ""),
+            carried_refs=owned_ref_counts(instance.get_character_sheet(actor["id"]))
+            if actor["kind"] == "player" else None,
+            speed=effective_speed(
+                self.catalog.conditions, actor.get("conditions") or {},
+                max(0, int(actor.get("speed", 0) or 0)),
+            ),
+        )
         if error:
             raise CombatIntentError(error)
         self._validate_attack_state_options(instance, combat, intent, actor, weapon, distance)

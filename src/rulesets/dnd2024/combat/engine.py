@@ -29,6 +29,11 @@ from src.rulesets.dnd2024.features import (
     CombatCapabilityView,
     Dnd2024ClassFeatureResolver,
 )
+from src.rulesets.dnd2024.features.attack_declarations import (
+    cunning_strike_capacity,
+    cunning_strike_options,
+    sneak_attack_dice_count,
+)
 from src.rulesets.dnd2024.features.resources import resource_state
 from src.rulesets.dnd2024.forms import bootstrap_known_forms
 from src.rulesets.dnd2024.spells.font_of_magic import declaring_class_level
@@ -722,6 +727,17 @@ class Dnd2024CombatEngine(
                 "count": cap,
             }
 
+        # 诡诈打击：面板要能显示"有哪些效果、每个几颗骰、这级能用几个、
+        # 池里还剩几颗"，否则玩家只能盲选。空元组 = 没有这个特性，所以
+        # 键的存在本身就说明可用。
+        cunning = cunning_strike_options(self.features, character)
+        if cunning:
+            options["cunning_strike"] = {
+                "effects": [effect.id for effect in cunning],
+                "count": cunning_strike_capacity(self.features, character),
+                "costs": {effect.id: effect.dice_cost for effect in cunning},
+                "dice": sneak_attack_dice_count(self.features, character),
+            }
         mark_kind = str(parameter("studied_attacks", "mark_kind") or "")
         if mark_kind:
             marks = (

@@ -105,6 +105,9 @@ class CombatReducerMixin:
             # condition.blocked 是 S0-MM1 的免疫回执——直到本片之前它只被
             # 产出、从未被消费，任何一次真的免疫都会让整批事件 apply 失败。
             "condition.blocked", "dnd2024.rider.skipped",
+            # 诡诈打击的选择在结算时可能落不了地（偷袭不成立 / 预算不足）：
+            # 事件说明为什么没扣骰、没发效果，状态不变。
+            "dnd2024.cunning_strike.skipped",
             # Multiattack 提前收尾的回执：剩余几击没打出去，原因写在事件里。
             "dnd2024.multiattack.truncated",
         }:
@@ -858,17 +861,13 @@ class CombatReducerMixin:
         if event_type == "dnd2024.movement.granted":
             amount = int(event["amount"])
             combat["economy"]["movement"] = int(combat["economy"].get("movement", 0)) + amount
-            if str(event.get("reason") or "") == "critical_hit":
-                # 暴击后移动单独记账：它既进池（玩家仍要提交 move），又带着
-                # 一份"本次移动免借机攻击"的额度。下一次移动消费掉它，
-                # 不会延续到后续任何移动。
-                combat["economy"]["crit_move"] = amount
-            elif str(event.get("reason") or "") == "brutal_forceful":
-                # Forceful Blow 的跟步额度同样只覆盖一次移动，而且多一个
-                # 方向约束：只能朝被推开的目标走。方向在掷骰侧判定，这里只
-                # 记录额度与目标。
-                combat["economy"]["brutal_move"] = {
+            if event.get("provokes_opportunity") is False:
+                # 一次性免借机额度：覆盖且只覆盖下一次移动。暴击后移动、
+                # Forceful Blow 的跟步、诡诈打击的撤步是同一个形状，差别只
+                # 在有没有方向约束，所以它们共用这一个键。
+                combat["economy"]["move_allowance"] = {
                     "amount": amount,
+                    "reason": str(event.get("reason") or ""),
                     "target_id": str(event.get("target_id") or ""),
                 }
             return
@@ -888,9 +887,12 @@ class CombatReducerMixin:
                 and not event.get("forced")
             ):
                 combat["economy"]["moved"] = True
-            if event.get("crit_move"):
+            if event.get("move_allowance"):
                 # 额度只覆盖它自己这一次移动；消费后即失效，其他移动要按
                 # 常规规则判定借机攻击。
+                combat["economy"].pop("move_allowance", None)
+            # 兼容读档：旧存档里可能还挂着已经停止写入的两个旧键。
+            if event.get("crit_move"):
                 combat["economy"]["crit_move"] = 0
             if event.get("brutal_move"):
                 combat["economy"].pop("brutal_move", None)
