@@ -2238,6 +2238,10 @@ class Dnd2024CombatEngine(
             # 归约需要知道"这一击用的是不是 Light 武器"，才能回答下一问：
             # "本回合还允许 Light 追加攻击吗"。
             "light_weapon": bool((weapon or {}).get("light")),
+            # 但"用 Light 武器攻击过"还不够：追加攻击的参照点是**触发它的那一次
+            # 攻击所用的武器**（"a different Light weapon"），所以账本必须记下
+            # 每一下的武器，而不是只记一个布尔。空串代表徒手或没有武器档案。
+            "weapon_ref": str((weapon or {}).get("weapon_ref") or ""),
             # Loading 的节流单位是"一次 action/Bonus/Reaction"，归约按窗口记账。
             "loading_weapon": bool((weapon or {}).get("loading")),
         }

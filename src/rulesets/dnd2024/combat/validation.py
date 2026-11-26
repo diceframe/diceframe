@@ -2164,15 +2164,20 @@ class CombatValidationMixin:
 
     def _validate_light_extra_attack(
         self, combat: dict[str, Any], actor: dict[str, Any], intent: dict[str, Any],
-        weapon: dict[str, Any], hands: dict[str, Any] | None = None,
+        weapon: dict[str, Any],
     ) -> None:
-        """The Light extra attack: a Bonus Action, a different Light weapon.
+        """The Light extra attack: a Bonus Action, a *different* Light weapon.
 
-        There is no "off-hand" in these rules.  What the extra attack needs is
-        (a) an Attack action with a Light weapon this turn, (b) a *different*
-        Light weapon in the other hand, and (c) an unspent Bonus Action.  Its
-        damage omits the ability modifier unless Two-Weapon Fighting says
-        otherwise -- that decision lives in resolution, next to the damage roll.
+        There is no "off-hand" in these rules, and there is no "other hand"
+        condition either: the SRD asks for "a different Light weapon", and the
+        reference point is the weapon that triggered the extra attack.  So the
+        gate is (a) this turn's Attack action attacked with a Light weapon and
+        (b) at least one of those weapons is Light and is not the weapon used
+        for the extra attack itself.  A same-hand or other-hand reading would
+        let a shortsword be its own reference, which the rules forbid.
+
+        Equip identity comes from ``_declared_attack``; the damage modifier
+        decision (Two-Weapon Fighting) lives in resolution, next to the roll.
         """
 
         declared = declaration_value(intent, LIGHT_EXTRA_ATTACK)
@@ -2184,21 +2189,6 @@ class CombatValidationMixin:
             raise CombatIntentError("light_extra_attack is not available to this actor")
         if not weapon.get("light"):
             raise CombatIntentError("the extra attack must use a Light weapon")
-        grip = hands if isinstance(hands, dict) else (actor.get("hands") or {})
-        ref = str(weapon.get("weapon_ref") or "")
-        other = next(
-            (
-                str(grip.get(side) or "")
-                for side in ("left", "right")
-                if str(grip.get(side) or "") not in {"", ref}
-            ),
-            "",
-        )
-        other_weapon = self.catalog.weapons.get(other.removeprefix("item:")) if other else None
-        if not isinstance(other_weapon, dict) or not other_weapon.get("light"):
-            raise CombatIntentError(
-                "the other hand must hold a different Light weapon"
-            )
         record = (combat.get("light_attacks") or {}).get(str(actor["actor_id"]))
         this_round = int(combat.get("round", 0) or 0)
         this_turn = int(combat.get("turn_index", 0) or 0)
@@ -2208,6 +2198,22 @@ class CombatValidationMixin:
         ):
             raise CombatIntentError(
                 "the extra attack requires an Attack action with a Light weapon this turn"
+            )
+        ref = str(weapon.get("weapon_ref") or "")
+        # 参照点是"触发这次追加的那次攻击所用的武器"。同一把武器不能给自己做
+        # 参照（无论本回合用它打过几次），非 Light 武器也不是合法参照 —— 两条
+        # 都由这一个过滤表达，不做集合比较、不取末项。
+        enabling = [
+            str(used)
+            for used in record.get("weapon_refs") or []
+            if str(used) != ref
+            and bool(
+                (self.catalog.weapons.get(str(used).removeprefix("item:")) or {}).get("light")
+            )
+        ]
+        if not enabling:
+            raise CombatIntentError(
+                "the extra attack needs a different Light weapon than the one that enabled it"
             )
         economy = combat.get("economy") or {}
         if str(economy.get("actor_id") or "") != str(actor["actor_id"]):
@@ -2351,7 +2357,7 @@ class CombatValidationMixin:
         self._validate_grip(actor, weapon, hands=swap_hands)
         self._validate_ammunition(instance, actor, weapon)
         self._validate_two_handed(actor, intent, weapon, hands=swap_hands)
-        self._validate_light_extra_attack(combat, actor, intent, weapon, hands=swap_hands)
+        self._validate_light_extra_attack(combat, actor, intent, weapon)
         self._validate_loading(combat, actor, intent, weapon)
         self._validate_lucky_spend(instance, intent, actor)
         self._validate_sacred_weapon(intent, actor, weapon, combat)
