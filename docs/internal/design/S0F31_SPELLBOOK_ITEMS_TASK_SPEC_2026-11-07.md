@@ -89,6 +89,12 @@ Evoker，SRD p82：
 2. 短休同调交换继续原子化；已有四个时不得新增第五件，解除后再绑定合法。死亡解绑和存档行为不回退。
 3. 每次实际使用“会消耗充能的魔法物品属性”时，在扣费前掷一次 1d6；6 则该属性正常生效且本次充能支出为 0，1–5 正常扣除声明费用。
 4. 每次属性使用只掷一次，不按充能点数多掷；无充能、不耗充能、非法激活不掷。6 导致未耗充能时不得触发“最后充能耗尽后的销毁检查”。事件保存 d6、是否免收、原费用、实际费用和 item_ref。
+
+   事件形状按执行侧定为**一次掷骰一条**：`dnd2024.item.charge_roll`
+   （`declared`/`roll`/`threshold`/`waived`），6 与 1–5 都发，`waived` 由服务端算。
+   不能只发免收那一条——否则“掷了没免”与“根本没掷”在事件流里无法区分，验收第 2、
+   3 条也失去可观察对象。免收时不发 `amount: 0` 的 `charge_spent`（`spend_charges`
+   拒绝 0 价），实际支出由 `charge_roll.waived` 推得。
 5. 该能力只改变充能支付，不绕过动作、目标、同调、持有数量或其他物品前提。
 
 ### 4.2 Use Magic Device：卷轴
@@ -105,20 +111,52 @@ Evoker，SRD p82：
 
 1. Wizard 1 级可把 spellbook 中带 Ritual tag 的法术作为仪式施放，即使未 prepared；必须实际读取法术书，仪式时间与组件不豁免，不消耗槽位。
 2. 非 Wizard、非 Ritual、不在 spellbook 或无法读取书时不可走此入口；仪式不能伪装成战斗中的一个普通 Action 来跳过时间。
-3. 探索 available/validate/resolve 必须承认合法未准备仪式法术；普通准备施法列表不被无意扩大为所有 spellbook 法术。
+3. 探索 available/validate/resolve 必须承认合法未准备仪式法术；普通准备施法列表不被无意扩大为所有 spellbook 法术。投影口径：未准备的仪式法术单列一条（只有仪式入口）；已准备的仪式法术只列一条并带 `ritual: true`（不重复两行，但也不丢掉“可省槽”这个事实）；法术位用尽时仪式法术不从列表消失。
 4. Wizard 5 级每次完成 Short Rest 可选择将恰好一个已准备的 1+ 环 Wizard 法术换成书中另一个 1+ 环法术；可不换，但不可一次换多个、换成戏法、非 Wizard 或书外法术。
+
+   入口与长休**共用同一个请求字段** `prepared_spells`（已在 `rest_option_names`
+   白名单内），不新增参数：白名单外的字段会被通用休息服务静默丢弃。预算来自特性
+   声明 `short_rest_replace`（与 `PreparationPolicy` 的 `long_rest_replace` 同一轴），
+   校验走同一套 `validate(context="short_rest")`，因此“环阶不超过最高可用槽位”
+   “准备总数不变”这类统一约束不在本特性里重写一遍。无该预算的角色请求短休换准备
+   直接拒绝，错误串须点明是 short rest。
 5. 更换在 rest 完成后原子落账，准备总数不变；非法选择不污染已完成休息。Long Rest 原规则、升级历史和中英文投影一致。
 
 ### 4.4 Evocation Savant
 
-1. Evoker 3 级时选择恰好两个 Wizard、Evocation school、等级 1–2 的法术，免费加入 spellbook；0 环和 3+ 环不合格。
-2. 此后每当 Wizard 获得新一环阶法术位时，可额外选择一个该环阶或更低、当前拥有槽位的 Wizard Evocation 法术免费加入；没有新开环阶的等级不额外授予。
-3. 这些免费加入独立于每级正常两个法术和最低法术书数量，不占抄录时间/GP，不自动 prepared；重复拥有、跨学派/列表和超等级均拒绝。
-4. preview 显示正常与免费授予的来源和数量，apply/history 重建得到同一 spellbook；普通抄录仍为每级 2 小时+50 GP，本特性只免本段明确列出的加入成本。
+本项必须复用既有的“特性授予玩家 N 个法术选择”主干（授权槽位族 `spell_choice_*`，
+代表实现：咏诗的 Magical Discoveries），**不得新起一套免费额度账本**——否则学派、
+环阶上限、替换预算这些语义要在两处各维护一遍，第二处一定先漏。
+
+1. 声明形状（全部落在 `srd_class_features.json`，代码不认特性 id）：
+
+   ```json
+   "spell_choice_count": 2,
+   "spell_choice_per_new_slot_level": 1,
+   "spell_choice_lists": ["class:wizard"],
+   "spell_choice_school": "evocation",
+   "spell_choice_min_level": 1,
+   "spell_choice_target": "spellbook",
+   "spell_choice_replacement": 0
+   ```
+
+   授予项进法术书（`target="spellbook"`）而非准备位；学派、列表、最低环都由槽位
+   自己报给客户端，客户端不必知道哪条特性是塑能。
+2. 槽位条数是**累计欠账**：3 级 2 个，此后每新开一环法术位 +1，靠相邻等级槽表差集
+   计算，不写成算术常数。未填不作废——3 级没选，4 级补上仍合法；等级不会因为槽位
+   空着而失败。
+3. 免费项独立于每级正常两个与最低法术书数量：正常增量仍恰好 `spellbook_gain_per_level`，
+   多出来那部分必须**正好是本次提交的授予项**，不能拿四个普通法术凑数。授予项必须
+   同时出现在 `spellbook_refs` 里——否则“授予”只是记录上的字符串，玩家永远准备不到
+   那一页。
+4. 0 环、3+ 环（超出当前最高槽位）、跨学派、跨列表、重复拥有均拒绝。
+5. 不自动 prepared（不进 always-prepared 投影）；不占抄录时间/GP——本层没有时间与
+   GP 机制，特性只免“这一段的加入成本”。preview 显示来源与数量，apply/history 重建
+   得到同一 spellbook。
 
 ## 5. 改动白名单
 
-仅允许 canonical/en/zh-CN class feature catalogs；`features/models.py`、`features/resolver.py`；`character/attunement.py`、`items/charges.py`（同调容量与充能免收的落点）；`spells/selection.py` 与 F1/F4/F5 已建立的同等主干；`progression/advancement.py`；`resting/engine.py`；`combat/view.py`、`validation.py`、`resolution.py`、`reducer.py`、`engine.py`；`exploration/engine.py`；新建 `tests/rulesets/test_dnd2024_spellbook_items.py`；本任务书仅追加执行报告。若真实物品系统由前置提供却位于其他路径，Use Magic Device 仍停止自动化并报告，不在本切片扩大白名单。
+仅允许 canonical/en/zh-CN class feature catalogs；`features/models.py`、`features/resolver.py`；`character/attunement.py`、`items/charges.py`（同调容量与充能免收的落点）；`spells/selection.py`、`spells/preparation.py` 与 F1/F4/F5 已建立的同等主干；`progression/advancement.py`；`resting/engine.py`；`runtime.py`（`rest_option_names` 与 `complete_rest` 的参数契约在此，短休换准备必须在这里放行）；`combat/view.py`、`validation.py`、`resolution.py`、`reducer.py`、`engine.py`；`exploration/engine.py`；新建 `tests/rulesets/test_dnd2024_spellbook_items.py`，以及为口径变更而必须同步的 `tests/rulesets/test_dnd2024_long_rest_preparation.py`、`tests/rulesets/test_dnd2024_item_destroy.py`；本任务书仅追加执行报告。若真实物品系统由前置提供却位于其他路径，Use Magic Device 仍停止自动化并报告，不在本切片扩大白名单。
 
 不为通过测试新建虚假 Spell Scroll、物品 fixture 目录或另一套物品系统。不得改索引、旧 SP、其他文档、前端、manifest 或通用引擎。
 
