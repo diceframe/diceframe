@@ -55,6 +55,7 @@
 | GAP-40 | 存档型动作没有射程与目标上限 | 契约只有 `ability` / `dc` / 两个分支；Satyr 的 90 尺、Constrictor 的 5 尺 Medium 都无法表达 | 任何距离都能吃吐息，目标数量也不受限 | 区域与射程原语（未立项） | 未开工 |
 | GAP-42 | 玩家申报骰面（实体骰）没有通道 | 战斗里每个 d20 都来自服务端 rng；`src/engine/dice.py::parse_player_roll` 只服务老通用引擎的聊天掷骰，不绑定任何 `check.resolved` | 桌上掷实体骰的玩家无法把自己的点数交给引擎，只能由服务端重掷 | 需先定信任模型（谁能申报、如何审计、GM 可否覆盖），未立项 | 未开工 |
 | GAP-41 | rider 的生物类型前提无法表达 | Ghoul 的麻痹写明「非亡灵非精灵」；`parse_riders` 见到这类前提整条不导入 | 这类 rider 在目录里缺席（宁可缺席也不对所有目标生效） | S0-MM4 | 未开工 |
+| GAP-46 | 重新规范化角色卡会把职业资源的当日消耗重置为满 | `runtime.normalize_character_submission()` 重建后调 `_sync_class_resources()` → `_sync_specs`，对"不存在的池"直接 `current = maximum`；`ruleset_characters.py:185/457` 会走这条路径 | 任何"每长休一次"的资源（自然恢复的免费面、诗人的激励、幸运点…）都能靠重新导入角色卡刷新，绕开日计数 | 与"资源首次创建即满"的迁移策略一起定，未立项 | 未开工 |
 
 
 ## 按片索引
@@ -70,6 +71,7 @@
 - **S0-MM3a**：GAP-26（本片内解决）
 - **S0-MM3e**：GAP-38、GAP-39（本片内解决）
 - **S0-MM3b/c/d 的遗留 + 后续 MM 片**：GAP-27 – GAP-37、GAP-40 – GAP-42
+- **未立项（资源日计数）**：GAP-46
 
 ## 附注 A：为什么 Utilize 不需要对象模型
 

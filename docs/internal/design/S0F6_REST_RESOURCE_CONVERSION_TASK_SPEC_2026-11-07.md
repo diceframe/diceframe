@@ -10,7 +10,7 @@
 | 代码基线 | 祖先基线 `integration/dnd2024-srd@35653f81` |
 | 硬前置 | S0-D2、S0-F5 已合入；S0-F4 的 Circle Spells 来源随 F5 前置可用 |
 | 执行模型 | `dsv4.1f` |
-| 状态 | **a/b/c 已交付**（2026-11-10，见 §10–§12）；**d/e 待做**（2026-11-25 复核，见 §13–§15） |
+| 状态 | **a/b/c 已交付**（2026-11-10，见 §10–§12）；**F6d 已交付**（2026-11-26，见 §16）；**F6e 待做**（§15） |
 
 ## 1. 范围纪律
 
@@ -371,7 +371,9 @@ git diff --check
 
 2. `srd_class_features.json`：`circle_of_the_land_spells` 的 `parameters` 新增 `free_cast_resource_id: "natural_recovery_cast"`；同时把 `natural_recovery` 的 `summary` 补回被省掉的免费施法那句（summary 是玩家可读事实，漏一句就是错一句）。
 
-3. `features/resolver.py::_grant_row()`：声明了 `free_cast_resource_id` 的特性，把它写进自己产出的每一条 grant 行（`resource_id` 字段）。**只有声明者产出**，别的特性的 always-prepared 行不带这个键。
+3. `features/resolver.py::actor_projection()`：声明了 `free_cast_resource_id` 的特性，把它**合并进自己产出的每一条授予行**（同一个 `row` 加一个键，不另起一行），且**只在池真的可用时**才标（等级够、子职对、存档里已经有这个池）。
+
+   不写成"另加一条只有 `{spell_ref, resource_id}` 的派生行"：那会让同一法术在 `spell_grants` 里出现两次，而新增的那行丢掉了 `owner` / `feature_id` / `granted_level` / `terrain` 全部 provenance，与 `_spell_grant_rows()` 自己声明的"一行一个来源"相撞。
 
 校验与扣费路径**一行不动**：`free_cast_resource` 先按 `spell_ref` 过滤授予、再找 `resource_id` 且 `current > 0` 的资源；`spell_cost_events(slot_level=0)` 发 `dnd2024.class_resource.spent`；`apply_free_cast_cost` 扣 `resources.class.natural_recovery_cast.current`。
 
@@ -380,7 +382,7 @@ git diff --check
 1. 只对**当前地形、当前等级**授予的 Circle Spell 生效——地形切换后旧列表立即失效（grant 行按当前地形算，不需要额外的失效逻辑）。
 2. 每长休一次；短休不恢复（`short: "none"`）。
 3. 与短休槽恢复**互不影响**：花掉免费面仍可提交 `recovery`，反之亦然。
-4. 环阶不设上限：land 表到 9 环（`arid:9:spell:wall_of_stone`），原文是「1 环以上」，所以 9 环也能免费；这与 Arcane/Natural 槽恢复的「6 环以上禁止」是**两回事**，不要串。
+4. 环阶不设上限：原文是「1 环以上」，实现里池分支不看环阶（只有 `>= 1` 才有意义，0 环被 `free_cast_resource` 直接拒绝）。注意 Land 表的写法是 `<职业等级>:spell:<id>`——`arid:9:spell:wall_of_stone` 是「德鲁伊 9 级时授予 `wall_of_stone`」，而 `wall_of_stone` 本身是 **5 环**；Land 表里没有 6 环以上的法术，所以「高环也能免费」目前只有代码保证、没有内容可验证。这与 Arcane/Natural 槽恢复的「6 环以上禁止」是**两回事**，不要串。
 5. 拒绝且不留痕：无余额、非法术、非当前地形、非本子职。
 
 ### 14.4 编号测试（接 §6 的 6/7）
@@ -406,3 +408,41 @@ git diff --check
 | Font 换点/造槽 | 战斗内 `available_intents` 的两条 capability | 既有 intent（`font_slot_to_points` 无动作、`font_create_slot` 附赠动作） |
 
 约束：三处都只渲染服务端给的数量与费用（`created_slot_costs` 五行表来自内容，不在前端写死）；非法组合不要让用户点得动，但最终拒绝仍在服务端。
+
+## 16. F6d 执行记录（2026-11-26）
+
+**分支**：`feat/dnd2024-s0f6d-free-cast-face`，基座 `f2d86b1a`（远端 fetch 被连接重置，未能确认上游是否已前进）。
+
+### 16.1 落地
+
+| 文件 | 改动 |
+|---|---|
+| `content/rest_catalogs/srd_recovery.json` | druid 新增 `natural_recovery_cast`（6 级、`maximum_fixed: 1`、`short: none`、`long: all`、`requires_subclass`） |
+| `content/class_feature_catalogs/srd_class_features.json` | `circle_of_the_land_spells.parameters.free_cast_resource_id`；`natural_recovery` 的 summary 补回免费施法那句 |
+| `content/locales/{en,zh-CN}/class_feature_catalogs/srd_class_features.json` | `natural_recovery_cast` 的显示名 |
+| `features/resolver.py` | `actor_projection()` 把 `resource_id` 合并进原授予行（仅当池可用）；`class_resources` 过滤 0/0 行；`class_resource_definition()` 补子职门禁 |
+| `features/resources.py` | `ClassResourceDeclaration` 新增 `requires_subclass`（此前解析时被丢弃，导致投影无法执行休息表已有的门禁） |
+| `spells/casting.py` | `free_cast_resource()`：0 环直接拒绝；多池改为取第一个有余额的池 |
+| `combat/reaction_spells.py` | 调用 `free_cast_resource` 时补传法术环阶 |
+
+### 16.2 与 §14 的偏差
+
+1. **`resource_id` 合并在原行上，不是新增一条派生行**（§14.2 第 3 条已按此改）：新增行会让同一法术在 `spell_grants` 里出现两次，且丢掉 provenance。
+2. **补了子职门禁**：`sync_resources` 早就按 `requires_subclass` 删池，但 `ClassResourceDeclaration` 解析时把这个字段丢了，投影于是一直给月德鲁伊报一个 store 里不存在的自然恢复（1/1）。这是本片之外就存在的投影/存储不一致，被 F6d 的池暴露出来，一并修。
+3. **补了两处 helper 边界**：`free_cast_resource` 不认 0 环（戏法不花槽）、多池取第一个有余额的（原来只取第一条带池的授予，第一池空了第二池就永远用不上）。
+4. **内容引用没有加载期校验**：`free_cast_resource_id` 写错仍是静默失效（测试里有内容一致性守卫，见 §16.4 第 11 条）。
+
+### 16.3 已知缺口
+
+- **GAP-46**：`normalize_character_submission()` 会把职业资源重建为满，等于给"每长休一次"开后门（所有职业资源共有，不是本片引入）。
+- **前端未接线**（F6e，§15）：投影已带 `resource_id` 与叫法，但 UI 还没画"这次要不要用免费面"的入口。
+- **高环未验证**：Land 表最高 5 环，"6 环以上也能免费"只有代码保证（见 §14.3 第 4 条）。
+
+### 16.4 验收
+
+| 项 | 结果 |
+|---|---|
+| `test_dnd2024_rest_resource_conversion.py` | **42 passed**（32 → +10） |
+| 变异验证 | 去掉内容声明 → 6b / 等级门禁 / 地形切换 三条立刻变红；去掉子职门禁 → 6a 变红 |
+| `tests/rulesets` 全量 | 见 §16.5（本次同时改了 `casting.py` 与 `class_resource_definition`，必须全量） |
+| 新增用例 | 6a（moon 的 store 与投影双断言）、等级门禁（5 vs 6）、6b（单行 + 事件）、6b（带槽施法不花免费面）、戏法不免费、6c/6d（正向前置 + 花掉后不可用 + 非授予法术）、6e（短休不恢复 / 长休恢复，均带正反向断言）、6f 正序、6f 反序、7（地形切换） |
