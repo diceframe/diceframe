@@ -42,6 +42,7 @@ from src.rulesets.dnd2024.items.activation import (
 from src.rulesets.dnd2024.items.charges import (
     ChargesError,
     charges_of,
+    charge_waiver_roll,
     destroy_check_events,
     spend_charges,
     validate_charges_declaration,
@@ -76,6 +77,13 @@ _ITEM_EVENT_FIELDS = {
     "dnd2024.item.consumed": frozenset({"type", "actor_id", "item_ref", "amount"}),
     "dnd2024.item.activated": frozenset({"type", "actor_id", "item_ref", "target_id", "cost"}),
     "dnd2024.item.charge_spent": frozenset({"type", "actor_id", "item_ref", "amount"}),
+    "dnd2024.item.charge_roll": frozenset({
+        "type", "actor_id", "item_ref", "declared", "roll", "threshold", "waived",
+    }),
+    "dnd2024.item.destroy_check": frozenset({
+        "type", "actor_id", "item_ref", "roll", "threshold", "destroyed",
+    }),
+    "dnd2024.item.destroyed": frozenset({"type", "actor_id", "item_ref"}),
 }
 
 # 探索态没有敌方 actor；伤害/豁免/法术攻击模式的确定性结算需要敌对目标，
@@ -96,6 +104,20 @@ def _canonical_actor_id(value: Any) -> str:
 
 class ExplorationIntentError(ValueError):
     """Raised when an exploration intent is structurally or rules invalid."""
+
+
+def _ritual_flag(intent: Any) -> bool:
+    """``ritual`` must be a real boolean, not a truthy string.
+
+    The flag decides whether a cast spends a slot, so ``{"ritual": "false"}``
+    must not read as ``True`` -- a mistyped payload would otherwise cast for
+    free. Unknown values fail closed instead of being coerced.
+    """
+
+    value = intent.get("ritual", False) if isinstance(intent, dict) else False
+    if not isinstance(value, bool):
+        raise ExplorationIntentError("ritual must be a boolean")
+    return value
 
 
 @dataclass(slots=True)
@@ -174,6 +196,46 @@ class Dnd2024ExplorationEngine:
     def _spell_refs(self, canonical: dict[str, Any]) -> list[str]:
         return spellcasting_projection(canonical, self.features)["spell_refs"]
 
+    def _ritual_spell_refs(self, canonical: dict[str, Any]) -> list[str]:
+        """Spells the caster may cast ritually *without* preparing them.
+
+        Ritual Adept reads the book, not the prepared list, so this is the one
+        place that looks at ``spellbook_refs`` for casting purposes.
+        """
+
+        if not self.features.has_feature(canonical, "ritual_adept"):
+            return []
+        block = (canonical.get("spellcasting") or {}).get("class") or {}
+        book = [str(ref) for ref in block.get("spellbook_refs") or []]
+        return [
+            ref for ref in dict.fromkeys(book)
+            if (self.spells.get(ref) or {}).get("ritual")
+        ]
+
+    def _validate_ritual(
+        self, canonical: dict[str, Any], spell_ref: str, spell: dict[str, Any],
+        intent: dict[str, Any],
+    ) -> None:
+        """Ritual Adept: book + ritual tag, no slot, and no shortcut around time.
+
+        时间与组件在本层没有可推进的时钟，所以这里只保证"不花槽、必须读书
+        里的那一条"；施法时间留给叙事层，事件里写明是仪式而非普通施法。
+        """
+
+        if not self.features.has_feature(canonical, "ritual_adept"):
+            raise ExplorationIntentError("ritual casting requires Ritual Adept")
+        if not spell.get("ritual"):
+            raise ExplorationIntentError("this spell has no Ritual tag")
+        if spell_ref not in self._ritual_spell_refs(canonical):
+            raise ExplorationIntentError("ritual casting reads from the spellbook")
+        # 先定类型再比较：`int("abc")` 抛的是裸 ValueError，会绕过
+        # ExplorationIntentError 的调用方，客户端拿到的不是一条规则错误。
+        requested = intent.get("slot_level", 0)
+        if isinstance(requested, bool) or not isinstance(requested, int):
+            raise ExplorationIntentError("slot_level must be an integer")
+        if requested != 0:
+            raise ExplorationIntentError("a ritual cast spends no spell slot")
+
     def _casting_eligible(self, canonical: dict[str, Any]) -> bool:
         """探索施法的公共资格：HP>0、非 dead、非失能。
 
@@ -222,10 +284,14 @@ class Dnd2024ExplorationEngine:
         class_magic = class_magic if isinstance(class_magic, dict) else {}
         spells = []
         casting = spellcasting_projection(canonical, self.features)
+        # 已准备的仪式法术也是仪式法术：能不能省槽不取决于它有没有被准备，
+        # 所以这一行同时保留"普通施法可用"与"可作仪式"两个事实。
+        ritual_refs = set(self._ritual_spell_refs(canonical))
         for spell_ref in casting["spell_refs"]:
             spell = self.spells.get(spell_ref)
             if spell is None:
                 continue
+            ritual = spell_ref in ritual_refs
             available_slots = (
                 [
                     int(level) for level, count in sorted(
@@ -244,11 +310,26 @@ class Dnd2024ExplorationEngine:
                 available_slots = sorted(set(available_slots))
                 if free_cast_resource(casting, spell_ref, int(spell["level"])) is not None:
                     available_slots.insert(0, 0)
-            if int(spell["level"]) > 0 and not available_slots:
+            if int(spell["level"]) > 0 and not available_slots and not ritual:
+                # 没槽又不是仪式：这一条现在不可用，投影里不再出现。
+                continue
+            row: dict[str, Any] = {
+                "spell_ref": spell_ref, "name": spell["name"], "level": spell["level"],
+                "casting_time": spell["casting_time"], "available_slot_levels": available_slots,
+            }
+            if ritual:
+                row["ritual"] = True
+            spells.append(row)
+        # 未准备的书内仪式法术单列一条：它没有普通施法入口，只有仪式。
+        prepared = set(casting["spell_refs"])
+        for spell_ref in self._ritual_spell_refs(canonical):
+            spell = self.spells.get(spell_ref)
+            if spell is None or spell_ref in prepared:
                 continue
             spells.append({
                 "spell_ref": spell_ref, "name": spell["name"], "level": spell["level"],
-                "casting_time": spell["casting_time"], "available_slot_levels": available_slots,
+                "casting_time": spell["casting_time"], "available_slot_levels": [0],
+                "ritual": True,
             })
         if spells:
             actions.append({
@@ -361,15 +442,22 @@ class Dnd2024ExplorationEngine:
         spell = self.spells.get(spell_ref)
         if spell is None:
             raise ExplorationIntentError("spell does not exist in the ruleset")
-        if spell_ref not in self._spell_refs(canonical):
+        ritual = _ritual_flag(intent)
+        if ritual:
+            self._validate_ritual(canonical, spell_ref, spell, intent)
+        elif spell_ref not in self._spell_refs(canonical):
             raise ExplorationIntentError("spell is not prepared or known by the actor")
-        slot_level = intent.get("slot_level", spell["level"])
+        slot_level = intent.get("slot_level", 0 if ritual else spell["level"])
         if isinstance(slot_level, bool) or not isinstance(slot_level, int):
             raise ExplorationIntentError("slot_level must be an integer")
         class_magic = canonical.get("spellcasting", {}).get("class")
         class_magic = class_magic if isinstance(class_magic, dict) else {}
         slots = class_magic.get("slots_current") or {}
-        if spell["level"] == 0:
+        if ritual:
+            # 仪式不花槽，也就没有"槽够不够"这一问；`_validate_ritual` 已经
+            # 确认了它与免费施法资源无关。
+            pass
+        elif spell["level"] == 0:
             if slot_level != 0:
                 raise ExplorationIntentError("a cantrip does not use a spell slot")
         elif slot_level == 0:
@@ -598,7 +686,9 @@ class Dnd2024ExplorationEngine:
         spell = self.spells.get(spell_ref)
         if spell is None:  # pragma: no cover - validation guards this
             raise ExplorationIntentError("spell does not exist in the ruleset")
-        slot_level = int(intent.get("slot_level", spell["level"]) or 0)
+        ritual = _ritual_flag(intent)
+        # 仪式不花槽：这里把 0 写死，而不是"信任客户端传了 0"。
+        slot_level = 0 if ritual else int(intent.get("slot_level", spell["level"]) or 0)
         effect = self.catalog.spell_effects.get(spell_ref.removeprefix("spell:"))
         target_values = intent.get("target_ids")
         target_ids = [str(item) for item in (target_values or []) if str(item)]
@@ -610,7 +700,8 @@ class Dnd2024ExplorationEngine:
         expected = int(intent["expected_version"])
         intent_id = str(intent.get("intent_id") or "")
         caster = spell_caster(self._actor_view(instance, actor_id), spell_ref)
-        events.extend(spell_cost_events(caster, spell, slot_level))
+        if not ritual:
+            events.extend(spell_cost_events(caster, spell, slot_level))
         if effect is not None and effect.get("concentration"):
             actor_canonical = self._canonical_of(instance, actor_id)
             if concentration_holder(actor_canonical).get("concentration"):
@@ -622,11 +713,15 @@ class Dnd2024ExplorationEngine:
                 "type": "dnd2024.concentration.started", "actor_id": actor_id,
                 "spell_ref": spell_ref, "target_ids": target_ids,
             })
-        events.append({
+        cast_event: dict[str, Any] = {
             "type": "dnd2024.spell.cast", "actor_id": actor_id, "spell_ref": spell_ref,
             "slot_level": slot_level, "target_ids": target_ids,
             "context": "exploration",
-        })
+        }
+        if ritual:
+            # 事件必须说清"这一次是仪式"：审计要能区分"没花槽"的两种原因。
+            cast_event["ritual"] = True
+        events.append(cast_event)
         revive = revive_definition(spell_ref)
         if revive is not None:
             for target_id in target_ids:
@@ -709,11 +804,30 @@ class Dnd2024ExplorationEngine:
         maximum = validate_charges_declaration(item)
         events: list[dict[str, Any]] = []
         charge_cost = declaration.get("charge_cost")
+        # 与战斗内同一判定：免收时本次实际扣 0，事件与销毁检查都读这个值。
+        spent: int | None = None
         if maximum is not None and charge_cost is not None:
-            events.append({
-                "type": "dnd2024.item.charge_spent", "actor_id": actor_id,
-                "item_ref": item_ref, "amount": int(charge_cost),
-            })
+            declared = int(charge_cost)
+            spent = declared
+            waiver = charge_waiver_roll(
+                self._canonical_of(instance, actor_id), self.features, rng,
+            )
+            if waiver is not None:
+                roll, threshold = waiver
+                waived = roll >= threshold
+                if waived:
+                    spent = 0
+                # 与战斗内同一骰迹：掷了就记，1–5 也要能看见。
+                events.append({
+                    "type": "dnd2024.item.charge_roll", "actor_id": actor_id,
+                    "item_ref": item_ref, "declared": declared,
+                    "roll": roll, "threshold": threshold, "waived": waived,
+                })
+            if spent:
+                events.append({
+                    "type": "dnd2024.item.charge_spent", "actor_id": actor_id,
+                    "item_ref": item_ref, "amount": spent,
+                })
         if validate_consumable_declaration(item):
             events.append({
                 "type": "dnd2024.item.consumed", "actor_id": actor_id,
@@ -743,10 +857,10 @@ class Dnd2024ExplorationEngine:
             "cost": declaration["cost"],
         })
         # 与战斗内同一语义、同一事件形状：效果结算完毕后才判定销毁。
-        if charge_cost is not None:
+        if spent is not None:
             current = charges_of(self._canonical_of(instance, actor_id), item_ref)
             if current is not None:
-                remaining = current - int(charge_cost)
+                remaining = current - spent
                 events.extend(destroy_check_events(
                     item,
                     actor_id=actor_id,
@@ -978,6 +1092,35 @@ class Dnd2024ExplorationEngine:
             unknown = sorted(set(event) - _ITEM_EVENT_FIELDS[event_type])
             if unknown:
                 raise EventBatchError(f"unknown {event_type} field: {unknown[0]}")
+            if event_type == "dnd2024.item.destroyed":
+                # 与战斗侧同一落账：按 ref 移除物品，并清掉充能状态与同调绑定。
+                # 不落账的话，探索里耗尽最后一格的物品会"事件说毁了、物品还在"。
+                kind, raw_id = str(event["actor_id"]).split(":", 1)
+                if kind != "player":
+                    raise EventBatchError("exploration item destruction is player-only")
+                canonical = snapshot["characters"][raw_id]
+                try:
+                    destroyed_ref = canonical_item_ref(event["item_ref"])
+                except AttunementError as exc:
+                    raise EventBatchError(str(exc)) from None
+                equipment = canonical.get("equipment")
+                if isinstance(equipment, dict):
+                    refs = equipment.get("item_refs")
+                    if isinstance(refs, list):
+                        equipment["item_refs"] = [
+                            ref for ref in refs if ref != destroyed_ref
+                        ]
+                    state = equipment.get("item_state")
+                    if isinstance(state, dict):
+                        state.pop(destroyed_ref, None)
+                attunement = canonical.get("attunement")
+                if isinstance(attunement, dict):
+                    bound = attunement.get("refs")
+                    if isinstance(bound, list):
+                        attunement["refs"] = [
+                            ref for ref in bound if ref != destroyed_ref
+                        ]
+                return
             if event_type != "dnd2024.item.charge_spent":
                 # 数量扣减由 apply_batch 通过 live backpack 权威接口落账。
                 return

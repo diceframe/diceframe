@@ -1617,6 +1617,17 @@
           }
         },
         {
+          "id": "use_magic_device",
+          "owner": "subclass:thief",
+          "minimum_level": 13,
+          "source_ref": "srd-5.2.1:p64:use-magic-device",
+          "summary": "You can attune to up to four magic items at once. Whenever you use a magic item property that expends charges, roll 1d6; on a 6 the property works without expending charges. You can use any Spell Scroll, using Intelligence as your spellcasting ability.",
+          "parameters": {
+            "attunement_slot_bonus": 1,
+            "charge_waive_on_d6": 6
+          }
+        },
+        {
           "id": "thiefs_reflexes",
           "owner": "subclass:thief",
           "minimum_level": 17,
@@ -2923,6 +2934,12 @@
           "summary": "Once per Long Rest, when you finish a Short Rest, recover expended spell slots with a combined level no higher than half your Wizard level (round up); none of them may be level 6 or higher."
         },
         {
+          "id": "ritual_adept",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p78:ritual-adept",
+          "summary": "You can cast any spell as a Ritual if that spell has the Ritual tag and the spell is in your spellbook. You needn't have the spell prepared, but you must read from the book to cast a spell in this way."
+        },
+        {
           "id": "scholar",
           "minimum_level": 2,
           "source_ref": "srd-5.2.1:p78:scholar",
@@ -2943,6 +2960,31 @@
               "skill:nature",
               "skill:religion"
             ]
+          }
+        },
+        {
+          "id": "evocation_savant",
+          "owner": "subclass:evoker",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p82:evocation-savant",
+          "summary": "Choose two Wizard spells from the Evocation school, each of which must be no higher than level 2, and add them to your spellbook for free. In addition, whenever you gain access to a new level of spell slots in this class, you can add one Wizard spell from the Evocation school to your spellbook for free. The chosen spell must be of a level for which you have spell slots.",
+          "parameters": {
+            "spell_choice_count": 2,
+            "spell_choice_per_new_slot_level": 1,
+            "spell_choice_lists": ["class:wizard"],
+            "spell_choice_school": "evocation",
+            "spell_choice_min_level": 1,
+            "spell_choice_target": "spellbook",
+            "spell_choice_replacement": 0
+          }
+        },
+        {
+          "id": "memorize_spell",
+          "minimum_level": 5,
+          "source_ref": "srd-5.2.1:p79:memorize-spell",
+          "summary": "Whenever you finish a Short Rest, you can study your spellbook and replace one of the level 1+ Wizard spells you have prepared with another level 1+ spell from the book.",
+          "parameters": {
+            "short_rest_replace": 1
           }
         },
         {

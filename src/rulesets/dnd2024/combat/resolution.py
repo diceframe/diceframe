@@ -24,6 +24,7 @@ from ..items.activation import (
 )
 from ..items.charges import (
     ChargesError,
+    charge_waiver_roll,
     charges_of,
     destroy_check_events,
     validate_charges_declaration,
@@ -296,13 +297,38 @@ class CombatResolutionMixin:
             "amount": 1,
         }]
         charge_cost = declaration.get("charge_cost")
+        # 实际扣费：Use Magic Device 掷出阈值时本次为 0。后续的事件与销毁判定
+        # 都读这个值，否则会出现"事件说免收、销毁检查照扣"的两套账。
+        spent: int | None = None
         if maximum is not None and charge_cost is not None:
-            events.append({
-                "type": "dnd2024.item.charge_spent",
-                "actor_id": actor_id,
-                "item_ref": item_ref,
-                "amount": int(charge_cost),
-            })
+            declared = int(charge_cost)
+            spent = declared
+            waiver = charge_waiver_roll(
+                self._feature_character(actor), self.features, rng,
+            )
+            if waiver is not None:
+                roll, threshold = waiver
+                waived = roll >= threshold
+                if waived:
+                    spent = 0
+                # 掷了就要留骰迹：1–5 与 6 的区别必须能从事件流里读出来，
+                # 否则"每次只掷一次"和"根本没掷"无法区分。
+                events.append({
+                    "type": "dnd2024.item.charge_roll",
+                    "actor_id": actor_id,
+                    "item_ref": item_ref,
+                    "declared": declared,
+                    "roll": roll,
+                    "threshold": threshold,
+                    "waived": waived,
+                })
+            if spent:
+                events.append({
+                    "type": "dnd2024.item.charge_spent",
+                    "actor_id": actor_id,
+                    "item_ref": item_ref,
+                    "amount": spent,
+                })
         if bool(item.get("consumable")):
             events.append({
                 "type": "dnd2024.item.consumed",
@@ -332,7 +358,7 @@ class CombatResolutionMixin:
         })
         # 销毁判定永远排在全部效果之后：先结算的治疗不得被销毁回滚。
         events.extend(self._destroy_check_events(
-            instance, actor_id, item_ref, item, charge_cost=charge_cost, rng=rng,
+            instance, actor_id, item_ref, item, charge_cost=spent, rng=rng,
         ))
         return events
 

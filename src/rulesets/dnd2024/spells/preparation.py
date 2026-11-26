@@ -43,12 +43,16 @@ class PreparationPolicy:
 
     ``long_rest_replace`` is ``None`` when the class may reshuffle any number of
     prepared spells on a Long Rest, and an integer cap otherwise; ``0`` means
-    the class cannot change preparation during a rest at all.
+    the class cannot change preparation during a rest at all.  ``short_rest_replace``
+    is the same budget for a Short Rest: no class grants one outright, but a
+    feature may (Memorize Spell), so the effective budget is this value plus
+    what the owned features declare.
     """
 
     source: str
     level_up_replace: int
     long_rest_replace: int | None
+    short_rest_replace: int
     cantrip_swap_on: str
     spellbook_initial: int
     spellbook_per_level: int
@@ -95,6 +99,7 @@ class PreparationPolicy:
             source=source,
             level_up_replace=_non_negative_int(raw, "level_up_replace"),
             long_rest_replace=rest_cap,
+            short_rest_replace=_non_negative_int(raw, "short_rest_replace"),
             cantrip_swap_on=timing,
             spellbook_initial=_non_negative_int(book, "initial"),
             spellbook_per_level=_non_negative_int(book, "per_level"),

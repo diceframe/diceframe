@@ -1186,6 +1186,10 @@ class CombatValidationMixin:
         if intent_type == "cast_spell":
             if actor.get("spellcasting_allowed") is False:
                 raise CombatIntentError("this shape does not allow spellcasting")
+            if intent.get("ritual"):
+                # 仪式是 10 分钟的施法方式，战斗里没有这个时间；静默按普通施法
+                # 处理等于偷偷免掉了那 10 分钟，所以显式拒绝而不是忽略字段。
+                raise CombatIntentError("ritual casting is not available in combat")
             self._validate_shaped_spellcasting(instance, actor_id, intent)
             self._validate_spell(instance, combat, intent, actor, economy)
         if intent_type == "activate_item":

@@ -707,9 +707,12 @@ class Dnd2024AdvancementEngine:
                 if policy is not None and policy.source == "spellbook"
                 else 0
             )
+            # 免费入书的授予（Evocation Savant）走同一套授予槽位：书目的正常
+            # 增量仍是 N，多出来的那几个由 `spell_grants` 单独提交，校验侧用
+            # 同一份声明判断"多出来的必须正好是授予项"。
             open_slots = [
                 slot for slot in spell_selection.grant_slots(target_level, spell_state)
-                if not slot["selected_refs"]
+                if len(slot["selected_refs"]) < int(slot["count"])
             ]
             # 免费施法槽同样"拥有但未选"时要把整块标成 required：11 级的
             # 秘奥与 18 级的法术精通都必须在这一级做出选择，但它们未提交
