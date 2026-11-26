@@ -987,7 +987,11 @@ class RoundProcessor:
         )
 
         # 昏迷角色的死亡豁免先于战斗/叙事结算，文本并入行动块供 GM 遵循。
-        death_text = resolve_round_death_saves(instance, rule)
+        # 权威战斗引擎拥有死亡豁免权威；sheet-only 跟踪器再结算会造成并行权威分叉。
+        death_text = (
+            "" if combat_model == "authoritative_event_batch"
+            else resolve_round_death_saves(instance, rule)
+        )
         if death_text:
             actions_text = death_text + "\n" + actions_text
 

@@ -20,6 +20,7 @@ from typing import Any
 from src.engine.modules import ruleset_runtime
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.attunement import attuned_refs
+from src.rulesets.dnd2024.character.health_display import sync_health_display
 from src.rulesets.dnd2024.character.reconciliation import (
     Dnd2024CharacterStateReconciler,
     merge_live_character_projection,
@@ -732,6 +733,7 @@ class Dnd2024CombatEngine(
                         # canonical 已按 ref 摘除，live 背包/装备行必须同步清理，
                         # 否则下一次 reconcile 会把行重新写回 canonical。
                         remove_destroyed_item(existing, str(event["item_ref"]))
+                sync_health_display(existing, canonical)
                 updated_sheets[uid] = existing
             ruleset_runtime.replace_state(instance, ruleset_state)
             for uid, sheet in updated_sheets.items():
