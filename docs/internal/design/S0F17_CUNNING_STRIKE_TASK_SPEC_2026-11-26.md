@@ -370,9 +370,16 @@ economy["move_allowance"] = {"amount": int, "reason": str, "target_id": ""}
 | `content/class_feature_catalogs/srd_class_features.json` | 三条定义 | 数据 |
 | `content/combat_catalogs/srd_combat_core.json` | `conditions.dazed` | 数据 |
 | `locales/{en,zh-CN}/…` | 特性名、效果名、`dazed` | 数据 |
+| `combat/engine.py`（实际改到） | `_attack_state_options` 的 `cunning_strike` 投影（`available` / `effects` / `count` / `costs` / `dice` / `names`） | 小 |
+| `frontend-v2/src/api/types.ts` | `RulesetCunningStrikeMenu` + attack 行上的可选字段 | 小 |
+| `frontend-v2/src/features/rulesets/dnd2024/combat/Dnd2024CombatPanel.vue` | 效果多选、预算提示、`available` 门控、提交载荷 | 约 +40 |
+| `frontend-v2/src/features/rulesets/dnd2024/combat/combatCopy.ts` | 面板文案（效果名退为服务端 `names` 的兜底） | 小 |
 | `tests/rulesets/test_dnd2024_cunning_strike.py`（新） | 见 §7 | 新文件 |
+| `tests/Dnd2024CombatPanel.test.ts` | 三条：载荷、超个数、已用后禁用 | +3 |
 
-**不许动**：`combat_coupling_baseline.py`（shrink-only，新增条目必须写明由哪一步删除）。本片的设计恰好**不新增**任何条目：声明在 `features/` 内（不在扫描范围），执行器按行数据分派而不是按 feature id，`cunning_strike_effects` 的读取也在 `features/` 内。
+**白名单外的必要改动**（都是"形状变了、断言没跟"，不是新行为）：`tests/rulesets/test_dnd2024_d20_skills.py` 与 `test_dnd2024_attack_state.py` 的三处额度断言改成 `move_allowance`；`test_dnd2024_gm_condition.py` 的条件目录条数 14 → 15（`dazed`）。
+
+**不许动**：`combat_coupling_baseline.py`（shrink-only，新增条目必须写明由哪一步删除）。本片的设计恰好**不新增**任何条目：声明在 `features/` 内（不在扫描范围），执行器按行数据分派而不是按 feature id，`cunning_strike_effects` 的读取也在 `features/` 内。**已知盲区**：`scripts/architecture_fitness.py` 只匹配 `X.kind == "literal"`，不匹配 `X.get("kind") == "literal"`，所以执行器新增的 `row.get("kind") == "cunning_strike"` 在语义上是一条 `kind_branch`，只是扫描器看不见（§11.8 第 8 条）。
 
 ## 7. 逐项测试
 
