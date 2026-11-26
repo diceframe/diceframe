@@ -248,6 +248,35 @@ describe('ProfessionalCharacterCenter', () => {
     expect(wrapper.get('.rest-center > button').attributes('disabled')).toBeDefined()
   })
 
+  it('blocks buying back more slots than a level has expended', async () => {
+    mocks.api.mockImplementation((path: string) => (
+      String(path).endsWith('/rest/options')
+        ? Promise.resolve(shortRestOptions)
+        : Promise.resolve({ ok: true, character, events: [] })
+    ))
+    const wrapper = mount(ProfessionalCharacterCenter, {
+      props: {
+        character: { ...character, ruleset_revision: 3 },
+        target: 'game', gameKey: 'web|room|bot', userId: 'player/1',
+        ruleId: 'dnd2024_srd', language: 'zh-CN',
+      },
+      global: { stubs: { PortraitPicker: true } },
+    })
+
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    await flushPromises()
+    const fields = wrapper.get('.rest-recovery').findAll('.rest-recovery-field input')
+    // 1 环只消耗了 2 个，买回 3 个仍在 3 环预算内——超的是每级上限，
+    // 不是预算。服务端会拒（cannot recover more level 1 slots than are expended），
+    // 但玩家不该先点得动再吃一个英文报错。
+    await fields[0].setValue(3)
+    await flushPromises()
+
+    expect(wrapper.get('.rest-recovery').text()).toContain('比已消耗还多 1 个')
+    await wrapper.get('.rest-confirm input').setValue(true)
+    expect(wrapper.get('.rest-center > button').attributes('disabled')).toBeDefined()
+  })
+
   it('shows party rest readiness and keeps the dialog open while waiting', async () => {
     mocks.api.mockImplementation((path: string) => (
       String(path).endsWith('/rest/options')

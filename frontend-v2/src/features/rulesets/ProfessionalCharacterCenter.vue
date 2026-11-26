@@ -289,6 +289,13 @@ const restRecoveryRows = computed(() => {
     const ceiling = item.mode === 'points'
       ? Math.min(Number(item.spent || 0), Number(item.budget || 0))
       : Number(item.budget || 0)
+    // 每级还有自己的上限：买回的数不能超过这一级已消耗的数量。服务端会逐级
+    // 拒绝（"cannot recover more level N slots than are expended"），但让玩家
+    // 先点得动再报错是坏体验。
+    const overPicked = slots.reduce(
+      (worst, slot) => Math.max(worst, Number(picked[slot.level] || 0) - Number(slot.expended)),
+      0,
+    )
     return {
       resourceId: item.resource_id,
       mode: item.mode,
@@ -297,6 +304,7 @@ const restRecoveryRows = computed(() => {
       slots,
       total,
       ceiling,
+      overPicked,
       label: names.get(item.resource_id) || item.resource_id,
     }
   }).filter(item => item.usesLeft > 0 && (item.mode === 'points'
@@ -304,7 +312,9 @@ const restRecoveryRows = computed(() => {
     : item.slots.length > 0))
 })
 const restRecoveryValid = computed(
-  () => restRecoveryRows.value.every(item => item.total <= item.ceiling),
+  () => restRecoveryRows.value.every(
+    item => item.total <= item.ceiling && item.overPicked <= 0,
+  ),
 )
 async function loadRestOptions(): Promise<void> {
   if (props.target !== 'game' || !props.gameKey || !props.userId) return
@@ -823,6 +833,7 @@ async function completeRest(): Promise<void> {
                 <input v-model.number="restRecoverySlots[item.resourceId][slot.level]" type="number" min="0" :max="Math.min(slot.expended, item.budget)">
               </label>
             </template>
+            <p v-if="item.overPicked > 0" class="rest-options-error" role="alert">{{ text(`有一级买回得比已消耗还多 ${item.overPicked} 个。`, `${item.overPicked} more than were expended at some level.`) }}</p>
             <p v-if="item.total > item.ceiling" class="rest-options-error" role="alert">{{ text(`超出预算：已选 ${item.total}，最多 ${item.ceiling}。`, `Over budget: ${item.total} chosen, at most ${item.ceiling}.`) }}</p>
           </div>
         </fieldset>
