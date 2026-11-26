@@ -379,6 +379,12 @@ def test_exploration_uses_the_same_event_shape() -> None:
     )
     assert check["roll"] == 1 and check["destroyed"] is True
     assert "dnd2024.item.destroyed" in _types(resolved)
+    # 事件必须真的能落账：探索侧的 apply 白名单曾经不认这两个类型，
+    # 于是"事件说毁了、物品还在"，整批 apply 还会直接报 unsupported。
+    assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
+    equipment = instance.get_character_sheet("gm")["ruleset_character"]["equipment"]
+    assert potion_ref not in (equipment.get("item_refs") or [])
+    assert potion_ref not in (equipment.get("item_state") or {})
 
 
 def test_replaying_the_same_batch_does_not_reroll_or_duplicate() -> None:

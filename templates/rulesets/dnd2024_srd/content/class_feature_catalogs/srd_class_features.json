@@ -2966,12 +2966,15 @@
           "owner": "subclass:evoker",
           "minimum_level": 3,
           "source_ref": "srd-5.2.1:p82:evocation-savant",
-          "summary": "Choose two Wizard spells from the Evocation school, each no higher than level 2, and add them to your spellbook for free. Whenever you gain access to a new level of spell slots in this class, you can add one more Evocation spell of a level you have slots for.",
+          "summary": "Choose two Wizard spells from the Evocation school, each of which must be no higher than level 2, and add them to your spellbook for free. In addition, whenever you gain access to a new level of spell slots in this class, you can add one Wizard spell from the Evocation school to your spellbook for free. The chosen spell must be of a level for which you have spell slots.",
           "parameters": {
-            "free_picks_on_gain": 2,
-            "max_gained_spell_level": 2,
-            "school": "evocation",
-            "free_picks_per_new_slot_level": 1
+            "spell_choice_count": 2,
+            "spell_choice_per_new_slot_level": 1,
+            "spell_choice_lists": ["class:wizard"],
+            "spell_choice_school": "evocation",
+            "spell_choice_min_level": 1,
+            "spell_choice_target": "spellbook",
+            "spell_choice_replacement": 0
           }
         },
         {
@@ -2980,7 +2983,7 @@
           "source_ref": "srd-5.2.1:p79:memorize-spell",
           "summary": "Whenever you finish a Short Rest, you can study your spellbook and replace one of the level 1+ Wizard spells you have prepared with another level 1+ spell from the book.",
           "parameters": {
-            "replace_prepared_per_short_rest": 1
+            "short_rest_replace": 1
           }
         },
         {

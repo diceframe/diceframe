@@ -702,22 +702,17 @@ class Dnd2024AdvancementEngine:
             # 一份书目：旧书恰好等于下一级的下限，只能说明以前的账平了，
             # 不能说明本级的 N 个已经选过。宁可多要一次输入，也不放过一条
             # 靠"总数刚好对得上"通过的空升级。
-            free_picks, free_cap = spell_selection.free_spellbook_allowance(
-                class_ref, target_level, spell_state,
-            )
-            # 免费名额与正常增量是**两笔账**，但客户端只填一份书目，所以增长
-            # 数取和；校验那边用同样的和，并额外要求多出来的部分是 Evocation。
-            # 免费名额是**可选的**（SRD: "you can add"），所以增量仍按正常值给；
-            # `free_spellbook_picks` 只说明"最多还能免费多几个"。把它并进增量会
-            # 让所有既有调用方（只加正常那几个）立刻不合法。
             spellbook_growth = (
                 int(policy.spellbook_gain_per_level or 0)
                 if policy is not None and policy.source == "spellbook"
                 else 0
             )
+            # 免费入书的授予（Evocation Savant）走同一套授予槽位：书目的正常
+            # 增量仍是 N，多出来的那几个由 `spell_grants` 单独提交，校验侧用
+            # 同一份声明判断"多出来的必须正好是授予项"。
             open_slots = [
                 slot for slot in spell_selection.grant_slots(target_level, spell_state)
-                if not slot["selected_refs"]
+                if len(slot["selected_refs"]) < int(slot["count"])
             ]
             # 免费施法槽同样"拥有但未选"时要把整块标成 required：11 级的
             # 秘奥与 18 级的法术精通都必须在这一级做出选择，但它们未提交
@@ -757,10 +752,6 @@ class Dnd2024AdvancementEngine:
                         1 if policy and policy.cantrip_swap_on == "level_up" else 0
                     ),
                     "spellbook_additions": spellbook_growth,
-                    # Evocation Savant 的免费名额：数量与上限分开给，面板才能
-                    # 说清"这 2 个必须是 1–2 环的 Evocation"。
-                    "free_spellbook_picks": free_picks,
-                    "free_spellbook_max_level": free_cap,
                     "cantrips": spell_options["cantrips"],
                     "leveled_spells": spell_options["leveled_spells"],
                     "grant_slots": spell_options["grant_slots"],

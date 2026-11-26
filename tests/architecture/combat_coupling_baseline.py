@@ -258,6 +258,10 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "retarget_mark"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "rider_damage_type"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "rider_move"),
+    # S0-F31: not a feature branch but a *rejection*. Combat has no 10-minute
+    # casting mode; ignoring the flag would silently waive it, so the key is read
+    # only to refuse. It cannot wait for GAP-43: dropping the read turns a
+    # fail-closed rejection into a silent rules change.
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "ritual"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "second_target_id"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "second_target_of"),

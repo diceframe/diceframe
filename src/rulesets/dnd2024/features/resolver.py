@@ -765,7 +765,16 @@ class Dnd2024ClassFeatureResolver:
                     terrain=terrain,
                 ))
             slot = choices.get(definition.id) or {}
-            if int(parameters.get("spell_choice_count") or 0):
+            has_choice_slot = bool(
+                int(parameters.get("spell_choice_count") or 0)
+                or int(parameters.get("spell_choice_per_new_slot_level") or 0)
+            )
+            if has_choice_slot and (
+                str(parameters.get("spell_choice_target") or "prepared")
+                != "spellbook"
+            ):
+                # 写进法术书的授予不是"常备"：它就是书里的一页，准备与否由
+                # player 决定，所以不能出现在 always-prepared 投影里。
                 granted_level = int(slot.get("granted_level") or definition.minimum_level)
                 for ref in slot.get("spells") or ():
                     if not isinstance(ref, str) or not ref:

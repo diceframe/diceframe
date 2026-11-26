@@ -308,16 +308,20 @@ class CombatResolutionMixin:
             )
             if waiver is not None:
                 roll, threshold = waiver
-                if roll >= threshold:
+                waived = roll >= threshold
+                if waived:
                     spent = 0
-                    events.append({
-                        "type": "dnd2024.item.charge_waived",
-                        "actor_id": actor_id,
-                        "item_ref": item_ref,
-                        "declared": declared,
-                        "roll": roll,
-                        "threshold": threshold,
-                    })
+                # 掷了就要留骰迹：1–5 与 6 的区别必须能从事件流里读出来，
+                # 否则"每次只掷一次"和"根本没掷"无法区分。
+                events.append({
+                    "type": "dnd2024.item.charge_roll",
+                    "actor_id": actor_id,
+                    "item_ref": item_ref,
+                    "declared": declared,
+                    "roll": roll,
+                    "threshold": threshold,
+                    "waived": waived,
+                })
             if spent:
                 events.append({
                     "type": "dnd2024.item.charge_spent",

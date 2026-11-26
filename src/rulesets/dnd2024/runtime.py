@@ -133,8 +133,9 @@ class Dnd2024Runtime:
     # 显式 rest option 契约：generic rest service 只转发这里声明的请求字段；
     # 未声明该能力的 ruleset 不会收到 D&D 专属的 attunement / prepared_spells /
     # land_terrain / free_cast / recovery 参数。land_terrain 是 Circle of the Land
-    # 每次长休必须记录的选择；prepared_spells 是长休时的一次准备替换；free_cast
-    # 是 Spell Mastery 在长休研究法术书时换掉的那一项；recovery 是短休的恢复预算。
+    # 每次长休必须记录的选择；prepared_spells 是一次准备替换（长休按职业策略、
+    # 短休按特性预算如 Memorize Spell）；free_cast 是 Spell Mastery 在长休研究
+    # 法术书时换掉的那一项；recovery 是短休的恢复预算。
     rest_option_names = frozenset(
         {"attunement", "prepared_spells", "land_terrain", "free_cast", "recovery",
          "hunter_options", "wild_shape_forms"}
@@ -927,7 +928,6 @@ class Dnd2024Runtime:
         recovery: dict[str, Any] | None = None,
         hunter_options: dict[str, Any] | None = None,
         wild_shape_forms: dict[str, Any] | None = None,
-        memorize_spell: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         del rule
         canonical = character.get("ruleset_character")
@@ -944,21 +944,24 @@ class Dnd2024Runtime:
             raise ValueError("recovery must be an object keyed by feature id")
         if hunter_options is not None and not isinstance(hunter_options, dict):
             raise ValueError("hunter_options must be an object keyed by feature id")
-        if memorize_spell is not None and not isinstance(memorize_spell, dict):
-            raise ValueError("memorize_spell must be an object")
         engine = Dnd2024RestEngine(bundle)
         if rest == "short":
-            if prepared_spells is not None:
-                raise ValueError("prepared spells can only be changed on a long rest")
             if land_terrain is not None:
                 raise ValueError("land_terrain is only valid for a long rest")
             if free_cast is not None:
                 raise ValueError("free_cast is only valid for a long rest")
             if wild_shape_forms is not None:
                 raise ValueError("wild shape forms are only replaced on a long rest")
+            # 短休换准备与长休共用 `prepared_spells`：能不能换由特性预算决定
+            # （Memorize Spell），所以不在这里按休息种类拒绝，交给引擎判断。
+            change = (
+                engine.parse_prepared_spells(character, prepared_spells, "short_rest")
+                if prepared_spells is not None
+                else None
+            )
             result = engine.complete_short_rest(
                 character, hit_die_rolls, attunement=attunement, recovery=recovery,
-                hunter_options=hunter_options, memorize_spell=memorize_spell,
+                hunter_options=hunter_options, prepared_spells=change,
             )
         elif rest == "long":
             if hit_die_rolls:
@@ -967,10 +970,8 @@ class Dnd2024Runtime:
                 raise ValueError("attunement changes are only valid during a short rest")
             if recovery is not None:
                 raise ValueError("recovery is only valid for a short rest")
-            if memorize_spell is not None:
-                raise ValueError("memorize_spell is only valid for a short rest")
             change = (
-                engine.parse_prepared_spells(character, prepared_spells)
+                engine.parse_prepared_spells(character, prepared_spells, "long_rest")
                 if prepared_spells is not None
                 else None
             )
@@ -1058,8 +1059,10 @@ class Dnd2024Runtime:
         # 每个声明项自己校验时机，新增选项不需要再改这个控制流。
         if "attunement" in options and rest != "short":
             raise ValueError("attunement changes are only valid during a short rest")
-        if "prepared_spells" in options and rest != "long":
-            raise ValueError("prepared spells can only be changed on a long rest")
+        if "prepared_spells" in options and rest not in {"long", "short"}:
+            # 两种休息都可以换准备，但预算不同：长休按职业策略，短休按特性
+            # 声明（Memorize Spell）。时机不在这里按休息种类拒绝，引擎按预算判。
+            raise ValueError("prepared spells can only be changed during a rest")
         if "land_terrain" in options and rest != "long":
             raise ValueError("land_terrain is only valid for a long rest")
         if "free_cast" in options and rest != "long":
@@ -1094,7 +1097,9 @@ class Dnd2024Runtime:
             )
         if "prepared_spells" in checked:
             # 存入队伍会话之前就拒绝非法值，避免把坏 payload 带到结算阶段。
-            engine.parse_prepared_spells(canonical, options["prepared_spells"])
+            engine.parse_prepared_spells(
+                canonical, options["prepared_spells"], f"{rest}_rest",
+            )
         if "land_terrain" in checked:
             engine.validate_land_terrain(canonical, options["land_terrain"])
         if "free_cast" in checked:

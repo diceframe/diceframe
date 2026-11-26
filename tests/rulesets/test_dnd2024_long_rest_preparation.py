@@ -281,9 +281,11 @@ def test_a_change_that_changes_nothing_is_refused(
 def test_prepared_spells_are_refused_on_a_short_rest(
     runtime: Dnd2024Runtime,
 ) -> None:
+    """短休换准备是特性预算，不是职业规则：牧师没有，就仍然拒绝。"""
+
     character = _caster(runtime, "cleric")
 
-    with pytest.raises(ValueError, match="only be changed on a long rest"):
+    with pytest.raises(ValueError, match="short rest"):
         runtime.complete_rest(
             None, _live(character), "short",
             prepared_spells={"prepared_spell_refs": []},

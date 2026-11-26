@@ -92,35 +92,37 @@ def test_the_bonus_never_leaks_to_another_class() -> None:
 def _spell_choices(bundle: Any, character: dict, row: dict) -> dict:
     """A legal answer for one level's spell selection, built on the real book.
 
-    升级要求书目"只增不减且恰好加 N"，准备法术必须都在书里，所以这里不是
-    "挑前几个"。N 已含 Evocation Savant 的免费名额，而免费那几个必须是
-    Wizard 的 Evocation、且不高于本级额度——校验会照着查，这里照着挑。
+    升级要求书目"只增不减、正常增量恰好 N"，准备法术必须都在书里，所以这里
+    不是"挑前几个"。免费入书的名额走 `spell_grants` 的授权槽位：槽位自己带着
+    count / options / target，客户端只负责把未填的部分填满。
     """
 
-    catalog = Dnd2024SpellCatalog.from_bundle(bundle)
     block = (character.get("spellcasting") or {}).get("class") or {}
     book = [str(ref) for ref in block.get("spellbook_refs") or []]
     candidates = [
         entry["ref"] for entry in row["leveled_spells"] if entry["ref"] not in book
     ]
-    free_picks = int(row.get("free_spellbook_picks") or 0)
-    free_cap = int(row.get("free_spellbook_max_level") or 0)
-
-    def _is_free(ref: str) -> bool:
-        spell = catalog.get(ref) or {}
-        lists = [str(item) for item in spell.get("class_refs") or []]
-        return (
-            str(spell.get("school") or "") == "evocation"
-            and 1 <= int(spell.get("level", 0) or 0) <= free_cap
-            and "class:wizard" in lists
-        )
-
-    free_part = [ref for ref in candidates if _is_free(ref)][:free_picks]
+    choices: dict = {}
+    grants: dict[str, list[str]] = {}
+    granted_refs: list[str] = []
+    for slot in row.get("grant_slots") or []:
+        if slot.get("target") != "spellbook":
+            continue
+        selected = [str(ref) for ref in slot.get("selected_refs") or ()]
+        need = int(slot["count"]) - len(selected)
+        picked = [
+            option["ref"] for option in slot.get("options") or ()
+            if option["ref"] not in book and option["ref"] not in selected
+            and option["ref"] not in granted_refs
+        ][: max(0, need)]
+        grants[slot["feature_id"]] = selected + picked
+        granted_refs.extend(picked)
+    # 正常增量只是 policy 的每级两个；免费项另算，二者合起来才是这本书。
     total = int(row["spellbook_additions"])
-    rest = [
-        ref for ref in candidates if ref not in free_part
-    ][: max(0, total - len(free_part))]
-    book = book + free_part + rest
+    normal = [ref for ref in candidates if ref not in granted_refs][:total]
+    book = book + granted_refs + normal
+    if grants:
+        choices["spell_grants"] = grants
     # 准备位与戏法在升级时不许换（replace_limit 0），只能在原有的基上补足。
     prepared = [
         str(ref) for ref in block.get("prepared_spell_refs") or [] if ref in book
@@ -140,11 +142,12 @@ def _spell_choices(bundle: Any, character: dict, row: dict) -> dict:
             break
         if entry["ref"] not in cantrips:
             cantrips.append(entry["ref"])
-    return {
+    choices.update({
         "cantrip_refs": cantrips,
         "prepared_spell_refs": prepared,
         "spellbook_refs": book,
-    }
+    })
+    return choices
 
 
 def _advance(
@@ -173,7 +176,7 @@ def _advance(
                 subclass if subclass in allowed else (allowed[0] if allowed else subclass)
             )
         # 再预览一次：这一级的法术选择要按"选完子职之后"的身份算，否则
-        # 3 级 Evoker 的免费名额在 requirements 里是 0。
+        # 3 级 Evoker 的授权槽位在 requirements 里根本不会出现。
         probe = engine.preview_next_level(character, choices)["requirements"]
         spell_row = next(
             (row for row in probe if row.get("kind") == "spell_selection"), None,
@@ -223,8 +226,9 @@ def test_a_thief_waives_the_charge_when_the_d6_shows_six() -> None:
 
     assert resolved["ok"] is True, resolved.get("error")
     events = resolved["event_batch"]["events"]
-    waived = [e for e in events if e["type"] == "dnd2024.item.charge_waived"]
-    assert waived and waived[0]["roll"] == 6 and waived[0]["declared"] == 1
+    rolled = [e for e in events if e["type"] == "dnd2024.item.charge_roll"]
+    assert rolled and rolled[0]["roll"] == 6 and rolled[0]["declared"] == 1
+    assert rolled[0]["waived"] is True and rolled[0]["threshold"] == 6
     # 免收就是"这次没有扣费事件"，不是 amount=0 的扣费：apply 侧不收 0 价。
     assert not [e for e in events if e["type"] == "dnd2024.item.charge_spent"]
 
@@ -242,7 +246,67 @@ def test_a_low_roll_spends_the_declared_charge() -> None:
     events = resolved["event_batch"]["events"]
     spent = [e for e in events if e["type"] == "dnd2024.item.charge_spent"]
     assert spent and spent[0]["amount"] == 1
-    assert not [e for e in events if e["type"] == "dnd2024.item.charge_waived"]
+    rolled = [e for e in events if e["type"] == "dnd2024.item.charge_roll"]
+    # 1–5 也要留骰迹：否则"掷了但没免"和"根本没掷"分不开。
+    assert rolled and rolled[0]["roll"] == 1 and rolled[0]["waived"] is False
+
+
+def test_use_magic_device_waives_the_charge_in_combat_too() -> None:
+    """战斗与探索同一判定：战斗里也要有骰迹、也要真的不扣。"""
+
+    runtime = Dnd2024Runtime()
+    sheet = _thief_sheet(runtime)
+    item_ref = _install_item(runtime, _charged_potion())
+    _carry(sheet, {item_ref: 1})
+    _reconcile(runtime, sheet)
+    instance = _instance(sheet)
+    engine = Dnd2024CombatEngine(runtime.load_bundle("en"), EncounterAccess.sandbox())
+    _start(engine, instance)
+
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": "umd-combat", "type": "activate_item", "expected_version": 1,
+        "submitted_by": "gm", "actor_id": "player:gm", "item_ref": item_ref,
+    }, SequenceRng([6, 4]))
+
+    assert resolved["ok"] is True, resolved.get("error")
+    events = resolved["event_batch"]["events"]
+    rolled = [e for e in events if e["type"] == "dnd2024.item.charge_roll"]
+    assert rolled and rolled[0]["roll"] == 6 and rolled[0]["waived"] is True
+    assert not [e for e in events if e["type"] == "dnd2024.item.charge_spent"]
+    assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
+    charges = instance.get_character_sheet("gm")["ruleset_character"][
+        "equipment"
+    ]["item_state"][item_ref]["charges"]
+    assert charges["current"] == 2
+
+
+def test_combat_spends_the_declared_charge_on_a_low_roll() -> None:
+    """战斗侧 1–5：照常扣一格，apply 只扣一次。"""
+
+    runtime = Dnd2024Runtime()
+    sheet = _thief_sheet(runtime)
+    item_ref = _install_item(runtime, _charged_potion())
+    _carry(sheet, {item_ref: 1})
+    _reconcile(runtime, sheet)
+    instance = _instance(sheet)
+    engine = Dnd2024CombatEngine(runtime.load_bundle("en"), EncounterAccess.sandbox())
+    _start(engine, instance)
+
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": "umd-combat-low", "type": "activate_item", "expected_version": 1,
+        "submitted_by": "gm", "actor_id": "player:gm", "item_ref": item_ref,
+    }, SequenceRng([2, 4]))
+
+    assert resolved["ok"] is True, resolved.get("error")
+    events = resolved["event_batch"]["events"]
+    rolled = [e for e in events if e["type"] == "dnd2024.item.charge_roll"]
+    assert rolled and rolled[0]["waived"] is False
+    assert [e for e in events if e["type"] == "dnd2024.item.charge_spent"][0]["amount"] == 1
+    assert engine.apply_batch(instance, resolved["event_batch"])["applied"] is True
+    charges = instance.get_character_sheet("gm")["ruleset_character"][
+        "equipment"
+    ]["item_state"][item_ref]["charges"]
+    assert charges["current"] == 1
 
 
 def test_a_rogue_without_use_magic_device_never_rolls_the_d6() -> None:
@@ -259,7 +323,8 @@ def test_a_rogue_without_use_magic_device_never_rolls_the_d6() -> None:
     assert resolved["ok"] is True, resolved.get("error")
     events = resolved["event_batch"]["events"]
     assert [e for e in events if e["type"] == "dnd2024.item.charge_spent"][0]["amount"] == 1
-    assert not [e for e in events if e["type"] == "dnd2024.item.charge_waived"]
+    # 12 级没有这条特性：一颗骰都不该掷，也就没有骰迹。
+    assert not [e for e in events if e["type"] == "dnd2024.item.charge_roll"]
 
 
 # --------------------------------------------------------------------------
@@ -333,8 +398,8 @@ def test_a_ritual_cast_spends_no_spell_slot() -> None:
     assert spent == []
 
 
-def test_a_prepared_ritual_is_listed_once_as_an_ordinary_cast() -> None:
-    """已准备的仪式法术不额外列一条：它是同一个法术的两种施法方式。"""
+def test_a_prepared_ritual_is_listed_once_and_still_offers_the_ritual() -> None:
+    """已准备的仪式法术只列一条，但这一条同时承认两种施法方式。"""
 
     runtime = Dnd2024Runtime()
     sheet = _wizard_sheet(runtime, prepared=True)
@@ -347,7 +412,31 @@ def test_a_prepared_ritual_is_listed_once_as_an_ordinary_cast() -> None:
     ]
     detect = [spell for spell in offered if spell["spell_ref"] == "spell:detect_magic"]
     assert len(detect) == 1
-    assert not detect[0].get("ritual")
+    # 有槽可以普通施法，也仍然可以按仪式施放（不花槽）。
+    assert detect[0]["available_slot_levels"]
+    assert detect[0]["ritual"] is True
+
+
+def test_a_prepared_ritual_survives_having_no_slots_left() -> None:
+    """槽用光时，已准备的仪式法术仍应出现——它本来就不需要槽。"""
+
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime, prepared=True)
+    block = sheet["ruleset_character"]["spellcasting"]["class"]
+    block["slots_current"] = {
+        level: 0 for level in block.get("slots_current") or {}
+    }
+    engine = Dnd2024ExplorationEngine(runtime.load_bundle("en"), "en")
+
+    offered = [
+        spell
+        for action in engine.available_intents(_instance(sheet), "gm")
+        for spell in action.get("spells") or []
+    ]
+    detect = [spell for spell in offered if spell["spell_ref"] == "spell:detect_magic"]
+    assert len(detect) == 1
+    assert detect[0]["ritual"] is True
+    assert detect[0]["available_slot_levels"] == []
 
 
 def test_a_spell_without_the_ritual_tag_cannot_be_cast_ritually() -> None:
@@ -378,6 +467,30 @@ def test_only_a_ritual_adept_may_cast_ritually() -> None:
 
     assert resolved["ok"] is False
     assert "Ritual Adept" in resolved["error"]
+
+
+def test_a_ritual_flag_must_be_a_boolean() -> None:
+    """`{"ritual": "false"}` 不能读成真：这个开关决定要不要花槽。"""
+
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime, prepared=True)
+
+    resolved = _cast_ritual(runtime, sheet, "spell:detect_magic", ritual="false")
+
+    assert resolved["ok"] is False
+    assert "ritual must be a boolean" in resolved["error"]
+
+
+def test_a_ritual_slot_level_must_be_an_integer() -> None:
+    """畸形输入要给一条规则错误，不是 `int()` 抛出的裸 ValueError。"""
+
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime)
+
+    resolved = _cast_ritual(runtime, sheet, "spell:detect_magic", slot_level="two")
+
+    assert resolved["ok"] is False
+    assert "slot_level must be an integer" in resolved["error"]
 
 
 def test_ritual_casting_is_refused_in_combat() -> None:
@@ -412,6 +525,10 @@ def _wizard_book(sheet: dict) -> tuple[list[str], list[str]]:
     )
 
 
+def _swap(prepared: list[str], replaced: str, gained: str) -> list[str]:
+    return [gained if ref == replaced else ref for ref in prepared]
+
+
 def test_memorize_spell_swaps_one_prepared_spell_on_a_short_rest() -> None:
     runtime = Dnd2024Runtime()
     sheet = _wizard_sheet(runtime, level=5)
@@ -420,9 +537,8 @@ def test_memorize_spell_swaps_one_prepared_spell_on_a_short_rest() -> None:
     replaced = prepared[0]
 
     result = runtime.complete_rest(
-        None, sheet, "short", {}, memorize_spell={
-            "replace_ref": replaced, "with_ref": gained,
-        },
+        None, sheet, "short", {},
+        prepared_spells={"prepared_spell_refs": _swap(prepared, replaced, gained)},
     )
 
     after_prepared, after_book = _wizard_book(result["character"])
@@ -430,7 +546,32 @@ def test_memorize_spell_swaps_one_prepared_spell_on_a_short_rest() -> None:
     # 数量不变、书目不变：这次只动了准备位。
     assert len(after_prepared) == len(prepared)
     assert after_book == book
-    assert [e for e in result["events"] if e["type"] == "memorize_spell"]
+    # 与长休同一个事件：短休换准备不是另一条审计口径。
+    assert [e for e in result["events"] if e["type"] == "prepared_spells_changed"]
+
+
+def test_memorize_spell_is_reachable_through_the_declared_rest_option() -> None:
+    """通道就是 `rest_option_names`：没声明就等于客户端提交被静默丢掉。"""
+
+    runtime = Dnd2024Runtime()
+
+    assert "prepared_spells" in runtime.rest_option_names
+
+
+def test_memorize_spell_swaps_only_one_prepared_spell() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime, level=5)
+    prepared, book = _wizard_book(sheet)
+    fresh = [ref for ref in book if ref not in prepared]
+
+    two_swaps = _swap(_swap(prepared, prepared[0], fresh[0]), prepared[1], fresh[1])
+    with pytest.raises(Exception) as excinfo:
+        runtime.complete_rest(
+            None, sheet, "short", {},
+            prepared_spells={"prepared_spell_refs": two_swaps},
+        )
+
+    assert "at most 1" in str(excinfo.value)
 
 
 def test_memorize_spell_refuses_a_spell_outside_the_book() -> None:
@@ -440,15 +581,16 @@ def test_memorize_spell_refuses_a_spell_outside_the_book() -> None:
 
     with pytest.raises(Exception) as excinfo:
         runtime.complete_rest(
-            None, sheet, "short", {}, memorize_spell={
-                "replace_ref": prepared[0], "with_ref": "spell:wish",
+            None, sheet, "short", {},
+            prepared_spells={
+                "prepared_spell_refs": _swap(prepared, prepared[0], "spell:wish"),
             },
         )
 
     assert "spellbook" in str(excinfo.value)
 
 
-def test_memorize_spell_refuses_a_spell_that_is_not_prepared() -> None:
+def test_memorize_spell_keeps_the_prepared_count_unchanged() -> None:
     runtime = Dnd2024Runtime()
     sheet = _wizard_sheet(runtime, level=5)
     prepared, book = _wizard_book(sheet)
@@ -456,12 +598,13 @@ def test_memorize_spell_refuses_a_spell_that_is_not_prepared() -> None:
 
     with pytest.raises(Exception) as excinfo:
         runtime.complete_rest(
-            None, sheet, "short", {}, memorize_spell={
-                "replace_ref": gained, "with_ref": prepared[0],
+            None, sheet, "short", {},
+            prepared_spells={
+                "prepared_spell_refs": [*prepared, gained],
             },
         )
 
-    assert "not prepared" in str(excinfo.value)
+    assert "must contain exactly" in str(excinfo.value)
 
 
 def test_memorize_spell_needs_five_wizard_levels() -> None:
@@ -474,26 +617,29 @@ def test_memorize_spell_needs_five_wizard_levels() -> None:
 
     with pytest.raises(Exception) as excinfo:
         runtime.complete_rest(
-            None, sheet, "short", {}, memorize_spell={
-                "replace_ref": prepared[0], "with_ref": gained,
-            },
-        )
-
-    assert "Memorize Spell" in str(excinfo.value)
-
-
-def test_memorize_spell_is_not_a_long_rest_option() -> None:
-    runtime = Dnd2024Runtime()
-    sheet = _wizard_sheet(runtime, level=5)
-
-    with pytest.raises(ValueError) as excinfo:
-        runtime.complete_rest(
-            None, sheet, "long", {}, memorize_spell={
-                "replace_ref": "spell:detect_magic", "with_ref": "spell:sleep",
-            },
+            None, sheet, "short", {},
+            prepared_spells={"prepared_spell_refs": _swap(prepared, prepared[0], gained)},
         )
 
     assert "short rest" in str(excinfo.value)
+
+
+def test_a_long_rest_still_uses_the_class_budget() -> None:
+    """短休预算只由特性给；长休仍走职业策略（法师不限数量）。"""
+
+    runtime = Dnd2024Runtime()
+    sheet = _wizard_sheet(runtime, level=5)
+    prepared, book = _wizard_book(sheet)
+    fresh = [ref for ref in book if ref not in prepared][:2]
+    reshuffled = _swap(_swap(prepared, prepared[0], fresh[0]), prepared[1], fresh[1])
+
+    result = runtime.complete_rest(
+        None, sheet, "long", {},
+        prepared_spells={"prepared_spell_refs": reshuffled},
+    )
+
+    after, _book = _wizard_book(result["character"])
+    assert fresh[0] in after and fresh[1] in after
 
 
 # --------------------------------------------------------------------------
@@ -501,8 +647,14 @@ def test_memorize_spell_is_not_a_long_rest_option() -> None:
 # --------------------------------------------------------------------------
 
 
-def _evoker_preview(runtime: Dnd2024Runtime, character: dict, *, free_ok: bool = True):
-    """Preview one level-up as an Evoker, with a hand-built spellbook."""
+def _evoker_step(
+    runtime: Dnd2024Runtime, character: dict, *, fill_grants: bool = True,
+):
+    """Preview one level-up as an Evoker and answer the spell selection.
+
+    ``fill_grants=False`` submits the two ordinary picks only, which is the
+    "slot stays open" path the shared grant machinery allows.
+    """
 
     engine = Dnd2024AdvancementEngine(runtime.load_bundle("en"))
     requirements = engine.preview_next_level(character)["requirements"]
@@ -510,84 +662,71 @@ def _evoker_preview(runtime: Dnd2024Runtime, character: dict, *, free_ok: bool =
     choices["subclass_ref"] = "subclass:evoker"
     probe = engine.preview_next_level(character, choices)["requirements"]
     row = next(item for item in probe if item.get("kind") == "spell_selection")
-    catalog = Dnd2024SpellCatalog.from_bundle(runtime.load_bundle("en"))
-    block = character["spellcasting"]["class"]
-    book = [str(ref) for ref in block.get("spellbook_refs") or []]
-    candidates = [item["ref"] for item in row["leveled_spells"] if item["ref"] not in book]
-    free_cap = int(row.get("free_spellbook_max_level") or 0)
-
-    def _is_free(ref: str) -> bool:
-        spell = catalog.get(ref) or {}
-        return (
-            str(spell.get("school") or "") == "evocation"
-            and 1 <= int(spell.get("level", 0) or 0) <= free_cap
-        )
-
-    free_picks = int(row.get("free_spellbook_picks") or 0)
-    picked = [
-        ref for ref in candidates if _is_free(ref) == free_ok
-    ][:free_picks]
-    # 免费是"可以多加"，所以一次全用：正常增量 + 免费名额。
-    total = int(row["spellbook_additions"]) + free_picks
-    rest = [ref for ref in candidates if ref not in picked][: max(0, total - len(picked))]
-    full_book = book + picked + rest
-    count = int(row["prepared_spell_count"])
-    prepared = [
-        str(ref) for ref in block.get("prepared_spell_refs") or [] if ref in full_book
-    ][:count]
-    # 3 级准备位从 5 涨到 6：涨出来的那个必须补上，但已有的不能换。
-    for ref in full_book:
-        if len(prepared) >= count:
-            break
-        if ref not in prepared:
-            prepared.append(ref)
-    choices["class_spell_choices"] = {
-        "cantrip_refs": [str(ref) for ref in block.get("cantrip_refs") or []],
-        "prepared_spell_refs": prepared,
-        "spellbook_refs": full_book,
-    }
-    return engine, choices, row, picked
+    answered = row if fill_grants else {**row, "grant_slots": []}
+    choices["class_spell_choices"] = _spell_choices(
+        runtime.load_bundle("en"), character, answered,
+    )
+    return engine, choices, row
 
 
-def test_evocation_savant_adds_two_free_spells_at_third_level() -> None:
-    runtime = Dnd2024Runtime()
-    sheet = _wizard_sheet(runtime, level=2)
-    character = sheet["ruleset_character"]
-    engine, choices, row, picked = _evoker_preview(runtime, character)
-
-    assert int(row["free_spellbook_picks"]) == 2
-    # 正常增量仍是 2：免费名额是"可以多加"，不是"必须多加"。
-    assert int(row["spellbook_additions"]) == 2
-    assert len(picked) == 2
-    preview = engine.preview_next_level(character, choices)
-    assert preview["ok"] is True, preview["errors"]
+def _evoker_slot(row: dict) -> dict:
+    return next(slot for slot in row["grant_slots"] if slot["feature_id"] == "evocation_savant")
 
 
-def test_the_free_picks_are_optional() -> None:
-    """只交正常那两个也合法：SRD 写的是 "you can add"。"""
+def _book(character: dict) -> list[str]:
+    return [str(ref) for ref in character["spellcasting"]["class"]["spellbook_refs"]]
+
+
+def test_evocation_savant_is_a_spellbook_grant_slot_of_two() -> None:
+    """同一个授权槽族：学派、列表、目标都由声明给出，代码不认特性 id。"""
 
     runtime = Dnd2024Runtime()
     character = _wizard_sheet(runtime, level=2)["ruleset_character"]
-    engine = Dnd2024AdvancementEngine(runtime.load_bundle("en"))
-    requirements = engine.preview_next_level(character)["requirements"]
-    choices = advancement_choices({"requirements": requirements})
-    choices["subclass_ref"] = "subclass:evoker"
-    probe = engine.preview_next_level(character, choices)["requirements"]
-    row = next(item for item in probe if item.get("kind") == "spell_selection")
-    choices["class_spell_choices"] = _spell_choices(runtime.load_bundle("en"), character, {
-        **row, "free_spellbook_picks": 0,
-    })
+    _engine, _choices, row = _evoker_step(runtime, character)
 
-    preview = engine.preview_next_level(character, choices)
+    slot = _evoker_slot(row)
+    assert (slot["count"], slot["target"], slot["school"]) == (2, "spellbook", "evocation")
+    assert slot["spell_lists"] == ["class:wizard"]
+    catalog = Dnd2024SpellCatalog.from_bundle(runtime.load_bundle("en"))
+    assert slot["options"]
+    for option in slot["options"]:
+        spell = catalog.get(option["ref"])
+        assert spell["school"] == "evocation"
+        assert "class:wizard" in spell["class_refs"]
+        assert 1 <= int(spell["level"]) <= 2
+    # 正常增量仍是每级两个：免费项走 grants，不并进 additions。
+    assert int(row["spellbook_additions"]) == 2
 
-    assert preview["ok"] is True, preview["errors"]
 
-
-def test_the_free_picks_must_be_evocation_spells() -> None:
+def test_the_free_picks_land_in_the_spellbook_not_in_the_prepared_list() -> None:
     runtime = Dnd2024Runtime()
-    sheet = _wizard_sheet(runtime, level=2)
-    character = sheet["ruleset_character"]
-    engine, choices, _row, _picked = _evoker_preview(runtime, character, free_ok=False)
+    character = _wizard_sheet(runtime, level=2)["ruleset_character"]
+    before = _book(character)
+    engine, choices, _row = _evoker_step(runtime, character)
+    picks = list(choices["class_spell_choices"]["spell_grants"]["evocation_savant"])
+
+    advanced = engine.apply_next_level(character, choices)
+    block = advanced["spellcasting"]["class"]
+
+    assert len(picks) == 2
+    assert set(picks) <= set(block["spellbook_refs"])
+    assert block["spell_grant_choices"]["evocation_savant"]["spells"] == picks
+    # 书 = 旧书 + 正常两个 + 免费两个；免费项不自动 prepared。
+    assert len(block["spellbook_refs"]) == len(before) + 4
+    assert not set(picks) <= set(block["prepared_spell_refs"])
+    assert Dnd2024ClassFeatureResolver(
+        runtime.load_bundle("en"),
+    ).spell_grant_rows(advanced) == []
+
+
+def test_a_free_pick_must_be_an_evocation_spell() -> None:
+    runtime = Dnd2024Runtime()
+    character = _wizard_sheet(runtime, level=2)["ruleset_character"]
+    engine, choices, _row = _evoker_step(runtime, character)
+    grants = choices["class_spell_choices"]["spell_grants"]["evocation_savant"]
+    book = choices["class_spell_choices"]["spellbook_refs"]
+    book[book.index(grants[0])] = "spell:shield"
+    grants[0] = "spell:shield"
 
     preview = engine.preview_next_level(character, choices)
 
@@ -595,25 +734,127 @@ def test_the_free_picks_must_be_evocation_spells() -> None:
     assert any("evocation" in error for error in preview["errors"])
 
 
-def test_a_level_without_a_new_slot_level_grants_no_free_pick() -> None:
+def test_a_free_pick_must_be_on_the_wizard_list() -> None:
     runtime = Dnd2024Runtime()
-    sheet = _wizard_sheet(runtime, level=3)
-    character = sheet["ruleset_character"]
-    engine = Dnd2024AdvancementEngine(runtime.load_bundle("en"))
+    character = _wizard_sheet(runtime, level=2)["ruleset_character"]
+    engine, choices, _row = _evoker_step(runtime, character)
+    grants = choices["class_spell_choices"]["spell_grants"]["evocation_savant"]
+    book = choices["class_spell_choices"]["spellbook_refs"]
+    # 塑能但不是法师列表：Guiding Bolt 只在牧师表上。
+    book[book.index(grants[0])] = "spell:guiding_bolt"
+    grants[0] = "spell:guiding_bolt"
 
-    requirements = engine.preview_next_level(character)["requirements"]
-    choices = advancement_choices({"requirements": requirements})
-    choices["class_spell_choices"] = _spell_choices(
-        runtime.load_bundle("en"), character,
-        next(item for item in requirements if item.get("kind") == "spell_selection"),
-    )
+    preview = engine.preview_next_level(character, choices)
 
+    assert preview["ok"] is False
+    assert any("may choose from" in error for error in preview["errors"])
+
+
+def test_a_cantrip_is_not_a_free_pick() -> None:
+    runtime = Dnd2024Runtime()
+    character = _wizard_sheet(runtime, level=2)["ruleset_character"]
+    engine, choices, _row = _evoker_step(runtime, character)
+    grants = choices["class_spell_choices"]["spell_grants"]["evocation_savant"]
+    book = choices["class_spell_choices"]["spellbook_refs"]
+    book[book.index(grants[0])] = "spell:fire_bolt"
+    grants[0] = "spell:fire_bolt"
+
+    preview = engine.preview_next_level(character, choices)
+
+    assert preview["ok"] is False
+    assert any("below the level" in error for error in preview["errors"])
+
+
+def test_a_deferred_free_pick_stays_open_and_can_be_filled_later() -> None:
+    """3 级不填不是"永久失去"：槽位还在，4 级补上仍然合法。"""
+
+    runtime = Dnd2024Runtime()
+    character = _wizard_sheet(runtime, level=2)["ruleset_character"]
+    before = _book(character)
+    engine, choices, _row = _evoker_step(runtime, character, fill_grants=False)
+    advanced = engine.apply_next_level(character, choices)
+
+    # 只加正常两个，槽位保持开放。
+    assert len(_book(advanced)) == len(before) + 2
+    assert "spell_grant_choices" not in advanced["spellcasting"]["class"]
+
+    engine2, choices2, row2 = _evoker_step(runtime, advanced)
+    slot = _evoker_slot(row2)
+    assert (slot["count"], slot["selected_refs"]) == (2, [])
+    preview = engine2.preview_next_level(advanced, choices2)
+    assert preview["ok"] is True, preview["errors"]
+    filled = engine2.apply_next_level(advanced, choices2)
+    picks = choices2["class_spell_choices"]["spell_grants"]["evocation_savant"]
+    assert set(picks) <= set(_book(filled))
+
+
+def test_a_level_without_a_new_slot_level_adds_no_free_pick() -> None:
+    runtime = Dnd2024Runtime()
+    character = _wizard_sheet(runtime, level=3)["ruleset_character"]
+    engine, choices, row = _evoker_step(runtime, character, fill_grants=False)
+
+    slot = _evoker_slot(row)
+    assert slot["count"] == 2
+    assert len(slot["selected_refs"]) == 2
+    assert int(row["spellbook_additions"]) == 2
+    assert engine.preview_next_level(character, choices)["ok"] is True
+
+
+def test_a_new_slot_level_at_five_adds_exactly_one_free_pick() -> None:
+    runtime = Dnd2024Runtime()
+    character = _wizard_sheet(runtime, level=4)["ruleset_character"]
+    before = _book(character)
+    engine, choices, row = _evoker_step(runtime, character)
+    slot = _evoker_slot(row)
+
+    assert slot["count"] == 3
+    preview = engine.preview_next_level(character, choices)
+    assert preview["ok"] is True, preview["errors"]
+    advanced = engine.apply_next_level(character, choices)
+    picks = choices["class_spell_choices"]["spell_grants"]["evocation_savant"]
+
+    assert len(picks) == 3
+    assert set(picks) <= set(_book(advanced))
+    # 这一级新增的是"正常两个 + 免费一个"；前两个免费项 3 级就在书里了。
+    assert len(_book(advanced)) == len(before) + 3
+
+
+def test_two_normal_picks_without_grants_are_still_a_complete_level() -> None:
+    runtime = Dnd2024Runtime()
+    character = _wizard_sheet(runtime, level=2)["ruleset_character"]
+    before = _book(character)
+    engine, choices, _row = _evoker_step(runtime, character, fill_grants=False)
+
+    preview = engine.preview_next_level(character, choices)
+    assert preview["ok"] is True, preview["errors"]
+    advanced = engine.apply_next_level(character, choices)
+    assert len(_book(advanced)) == len(before) + 2
+
+
+def test_four_normal_picks_cannot_stand_in_for_the_free_ones() -> None:
+    """多出来的页必须正好是授予项，不能拿四个普通法术凑数。"""
+
+    runtime = Dnd2024Runtime()
+    character = _wizard_sheet(runtime, level=2)["ruleset_character"]
+    engine, choices, _row = _evoker_step(runtime, character, fill_grants=False)
     row = next(
         item for item in engine.preview_next_level(character, choices)["requirements"]
         if item.get("kind") == "spell_selection"
     )
-    assert int(row["free_spellbook_picks"]) == 0
-    assert int(row["spellbook_additions"]) == 2
+    block = choices["class_spell_choices"]
+    extra = [
+        entry["ref"] for entry in row["leveled_spells"]
+        if entry["ref"] not in block["spellbook_refs"]
+    ][:2]
+    block["spellbook_refs"] = [*block["spellbook_refs"], *extra]
+    block["prepared_spell_refs"] = [
+        ref for ref in block["prepared_spell_refs"] if ref in block["spellbook_refs"]
+    ]
+
+    preview = engine.preview_next_level(character, choices)
+
+    assert preview["ok"] is False
+    assert any("exactly 2" in error for error in preview["errors"])
 
 
 # --------------------------------------------------------------------------

@@ -68,55 +68,6 @@ class Dnd2024SpellSelection:
         self.progression = Dnd2024ProgressionCatalog.from_bundle(self.bundle)
         self.features = Dnd2024ClassFeatureResolver(self.bundle)
 
-    def free_spellbook_allowance(
-        self, class_ref: str, level: int, character: Mapping[str, Any] | None,
-    ) -> tuple[int, int]:
-        """Evocation Savant's free book picks for this level: ``(count, max_level)``.
-
-        3 级给两个 1–2 环；此后只有**新开一环槽位**的等级才再给一个。没有这条
-        特性一律 ``(0, 0)``——调用方据此决定"书还能多几本""多出来的必须是什么"。
-        """
-
-        if character is None or not self.features.has_feature(
-            character, "evocation_savant",
-        ):
-            return 0, 0
-        on_gain = int(
-            self.features.feature_value(
-                character, "evocation_savant", "free_picks_on_gain", 0,
-            ) or 0
-        )
-        initial_cap = int(
-            self.features.feature_value(
-                character, "evocation_savant", "max_gained_spell_level", 0,
-            ) or 0
-        )
-        per_level = int(
-            self.features.feature_value(
-                character, "evocation_savant", "free_picks_per_new_slot_level", 0,
-            ) or 0
-        )
-        definition = self.features.catalog.features.get("evocation_savant")
-        minimum = int(getattr(definition, "minimum_level", 0) or 0)
-        if minimum and level == minimum:
-            return on_gain, initial_cap
-        if level <= minimum or per_level <= 0:
-            return 0, 0
-        current = {
-            int(key) for key in self.progression.snapshot(
-                class_ref, level,
-            )["spell_slots"]
-        }
-        before = {
-            int(key) for key in self.progression.snapshot(
-                class_ref, level - 1,
-            )["spell_slots"]
-        }
-        if not (current - before):
-            # 没开新环阶的等级不额外授予：否则"每升一级送一个"会变成免费额度。
-            return 0, 0
-        return per_level, max(current or {0})
-
     def requirements(
         self, class_ref: str, level: int, character: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -182,8 +133,11 @@ class Dnd2024SpellSelection:
         """Player-choice grant slots the character currently owns.
 
         Magical Discoveries is one: two spells from the Cleric, Druid, or Wizard
-        list, always prepared, replaceable one per Bard level.  The slot reports
-        its options so a client never has to know which lists are legal.
+        list, always prepared, replaceable one per Bard level.  Evocation Savant
+        is another: two Evocation spells at level 3, then one more each time the
+        class opens a new spell-slot level, added to the spellbook instead of
+        being prepared.  The slot reports its options and its target so a client
+        never has to know which lists are legal or where the pick lands.
         """
 
         slots: list[dict[str, Any]] = []
@@ -197,23 +151,44 @@ class Dnd2024SpellSelection:
             self.requirements(class_ref, level, character)["maximum_spell_level"]
         )
         for definition in self.features.features_for(character):
-            count = int(definition.parameters.get("spell_choice_count") or 0)
+            parameters = definition.parameters
+            base = int(parameters.get("spell_choice_count") or 0)
+            per_slot_level = int(
+                parameters.get("spell_choice_per_new_slot_level") or 0
+            )
+            if base < 1 and per_slot_level < 1:
+                continue
+            # 授予是累积的：3 级两个，此后每开一环再多一个。用"到目前为止
+            # 一共欠几个"表示，槽位才不会被"这一级没选"永久作废。
+            count = base + per_slot_level * self._new_slot_levels(
+                class_ref, level, int(definition.minimum_level or 0),
+            )
             if count < 1:
                 continue
-            lists = [str(ref) for ref in definition.parameters.get("spell_choice_lists") or ()]
+            lists = [str(ref) for ref in parameters.get("spell_choice_lists") or ()]
+            school = str(parameters.get("spell_choice_school") or "")
+            minimum_level = int(parameters.get("spell_choice_min_level") or 0)
             slot_state = stored.get(definition.id) or {}
             slots.append({
                 "id": f"spell_grant:{definition.owner}:{definition.id}",
+                "slot_id": definition.id,
                 "feature_id": definition.id,
                 "owner": definition.owner,
                 "count": count,
-                "replacement": int(definition.parameters.get("spell_choice_replacement") or 0),
+                "target": str(parameters.get("spell_choice_target") or "prepared"),
+                "school": school,
+                "min_level": minimum_level,
+                "replacement": int(parameters.get("spell_choice_replacement") or 0),
                 "granted_level": int(
                     slot_state.get("granted_level") or definition.minimum_level
                 ),
                 "spell_lists": lists,
                 "selected_refs": list(slot_state.get("spells") or ()),
-                "options": self._spells_for_lists(lists, maximum),
+                "options": [
+                    spell for spell in self._spells_for_lists(lists, maximum)
+                    if (not school or str(spell.get("school") or "") == school)
+                    and int(spell["level"]) >= minimum_level
+                ],
             })
         return slots
 
@@ -362,21 +337,23 @@ class Dnd2024SpellSelection:
                 errors.extend(spellbook_errors)
                 if not set(prepared).issubset(spellbook):
                     errors.append("prepared_spell_refs must be in spellbook_refs")
-        if previous is not None and policy is not None:
-            free_picks, free_cap = (
-                self.free_spellbook_allowance(class_ref, level, character)
-                if context == "level_up" else (0, 0)
-            )
-            errors.extend(
-                self._replacement_errors(
-                    policy, previous, cantrips, prepared, spellbook, context,
-                    free_picks=free_picks, free_max_level=free_cap,
-                )
-            )
         grants, grant_errors = self._validate_grants(
             choices.get("spell_grants"), character, requirements,
         )
         errors.extend(grant_errors)
+        book_grants = self._book_grant_refs(grants, level, character)
+        if book_grants and not book_grants.issubset(spellbook):
+            # 免费名额落在法术书里，所以必须真的在书目中——否则"授予"只是
+            # 记录上的一个字符串，player 永远准备不到那一页。
+            errors.append("free spellbook picks must be listed in spellbook_refs")
+        if previous is not None and policy is not None:
+            errors.extend(
+                self._replacement_errors(
+                    policy, previous, cantrips, prepared, spellbook, context,
+                    book_grant_refs=book_grants,
+                    short_rest_budget=self.short_rest_replace_budget(character),
+                )
+            )
         free_cast, free_errors = self._validate_free_cast(
             choices.get("free_cast"), character, requirements, spellbook,
         )
@@ -442,6 +419,9 @@ class Dnd2024SpellSelection:
                     "any" if policy.long_rest_replace is None
                     else policy.long_rest_replace
                 ),
+                # 短休换准备不是职业规则，而是特性预算；面板与提交走同一份
+                # 计算，客户端不必去认特性 id。
+                "short_rest_replace": self.short_rest_replace_budget(character),
                 "cantrip_swap_on": policy.cantrip_swap_on,
             },
             "prepared_capacity": int(requirements["prepared_spell_count"]),
@@ -516,16 +496,17 @@ class Dnd2024SpellSelection:
         spellbook: Sequence[str],
         context: str,
         *,
-        free_picks: int = 0,
-        free_max_level: int = 0,
+        book_grant_refs: set[str] | None = None,
+        short_rest_budget: int = 0,
     ) -> list[str]:
         """The swap budget for this context, per the class's declared policy.
 
-        Level-up and Long Rest are two different budgets for the same class:
-        a Bard swaps one spell when gaining a level and none on a rest, a Cleric
-        the other way round, and a Wizard re-picks cantrips only after a rest.
-        Only the *dropped* spells count; gaining capacity is the other SRD rule
-        and is already enforced by the exact-count check above.
+        Level-up, Long Rest and Short Rest are three budgets over the same
+        prepared list: a Bard swaps one spell when gaining a level and none on
+        a rest, a Cleric the other way round, a Wizard re-picks cantrips only
+        after a Long Rest, and Memorize Spell is the Short Rest one.  Only the
+        *dropped* spells count; gaining capacity is the other SRD rule and is
+        already enforced by the exact-count check above.
         """
 
         errors: list[str] = []
@@ -535,6 +516,9 @@ class Dnd2024SpellSelection:
         elif context == "long_rest":
             budget = policy.long_rest_replace
             where = "on a long rest"
+        elif context == "short_rest":
+            budget = short_rest_budget
+            where = "on a short rest"
         else:
             raise SpellCatalogError(f"unknown spell selection context {context}")
         dropped = self._previous_refs(previous, "prepared_spell_refs") - set(prepared)
@@ -542,8 +526,13 @@ class Dnd2024SpellSelection:
             errors.append(
                 f"prepared_spell_refs may replace at most {budget} spell(s) {where}"
             )
-        cantrip_timing = "level_up" if context == "level_up" else "long_rest"
-        cantrip_limit = 1 if policy.cantrip_swap_on == cantrip_timing else 0
+        cantrip_timing = {
+            "level_up": "level_up", "long_rest": "long_rest", "short_rest": "none",
+        }[context]
+        cantrip_limit = (
+            1 if policy.cantrip_swap_on == cantrip_timing
+            and cantrip_timing != "none" else 0
+        )
         dropped_cantrips = self._previous_refs(previous, "cantrip_refs") - set(cantrips)
         if len(dropped_cantrips) > cantrip_limit:
             errors.append(
@@ -560,36 +549,14 @@ class Dnd2024SpellSelection:
                     )
                 added = set(spellbook) - self._previous_refs(previous, "spellbook_refs")
                 expected = policy.spellbook_gain_per_level
-                ceiling = expected + free_picks
-                if not expected <= len(added) <= ceiling:
+                # 免费名额是"特性授予的槽位"，不是"额外的升级增量"：多出来的
+                # 那一部分必须正好是本次提交的授予项，正常增量仍恰好 N 个。
+                # 这样既不用在通用校验里认学派，也不会让"随便多塞几个"通过。
+                granted = added & (book_grant_refs or set())
+                if len(added - granted) != expected:
                     errors.append(
-                        "spellbook_refs must add "
-                        + (
-                            f"exactly {expected} spell(s) at this level"
-                            if ceiling == expected
-                            else f"between {expected} and {ceiling} spell(s) at this level"
-                        )
+                        f"spellbook_refs must add exactly {expected} spell(s) at this level"
                     )
-                extra = len(added) - expected
-                if extra > 0:
-                    # 多出来的部分是免费名额，必须是 Wizard 的 Evocation、且不高于
-                    # 本级额度。正常那几个不受此限——规则只限定免费的那几个。
-                    free_ok = 0
-                    for ref in added:
-                        spell = self.catalog.get(ref) or {}
-                        level_of_spell = int(spell.get("level", 0) or 0)
-                        lists = [str(item) for item in spell.get("class_refs") or []]
-                        if (
-                            str(spell.get("school") or "") == "evocation"
-                            and 1 <= level_of_spell <= free_max_level
-                            and "class:wizard" in lists
-                        ):
-                            free_ok += 1
-                    if free_ok < extra:
-                        errors.append(
-                            "extra spellbook spells must be Wizard evocation "
-                            "spells of a level you have slots for"
-                        )
         elif policy.source == "spellbook":
             # 休息只重排准备位，不往法术书里加东西。
             if set(spellbook) != self._previous_refs(previous, "spellbook_refs"):
@@ -829,6 +796,8 @@ class Dnd2024SpellSelection:
                     )
                     continue
                 allowed = set(slot["spell_lists"])
+                school = str(slot.get("school") or "")
+                minimum_level = int(slot.get("min_level") or 0)
                 for ref in refs:
                     spell = self.catalog.get(ref)
                     if spell is None:
@@ -839,7 +808,15 @@ class Dnd2024SpellSelection:
                             f"{ref} is not on a list {key} may choose from"
                         )
                         continue
+                    if school and str(spell.get("school") or "") != school:
+                        errors.append(f"{ref} is not a {school} spell {key} may take")
+                        continue
                     spell_level = int(spell["level"])
+                    if spell_level < minimum_level:
+                        errors.append(
+                            f"{ref} is below the level {key} may choose from"
+                        )
+                        continue
                     if spell_level and not (
                         1 <= spell_level <= int(requirements["maximum_spell_level"])
                     ):
@@ -851,7 +828,12 @@ class Dnd2024SpellSelection:
                     ref for ref in slot["selected_refs"] if isinstance(ref, str)
                 ]
                 if previous and slot["replacement"] >= 0:
-                    replaced = len(set(refs) - set(previous))
+                    # 槽位会随等级变长（Evocation Savant 每开一环多一个）：
+                    # 先扣掉"这一级新增的名额"，剩下的才是真正的替换。
+                    grown = max(0, int(slot["count"]) - len(previous))
+                    replaced = max(
+                        0, len(set(refs) - set(previous)) - grown,
+                    )
                     if replaced > int(slot["replacement"]):
                         errors.append(
                             f"spell grant {key} can replace at most "
@@ -877,6 +859,30 @@ class Dnd2024SpellSelection:
                 "granted_level": int(slot.get("granted_level") or requirements["level"]),
             }
         return parsed, errors
+
+    def _book_grant_refs(
+        self,
+        grants: Mapping[str, Mapping[str, Any]],
+        level: int,
+        character: Mapping[str, Any] | None,
+    ) -> set[str]:
+        """The picks a grant slot files into the spellbook rather than preparing.
+
+        They are ordinary book entries once added -- a Wizard prepares them like
+        any other -- so the only thing that distinguishes them is that the
+        level-up gain rule must not count them as one of the two printed picks.
+        """
+
+        refs: set[str] = set()
+        for slot in self.grant_slots(int(level), character):
+            if slot["target"] != "spellbook":
+                continue
+            record = grants.get(slot["slot_id"]) or {}
+            refs.update(
+                str(ref) for ref in record.get("spells") or ()
+                if isinstance(ref, str)
+            )
+        return refs
 
     def _validate_free_cast(
         self,
@@ -1125,6 +1131,51 @@ class Dnd2024SpellSelection:
             ):
                 seen.setdefault(spell["ref"], spell)
         return sorted(seen.values(), key=lambda item: (item["level"], item["name"], item["id"]))
+
+    def _new_slot_levels(self, class_ref: str, level: int, since: int) -> int:
+        """How many spell-slot levels the class opened after ``since``.
+
+        "Whenever you gain access to a new level of spell slots" is counted by
+        comparing the slot tables of two adjacent levels, so the Wizard's
+        printed table stays data instead of becoming an arithmetic constant.
+        """
+
+        if not class_ref or since < 1 or level <= since:
+            return 0
+        opened = 0
+        for step in range(since + 1, level + 1):
+            current = {
+                int(key)
+                for key in self.progression.snapshot(class_ref, step)["spell_slots"]
+            }
+            before = {
+                int(key)
+                for key in self.progression.snapshot(class_ref, step - 1)["spell_slots"]
+            }
+            opened += len(current - before)
+        return opened
+
+    def short_rest_replace_budget(
+        self, character: Mapping[str, Any] | None,
+    ) -> int:
+        """Prepared-spell swaps this character may make on a Short Rest.
+
+        No class grants one by default; the budget comes from features that
+        declare ``short_rest_replace`` (Memorize Spell).  It is the same axis
+        the class policy uses for Long Rests, read from the same table, so a
+        Short Rest swap goes through the ordinary preparation validator.
+        """
+
+        if not isinstance(character, Mapping):
+            return 0
+        class_ref = self._class_ref(character)
+        policy = (
+            PreparationPolicy.for_class(self.bundle, class_ref) if class_ref else None
+        )
+        budget = int(policy.short_rest_replace) if policy is not None else 0
+        for definition in self.features.features_for(character):
+            budget += int(definition.parameters.get("short_rest_replace") or 0)
+        return max(0, budget)
 
     @staticmethod
     def _class_ref(character: Mapping[str, Any]) -> str:
