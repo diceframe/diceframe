@@ -231,3 +231,38 @@ git diff --check
 - **I**：守卫基线的纪律（新增条目必须写明由哪一步删除）已按此执行；CI 的行数趋势报告没有做。
 - `features/resolver.py` 的其余候选切分（spell grants、passive readers）不在本次范围。
 - S0-F28 自己记录的未落地项见 #847：Twinned 的有效环阶只作用于目标数、选项清单两份硬编码、2 / 10 / 17 级的选项数需对 SRD 确认。
+
+## 13. 下游接入记录：S0-F17 Cunning Strike（2026-11-26）
+
+本节只记「F17 消费本片产物时确认了什么、往骨架上加了什么」。§1–§12 不改写。
+
+### 13.1 结论：诡诈打击落在 `attack_hit` 声明层，不加新层
+
+| 候选层 | 否掉的理由 |
+|---|---|
+| `KIND_HANDLERS`（Activation） | 它没有动作槽、不付资源池、不占反应；`cost.slot/resources/timing` 三个字段一个都用不上 |
+| `WINDOW_REGISTRY` | 没有 offer 阶段，不需要问「要不要响应别人」 |
+| **`ATTACK_DECLARATIONS`** | 命中后才生效、改「这一击产生什么」；`stunning_strike` 是现成样板，多选列表天然支持 11 级「一次两种」 |
+
+### 13.2 未新增意图布尔、未新增 decision kind
+
+- 载荷是 `cunning_strike_effects: ["trip"]`（11 级起可为两项），与 `brutal_strike_effects` 同形：**一个声明 id + 一个受内容闭集约束的列表**，不是六个声明 id，也不是六个意图布尔。
+- 六个效果**不各注册一个 canonical id**：效果集合是内容（14 级才加入后三种），而 `ATTACK_DECLARATIONS` 是代码里的静态字典；注册六条等于把「哪些已解锁」写进代码。
+- 声明在攻击检定之前提交，扣骰在 `roll_damage_node()` 之前。**没有**新开「命中已定、伤害未掷」的窗口——那会是系统里唯一一个伤害之前的窗口，且要给 `/auto` 加自动弃权分支。
+
+### 13.3 为 F17 扩的两处（登记，不是先斩后奏）
+
+1. **`_hit_condition_events` 的 DC 从写死 WIS 改成逐行 `save_dc_ability`**（`combat/martial_actions.py`）。现状 `8 + PB + WIS` 只服务武僧；诡诈打击是 `8 + PB + DEX`。改法是删掉那条特性专用公式、由行携带属性；`stunning_strike` 补 `"save_dc_ability": "wis"` 保持行为不变，`open_hand` 行继续由调用方按 WIS 传 DC。
+2. **`plan_condition` 的返回形状扩展**：行可以携带 `dice_cost` / `save_repeat` / `ends_on_damage` / `turn_choice_limit` / `granted_move` / `save_dc_ability`。`AttackDeclaration` 的字段**不变**——它本来就允许裸 dict，扩展的是执行器对行数据的解释，不是声明模型。
+
+两条都不增加 `combat_coupling_baseline.py` 的条目：声明与载荷读取都在 `features/attack_declarations.py`（不在扫描的 combat 包内），执行器按「行里有什么字段」分派而不是按 feature id 分支。
+
+### 13.4 明确不属于本骨架的两件事
+
+- **骰费不是 `cost.resources`**：它是每击临时算出来的、不进任何资源池，`Cost` 三字段不动。
+- **`turn_choice_limit`（Daze）与 `save_repeat`（Poison / Knock Out）不是本片产物**：两者都已有别的消费者（Abjure Foes 用前者，Intimidating Presence 与多个法术用后者），F17 只是多一个调用方。这一点在写 F17 任务书时逐条核实过，避免了重造一套原语。
+
+### 13.5 尚未闭合的下游缺口
+
+- **GAP-48**：`attack_declarations` 没有任何面向玩家的投影与 UI（`_attack_state_options()` 只投影 reckless / brutal / studied，`frontend-v2/src` 对四个声明零支持）。GAP-43 把声明化做完了，但玩家侧仍只能靠 API 传。
+- **GAP-49**：借机攻击的 answer intent 只有 `option`，没有声明通道，所以诡诈打击与 Brutal Strike 都无法用在借机攻击上。

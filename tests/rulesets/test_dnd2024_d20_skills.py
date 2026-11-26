@@ -1074,14 +1074,16 @@ def test_a_critical_hit_grants_half_the_current_speed(
     )
     state = _state(instance)["combat"]
     assert state["economy"]["movement"] == 45
-    assert state["economy"]["crit_move"] == 15
+    assert state["economy"]["move_allowance"] == {
+        "amount": 15, "reason": "critical_hit", "target_id": "",
+    }
 
     # 这一次移动在额度之内：借机攻击不开窗，事件自己带着抑制标记。
     moved = _apply(engine, instance, _move_intent(instance, 15))
     changed = next(e for e in moved if e.get("type") == "dnd2024.position.changed")
-    assert changed["crit_move"] is True
+    assert changed["move_allowance"] is True
     assert _state(instance)["combat"]["pending_decisions"] == []
-    assert _state(instance)["combat"]["economy"]["crit_move"] == 0
+    assert "move_allowance" not in _state(instance)["combat"]["economy"]
 
 
 def test_a_normal_hit_grants_nothing(runtime: Dnd2024Runtime) -> None:
