@@ -98,7 +98,7 @@
 | F14 | 命中附加效果、命中后条件、施法侧加值 | ✅ | #763 + 报告（52 条） |
 | F15 | 攻击前声明与连续状态 | ✅ | #783 + 报告（28 条） |
 | F16 | 法术学派、职业与伤害类型修饰 | ⛔ | 停工报告：四项载体里两项无落点 |
-| F17 | Cunning Strike 的 Sneak Attack 骰池预算 | ⬜ | 停工理由已过期：规则原文在 `.rulebooks`（游荡者 L133–159），载体由 GAP-43 的 `ATTACK_DECLARATIONS` 提供；任务书 `S0F17_CUNNING_STRIKE_TASK_SPEC_2026-11-26.md`（F17a–F17e），等 #869 合入后开工作树 |
+| F17 | Cunning Strike 的 Sneak Attack 骰池预算 | ✅ | 六种效果全部落地（5 级三种 / 11 级双效果 / 14 级三种），DC = 8+PB+敏捷按行算；F17e 只做了 Cunning Strike 一条，通用攻击声明面板仍是 GAP-48（「部分」）；任务书 `S0F17_CUNNING_STRIKE_TASK_SPEC_2026-11-26.md` §11 有执行记录 |
 | F18 | Hunter's Mark 实例与 Ranger 高等级链 | ✅ | #783 + 报告（24 条） |
 | F19 | Hunter 五项特性、prey riders、伤害反应 | ✅ | #813（第一部分）+ #822（第二部分） |
 | F20 | 战斗开始、先攻与额外首回合 | ✅ | #784 |

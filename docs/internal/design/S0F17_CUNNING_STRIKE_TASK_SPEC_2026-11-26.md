@@ -418,4 +418,86 @@ Windows 上先 `export TEMP=TMP=TMPDIR=E:/pytest-tmp`，`--basetemp` 用从未�
 
 ## 11. 执行记录
 
-（F17a–F17e 各自完成后在此追加：落地 PR、偏差、未决、只看门禁才现形的缺陷。）
+### 11.1 落地范围
+
+F17a–F17e 一次落地，分成三个实现提交加一个文档提交（后端没有拆成 a/b/c/d 四个提交：六种效果共用同一条预算链，`_hit_condition_events` 的执行器、`plan_row` 的字段与内容表在同一次改动里成型，硬拆只会在同一批函数上切成碎片）。
+
+| 片 | 落地内容 |
+|---|---|
+| F17a | 内容三条定义、`ATTACK_DECLARATIONS` 加 `cunning_strike`、`validate_cunning_strike`、`_hit_condition_declarations` 上移 + 扣骰、`sneak_qualified` 记账、`cunning_strike.skipped` 与白名单、`_attack_state_options` 投影 |
+| F17b | `ONE_MINUTE_DURATION` + `TURNS_SCOPED_DURATIONS`、`save_repeat` 快照、`target_turn_end`、`requires_item` 门禁 |
+| F17c | `economy.move_allowance` 归一（`crit_move` / `brutal_move` 只读兼容）、`provokes_opportunity` 由授予方声明 |
+| F17d | `conditions.dazed` 载体、`turn_choice_limit` 元数据、`ends_on_damage`、11 级双效果 |
+| F17e | `RulesetCunningStrikeMenu` 投影类型、战斗面板效果多选与预算提示、`attack_declarations` 载荷 |
+
+### 11.2 与任务书的四处偏差（都是实现时才看清的）
+
+1. **`HitConditionContext` 加了 `intent`**，而不是 §3.1 伪代码里的 `content_order(context)`。`plan_condition` 只拿到 context，载荷必须从 intent 读；把整个 intent 放进去比再开一个 `payload` 字段更省，而且以后别的声明要载荷时同一个入口就够。
+2. **`CunningStrikeEffect` 多一个 `save_dc_ability`**。§3.2 只写了 `save_ability`（目标掷什么），但 DC 是 8 + PB + **敏捷**，两者对 Trip/Obscure 恰好相同、对 Poison/Knock Out/Daze 不同。不分开就会把 DC 算成"目标豁免的那项属性"。
+3. **计划行的键叫 `on_fail_condition`**，与 Stunning Strike 的行同形，这样执行器只需要一套"失败施加条件"的读取。
+4. **移动额度归一按 `provokes_opportunity: false` 判定，不按 `reason` 白名单**。授予方声明"这份额度免不免借机"，reducer 不再按特性名猜；三处授予（暴击后移动、Forceful Blow 跟步、撤步）各加一个布尔，判定只剩一处。
+
+### 11.3 未决
+
+- **Shield 改判落空的端到端用例没写**：它要求同侧目标 + 构造待定决策（`test_dnd2024_sneak_attack.py` 的 `_held_attack` 手法）。当前实现走的是既有延迟提交（骰与效果都挂在伤害事件上，事件整条作废），语义由 Sneak Attack 的既有用例覆盖；F17 自己的用例覆盖了"偷袭不成立不扣骰"这一条同族语义。
+- **借机攻击上仍不能声明**（GAP-49）：窗口的 answer intent 只有 `option`。
+- **F17e 的范围收窄成"Cunning Strike 一条"**，不是 §5 原计划的通用声明面板。载荷形状在五种声明之间差异太大（布尔 / 效果列表 / 武器选择），一张卡要先定 schema；GAP-48 因此仍是「部分」。投影带 `names` 让面板不必自带一份效果名，但只有这一个特性受益。
+- **`move_allowance` 是单槽**：同回合内"暴击额度 + 撤步"或"Forceful + 撤步"会互相覆盖。纯职游荡者拿不到前两者，多职业支持前不可达。
+
+### 11.4 只看门禁才现形的缺陷（单测全绿时看不见的）
+
+1. **DC 退化成 0，豁免必然成功**。`plan_row` 起初只带 `save_ability`，执行器按 `save_dc_ability` 查表时落回 fallback=0。单测若只断言"行里有豁免属性"会全绿；实际攻击里目标掷 3 也"成功"，Trip 永远不倒地。这是任务书 §3.2 那张"执行行元数据表"漏写一列的直接后果。
+2. **`conditions.dazed` 必须带 `attack_modes: []`**。`Dnd2024CombatCatalog` 要求每个条件条目声明攻击模式（哪怕是空数组），只写 `{"kind": "condition"}` 会让整个 bundle 装载失败——这条只有真加载才发现，`_RIDER_PARAMETER_KEYS` 那类键集校验看不到。
+3. **11 级偷袭骰是 6d6 不是 4d6**。`sneak_attack_dice` 表是 20 项数组，`index == level - 1`，11 级取到 6。写测试注释时按"每两级一颗"心算成 4 就错了，靠真实骰数纠正。
+4. **`target_turn_end` 的到期时刻取决于施加时机**。它读 `previous_actor_id` 与 `expires_after`：在攻击者回合挂上的 Daze 在目标自己回合结束时过期（正确），在目标回合内挂上才需要多等一轮。这条是复用既有实现，没有新写计时器——但**复用必须显式写 `expires_after: 2`**，第一版漏了（见 §11.8 第 4 条）。
+5. **旧额度只清新键等于永不失效**。读取侧认识 `crit_move` / `brutal_move`，写路径只写 `move_allowance`，消费侧只 `pop("move_allowance")`——旧存档里的一次性额度会一直免借机到回合结束。三个标记任一出现都要清全部三个（见 §11.8 第 2 条）。
+6. **`_activation_payload` 不认敌人**。为了给 companion 也判制毒工具，校验改成对两种 actor 都取 `_activation_payload`；但 `_validate_attack` 是全 actor 共用入口，**敌人攻击也会走到这里**，而 `_activation_payload` 对 `enemy:` 直接调 `_companion()` 并抛「companion actor does not exist」。184 条反应窗口用例同时变红（它们全部由敌人发起攻击）。只看自己的 28 条用例完全看不出来——这是本轮唯一一次靠全量回归才发现的破坏。
+
+### 11.5 变异验证
+
+| 变异 | 应变的用例 | 结果 |
+|---|---|---|
+| 删掉 `reduce_dice_count` 那一行 | Trip 扣骰、11 级双效果、Knock Out 打空池 | 3 条同时变红 |
+| `sneak_qualified` 改回 `if sneak_dice:` | Knock Out 打空池仍记一次偷袭 | 变红 |
+| `_declared_save_dc` 改回一律用 WIS | DC = 8 + PB + 敏捷 | 变红 |
+
+### 11.6 门禁
+
+| 项 | 结果 |
+|---|---|
+| `tests/rulesets/test_dnd2024_cunning_strike.py` | 28 passed（新文件） |
+| `tests/rulesets/test_dnd2024_gm_condition.py` | 20 passed（条件目录 14 → 15） |
+| `tests/rulesets/test_dnd2024_d20_skills.py` / `test_dnd2024_attack_state.py` | 额度归一后的断言已更新，通过 |
+| `tests/architecture` | 162 passed（耦合基线**没有**新增条目） |
+| `ruff check src/ tests/` | 通过 |
+| `mypy` | 通过（118 files） |
+| `vue-tsc -b` / `eslint --max-warnings 0` / `locales:check` | 通过 |
+| `tests/Dnd2024CombatPanel.test.ts` | 87 passed（84 → +3） |
+| `tests/rulesets` 全量 | 见 §11.7 |
+
+### 11.7 全量回归
+
+| 轮次 | 结果 | 说明 |
+|---|---|---|
+| 第一轮（实现完成） | 3023 passed / **5 failed** | 5 条红：额度归一的旧键断言（`crit_move` / `brutal_move`，2 条）+ `dazed` 进条件目录（3 条）。都是"形状变了、断言没跟"，已按 §11.8 第 1 条更新 |
+| 第二轮（审核修正后） | 2852 passed / **184 failed** | 本轮唯一一次**真回归**：给 companion 取背包时误用了只认 player/companion 的 `_activation_payload`，而 `_validate_attack` 对敌人也跑，敌人攻击全部抛「companion actor does not exist」。见 §11.4 第 6 条 |
+| 第三轮 | **3036 passed / 0 failed** | 修正后全绿。3036 = 第一轮 3028 (+5 failed) + 新增 8 条 Cunning Strike 用例 |
+
+`tests/architecture` 三轮都是 162 passed：耦合基线**没有**新增条目（`cunning_strike` 的读取全在 `features/` 包内或 `row.get(...)`，扫描器不记）。
+
+### 11.8 审核修正（2026-11-26，第二轮）
+
+独立审查提出 3 条必须修、7 条应该修。逐条处理：
+
+| # | 问题 | 处理 |
+|---|---|---|
+| 1 | 额度归一把 `test_d20_skills` / `test_attack_state` 的旧键断言改红 | 更新三处断言到 `move_allowance`（含 `reason`），并把 `gm_condition` 的目录条数 14 → 15 |
+| 2 | 旧额度永不被消费（只清新键） | `position.changed` 的三个标记任一出现都清 `move_allowance` / `crit_move` / `brutal_move`；补旧存档用例 |
+| 3 | `cunning_strike: true` 这个 legacy flag 能绕过"必须有声明" | `validate_cunning_strike` 只认 `attack_declarations` 列表里出现 `cunning_strike` |
+| 4 | `target_turn_end` 在目标回合内挂上时不写 `expires_after` | `_cunning_condition_event` 接收 `currently_acting`，等于目标时写 `expires_after: 2` |
+| 5 | 投影没有 `available`，面板会让玩家在偷袭已用后仍选效果 | 投影加 `available`；面板禁用整块并显示原因 |
+| 6 | companion 的 Poison 必被拒（只给 player 传 `carried_refs`） | 改用 `_activation_payload`（player 与 companion 各有权威） |
+| 7 | Daze 的拒绝文案仍是 "while frightened this way" | 改成中性的「your turn is limited to one of …」；既有用例只匹配 `already chose` 子串，不受影响 |
+| 8 | 执行器新增了 `row.get("kind") == "cunning_strike"`，扫描器看不见 | 登记为已知盲区：`scripts/architecture_fitness.py` 只匹配 `X.kind == literal`，不匹配 `X.get("kind")`。等 GAP-43 迁移时和其余 kind 一起收 |
+| 9 | F17e 没做成通用面板，六个 locale 键没有前端消费者 | 投影改带 `names`（从 bundle 的 `label` 读），前端优先用服务端名字、`combatCopy` 退为兜底；GAP-48 状态改为「部分」 |
+| 10 | 测试缺口：重击×预算、超池、旧键、受伤移除、Daze 到期、撤步超额、同回合第二击 | 前六条各补一个用例；"同回合第二击"对纯职游侠不可达（一次 Attack 动作只有一击），改由 `available=false` 的投影用例覆盖同一语义 |
