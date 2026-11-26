@@ -29,6 +29,11 @@ from scripts.architecture_fitness import DependencyDebt
 #: actor kind (``player`` / ``enemy`` / ``companion``) are not recorded: that is the
 #: engine telling a player from an enemy, not a rule written for one feature.
 #:
+#: Registered with #871 (S0-F17, 2026-11-26): the Cunning Strike executor dispatches on
+#: the hit-condition row's kind.  It leaves when hit conditions become declarations
+#: on the ATTACK_DECLARATIONS table (GAP-48, the panel work #871 lists as its
+#: remaining half).
+#:
 #: One entry per (file, category, symbol), generated from the current package.
 #: Categories: kind_branch, feature_branch, feature_literal, intent_switch.
 COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
@@ -90,6 +95,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/martial_actions.py", "intent_switch", "open_hand_choice"),
     DependencyDebt("src/rulesets/dnd2024/combat/martial_actions.py", "intent_switch", "rider_move"),
     # GAP-43 D: re-key existing reads moved with ongoing effects.
+    DependencyDebt("src/rulesets/dnd2024/combat/martial_actions.py", "kind_branch", "cunning_strike"),
     DependencyDebt("src/rulesets/dnd2024/combat/martial_actions.py", "kind_branch", "open_hand"),
     DependencyDebt("src/rulesets/dnd2024/combat/martial_actions.py", "kind_branch", "quivering_palm"),
     DependencyDebt("src/rulesets/dnd2024/combat/martial_actions.py", "kind_branch", "stunning_strike"),
@@ -196,6 +202,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "uses"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "via_fleet_step"),
     # GAP-43 D: re-key existing reads moved with support actions.
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "cunning_strike"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "miss_damage"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "normal"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "unimplemented"),

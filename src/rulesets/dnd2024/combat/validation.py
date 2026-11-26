@@ -18,8 +18,9 @@ from ..character.attunement import (
 )
 from .action_adapter import is_supported_damage_formula
 from ..features.attack_declarations import (
-    BRUTAL_STRIKE, LIGHT_EXTRA_ATTACK, SELECTION_KEY, STUNNING_STRIKE,
-    declaration_value, selection_error, validate_uses, validate_weapon_selection,
+    BRUTAL_STRIKE, CUNNING_STRIKE_EFFECTS_KEY, LIGHT_EXTRA_ATTACK, SELECTION_KEY,
+    STUNNING_STRIKE, declaration_value, selection_error, validate_cunning_strike,
+    validate_uses, validate_weapon_selection,
 )
 from ..features.kinds import KIND_HANDLERS, KindContext
 from ..features.models import ClassFeatureError
@@ -1766,8 +1767,8 @@ class CombatValidationMixin:
             and int(economy.get("surge_action", 0) or 0) > 0
         ):
             raise CombatIntentError(
-                "while frightened this way you can only take one action "
-                "on your turn: Action Surge cannot buy another"
+                "your turn is limited to one of move, one action or one Bonus "
+                "Action: Action Surge cannot buy another action"
             )
         spent = {
             name for name in limit
@@ -1780,8 +1781,8 @@ class CombatValidationMixin:
             }
             used = ", ".join(sorted(labels.get(name, name) for name in spent))
             raise CombatIntentError(
-                "while frightened this way you can only move, take an action, "
-                f"or take a Bonus Action on your turn: you already chose to {used}"
+                "your turn is limited to one of move, one action or one Bonus "
+                f"Action: you already chose to {used}"
             )
 
     def _turn_choice_limit(self, conditions: dict[str, Any]) -> list[str]:
@@ -2363,6 +2364,26 @@ class CombatValidationMixin:
         error = validate_weapon_selection(self.features, character, intent, weapon, world_minutes(instance))
         if error:
             raise CombatIntentError(error)
+        # 只有真的带了载荷才进这条校验：`validate_cunning_strike` 要读一次
+        # 背包（制毒工具），而绝大多数攻击什么也没声明——把它放在无条件路径
+        # 上等于给每次攻击加一次全量物品统计。
+        if intent.get(CUNNING_STRIKE_EFFECTS_KEY) is not None:
+            error = validate_cunning_strike(
+                self.features, character, intent,
+                target_size=str(target.get("size") or ""),
+                # 只有玩家与伙伴有背包权威（`_activation_payload` 就是这两条
+                # 路径）；敌人的攻击也会走到这里，`_companion()` 对它会直接报错。
+                carried_refs=(
+                    owned_ref_counts(self._activation_payload(instance, actor))
+                    if actor["kind"] in {"player", "companion"} else None
+                ),
+                speed=effective_speed(
+                    self.catalog.conditions, actor.get("conditions") or {},
+                    max(0, int(actor.get("speed", 0) or 0)),
+                ),
+            )
+            if error:
+                raise CombatIntentError(error)
         self._validate_attack_state_options(instance, combat, intent, actor, weapon, distance)
 
     def _validate_save_action_intent(

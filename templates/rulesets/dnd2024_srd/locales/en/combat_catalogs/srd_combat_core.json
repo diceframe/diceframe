@@ -35,7 +35,9 @@
       "condition.stunned": "Stunned",
       "condition.stunned.summary": "Incapacitated; Str and Dex saves auto-fail; attacks against you have advantage.",
       "condition.unconscious": "Unconscious",
-      "condition.unconscious.summary": "Incapacitated, speed 0; Str and Dex saves auto-fail; hits within 5 feet are critical."
+      "condition.unconscious.summary": "Incapacitated, speed 0; Str and Dex saves auto-fail; hits within 5 feet are critical.",
+      "condition.dazed": "Dazed",
+      "condition.dazed.summary": "Can only do one of: move, take an action, or take a Bonus Action on its next turn."
     }
   }
 }
