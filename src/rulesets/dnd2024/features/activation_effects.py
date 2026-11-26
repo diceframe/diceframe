@@ -204,3 +204,14 @@ def action_surge(
         "grants": {"surge_action": 1},
         "flags": {"action_surge_used": True},
     }]
+
+
+def innate_sorcery(
+    capability: FeatureCapability, action: CapabilityAction, context: KindContext, rng: Any,
+) -> list[dict[str, Any]]:
+    # The shared cost block has already paid. This only records which of the
+    # two prices was paid, because Arcane Apotheosis and the audit both
+    # distinguish "one use" from "two sorcery points".
+    return context.operations._innate_sorcery_events(
+        context.instance, context.combat, context.intent, capability,
+    )

@@ -78,15 +78,18 @@ class CombatTriggeredSpellsMixin:
         ]
         return decision if choices else None
 
-    def _spell_cost_events(self, actor, spell, slot_level, *, spend_action=True):
+    def _spell_cost_events(
+        self, actor, spell, slot_level, *, spend_action=True, quickened=False,
+    ):
         # 反应法术（护盾术）不占用动作经济里的动作，由调用方另记 reaction.spent。
+        # Quickened Spell 把这次施法的成本从动作换成附赠动作：换的是**哪一项**，
+        # 不是"多扣一项"，所以仍只有一条 action.spent。
+        as_bonus = quickened or str(spell["casting_time"]).startswith("Bonus Action")
         events = [
             {
                 "type": "dnd2024.action.spent",
                 "actor_id": actor["actor_id"],
-                "resource": "bonus_action"
-                if str(spell["casting_time"]).startswith("Bonus Action")
-                else "action",
+                "resource": "bonus_action" if as_bonus else "action",
                 "amount": 1,
             }
         ] if spend_action else []

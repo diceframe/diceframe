@@ -177,7 +177,18 @@ def _blocked_reason(
     capability: FeatureCapability,
     context: CombatContext,
     definitions: Mapping[str, ResourceDefinition],
+    owned_ids: frozenset[str] = frozenset(),
 ) -> str:
+    if (
+        capability.requires_feature_id
+        and capability.requires_feature_id not in owned_ids
+    ):
+        # 第二条价格通常挂在更高的等级上：能力本身属于低等级特性，所以门禁
+        # 必须能指到另一条特性，而不是把"7 级才有"写进引擎。
+        return (
+            "requires "
+            f"{catalog.label(capability.requires_feature_id, capability.requires_feature_id)}"
+        )
     for resource_cost in capability.cost.resources:
         if isinstance(resource_cost, SpellSlotCost):
             if spell_slot_count(context.spell_slots, resource_cost.level) < 1:
@@ -202,6 +213,15 @@ def _blocked_reason(
             return f"{name} is not available to this character"
         if int(pool.current) < 1:
             return f"{name} is empty"
+    exhausted_id = capability.exhausted_resource_id
+    if exhausted_id:
+        # 与池相反的前置：还有余额时这条价格根本不成立。
+        pool = definitions.get(exhausted_id)
+        name = catalog.label(exhausted_id, exhausted_id)
+        if pool is None:
+            return f"{name} is not available to this character"
+        if int(pool.current) > 0:
+            return f"{name} is not exhausted yet"
     action = capability.cost.slot
     if action and context.remaining(action) < 1:
         if not (action == "bonus_action" and context.fleet_step
@@ -239,9 +259,12 @@ def combat_capabilities(
     """
 
     result: list[CombatCapabilityView] = []
+    owned_ids = frozenset(definition.id for definition in owned)
     for definition in owned:
         for capability in definition.capabilities:
-            blocked = _blocked_reason(catalog, capability, context, definitions)
+            blocked = _blocked_reason(
+                catalog, capability, context, definitions, owned_ids,
+            )
             if blocked and not include_unavailable:
                 continue
             view = CombatCapabilityView(

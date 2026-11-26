@@ -33,6 +33,11 @@ class CapabilityOperations(
 
     def has_moved_this_turn(self, combat: dict[str, Any], actor_id: str) -> bool: ...
 
+    def _innate_sorcery_events(
+        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
+        capability: FeatureCapability,
+    ) -> list[dict[str, Any]]: ...
+
 
 @dataclass(frozen=True, slots=True)
 class KindContext:
@@ -134,6 +139,7 @@ KIND_HANDLERS: dict[str, KindHandler] = {
     "holy_nimbus": KindHandler(resolve=effects.holy_nimbus),
     "dragon_wings": KindHandler(resolve=effects.dragon_wings),
     "intimidating_presence": KindHandler(resolve=effects.intimidating_presence),
+    "innate_sorcery": KindHandler(resolve=effects.innate_sorcery),
     "restore_feature_use": KindHandler(
         resolve=effects.restore_feature_use, validate=effects.validate_restore_feature_use,
         requires_resource_cost=True,

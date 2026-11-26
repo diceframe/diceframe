@@ -93,7 +93,7 @@ class CombatMartialActionsMixin:
             current_combat = ruleset_runtime.state(staged)["combat"]
             current_actor = self._actor_view(staged, current_combat, actor_id)
             current_target = self._actor_view(staged, current_combat, target_id)
-            strike_intent = {
+            strike_intent: dict[str, Any] = {
                 "actor_id": actor_id, "target_id": target_id,
                 "weapon_ref": UNARMED_STRIKE_REF,
                 **{key: intent[key] for key in (

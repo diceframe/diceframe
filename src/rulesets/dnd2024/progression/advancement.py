@@ -25,6 +25,11 @@ from src.rulesets.dnd2024.progression.catalog import (
     Dnd2024ProgressionCatalog,
     ProgressionCatalogError,
 )
+from src.rulesets.dnd2024.spells.metamagic import (
+    MetamagicError,
+    known_after_picks,
+    resolve_replacement,
+)
 from src.rulesets.dnd2024.spells.preparation import PreparationPolicy
 from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
 
@@ -108,6 +113,62 @@ def _applied_ability_bonuses(character: dict[str, Any]) -> dict[str, int]:
         and not isinstance(points, bool)
         and points > 0
     }
+
+
+#: 十选项的 canonical id（运行时权威在 `spells/metamagic.OPTIONS`）。
+METAMAGIC_OPTION_IDS = (
+    "careful_spell", "distant_spell", "empowered_spell", "extended_spell",
+    "heightened_spell", "quickened_spell", "seeking_spell", "subtle_spell",
+    "transmuted_spell", "twinned_spell",
+)
+
+METAMAGIC_OPTION_NAMES = {
+    "careful_spell": "Careful Spell",
+    "distant_spell": "Distant Spell",
+    "empowered_spell": "Empowered Spell",
+    "extended_spell": "Extended Spell",
+    "heightened_spell": "Heightened Spell",
+    "quickened_spell": "Quickened Spell",
+    "seeking_spell": "Seeking Spell",
+    "subtle_spell": "Subtle Spell",
+    "transmuted_spell": "Transmuted Spell",
+    "twinned_spell": "Twinned Spell",
+}
+
+
+#: 哪些 requirement 的 `id` 对应 `choices` 里的哪个键。同一形状也用于判定必填。
+CHOICE_KEYS = {
+    "known_form_refs": "known_form_refs",
+    "metamagic_option_ids": "metamagic_option_ids",
+    "feature_choice": "feature_choices",
+}
+
+
+def _choice_satisfied(requirement: dict[str, Any], choices: dict[str, Any]) -> bool:
+    """Whether a choice slot was answered at all.
+
+    The engine only answers "did you fill it", not "is it valid" -- validity
+    belongs to each slot's own validator, which runs next to where the option
+    list is built.
+    """
+
+    key = CHOICE_KEYS.get(str(requirement.get("id"))) or CHOICE_KEYS.get(
+        str(requirement.get("kind"))
+    )
+    if key is None:
+        return True
+    value = choices.get(key)
+    if isinstance(value, list):
+        return len(value) >= int(requirement.get("count", 1) or 1)
+    return value is not None
+
+
+def metamagic_choices_at(class_ref: str, target_level: int) -> int:
+    """How many new Metamagic options this level grants (2 at levels 2/10/17)."""
+
+    if class_ref != "class:sorcerer":
+        return 0
+    return 2 if target_level in {2, 10, 17} else 0
 
 
 @dataclass(slots=True)
@@ -312,6 +373,7 @@ class Dnd2024AdvancementEngine:
                 missing.append({
                     "id": "ability_score_increases",
                     "kind": "ability_increase",
+                    "enforced": True,
                     "required": True,
                     "level": row_level,
                     "total": 1,
@@ -324,6 +386,7 @@ class Dnd2024AdvancementEngine:
                 missing.append({
                     "id": "ability_score_increases",
                     "kind": "ability_increase",
+                    "enforced": True,
                     "required": True,
                     "level": row_level,
                     "total": 2,
@@ -375,6 +438,7 @@ class Dnd2024AdvancementEngine:
             missing.append({
                 "id": count_key,
                 "kind": "spell_selection",
+                "enforced": True,
                 "required": True,
                 "level": level,
                 "expected": expected,
@@ -567,6 +631,7 @@ class Dnd2024AdvancementEngine:
             requirements.append({
                 "id": "ability_score_increases",
                 "kind": "ability_increase",
+                "enforced": True,
                 "required": True,
                 "total": int(ability_spec.get("points", 2) or 2),
                 "maximum_score": int(ability_spec.get("maximum", 20) or 20),
@@ -592,6 +657,7 @@ class Dnd2024AdvancementEngine:
                 {
                     "id": "ability_score_increases",
                     "kind": "ability_increase",
+                    "enforced": True,
                     "required": True,
                     "total": 1,
                     "maximum_score": 30,
@@ -668,6 +734,7 @@ class Dnd2024AdvancementEngine:
                 requirements.append({
                     "id": "class_spell_choices",
                     "kind": "spell_selection",
+                    "enforced": True,
                     "required": spell_choice_required,
                     **target_requirements,
                     # 三个上限交给客户端做即时提示与禁用，出提交前就能看出
@@ -811,6 +878,97 @@ class Dnd2024AdvancementEngine:
                         for row in options
                     ],
                 })
+        # 通用收口：带 `count` 的选择槽默认**必填**。特性只需声明"有哪些槽"，
+        # 不必各自再回答一次"不选怎么办"——漏选就让特性永久丢失，这个判断属于
+        # 升级本身，而不是每一条特性的实现细节。
+        for requirement in requirements:
+            if not requirement.get("count") or requirement.get("optional"):
+                continue
+            if requirement.get("enforced"):
+                # 已经有自己的 planner 在判（专长、技能、法术换选等），通用规则
+                # 不再重复一遍，避免同一件事出现两种错误文案。
+                continue
+            if not _choice_satisfied(requirement, choices):
+                message = f"{requirement['id']} is required at this level"
+                if message not in errors:
+                    errors.append(message)
+        # S0-F28：超魔选项在 2/10/17 级各选两个；任意升级可换掉一个。
+        metamagic_count = metamagic_choices_at(class_ref, target_level)
+        metamagic_block = (character.get("features") or {}).get("metamagic", {}) or {}
+        metamagic_known = [str(item) for item in metamagic_block.get("known") or []]
+        metamagic_picked: list[str] = []
+        if metamagic_count:
+            picked = choices.get("metamagic_option_ids")
+            if picked is None:
+                # 与仓库既有原则一致：可选槽位是升级的**必要条件**，不选就
+                # 不能确认升级。放过它等于让这个特性永远丢失——2/10/17 每级
+                # 只给一次，错过不会补。
+                errors.append("metamagic_option_ids is required at this level")
+            else:
+                metamagic_picked = [str(item) for item in picked]
+                if len(metamagic_picked) != metamagic_count:
+                    errors.append(
+                        f"metamagic_option_ids must list exactly {metamagic_count} options"
+                    )
+                unknown = [
+                    item for item in metamagic_picked
+                    if item not in METAMAGIC_OPTION_IDS
+                ]
+                if unknown:
+                    errors.append(f"unknown metamagic option: {unknown[0]}")
+                duplicated = [
+                    item for item in set(metamagic_picked)
+                    if metamagic_picked.count(item) > 1
+                ]
+                if duplicated:
+                    errors.append(f"metamagic option chosen twice: {duplicated[0]}")
+                repeated = [item for item in metamagic_picked if item in metamagic_known]
+                if repeated:
+                    errors.append(f"metamagic option already known: {repeated[0]}")
+            requirements.append({
+                "id": "metamagic_option_ids",
+                "kind": "metamagic",
+                "count": metamagic_count,
+                # 这个槽自己判"少选"：通用必填只看"填没填"，玩家选了 1 个
+                # 会得到"required"而不是"必须恰好 2 个"，文案会指错地方。
+                "enforced": True,
+                "options": [
+                    {"value": option_id,
+                     "name": METAMAGIC_OPTION_NAMES.get(option_id, option_id)}
+                    for option_id in METAMAGIC_OPTION_IDS
+                    if option_id not in metamagic_known
+                ],
+            })
+        if class_ref == "class:sorcerer":
+            replacement = choices.get("metamagic_replace")
+            if isinstance(replacement, dict):
+                try:
+                    resolve_replacement(
+                        known=metamagic_known,
+                        picked=metamagic_picked,
+                        drop=str(replacement.get("drop") or ""),
+                        add=str(replacement.get("add") or ""),
+                    )
+                except MetamagicError as error:
+                    errors.append(str(error))
+            # 替换槽按"本批次已写入"后的已知集合算候选：先选后换与先换后
+            # 选必须给出同一组下拉，否则预览刷新一次换一批选项。
+            metamagic_known_after = known_after_picks(
+                metamagic_known, metamagic_picked,
+            )
+            if metamagic_known:
+                requirements.append({
+                    "id": "metamagic_replace",
+                    "kind": "metamagic_replace",
+                    "optional": True,
+                    "known": metamagic_known_after,
+                    "options": [
+                        {"value": option_id,
+                         "name": METAMAGIC_OPTION_NAMES.get(option_id, option_id)}
+                        for option_id in METAMAGIC_OPTION_IDS
+                        if option_id not in metamagic_known_after
+                    ],
+                })
         return {
             "ok": not errors,
             "form_requirements": form_requirements,
@@ -903,6 +1061,24 @@ class Dnd2024AdvancementEngine:
             character.setdefault("forms", {}).setdefault("known", {})["wild_shape"] = [
                 str(ref) for ref in known_forms
             ]
+
+        # S0-F28：超魔选项是角色级选择，跨战斗与长休存在。
+        picked_metamagic = preview.get("choices", {}).get("metamagic_option_ids")
+        if picked_metamagic:
+            block = character.setdefault("features", {}).setdefault("metamagic", {})
+            block["known"] = known_after_picks(
+                block.get("known") or [], [str(item) for item in picked_metamagic],
+            )
+        replacement = preview.get("choices", {}).get("metamagic_replace")
+        if isinstance(replacement, dict):
+            block = character.setdefault("features", {}).setdefault("metamagic", {})
+            # 与预览走同一个函数：预览允许的替换，写入必须得到同一结果。
+            block["known"] = resolve_replacement(
+                known=block.get("known") or [],
+                picked=(),
+                drop=str(replacement.get("drop") or ""),
+                add=str(replacement.get("add") or ""),
+            )
 
         features = character.setdefault("features", {})
         subclass_ref = str(preview["choices"].get("subclass_ref") or "")
@@ -1390,6 +1566,7 @@ class Dnd2024AdvancementEngine:
                 requirements.append({
                     "id": f"feature_choice:{definition.owner}:{definition.id}:{choice.id}",
                     "kind": "feature_choice",
+                "enforced": True,
                     "required": True,
                     "owner": definition.owner,
                     "feature_id": definition.id,
@@ -1423,6 +1600,7 @@ class Dnd2024AdvancementEngine:
                 requirements.append({
                     "id": f"feature_choice:{definition.owner}:{definition.id}:{choice.id}",
                     "kind": "feature_choice",
+                "enforced": True,
                     "required": True,
                     "owner": definition.owner,
                     "feature_id": definition.id,
@@ -1509,6 +1687,7 @@ class Dnd2024AdvancementEngine:
             requirements.append({
                 "id": f"feature_choice:{definition.owner}:{definition.id}:{choice.id}",
                 "kind": "feature_choice",
+                "enforced": True,
                 "required": True,
                 "owner": definition.owner,
                 "feature_id": definition.id,

@@ -76,6 +76,16 @@ def _advance_choices(preview: dict) -> dict:
                 option for option in requirement["options"] if option.get("available")
             ]
             choices[requirement_id] = str(available[0]["value"])
+        elif requirement.get("kind") == "metamagic":
+            count = int(requirement.get("count", 1) or 1)
+            choices["metamagic_option_ids"] = [
+                str(row["value"]) for row in requirement.get("options") or []
+            ][:count]
+        elif requirement.get("kind") == "known_forms":
+            count = int(requirement.get("count", 1) or 1)
+            choices["known_form_refs"] = [
+                str(row["value"]) for row in requirement.get("options") or []
+            ][:count]
         elif requirement_id == "ability_score_increases":
             allowed = requirement.get("allowed", "any")
             ability = "str" if allowed == "any" else str(allowed[0])

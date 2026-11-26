@@ -108,8 +108,8 @@
 | F24 | 属性、熟练与总值替换被动 | ✅ | #784 |
 | F25 | Wild Shape（德鲁伊核心，含 Beast Spells / Archdruid） | ⬜ | 有任务书 + 调研 `S0F25_WILD_SHAPE_RESEARCH`；被 **GAP-20/21/22/23** 挡住（变形地基整条未建） |
 | F26 | Land 主动特性 | ⬜ | 有任务书；未开工 |
-| F27 | 召唤物 | ⬜ | 有任务书；只有内容数据，无引擎原语 |
-| F28 | Metamagic | ⬜ | 有任务书；引擎无 `metamagic` 实现 |
+| F27 | ~~召唤物~~（**移出本线**） | ➖ | 实为召唤类法术的效果层（`find_familiar` L1 / `find_steed` L2 / `summon_dragon` L5），三个 feature 只是入口修饰（免材料/免槽一次/类型锁定）。不属于职业特性线，交由法术与召唤子系统处理 |
+| F28 | Metamagic | 🟡 | 本地完成、未提 PR：十选项 + 容器（Sorcery Incarnate / Apotheosis）+ 2/10/17 选择 + 每级替换 + 前端两种 kind；回归见 `S0F28_METAMAGIC_EXECUTION_REPORT` §3 |
 | F29 | Divine Words 类 | ⬜ | 有任务书；未开工 |
 | F30 | 长时效应 | ⬜ | 有任务书；未开工 |
 | F31 | 法术书与物品 | ⬜ | 有任务书；未开工 |

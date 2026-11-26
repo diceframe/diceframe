@@ -510,7 +510,29 @@ class CombatReactionSpellsMixin:
             return None
         if str(effect.get("mode") or "") in {"triggered_damage", "reaction_defense"}:
             return None
-        if not (set(spell.get("components") or []) & {"V", "S", "M"}):
+        # Subtle Spell 会抹掉成分：施法与反制必须问同一个权威，否则玩家可以
+        # 声称无声施法、而窗口仍按目录里的 V/S/M 判定"可以反制"。
+        components = spell.get("components") or []
+        if intent.get("metamagic"):
+            from ..spells import metamagic as metamagic_rules
+
+            try:
+                plan = metamagic_rules.plan(
+                    intent,
+                    spell=spell,
+                    effect=effect,
+                    known={str(row.get("option_id")): {} for row in intent["metamagic"]},
+                    points=10 ** 6,
+                    incarnate=True,
+                    apotheosis=False,
+                    free_used_this_turn=True,
+                    cast_level_one_plus_this_turn=False,
+                )
+            except metamagic_rules.MetamagicError:
+                plan = None
+            if plan is not None:
+                components = list(metamagic_rules.effective_components(spell, plan))
+        if not (set(components) & {"V", "S", "M"}):
             return None
         caster_id = str(intent.get("actor_id") or "")
         threats = []

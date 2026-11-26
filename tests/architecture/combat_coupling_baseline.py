@@ -18,6 +18,11 @@ from scripts.architecture_fitness import DependencyDebt
 #: in flight before this baseline existed.  Their kinds and intent keys are the
 #: first migration list of GAP-43, not a pattern to copy.
 #:
+#: Registered with #847 (S0-F28, 2026-11-25): the Metamagic intent switch and the
+#: Sorcery Incarnate / Arcane Apotheosis reads were in flight before this baseline
+#: existed.  They leave with GAP-43 C (attack and cast declarations) and the spell
+#: option table; Innate Sorcery itself is already a registered kind.
+#:
 #: One entry per (file, category, symbol), generated from the current package.
 #: Categories: kind_branch, feature_branch, feature_literal, intent_switch.
 COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
@@ -86,6 +91,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch", "actor_id"),
     DependencyDebt("src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch", "feature_id"),
     DependencyDebt("src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch", "intent_id"),
+    DependencyDebt("src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch", "metamagic"),
     DependencyDebt("src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch", "option"),
     DependencyDebt("src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch", "slot_level"),
     DependencyDebt("src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch", "spell_ref"),
@@ -106,6 +112,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "feature_value:studied_attacks"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "feature_value:superior_inspiration"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "feature_value:thiefs_reflexes"),
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:arcane_apotheosis"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:archdruid"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:beast_spells"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:brutal_strike"),
@@ -121,6 +128,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:reckless_attack"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:relentless_rage"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:sneak_attack"),
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:sorcery_incarnate"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:superior_inspiration"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:supreme_healing"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "has_feature:uncanny_metabolism"),
@@ -150,6 +158,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "initiative_choices"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "intent_id"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "item_ref"),
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "metamagic"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "mode"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "mounted_player_ids"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "option"),
@@ -194,13 +203,16 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "feature_value:reckless_attack"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "feature_value:stunning_strike"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "feature_value:superior_hunters_prey"),
+    DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:arcane_apotheosis"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:archdruid"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:brutal_strike"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:horde_breaker"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:improved_blessed_strikes"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:improved_brutal_strike"),
+    DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:metamagic"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:open_hand_technique"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:reckless_attack"),
+    DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:sorcery_incarnate"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:stunning_strike"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:superior_hunters_prey"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "feature_literal", "has_feature:wild_resurgence"),
@@ -233,6 +245,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "intent_id"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "item_ref"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "level"),
+    DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "metamagic"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "mode"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "mounted_player_ids"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "open_hand_choice"),

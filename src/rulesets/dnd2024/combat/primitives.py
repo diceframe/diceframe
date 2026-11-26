@@ -217,6 +217,9 @@ RELENTLESS_RAGE_DECISION = "relentless_rage"
 FEATURE_STATE_KEYS = {
     "relentless_rage": frozenset({"next_dc"}),
     "fiendish_resilience": frozenset({"damage_type"}),
+    # S0-F28：超魔选项是角色级选择。不投影它，战斗里的 known 就恒为空，
+    # 所有选项都会以 "not known" 被拒。
+    "metamagic": frozenset({"known"}),
 }
 
 

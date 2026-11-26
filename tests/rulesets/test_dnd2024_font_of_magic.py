@@ -127,11 +127,14 @@ def test_the_two_directions_arrive_with_the_feature(
     runtime: Dnd2024Runtime,
 ) -> None:
     early, early_instance = _combat(runtime, _sorcerer(runtime, 1))
-    assert _capabilities(early, early_instance) == {}
+    # 1 级只有 Innate Sorcery 一个主动能力：Font of Magic 从 2 级开始。
+    assert set(_capabilities(early, early_instance)) == {"innate_sorcery"}
 
     later, later_instance = _combat(runtime, _sorcerer(runtime, 2))
     offered = _capabilities(later, later_instance)
-    assert set(offered) == {"font_slot_to_points", "font_create_slot"}
+    assert set(offered) == {
+        "font_slot_to_points", "font_create_slot", "innate_sorcery",
+    }
     # 槽换点不花动作、也不要敌对目标；点换槽要附赠动作。
     assert not offered["font_slot_to_points"]["costs"]
     assert [cost["kind"] for cost in offered["font_create_slot"]["costs"]] == [

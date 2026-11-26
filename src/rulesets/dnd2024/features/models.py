@@ -252,6 +252,14 @@ class FeatureCapability:
     # 角色卡上的条，特性使用是一次性开关，两者在投影上不该混在一起。
     uses_per_long_rest: int = 0
     requires: tuple[str, ...] = ()
+    # 必须**为空**才算成立的那个资源池：Innate Sorcery 的 2 点术法点价格
+    # 只在次数用完之后才存在。``pool_resource_id`` 要求"还有余额"，这个刚好
+    # 相反，两者都是成本模型说不出来的前置。
+    exhausted_resource_id: str = ""
+    # 第二条价格挂在另一条特性上：Innate Sorcery 属于 1 级特性，而"用术法点
+    # 换一次"从 7 级的 Sorcery Incarnate 才开始。声明出来，引擎就不必记住
+    # "哪条能力在几级多出一种付法"。
+    requires_feature_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -936,6 +944,20 @@ class Dnd2024ClassFeatureCatalog:
             raise ClassFeatureError(
                 f"{capability_id}.uses_per_long_rest must be a non-negative integer"
             )
+        exhausted_resource_id = str(raw.get("exhausted_resource_id") or "")
+        if exhausted_resource_id:
+            _require_id(exhausted_resource_id, f"{capability_id}.exhausted_resource_id")
+            if exhausted_resource_id in {
+                cost.resource_id for cost in resources if isinstance(cost, ResourceCost)
+            }:
+                # 既"要先花掉一单位"又"必须是零"：没有角色能同时满足。
+                raise ClassFeatureError(
+                    f"{capability_id} cannot both spend and require-empty "
+                    f"{exhausted_resource_id}"
+                )
+        requires_feature_id = str(raw.get("requires_feature_id") or "")
+        if requires_feature_id:
+            _require_id(requires_feature_id, f"{capability_id}.requires_feature_id")
         return FeatureCapability(
             id=capability_id,
             feature_id=feature_id,
@@ -951,6 +973,8 @@ class Dnd2024ClassFeatureCatalog:
             pool_resource_id=pool_resource_id,
             uses_per_long_rest=uses_per_long_rest,
             requires=tuple(requires),
+            exhausted_resource_id=exhausted_resource_id,
+            requires_feature_id=requires_feature_id,
         )
 
     def label(self, key: str, default: str = "") -> str:
