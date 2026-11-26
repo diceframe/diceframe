@@ -197,8 +197,13 @@ def test_a_new_feature_branch_and_intent_switch_are_rejected(tmp_path: Path) -> 
     module = tmp_path / "src/rulesets/dnd2024/combat/resolution.py"
     module.parent.mkdir(parents=True)
     module.write_text(
-        "def resolve(engine, character, action, intent):\n"
+        "def resolve(engine, character, action, intent, row):\n"
         "    if action.kind == 'brand_new_feature':\n"
+        "        return True\n"
+        "    # The same branch, spelled the way a dict row is read.\n"
+        "    if row.get('kind') == 'brand_new_row_kind':\n"
+        "        return True\n"
+        "    if row['kind'] == 'brand_new_subscript_kind':\n"
         "        return True\n"
         "    if engine.features.has_feature(character, 'brand_new_feature'):\n"
         "        return True\n"
@@ -214,6 +219,14 @@ def test_a_new_feature_branch_and_intent_switch_are_rejected(tmp_path: Path) -> 
         DependencyDebt(
             "src/rulesets/dnd2024/combat/resolution.py",
             "kind_branch", "brand_new_feature",
+        ),
+        DependencyDebt(
+            "src/rulesets/dnd2024/combat/resolution.py",
+            "kind_branch", "brand_new_row_kind",
+        ),
+        DependencyDebt(
+            "src/rulesets/dnd2024/combat/resolution.py",
+            "kind_branch", "brand_new_subscript_kind",
         ),
         DependencyDebt(
             "src/rulesets/dnd2024/combat/resolution.py",
@@ -235,6 +248,19 @@ def test_a_new_feature_branch_and_intent_switch_are_rejected(tmp_path: Path) -> 
             set(),
             boundary="dnd2024 combat -> concrete feature",
         )
+
+
+def test_an_actor_kind_comparison_is_not_feature_coupling(tmp_path: Path) -> None:
+    module = tmp_path / "src/rulesets/dnd2024/combat/resolution.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(
+        "def resolve(actor, row):\n"
+        "    if actor.get('kind') == 'player':\n"
+        "        return row['kind'] == 'enemy'\n",
+        encoding="utf-8",
+    )
+
+    assert scan_combat_feature_coupling(tmp_path) == set()
 
 
 def test_known_size_hotspots_do_not_grow() -> None:

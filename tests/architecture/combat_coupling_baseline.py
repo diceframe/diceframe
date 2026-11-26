@@ -23,6 +23,12 @@ from scripts.architecture_fitness import DependencyDebt
 #: existed.  They leave with GAP-43 C (attack and cast declarations) and the spell
 #: option table; Innate Sorcery itself is already a registered kind.
 #:
+#: Visible since 2026-11-26, when the scanner also learned ``x.get("kind")`` and
+#: ``x["kind"]``: eight kind branches that were already there and could not be
+#: seen.  They are registered as they are, not as new debt.  Comparisons with an
+#: actor kind (``player`` / ``enemy`` / ``companion``) are not recorded: that is the
+#: engine telling a player from an enemy, not a rule written for one feature.
+#:
 #: One entry per (file, category, symbol), generated from the current package.
 #: Categories: kind_branch, feature_branch, feature_literal, intent_switch.
 COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
@@ -38,6 +44,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/check_windows.py", "intent_switch", "intent_id"),
     DependencyDebt("src/rulesets/dnd2024/combat/check_windows.py", "intent_switch", "option"),
     # GAP-43 D: re-key existing reads moved with divine actions and spell healing.
+    DependencyDebt("src/rulesets/dnd2024/combat/check_windows.py", "kind_branch", "death_save"),
     DependencyDebt("src/rulesets/dnd2024/combat/divine_actions.py", "feature_literal", "feature_value:blessed_healer"),
     DependencyDebt("src/rulesets/dnd2024/combat/divine_actions.py", "feature_literal", "feature_value:disciple_of_life"),
     DependencyDebt("src/rulesets/dnd2024/combat/divine_actions.py", "feature_literal", "feature_value:lay_on_hands"),
@@ -83,6 +90,9 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/martial_actions.py", "intent_switch", "open_hand_choice"),
     DependencyDebt("src/rulesets/dnd2024/combat/martial_actions.py", "intent_switch", "rider_move"),
     # GAP-43 D: re-key existing reads moved with ongoing effects.
+    DependencyDebt("src/rulesets/dnd2024/combat/martial_actions.py", "kind_branch", "open_hand"),
+    DependencyDebt("src/rulesets/dnd2024/combat/martial_actions.py", "kind_branch", "quivering_palm"),
+    DependencyDebt("src/rulesets/dnd2024/combat/martial_actions.py", "kind_branch", "stunning_strike"),
     DependencyDebt("src/rulesets/dnd2024/combat/ongoing_effects.py", "feature_literal", "feature_value:sacred_weapon"),
     DependencyDebt("src/rulesets/dnd2024/combat/ongoing_effects.py", "feature_literal", "has_feature:persistent_rage"),
     DependencyDebt("src/rulesets/dnd2024/combat/ongoing_effects.py", "feature_literal", "has_feature:sacred_weapon"),
@@ -95,6 +105,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch", "option"),
     DependencyDebt("src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch", "slot_level"),
     DependencyDebt("src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch", "spell_ref"),
+    DependencyDebt("src/rulesets/dnd2024/combat/reducer.py", "kind_branch", "attack"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "feature_value:brutal_strike"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "feature_value:colossus_slayer"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "feature_literal", "feature_value:danger_sense"),
@@ -185,6 +196,9 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "uses"),
     DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "intent_switch", "via_fleet_step"),
     # GAP-43 D: re-key existing reads moved with support actions.
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "miss_damage"),
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "normal"),
+    DependencyDebt("src/rulesets/dnd2024/combat/resolution.py", "kind_branch", "unimplemented"),
     DependencyDebt("src/rulesets/dnd2024/combat/support_actions.py", "feature_literal", "feature_value:bardic_inspiration"),
     DependencyDebt("src/rulesets/dnd2024/combat/triggered_spells.py", "feature_literal", "feature_value:smite_of_protection"),
     DependencyDebt("src/rulesets/dnd2024/combat/triggered_spells.py", "feature_literal", "has_feature:smite_of_protection"),
