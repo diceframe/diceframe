@@ -1179,7 +1179,7 @@ class CombatResolutionMixin:
         self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
         target: dict[str, Any], range_disadvantage: bool, *,
         ability: str, declared_reckless: bool, spend_luck: bool = False,
-        use_grant: bool = True,
+        use_grant: bool = True, opportunity: bool = False,
     ) -> dict[str, Any]:
         """Every Advantage/Disadvantage source on a weapon attack roll.
 
@@ -1234,6 +1234,13 @@ class CombatResolutionMixin:
             # Pack Tactics 问的不是"攻击者身边有没有同伙"，而是"目标身边有没有
             # 攻击者的同伙"——那只同伙也是目标的敌人。
             extra.append({"code": "pack_tactics", "mode": "advantage"})
+        # 猎人 7 的两个防御战术选项都不是"某生物处于某状态"，所以不进条件
+        # 注册表：Escape the Horde 只对借机攻击成立，Multiattack Defense 是
+        # "这个攻击者这一回合打过我"的成对事实。两者在这里合成来源。
+        if opportunity and self._defensive_tactics_option(target) == "escape_the_horde":
+            extra.append({"code": "escape_the_horde", "mode": "disadvantage"})
+        if self._multiattack_mark_active(combat, actor, target):
+            extra.append({"code": "multiattack_defense", "mode": "disadvantage"})
         check_mode = attack_mode(
             self, instance, actor, target, range_disadvantage,
             use_grant=use_grant, extra_sources=tuple(extra), combat=combat,
@@ -1406,6 +1413,74 @@ class CombatResolutionMixin:
             return None
         row = per_actor.get(str(target_id))
         return row if isinstance(row, dict) else None
+
+    #: The mark Multiattack Defense leaves on the attacker: "this creature hit
+    #: me this turn".  It rides the shared ``attack_marks`` store, so replay,
+    #: the turn-start sweep and the combat-end clear are the same machinery
+    #: Studied Attacks already uses; only the read gate differs (same round and
+    #: turn, rather than "my next turn").
+    MULTIATTACK_DEFENSE_MARK = "multiattack_defense"
+
+    def _defensive_tactics_option(self, actor: dict[str, Any]) -> str:
+        """The chosen Defensive Tactics option id, or "" when none is committed.
+
+        Both options are passives of the *defender*, so every reader asks the
+        defender's canonical sheet.  An un-answered choice grants nothing --
+        the resolver returns "" and no source/mark is produced.
+        """
+
+        if actor.get("kind") not in {"player", "companion"}:
+            return ""
+        return self.features.feature_option_choice(
+            self._feature_character(actor), "defensive_tactics", owner="subclass:hunter",
+        )
+
+    def _multiattack_mark_active(
+        self, combat: dict[str, Any], actor: dict[str, Any], target: dict[str, Any],
+    ) -> bool:
+        """Whether this attacker already hit this target *this turn*.
+
+        The row keeps the round/turn it was created in; requiring both to match
+        the current combat state is what makes "this turn" true.  The stored
+        counter only decides when the row is swept.
+        """
+
+        marks = combat.get("attack_marks")
+        per_kind = (
+            marks.get(self.MULTIATTACK_DEFENSE_MARK) if isinstance(marks, dict) else None
+        )
+        per_actor = (
+            per_kind.get(str(actor["actor_id"])) if isinstance(per_kind, dict) else None
+        )
+        row = (
+            per_actor.get(str(target["actor_id"])) if isinstance(per_actor, dict) else None
+        )
+        if not isinstance(row, dict):
+            return False
+        return (
+            int(row.get("round", -1)) == int(combat.get("round", 0) or 0)
+            and int(row.get("turn_index", -1)) == int(combat.get("turn_index", 0) or 0)
+        )
+
+    def _multiattack_mark_events(
+        self, actor: dict[str, Any], target: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Mark an attacker that just hit a Hunter who chose Multiattack Defense.
+
+        The first hit is not reached by this mark -- it is written after the
+        roll resolves -- which is exactly the SRD's "all *other* attack rolls".
+        """
+
+        if self._defensive_tactics_option(target) != "multiattack_defense":
+            return []
+        return [{
+            "type": "dnd2024.attack_mark.set",
+            "actor_id": str(actor["actor_id"]),
+            "kind": self.MULTIATTACK_DEFENSE_MARK,
+            "target_id": str(target["actor_id"]),
+            "turns_remaining": 0,
+            "expiry": "turn_end",
+        }]
 
     def _studied_mark_events(
         self, actor: dict[str, Any], target_id: str,
@@ -1679,6 +1754,10 @@ class CombatResolutionMixin:
     ) -> list[dict[str, Any]]:
         actor_id = str(intent["actor_id"])
         target_id = str(intent["target_id"])
+        # 借机攻击与普通攻击走同一张结算链，唯一的差别是掷骰的准入事实：
+        # Escape the Horde 只对借机攻击成立。标志由机会攻击路径自己写入，
+        # 缺失即普通攻击。
+        opportunity = bool(intent.get("opportunity_attack"))
         actor = (
             actor_view if actor_view is not None
             else self._actor_view(instance, combat, actor_id)
@@ -1784,6 +1863,7 @@ class CombatResolutionMixin:
             ability=ability,
             declared_reckless=declaration["reckless"],
             spend_luck=spend_luck, use_grant=spend_attack_action,
+            opportunity=opportunity,
         )
         if declaration["brutal"]:
             # 放弃全部 Advantage：来源仍写进事件留痕，但这一掷只掷一颗 d20。
@@ -1949,6 +2029,9 @@ class CombatResolutionMixin:
                 "condition": "rage",
             })
         if hit:
+            # Multiattack Defense：命中之后才立标记，所以这一击自己不受影响，
+            # 只有本回合后续对该防御者的攻击骰吃劣势。
+            events.extend(self._multiattack_mark_events(actor, target))
             events.extend(self._hit_settlement_events(
                 instance, combat, actor, target, weapon, check_event, intent, rng,
                 ability=ability, modifier=modifier,
@@ -5933,6 +6016,10 @@ class CombatResolutionMixin:
                     "intent_id": f"{decision['decision_id']}:attack",
                     "actor_id": threat_id,
                     "target_id": str(movement["actor_id"]),
+                    # 借机攻击会在结算后被改写成 reaction.spent；掷骰侧的准入
+                    # （Escape the Horde）要能分辨这一击是不是借机攻击，所以
+                    # 标志随意图一起进结算链。
+                    "opportunity_attack": True,
                 }
                 # 借机攻击必须是近战武器攻击：只有射程 5 尺的攻击档案才能
                 # 用作借机攻击（长弓等远程武器不构成威胁）；没有近战档案时

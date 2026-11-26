@@ -244,7 +244,9 @@ class CombatReducerMixin:
             # 握持、骑乘与两个攻击窗口账本都是"这一场"的事实：战斗结束就没有
             # 回合，也没有"手上拿着什么"。留着它们只会让下一场之前的读取看到
             # 一场已经结束的战斗的姿势。
-            for key in ("hands", "mounted", "light_attacks", "loading_shots"):
+            for key in (
+                "hands", "mounted", "light_attacks", "loading_shots", "attack_marks",
+            ):
                 combat[key] = {}
             # 狂暴靠每回合攻击或附赠动作续期；按回合计时的效果也只在回合
             # 边界到期。战斗结束后没有回合，它们随之结束；``duration=combat``
