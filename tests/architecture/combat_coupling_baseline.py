@@ -25,7 +25,19 @@ from scripts.architecture_fitness import DependencyDebt
 #:
 #: One entry per (file, category, symbol), generated from the current package.
 #: Categories: kind_branch, feature_branch, feature_literal, intent_switch.
+#:
+#: Re-keyed by the ``combat/engine.py`` split: the six feature_literal reads
+#: below moved verbatim into ``combat/availability.py`` together with
+#: ``available_intents`` and the rest of the availability surface.  The engine
+#: keeps ``feature_value:relentless_hunter`` and its intent switches, so a pure
+#: move leaves the total unchanged.
 COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
+    DependencyDebt("src/rulesets/dnd2024/combat/availability.py", "feature_literal", "feature_value:foe_slayer"),
+    DependencyDebt("src/rulesets/dnd2024/combat/availability.py", "feature_literal", "has_feature:brutal_strike"),
+    DependencyDebt("src/rulesets/dnd2024/combat/availability.py", "feature_literal", "has_feature:improved_brutal_strike"),
+    DependencyDebt("src/rulesets/dnd2024/combat/availability.py", "feature_literal", "has_feature:lands_aid"),
+    DependencyDebt("src/rulesets/dnd2024/combat/availability.py", "feature_literal", "has_feature:natures_sanctuary"),
+    DependencyDebt("src/rulesets/dnd2024/combat/availability.py", "feature_literal", "has_feature:wild_shape"),
     DependencyDebt("src/rulesets/dnd2024/combat/check_modes.py", "feature_literal", "feature_value:feral_senses"),
     DependencyDebt("src/rulesets/dnd2024/combat/check_modes.py", "feature_literal", "feature_value:precise_hunter"),
     DependencyDebt("src/rulesets/dnd2024/combat/check_windows.py", "feature_literal", "feature_value:bardic_inspiration"),
@@ -52,13 +64,7 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/divine_actions.py", "intent_switch", "spark_mode"),
     DependencyDebt("src/rulesets/dnd2024/combat/divine_actions.py", "intent_switch", "target_id"),
     DependencyDebt("src/rulesets/dnd2024/combat/divine_actions.py", "intent_switch", "target_ids"),
-    DependencyDebt("src/rulesets/dnd2024/combat/engine.py", "feature_literal", "feature_value:foe_slayer"),
     DependencyDebt("src/rulesets/dnd2024/combat/engine.py", "feature_literal", "feature_value:relentless_hunter"),
-    DependencyDebt("src/rulesets/dnd2024/combat/engine.py", "feature_literal", "has_feature:brutal_strike"),
-    DependencyDebt("src/rulesets/dnd2024/combat/engine.py", "feature_literal", "has_feature:improved_brutal_strike"),
-    DependencyDebt("src/rulesets/dnd2024/combat/engine.py", "feature_literal", "has_feature:lands_aid"),
-    DependencyDebt("src/rulesets/dnd2024/combat/engine.py", "feature_literal", "has_feature:natures_sanctuary"),
-    DependencyDebt("src/rulesets/dnd2024/combat/engine.py", "feature_literal", "has_feature:wild_shape"),
     DependencyDebt("src/rulesets/dnd2024/combat/engine.py", "intent_switch", "action"),
     DependencyDebt("src/rulesets/dnd2024/combat/engine.py", "intent_switch", "actor_id"),
     DependencyDebt("src/rulesets/dnd2024/combat/engine.py", "intent_switch", "condition"),
