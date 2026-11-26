@@ -2753,7 +2753,7 @@
           "minimum_level": 6,
           "resource_id": "natural_recovery",
           "source_ref": "srd-5.2.1:p46:natural-recovery",
-          "summary": "Once per Long Rest, when you finish a Short Rest, recover expended spell slots with a combined level no higher than half your Druid level (round up); none of them may be level 6 or higher."
+          "summary": "Once per Long Rest, when you finish a Short Rest, recover expended spell slots with a combined level no higher than half your Druid level (round up); none of them may be level 6 or higher. Separately, you can cast one level 1+ spell you have prepared from your Circle Spells feature without expending a spell slot; you must finish a Long Rest before doing so again."
         },
         {
           "id": "circle_of_the_land_spells",
@@ -2762,6 +2762,7 @@
           "source_ref": "srd-5.2.1:p46:circle-of-the-land-spells",
           "summary": "Whenever you finish a Long Rest, choose one type of land: arid, polar, temperate, or tropical; you have the spells listed for your Druid level and lower prepared. The choice replaces the previous land's list rather than adding to it.",
           "parameters": {
+            "free_cast_resource_id": "natural_recovery_cast",
             "terrain_options": [
               "arid",
               "polar",

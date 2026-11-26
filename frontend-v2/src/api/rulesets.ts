@@ -11,6 +11,8 @@ import type {
   RulesetProgressionResponse,
   RulesetRestResponse,
   RulesetRestOptionsResponse,
+  RulesetRitualOptionsResponse,
+  RulesetRitualResponse,
   RestDecisionResponse,
   RulesetGameplayResponse,
   RulesetTemporaryEncounterResponse,
@@ -221,6 +223,8 @@ export interface RestSubmissionOptions {
   landTerrain?: string
   /** slot_id -> spell ref; the server accepts at most `rest_replace` entries. */
   freeCast?: Record<string, string>
+  /** resource_id -> what to take back; Short Rest only. */
+  recovery?: Record<string, { slots?: Record<string, number>; points?: number }>
 }
 
 export function resolveLiveCharacterRest(
@@ -245,6 +249,11 @@ export function resolveLiveCharacterRest(
   if (options?.landTerrain) body.land_terrain = options.landTerrain
   const freeCast = options?.freeCast || {}
   if (Object.keys(freeCast).length) body.free_cast = freeCast
+  // 短休恢复同样是"有才发"。服务端把空对象当作"没有恢复计划"静默放行
+  // （`_plan_short_recovery` 对 `{}` 直接返回空表），所以空对象不是错误，
+  // 而是一次没有意义的写入——不发它。
+  const recovery = options?.recovery || {}
+  if (Object.keys(recovery).length) body.recovery = recovery
   return api<RulesetRestResponse>(
     `/games/${encodeURIComponent(gameKey)}/character/${encodeURIComponent(userId)}/rest`,
     { method: 'POST', body: JSON.stringify(body) },
@@ -269,6 +278,37 @@ export function fetchLiveCharacterRestOptions(
 ): Promise<RulesetRestOptionsResponse> {
   return api<RulesetRestOptionsResponse>(
     `/games/${encodeURIComponent(gameKey)}/character/${encodeURIComponent(userId)}/rest/options`,
+  )
+}
+
+/** Read-only: what this character could perform right now; never performs one. */
+export function fetchLiveCharacterRitualOptions(
+  gameKey: string,
+  userId: string,
+): Promise<RulesetRitualOptionsResponse> {
+  return api<RulesetRitualOptionsResponse>(
+    `/games/${encodeURIComponent(gameKey)}/character/${encodeURIComponent(userId)}/ritual/options`,
+  )
+}
+
+/**
+ * Perform a timed rite. The server spends the minutes inside the same write, so
+ * `confirm_elapsed_time` is not a formality: game time really moves.
+ */
+export function performLiveCharacterRitual(
+  gameKey: string,
+  userId: string,
+  options: { resource_id?: string; expected_revision: number; operation_id: string },
+): Promise<RulesetRitualResponse> {
+  return api<RulesetRitualResponse>(
+    `/games/${encodeURIComponent(gameKey)}/character/${encodeURIComponent(userId)}/ritual`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        ...options,
+        confirm_elapsed_time: true,
+      }),
+    },
   )
 }
 

@@ -36,10 +36,19 @@ const character = {
 
 describe('ProfessionalCharacterCenter', () => {
   beforeEach(() => {
-    mocks.api.mockReset().mockResolvedValue({
-      ok: true,
-      card: { ...character, character_name: 'Arden Vale' },
-    })
+    // 打开休息页会先读一次选项（短休的恢复预算也算声明），所以默认实现要按路径
+    // 分流；用 Once 的用例会被这一次读选项吃掉。
+    mocks.api.mockReset().mockImplementation((path: string) => (
+      String(path).endsWith('/rest/options')
+        ? Promise.resolve({
+            ok: true,
+            rest_options: { land_terrain: null, free_cast: [], short_recovery: [] },
+          })
+        : Promise.resolve({
+            ok: true,
+            card: { ...character, character_name: 'Arden Vale' },
+          })
+    ))
   })
 
   it('opens a direct rest entry without submitting or changing the character', async () => {
@@ -50,7 +59,12 @@ describe('ProfessionalCharacterCenter', () => {
     await flushPromises()
     expect(wrapper.get('.center-tabs button:nth-child(4)').classes()).toContain('active')
     expect(wrapper.find('.rest-center').exists()).toBe(true)
-    expect(mocks.api).not.toHaveBeenCalled()
+    // 只读选项（休息 + 仪式），绝不提交：打开休息入口不等于休息。
+    const calls = mocks.api.mock.calls.map(([path]) => String(path))
+    expect(calls).toEqual([
+      '/games/web%7Croom%7Cbot/character/player%2F1/rest/options',
+      '/games/web%7Croom%7Cbot/character/player%2F1/ritual/options',
+    ])
     wrapper.unmount()
   })
 
@@ -94,14 +108,37 @@ describe('ProfessionalCharacterCenter', () => {
     expect(wrapper.emitted('saved')).toHaveLength(1)
   })
 
+  const shortRestOptions = {
+    ok: true,
+    rest_options: {
+      land_terrain: null,
+      free_cast: [],
+      short_recovery: [{
+        resource_id: 'natural_recovery',
+        mode: 'spell_slots',
+        budget: 3,
+        uses_left: 1,
+        max_slot_level: 5,
+        slots: [
+          { level: 1, expended: 2, maximum: 4 },
+          { level: 3, expended: 1, maximum: 2 },
+        ],
+      }],
+    },
+  }
+
   it('submits live rest intent with hit-die counts, confirmation, and revision', async () => {
-    mocks.api.mockResolvedValueOnce({
-      ok: true,
-      character: { ...character, hp: 12, ruleset_revision: 4 },
-      rest: 'short',
-      events: [],
-      revision: 4,
-    })
+    mocks.api.mockImplementation((path: string) => (
+      String(path).endsWith('/rest/options')
+        ? Promise.resolve(shortRestOptions)
+        : Promise.resolve({
+            ok: true,
+            character: { ...character, hp: 12, ruleset_revision: 4 },
+            rest: 'short',
+            events: [],
+            revision: 4,
+          })
+    ))
     const wrapper = mount(ProfessionalCharacterCenter, {
       props: {
         character: { ...character, ruleset_revision: 3 },
@@ -115,6 +152,7 @@ describe('ProfessionalCharacterCenter', () => {
     })
 
     await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    await flushPromises()
     expect(wrapper.text()).toContain('生命骰')
     expect(wrapper.text()).toContain('1 / 1')
     const restOptions = wrapper.findAll('.rest-type-option')
@@ -127,32 +165,265 @@ describe('ProfessionalCharacterCenter', () => {
     await wrapper.get('.rest-center > button').trigger('click')
     await flushPromises()
 
-    const [path, request] = mocks.api.mock.calls[0]
-    expect(path).toBe('/games/web%7Croom%7Cbot/character/player%2F1/rest')
-    const body = JSON.parse(request.body)
+    const submit = mocks.api.mock.calls.find(
+      ([path]) => String(path).endsWith('/character/player%2F1/rest'),
+    )
+    expect(submit).toBeTruthy()
+    const body = JSON.parse(submit![1].body)
     expect(body).toMatchObject({
       rest: 'short', hit_dice: { d10: 1 }, confirm_elapsed_time: true,
       expected_revision: 3,
     })
     expect(body.operation_id).toEqual(expect.any(String))
     expect(body).not.toHaveProperty('hit_die_rolls')
+    // 没选恢复就不发这一块：服务端把 `{}` 当"没有计划"静默放行，发它等于
+    // 每次短休都塞一个无意义的字段。
+    expect(body).not.toHaveProperty('recovery')
     expect(wrapper.emitted('saved')?.[0]?.[1]).toBe('rest')
   })
 
-  it('shows party rest readiness and keeps the dialog open while waiting', async () => {
-    mocks.api.mockResolvedValueOnce({
-      ok: true,
-      pending: true,
-      resolved: false,
-      rest: 'short',
-      rest_session: {
-        active: true, status: 'collecting', rest: 'short', ready_count: 1, active_count: 2,
-        participants: [
-          { user_id: 'player/1', character_name: 'Arden', status: 'submitted' },
-          { user_id: 'player/2', character_name: 'Mira', status: 'waiting' },
-        ],
+  it('offers the Short Rest recovery budget and submits only what was chosen', async () => {
+    mocks.api.mockImplementation((path: string) => (
+      String(path).endsWith('/rest/options')
+        ? Promise.resolve(shortRestOptions)
+        : Promise.resolve({ ok: true, character: { ...character, ruleset_revision: 4 }, events: [] })
+    ))
+    const wrapper = mount(ProfessionalCharacterCenter, {
+      props: {
+        character: { ...character, ruleset_revision: 3 },
+        target: 'game', gameKey: 'web|room|bot', userId: 'player/1',
+        ruleId: 'dnd2024_srd', language: 'zh-CN',
       },
+      global: { stubs: { PortraitPicker: true } },
     })
+
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    await flushPromises()
+
+    // 预算与"已用/上限"都来自服务端投影，前端只画。
+    const block = wrapper.get('.rest-recovery')
+    expect(block.text()).toContain('预算 3 环')
+    expect(block.text()).toContain('今日剩余 1 次')
+    const fields = block.findAll('.rest-recovery-field input')
+    expect(fields).toHaveLength(2)
+
+    // 3 环那格买回 1 个 = 刚好用完预算；再想多买会被挡住。
+    await fields[1].setValue(1)
+    await wrapper.get('.rest-confirm input').setValue(true)
+    await wrapper.get('.rest-center > button').trigger('click')
+    await flushPromises()
+
+    const submit = mocks.api.mock.calls.find(
+      ([path]) => String(path).endsWith('/character/player%2F1/rest'),
+    )
+    expect(JSON.parse(submit![1].body).recovery).toEqual({
+      natural_recovery: { slots: { '3': 1 } },
+    })
+  })
+
+  it('blocks a Short Rest that would exceed the recovery budget', async () => {
+    mocks.api.mockImplementation((path: string) => (
+      String(path).endsWith('/rest/options')
+        ? Promise.resolve(shortRestOptions)
+        : Promise.resolve({ ok: true, character, events: [] })
+    ))
+    const wrapper = mount(ProfessionalCharacterCenter, {
+      props: {
+        character: { ...character, ruleset_revision: 3 },
+        target: 'game', gameKey: 'web|room|bot', userId: 'player/1',
+        ruleId: 'dnd2024_srd', language: 'zh-CN',
+      },
+      global: { stubs: { PortraitPicker: true } },
+    })
+
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    await flushPromises()
+    const fields = wrapper.get('.rest-recovery').findAll('.rest-recovery-field input')
+    // 3 环 1 个已经用满 3 点预算，再买 1 个 1 环就超了。
+    await fields[1].setValue(1)
+    await fields[0].setValue(1)
+    await flushPromises()
+
+    expect(wrapper.get('.rest-recovery').text()).toContain('超出预算')
+    await wrapper.get('.rest-confirm input').setValue(true)
+    expect(wrapper.get('.rest-center > button').attributes('disabled')).toBeDefined()
+  })
+
+  it('blocks buying back more slots than a level has expended', async () => {
+    mocks.api.mockImplementation((path: string) => (
+      String(path).endsWith('/rest/options')
+        ? Promise.resolve(shortRestOptions)
+        : Promise.resolve({ ok: true, character, events: [] })
+    ))
+    const wrapper = mount(ProfessionalCharacterCenter, {
+      props: {
+        character: { ...character, ruleset_revision: 3 },
+        target: 'game', gameKey: 'web|room|bot', userId: 'player/1',
+        ruleId: 'dnd2024_srd', language: 'zh-CN',
+      },
+      global: { stubs: { PortraitPicker: true } },
+    })
+
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    await flushPromises()
+    const fields = wrapper.get('.rest-recovery').findAll('.rest-recovery-field input')
+    // 1 环只消耗了 2 个，买回 3 个仍在 3 环预算内——超的是每级上限，
+    // 不是预算。服务端会拒（cannot recover more level 1 slots than are expended），
+    // 但玩家不该先点得动再吃一个英文报错。
+    await fields[0].setValue(3)
+    await flushPromises()
+
+    expect(wrapper.get('.rest-recovery').text()).toContain('比已消耗还多 1 个')
+    await wrapper.get('.rest-confirm input').setValue(true)
+    expect(wrapper.get('.rest-center > button').attributes('disabled')).toBeDefined()
+  })
+
+  it('caps a points pool at what was actually spent', async () => {
+    // 点数池与法术位是两条分支：上限不是"预算"一个数，而是 min(已消耗, 预算)。
+    // 这张卡花了 3 点，预算只有 2 点，所以最多回 2 点。
+    mocks.api.mockImplementation((path: string) => (
+      String(path).endsWith('/rest/options')
+        ? Promise.resolve({
+            ok: true,
+            rest_options: {
+              land_terrain: null,
+              free_cast: [],
+              short_recovery: [{
+                resource_id: 'sorcerous_restoration',
+                mode: 'points',
+                budget: 2,
+                uses_left: 1,
+                track: 'sorcery_points',
+                spent: 3,
+              }],
+            },
+          })
+        : Promise.resolve({ ok: true, character, events: [] })
+    ))
+    const wrapper = mount(ProfessionalCharacterCenter, {
+      props: {
+        character: {
+          ...character,
+          ruleset_revision: 3,
+          class_resources: [
+            { id: 'sorcerous_restoration', name: '术法复苏', current: 1, maximum: 1 },
+          ],
+        },
+        target: 'game', gameKey: 'web|room|bot', userId: 'player/1',
+        ruleId: 'dnd2024_srd', language: 'zh-CN',
+      },
+      global: { stubs: { PortraitPicker: true } },
+    })
+
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    await flushPromises()
+
+    const block = wrapper.get('.rest-recovery')
+    expect(block.text()).toContain('术法复苏')
+    expect(block.text()).toContain('预算 2 点')
+
+    const field = block.get('.rest-recovery-field input')
+    // 花掉 3 点也只想回 3 点：预算 2 点挡住了，按钮跟着禁用。
+    await field.setValue(3)
+    await flushPromises()
+    expect(block.text()).toContain('超出预算')
+    await wrapper.get('.rest-confirm input').setValue(true)
+    expect(wrapper.get('.rest-center > button').attributes('disabled')).toBeDefined()
+
+    await field.setValue(2)
+    await flushPromises()
+    await wrapper.get('.rest-center > button').trigger('click')
+    await flushPromises()
+
+    const submit = mocks.api.mock.calls.find(
+      ([path]) => String(path).endsWith('/character/player%2F1/rest'),
+    )
+    expect(JSON.parse(submit![1].body).recovery).toEqual({
+      sorcerous_restoration: { points: 2 },
+    })
+  })
+
+  it('re-reads the recovery budget when someone else moves the character', async () => {
+    // 队伍休息要 DM 批准：批准时角色卡是被别人推进的，面板不能一直画着
+    // 休息前的"今日剩余 1 次"。版本号一变就重读。
+    mocks.api.mockImplementation((path: string) => (
+      String(path).endsWith('/rest/options')
+        ? Promise.resolve(shortRestOptions)
+        : Promise.resolve({ ok: true, character, events: [] })
+    ))
+    const wrapper = mount(ProfessionalCharacterCenter, {
+      props: {
+        character: { ...character, ruleset_revision: 3 },
+        target: 'game', gameKey: 'web|room|bot', userId: 'player/1',
+        ruleId: 'dnd2024_srd', language: 'zh-CN',
+      },
+      global: { stubs: { PortraitPicker: true } },
+    })
+
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    await flushPromises()
+    const reads = () => mocks.api.mock.calls
+      .filter(([path]) => String(path).endsWith('/rest/options')).length
+    expect(reads()).toBe(1)
+
+    // 同一个版本号重复渲染不该再问一次。
+    await wrapper.setProps({ character: { ...character, ruleset_revision: 3 } })
+    await flushPromises()
+    expect(reads()).toBe(1)
+
+    await wrapper.setProps({ character: { ...character, ruleset_revision: 4 } })
+    await flushPromises()
+    expect(reads()).toBe(2)
+  })
+
+  it('tells the player a Short Rest lost its recovery options, but still lets them rest', async () => {
+    mocks.api.mockImplementation((path: string) => (
+      String(path).endsWith('/rest/options')
+        ? Promise.resolve({ ok: false, error: '读取休息选项失败' })
+        : Promise.resolve({ ok: true, character, events: [] })
+    ))
+    const wrapper = mount(ProfessionalCharacterCenter, {
+      props: {
+        character: { ...character, ruleset_revision: 3 },
+        target: 'game', gameKey: 'web|room|bot', userId: 'player/1',
+        ruleId: 'dnd2024_srd', language: 'zh-CN',
+      },
+      global: { stubs: { PortraitPicker: true } },
+    })
+
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    await flushPromises()
+
+    // 静默降级是错的：玩家会以为"本来就没东西可回"。
+    const error = wrapper.get('.rest-options-error')
+    expect(error.text()).toContain('不会恢复法术位')
+    expect(error.text()).toContain('读取休息选项失败')
+    // 但读不到选项不该把人锁在休息外面。
+    await wrapper.get('.rest-confirm input').setValue(true)
+    expect(wrapper.get('.rest-center > button').attributes('disabled')).toBeUndefined()
+  })
+
+  it('shows party rest readiness and keeps the dialog open while waiting', async () => {
+    mocks.api.mockImplementation((path: string) => (
+      String(path).endsWith('/rest/options')
+        ? Promise.resolve({
+            ok: true,
+            rest_options: { land_terrain: null, free_cast: [], short_recovery: [] },
+          })
+        : Promise.resolve({
+            ok: true,
+            pending: true,
+            resolved: false,
+            rest: 'short',
+            rest_session: {
+              active: true, status: 'collecting', rest: 'short', ready_count: 1, active_count: 2,
+              participants: [
+                { user_id: 'player/1', character_name: 'Arden', status: 'submitted' },
+                { user_id: 'player/2', character_name: 'Mira', status: 'waiting' },
+              ],
+            },
+          })
+    ))
     const wrapper = mount(ProfessionalCharacterCenter, {
       props: {
         character: { ...character, ruleset_revision: 3 },
@@ -376,16 +647,21 @@ describe('ProfessionalCharacterCenter', () => {
     })
   }
 
-  it('asks for the long-rest choices only once a long rest is selected', async () => {
+  it('asks for the rest choices once the rest page is opened, and only once', async () => {
     const wrapper = mountLongRest()
     await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
-    // 短休没有任何声明：打开面板不发请求。
-    expect(mocks.api).not.toHaveBeenCalled()
-    await wrapper.findAll('.rest-type-option')[1].get('input').setValue(true)
     await flushPromises()
-    expect(mocks.api.mock.calls[0][0]).toBe(
+    const optionsCalls = () => mocks.api.mock.calls
+      .map(([path]) => String(path))
+      .filter(path => path.endsWith('/rest/options'))
+    // 短休现在也有声明（恢复预算），所以打开这一页就要问一次；但只问一次。
+    expect(optionsCalls()).toHaveLength(1)
+    expect(optionsCalls()[0]).toBe(
       '/games/web%7Croom%7Cbot/character/player%2F1/rest/options',
     )
+    await wrapper.findAll('.rest-type-option')[1].get('input').setValue(true)
+    await flushPromises()
+    expect(optionsCalls()).toHaveLength(1)
     expect(wrapper.find('.rest-terrain').exists()).toBe(true)
     expect(wrapper.find('.rest-study').exists()).toBe(true)
     // 地形预填当前值，研究默认"不替换"：不选就什么都不改。
@@ -475,5 +751,95 @@ describe('ProfessionalCharacterCenter', () => {
     expect(body.approve).toBe(true)
     expect(body.operation_id).toBeTruthy()
     expect(wrapper.emitted('rest-pending')).toHaveLength(1)
+  })
+})
+
+describe('ProfessionalCharacterCenter · timed ritual', () => {
+  const ritualOptions = {
+    ok: true,
+    ritual_options: [{
+      resource_id: 'magical_cunning',
+      minutes: 1,
+      uses_left: 1,
+      slot_level: 3,
+      maximum: 2,
+      expended: 2,
+      regain: 1,
+      full_budget: false,
+    }],
+  }
+
+  function mountRitual() {
+    mocks.api.mockImplementation((path: string) => {
+      const target = String(path)
+      if (target.endsWith('/rest/options')) {
+        return Promise.resolve({
+          ok: true,
+          rest_options: { land_terrain: null, free_cast: [], short_recovery: [] },
+        })
+      }
+      if (target.endsWith('/ritual/options')) return Promise.resolve(ritualOptions)
+      if (target.endsWith('/ritual')) {
+        return Promise.resolve({
+          ok: true,
+          character: { ...character, ruleset_revision: 5 },
+          duration_minutes: 1,
+        })
+      }
+      return Promise.resolve({ ok: true })
+    })
+    return mount(ProfessionalCharacterCenter, {
+      props: {
+        // revision 必须有非 0 值：仪式把它原样交给服务端做乐观锁，
+        // 传 0 的话"取自 props"与"写死 0"两种实现都会绿。
+        character: {
+          ...character,
+          ruleset_revision: 7,
+          class_resources: [
+            { id: 'magical_cunning', name: '玄妙巧计', current: 1, maximum: 1 },
+          ],
+        },
+        target: 'game', gameKey: 'web|room|bot', userId: 'player/1',
+        ruleId: 'dnd2024_srd', language: 'zh-CN',
+      },
+      global: { stubs: { PortraitPicker: true } },
+    })
+  }
+
+  it('draws what the rite would give back, from the server projection', async () => {
+    const wrapper = mountRitual()
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    await flushPromises()
+
+    const block = wrapper.get('.ritual-center')
+    // 显示名取自角色卡上的 class_resources，不是裸资源 id。
+    expect(block.text()).toContain('玄妙巧计')
+    expect(block.text()).not.toContain('magical_cunning')
+    expect(block.text()).toContain('1 分钟')
+    expect(block.text()).toContain('恢复 1 个 3 环')
+    expect(block.text()).toContain('今日剩余 1 次')
+  })
+
+  it('requires the time confirmation before performing the rite', async () => {
+    const wrapper = mountRitual()
+    await wrapper.get('.center-tabs button:nth-child(4)').trigger('click')
+    await flushPromises()
+
+    const button = wrapper.get('.ritual-submit')
+    expect(button.attributes('disabled')).toBeDefined()
+    await wrapper.get('.ritual-center .rest-confirm input').setValue(true)
+    expect(button.attributes('disabled')).toBeUndefined()
+
+    await button.trigger('click')
+    await flushPromises()
+
+    const submit = mocks.api.mock.calls.find(([path]) => String(path).endsWith('/ritual'))
+    expect(submit).toBeTruthy()
+    expect(JSON.parse(submit![1].body)).toMatchObject({
+      resource_id: 'magical_cunning',
+      confirm_elapsed_time: true,
+      expected_revision: 7,
+    })
+    expect(wrapper.emitted('saved')).toHaveLength(1)
   })
 })

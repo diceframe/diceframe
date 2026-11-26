@@ -118,7 +118,7 @@ class CombatReactionSpellsMixin:
                 int(level) for level, count in defender["slots"].items()
                 if int(count) > 0 and int(level) >= int(spell["level"])
             ]
-            if free_cast_resource(defender, ref):
+            if free_cast_resource(defender, ref, int(spell["level"])):
                 slots.append(0)
             if slots:
                 choices.append({

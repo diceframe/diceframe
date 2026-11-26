@@ -84,6 +84,10 @@ def _parse_declaration(
         short_rest=raw_spec.get("short", "none"),
         long_rest=raw_spec.get("long", "none"),
         short_all_from_level=short_all_from_level,
+        # 休息表按**职业**键入，说不出"只有某个子职"。`sync_resources` 早就按
+        # 这个键删池，但投影读的是这份解析结果——不带着它走，投影就会给月德鲁伊
+        # 报一个 store 里根本不存在的自然恢复。
+        requires_subclass=str(raw_spec.get("requires_subclass") or ""),
     )
 
 
@@ -98,6 +102,7 @@ class ClassResourceDeclaration:
     short_rest: Any
     long_rest: Any
     short_all_from_level: int
+    requires_subclass: str = ""
 
     def recovery(self) -> dict[str, Any]:
         return {
