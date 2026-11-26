@@ -56,6 +56,7 @@
 | GAP-42 | 玩家申报骰面（实体骰）没有通道 | 战斗里每个 d20 都来自服务端 rng；`src/engine/dice.py::parse_player_roll` 只服务老通用引擎的聊天掷骰，不绑定任何 `check.resolved` | 桌上掷实体骰的玩家无法把自己的点数交给引擎，只能由服务端重掷 | 需先定信任模型（谁能申报、如何审计、GM 可否覆盖），未立项 | 未开工 |
 | GAP-41 | rider 的生物类型前提无法表达 | Ghoul 的麻痹写明「非亡灵非精灵」；`parse_riders` 见到这类前提整条不导入 | 这类 rider 在目录里缺席（宁可缺席也不对所有目标生效） | S0-MM4 | 未开工 |
 | GAP-46 | 重新规范化角色卡会把职业资源的当日消耗重置为满 | `runtime.normalize_character_submission()` 重建后调 `_sync_class_resources()` → `_sync_specs`，对"不存在的池"直接 `current = maximum`；`ruleset_characters.py:185/457` 会走这条路径 | 任何"每长休一次"的资源（自然恢复的免费面、诗人的激励、幸运点…）都能靠重新导入角色卡刷新，绕开日计数 | 与"资源首次创建即满"的迁移策略一起定，未立项 | 未开工 |
+| GAP-47 | 兼职角色不能休息，也不能举行仪式 | `resting/engine.py:1153 _class_state()` 要求 `build.class_levels` 恰好一行，否则 `RestError("rest recovery currently requires one class")`；`_require_conscious` 之后第一处就撞上它 | 任何 `class_levels` 多于一条的角色卡在休息与仪式上 100% 失败。要修得同时改 `_class_state`、`sync_resources`、progression snapshot、生命骰四处，影响所有休息路径 | 单独立项（休息引擎的通用缺口，不是某一特性的前置） | 未开工 |
 
 
 ## 按片索引
@@ -72,6 +73,7 @@
 - **S0-MM3e**：GAP-38、GAP-39（本片内解决）
 - **S0-MM3b/c/d 的遗留 + 后续 MM 片**：GAP-27 – GAP-37、GAP-40 – GAP-42
 - **未立项（资源日计数）**：GAP-46
+- **未立项（兼职休息）**：GAP-47
 
 ## 附注 A：为什么 Utilize 不需要对象模型
 

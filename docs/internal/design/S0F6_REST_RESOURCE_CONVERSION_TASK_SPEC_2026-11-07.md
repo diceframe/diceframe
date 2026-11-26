@@ -10,7 +10,7 @@
 | 代码基线 | 祖先基线 `integration/dnd2024-srd@35653f81` |
 | 硬前置 | S0-D2、S0-F5 已合入；S0-F4 的 Circle Spells 来源随 F5 前置可用 |
 | 执行模型 | `dsv4.1f` |
-| 状态 | **a/b/c 已交付**（2026-11-10，见 §10–§12）；**F6d 已交付**（2026-11-26，见 §16）；**F6e 待做**（§15） |
+| 状态 | **全部交付**：a/b/c（2026-11-10，§10–§12）、F6d（2026-11-26，§16）、F6e（2026-11-26，§17）；兼职休息不在本片（见 §16.3） |
 
 ## 1. 范围纪律
 
@@ -397,17 +397,21 @@ git diff --check
 | 6f | 花掉免费面后仍可提交 `recovery`（短休槽预算），反序亦然 |
 | 7 | 切换地形后，旧地形的法术不再能免费（新地形法术可以） |
 
-## 15. F6e 契约：三个入口的 UI（另提交）
+## 15. F6e 契约：入口的 UI（已交付，见 §17）
 
-投影与端点都已就绪，缺的只是画。三处各自读什么：
+投影与端点都已就绪，缺的只是画。两处各自读什么：
 
 | 入口 | 读 | 写 |
 |---|---|---|
-| 短休恢复选择器 | `GET .../rest/options` → `rest_options.short_recovery`（`budget` / `max_slot_level` / 已消耗槽） | `complete_short_rest` 的 `recovery = {<resource_id>: {"slots": {"<环阶>": n}}}` |
-| Magical Cunning 仪式 | `GET .../ritual/options` → `resource_id` / `minutes` / `regain` / `full_budget` | `POST .../ritual`，必须带 `confirm_elapsed_time: true`（时间会推进） |
-| Font 换点/造槽 | 战斗内 `available_intents` 的两条 capability | 既有 intent（`font_slot_to_points` 无动作、`font_create_slot` 附赠动作） |
+| 短休恢复选择器 | `GET .../rest/options` → `rest_options.short_recovery`（`budget` / `max_slot_level` / 已消耗槽 / `uses_left`） | `complete_short_rest` 的 `recovery = {<resource_id>: {"slots": {"<环阶>": n}}}`（点数池是 `{"points": n}`） |
+| Magical Cunning 仪式 | `GET .../ritual/options` → `resource_id` / `minutes` / `regain` / `full_budget` / `uses_left` | `POST .../ritual`，必须带 `confirm_elapsed_time: true` 与 `expected_revision`（时间会推进） |
 
-约束：三处都只渲染服务端给的数量与费用（`created_slot_costs` 五行表来自内容，不在前端写死）；非法组合不要让用户点得动，但最终拒绝仍在服务端。
+**第三处（Font 换点/造槽）不需要 frontend 工作**：复核后确认它的两条 capability 早就是
+`class_capability`，战斗面板对这类条目做通用渲染（`Dnd2024CombatPanel.vue` 的
+`capabilityActions` + 既有用例）。真正的缺口是"出战斗后没有入口"——那是探索态意图的
+缺口（§12.2 第 2 条），属于引擎切片，不是 UI。
+
+约束：两处都只渲染服务端给的数量与费用（`created_slot_costs` 五行表来自内容，不在前端写死）；非法组合不要让用户点得动，但最终拒绝仍在服务端。
 
 ## 16. F6d 执行记录（2026-11-26）
 
@@ -435,14 +439,69 @@ git diff --check
 ### 16.3 已知缺口
 
 - **GAP-46**：`normalize_character_submission()` 会把职业资源重建为满，等于给"每长休一次"开后门（所有职业资源共有，不是本片引入）。
-- **前端未接线**（F6e，§15）：投影已带 `resource_id` 与叫法，但 UI 还没画"这次要不要用免费面"的入口。
+- ~~**前端未接线**（F6e，§15）~~：已由 §17 接线。投影当初就带了 `resource_id` 与叫法，UI 缺的只是画。
+- **GAP-47**：兼职角色不能休息、不能举行仪式（`_class_state()` 要求 `class_levels` 恰好一行）。这是休息引擎的通用限制，F6 只是第三次撞上，单独立项。
 - **高环未验证**：Land 表最高 5 环，"6 环以上也能免费"只有代码保证（见 §14.3 第 4 条）。
 
 ### 16.4 验收
 
 | 项 | 结果 |
 |---|---|
-| `test_dnd2024_rest_resource_conversion.py` | **42 passed**（32 → +10） |
+| `test_dnd2024_rest_resource_conversion.py` | **43 passed**（32 → +11；第 11 条是内容漂移守卫，审核后补） |
 | 变异验证 | 去掉内容声明 → 6b / 等级门禁 / 地形切换 三条立刻变红；去掉子职门禁 → 6a 变红 |
 | `tests/rulesets` 全量 | 见 §16.5（本次同时改了 `casting.py` 与 `class_resource_definition`，必须全量） |
-| 新增用例 | 6a（moon 的 store 与投影双断言）、等级门禁（5 vs 6）、6b（单行 + 事件）、6b（带槽施法不花免费面）、戏法不免费、6c/6d（正向前置 + 花掉后不可用 + 非授予法术）、6e（短休不恢复 / 长休恢复，均带正反向断言）、6f 正序、6f 反序、7（地形切换） |
+| 新增用例 | 6a（moon 的 store 与投影双断言）、等级门禁（5 vs 6）、6b（单行 + 事件）、6b（带槽施法不花免费面）、戏法不免费、6c/6d（正向前置 + 花掉后不可用 + 非授予法术）、6e（短休不恢复 / 长休恢复，均带正反向断言）、6f 正序、6f 反序、7（地形切换）、跨内容表的漂移守卫 |
+
+### 16.5 全量与整仓
+
+| 项 | 结果 |
+|---|---|
+| `tests/rulesets` 全量（`-n 6 --dist loadfile`） | **2944 passed / 0 failed**（12m32s） |
+| 整仓全量 | **11015 passed / 10 failed / 3 errors / 12 skipped**；失败与基线同名同数：`test_updater`（MAX_PATH）1、`test_docker_launcher` 6、`docker_data_generation` 1、`docker_self_update_reentry` 1、`runtime_dependencies` 1，`docker_runtime_v1_upgrade` 3 errors |
+| `ruff check` / `mypy` | 干净 |
+
+这一段同时改了 `casting.py`、`class_resource_definition()`（所有职业资源投影都走它）与 `reaction_spells.py`，所以按规矩跑了全量而不是只跑定向套件。
+
+---
+
+## 17. F6e 执行记录（2026-11-26）
+
+同一个工作树、同一个分支（`feat/dnd2024-s0f6d-free-cast-face`）。与 F6d 分开提交，是因为前者动引擎、本段只动前端，回滚边界不同；本段自身是两个提交——画界面（`96123fe9`）与逐级上限（`baf99eae`）。
+
+### 17.1 落地
+
+| 文件 | 改动 |
+|---|---|
+| `frontend-v2/src/api/types.ts` | `RestShortRecovery` / `RestRecoverySlotRow` / `RitualOption` / `RulesetRitualOptionsResponse` / `RulesetRitualResponse`；`RestOptions.short_recovery` 可选 |
+| `frontend-v2/src/api/rulesets.ts` | `RestSubmissionOptions.recovery`（有才发）；`fetchLiveCharacterRitualOptions` / `performLiveCharacterRitual`（后者固定带 `confirm_elapsed_time: true`，因为服务端在同一次写入里推进时钟） |
+| `ProfessionalCharacterCenter.vue` | 短休恢复小节：按资源池画每个环阶的"已用/预算"、超预算挡住提交、只发选中的格子；仪式小节：读 `/ritual/options`、确认门禁、成功后 `emit('saved')` 并重读剩余次数；打开「法术与资源」页读一次休息选项 |
+| `tests/ProfessionalCharacterCenter.test.ts` | 13 → 18 条；另有三条既有用例（连同 `beforeEach` 的默认桩）绑在"打开面板零请求"这个已过期假设上，一并改写 |
+
+### 17.2 与 §15 的偏差
+
+1. **第三处（Font 换点/造槽）不需要前端**：复核后确认两条 capability 早已是 `class_capability`，战斗面板对这类条目做通用渲染。缺的是"出战斗后没有入口"，那是探索态意图的缺口（§12.2 第 2 条），属引擎切片。
+2. **§15 的前提句已过期，不是"加一个开关"**：原 watcher 上写着"短休没有任何声明，打开面板也不该产生请求"。这句话从 F6a 合入起就不成立（短休一直有 `short_recovery` 声明），只是没有消费者。这次把 watcher 改成"打开这一页读一次"，并把断言"零请求"的用例改成"只读选项、绝不提交"——后者才是真正要守的性质。
+3. **`recovery` 只在短休发**：长休由服务端按自己的规则回满，带过去会被硬拒。空对象也不发（服务端会拒成 `would not change anything`）。
+4. **仪式与休息的选项分开拉**：仪式读失败不该拦住休息，反之亦然。两者的失败各自显示在自己的小节里。
+5. **补了逐级上限**（提交 `baf99eae`）：第一版只挡总预算，1 环消耗 2 个、预算 3 环时填 3 个仍能提交，然后被服务端拒成 `cannot recover more level 1 slots than are expended`。服务端 fail-closed 是对的，但 §1 第 2 条要求"客户端只提交合法分配选择"，所以前端也逐级算 `买回 − 已消耗`，为正就挡住并在那一行报错。
+
+### 17.3 已知缺口
+
+- **恢复粒度是"每环阶买回几个"，不是"具体哪几个槽"**：引擎的 `recovery` 契约就是 `{"slots": {"3": 1}}`，所以 UI 也只能画到这个粒度。要支持挑具体槽位得先改引擎。
+- **点数池模式的"买回几点"上限取 `min(spent, budget)`**：服务端下发的是"已消耗点数"（`spent`）与"预算"（`budget`），没有下发"本次最多能买回多少"这个单值。目前唯一的点数池是 Sorcerous Restoration（`budget = half_level_round_down`，`track = sorcery_points`），预算不可能大于已消耗，所以取小者就是"能回多少"；若以后出现"至少回 1 点"这类下限规则，需要服务端补字段而不是前端自己推。
+- **没有 e2e**：只有组件用例。角色中心的休息页不在 CI 的 e2e smoke 里，所以"面板对着活服务端跑通"没有被自动化覆盖。
+- **兼职仍不可用**：仪式与休息都撞 `_class_state()` 的单职业硬限制（GAP-47）。
+
+### 17.4 验收
+
+| 项 | 结果 |
+|---|---|
+| `test_dnd2024_rest_resource_conversion.py`（后端回归，本段未改后端） | **43 passed**（32 → +11，改动全在 §16） |
+| `npx vue-tsc -b` | 通过 |
+| `npx eslint src tests --max-warnings 0` | 通过（CI 同命令） |
+| `npm run locales:check` | 通过（ja/de/ru 的既有缺失不变，本次没有新增 i18n 键——面板用内联双语 `text()`） |
+| `npx vitest run` 全量 | **1744 passed / 1746**；两条失败都是计时断言（`mapLayout` 的 300ms 性能上限、`useTheme` 的初始化耗时），单独跑 10 passed |
+| `npx vite build` | 通过（CI 同步骤；产物落在被忽略的 `static-v2/assets/`） |
+| 组件用例 | **18 passed**（13 → +5：短休预算渲染与提交体、超预算拦截、逐级上限拦截、仪式投影渲染、仪式确认门禁与提交体） |
+
+计时类用例的说明要留在这里：`mapLayout` 与 `useTheme` 的断言读的是墙钟时间，在 `vitest run` 并行时会双双越线（这两轮分别是 `useTheme` 17.1s / 22.0s、`mapLayout` 约 340ms 撞 300ms 上限），单独跑则 10 passed。这不是本次改动引入的，但说明"本机 vitest 全绿"不是一个可靠的验收口径——要判回归必须单独重跑这两个文件。
