@@ -2367,9 +2367,12 @@ class CombatValidationMixin:
         error = validate_cunning_strike(
             self.features, character, intent,
             target_size=str(target.get("size") or ""),
-            # 伙伴也有自己的背包权威（`_activation_payload` 覆盖两种 actor），
-            # 所以毒药工具的存在性对两边用同一个入口判，不能只给玩家传。
-            carried_refs=owned_ref_counts(self._activation_payload(instance, actor)),
+            # 只有玩家与伙伴有背包权威（`_activation_payload` 就是这两条
+            # 路径）；敌人的攻击也会走到这里，`_companion()` 对它会直接报错。
+            carried_refs=(
+                owned_ref_counts(self._activation_payload(instance, actor))
+                if actor["kind"] in {"player", "companion"} else None
+            ),
             speed=effective_speed(
                 self.catalog.conditions, actor.get("conditions") or {},
                 max(0, int(actor.get("speed", 0) or 0)),
