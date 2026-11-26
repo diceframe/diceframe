@@ -11,6 +11,7 @@ import type {
   RestOptions,
   RestSessionStatus,
   RestSpellOption,
+  RitualOption,
   RulesetSpellOption,
   SpellPreparationOptions,
 } from '@/api/types'
@@ -18,7 +19,9 @@ import PortraitPicker from '@/components/admin/PortraitPicker.vue'
 import {
   decideLiveRest,
   fetchLiveCharacterRestOptions,
+  fetchLiveCharacterRitualOptions,
   fetchLiveCharacterSpellOptions,
+  performLiveCharacterRitual,
   resolveLiveCharacterRest,
   type RestSubmissionOptions,
 } from '@/api/rulesets'
@@ -242,6 +245,10 @@ const restOptionsLoaded = ref(false)
 const restTerrain = ref('')
 const restStudySlot = ref('')
 const restStudySpell = ref('')
+// 短休恢复：按资源池记"每级买回几个"，点数池记"买回几点"。全部是玩家的选择，
+// 预算与剩余槽数都来自服务端投影。
+const restRecoverySlots = ref<Record<string, Record<number, number>>>({})
+const restRecoveryPoints = ref<Record<string, number>>({})
 const restTerrainOptions = computed(() => restOptions.value?.land_terrain?.options || [])
 const restStudyRows = computed<RestFreeCastSlot[]>(() => restOptions.value?.free_cast || [])
 const restStudyRow = computed<RestFreeCastSlot | null>(() => (
@@ -253,11 +260,52 @@ const restStudySpellOptions = computed<RestSpellOption[]>(() => (
 ))
 const restChoicesReady = computed(() => {
   // 读不到选项时不要拦住休息：让服务端按既有语义处理（地形缺失会产事件）。
-  if (restType.value !== 'long' || !restOptions.value) return true
+  if (!restOptions.value) return true
+  if (restType.value === 'short') return restRecoveryValid.value
+  if (restType.value !== 'long') return true
   if (restOptions.value.land_terrain?.required && !restTerrain.value) return false
   return !restStudySlot.value || Boolean(restStudySpell.value)
 })
 watch(restStudySlot, () => { restStudySpell.value = '' })
+
+// 短休的恢复预算：预算、每级还空着的槽、当日还剩几次，全部由服务端算好下发。
+// 前端只画数字并挡住"超过预算"，不重算 ceil(level/2)——那是规则事实。
+const restRecoveryRows = computed(() => {
+  const names = new Map(
+    (Array.isArray(props.character.class_resources) ? props.character.class_resources : [])
+      .map(row => [row.id, row.name] as const),
+  )
+  return (restOptions.value?.short_recovery || []).map(item => {
+    const usesLeft = Number(item.uses_left || 0)
+    const slots = (item.slots || []).filter(slot => Number(slot.expended) > 0)
+    const picked = restRecoverySlots.value[item.resource_id] || {}
+    const points = Math.max(0, Number(restRecoveryPoints.value[item.resource_id] || 0))
+    const total = item.mode === 'points'
+      ? points
+      : slots.reduce(
+        (sum, slot) => sum + slot.level * Math.max(0, Number(picked[slot.level] || 0)),
+        0,
+      )
+    const ceiling = item.mode === 'points'
+      ? Math.min(Number(item.spent || 0), Number(item.budget || 0))
+      : Number(item.budget || 0)
+    return {
+      resourceId: item.resource_id,
+      mode: item.mode,
+      budget: Number(item.budget || 0),
+      usesLeft,
+      slots,
+      total,
+      ceiling,
+      label: names.get(item.resource_id) || item.resource_id,
+    }
+  }).filter(item => item.usesLeft > 0 && (item.mode === 'points'
+    ? item.ceiling > 0
+    : item.slots.length > 0))
+})
+const restRecoveryValid = computed(
+  () => restRecoveryRows.value.every(item => item.total <= item.ceiling),
+)
 async function loadRestOptions(): Promise<void> {
   if (props.target !== 'game' || !props.gameKey || !props.userId) return
   restOptionsFailure.value = ''
@@ -271,16 +319,84 @@ async function loadRestOptions(): Promise<void> {
     restTerrain.value = restOptions.value.land_terrain?.current || ''
     restStudySlot.value = ''
     restStudySpell.value = ''
+    restRecoverySlots.value = Object.fromEntries(
+      (restOptions.value.short_recovery || []).map(item => [
+        item.resource_id,
+        Object.fromEntries((item.slots || []).map(slot => [slot.level, 0])),
+      ]),
+    )
+    restRecoveryPoints.value = {}
   } catch (cause: unknown) {
     // 选项读不到不等于不能休息：降级为旧行为，并把原因显示在面板上。
     restOptions.value = null
     restOptionsFailure.value = errorMessage(cause)
   }
 }
-// 只在真正要长休时才问服务端：短休没有任何声明，打开面板也不该产生请求。
-watch(restType, value => {
-  if (value === 'long' && !restOptionsLoaded.value) void loadRestOptions()
+// 只在真的打开这一页时才问服务端：两种休息现在都有声明（短休有恢复预算），
+// 但没人点"法术与资源"就一次请求都不该发。
+watch([activeTab, restType], ([tab]) => {
+  if (tab !== 'magic' || restOptionsLoaded.value) return
+  void loadRestOptions()
 }, { immediate: true })
+
+// 仪式（Magical Cunning / Eldritch Master）不是休息：它自己花掉 1 分钟再回槽。
+// 选项与休息分开拉，因为它的失败不该影响休息面板，反之亦然。
+const ritualOptions = ref<RitualOption[]>([])
+const ritualFailure = ref('')
+const ritualNote = ref('')
+const ritualConfirmed = ref(false)
+const ritualBusy = ref(false)
+const ritualRows = computed(() => ritualOptions.value.filter(
+  row => Number(row.uses_left) > 0 && Number(row.expended) > 0,
+))
+const ritualLabels = computed(() => new Map(
+  (Array.isArray(props.character.class_resources) ? props.character.class_resources : [])
+    .map(row => [row.id, row.name] as const),
+))
+function ritualLabel(row: RitualOption): string {
+  return ritualLabels.value.get(row.resource_id) || row.resource_id
+}
+async function loadRitualOptions(): Promise<void> {
+  if (props.target !== 'game' || !props.gameKey || !props.userId) return
+  ritualFailure.value = ''
+  try {
+    const response = await fetchLiveCharacterRitualOptions(props.gameKey, props.userId)
+    ritualOptions.value = response.ok ? (response.ritual_options || []) : []
+    if (!response.ok) ritualFailure.value = response.error || ''
+  } catch (cause: unknown) {
+    // 读不到仪式不等于角色卡坏了：只在面板上说一声，不拦休息。
+    ritualOptions.value = []
+    ritualFailure.value = errorMessage(cause)
+  }
+}
+watch(activeTab, tab => {
+  if (tab === 'magic') void loadRitualOptions()
+}, { immediate: true })
+
+async function performRitual(row: RitualOption): Promise<void> {
+  if (!ritualConfirmed.value || ritualBusy.value) return
+  ritualBusy.value = true
+  ritualNote.value = ''
+  try {
+    const response = await performLiveCharacterRitual(props.gameKey, props.userId, {
+      resource_id: row.resource_id,
+      expected_revision: Number(props.character.ruleset_revision || 0),
+      operation_id: operationId('ritual'),
+    })
+    if (!response.ok) {
+      ritualNote.value = response.error || text('仪式未能完成', 'The rite could not be completed')
+      return
+    }
+    ritualConfirmed.value = false
+    // 时间已经推进、槽已经回来：把角色卡交回给外层刷新，再重读剩余次数。
+    if (response.character) emit('saved', response.character as CharacterSheet)
+    await loadRitualOptions()
+  } catch (cause: unknown) {
+    ritualNote.value = errorMessage(cause)
+  } finally {
+    ritualBusy.value = false
+  }
+}
 
 // 职业能力与职业资源完全来自服务端投影：前端不判断职业等级、不算武艺骰、
 // 不算资源上限，只渲染 name / current / maximum。
@@ -480,8 +596,27 @@ async function completeRest(): Promise<void> {
     if (longRest && restStudySlot.value && restStudySpell.value) {
       freeCast[restStudySlot.value] = restStudySpell.value
     }
+    // 短休的恢复预算：只在短休提交，只发真的选了的那几格。长休由服务端按
+    // 自己的规则回满，带 recovery 过去会被硬拒。
+    const recovery: Record<string, { slots?: Record<string, number>; points?: number }> = {}
+    if (!longRest) {
+      for (const item of restRecoveryRows.value) {
+        if (item.mode === 'points') {
+          const points = Math.max(0, Number(restRecoveryPoints.value[item.resourceId] || 0))
+          if (points > 0) recovery[item.resourceId] = { points }
+          continue
+        }
+        const picked = restRecoverySlots.value[item.resourceId] || {}
+        const slots: Record<string, number> = {}
+        for (const slot of item.slots) {
+          const count = Math.max(0, Number(picked[slot.level] || 0))
+          if (count > 0) slots[String(slot.level)] = count
+        }
+        if (Object.keys(slots).length) recovery[item.resourceId] = { slots }
+      }
+    }
     const options: RestSubmissionOptions | null = (
-      preparedChanged.value || longRest
+      preparedChanged.value || longRest || Object.keys(recovery).length > 0
     )
       ? {
           ...(preparedChanged.value
@@ -496,6 +631,7 @@ async function completeRest(): Promise<void> {
             : {}),
           landTerrain: longRest ? restTerrain.value || undefined : undefined,
           freeCast: longRest ? freeCast : undefined,
+          recovery: Object.keys(recovery).length ? recovery : undefined,
         }
       : null
     const response = await resolveLiveCharacterRest(
@@ -515,9 +651,10 @@ async function completeRest(): Promise<void> {
     emit('saved', response.character as CharacterSheet, 'rest')
     // 结算后旧候选已经过期；重拉一次，草稿跟着新的准备列表重置。
     void loadSpellOptions()
-    // 休息之后"当前研究"可能已经变了，重新问一次；下一次长休仍要拿到新的候选。
+    // 休息之后"当前研究"可能已经变了，重新问一次；短休的恢复次数也少了一次，
+    // 两种休息都要重拉，否则下一次还会画着上一次的剩余额度。
     restOptionsLoaded.value = false
-    if (restType.value === 'long') void loadRestOptions()
+    void loadRestOptions()
   } catch (cause: unknown) {
     failure.value = errorMessage(cause)
   } finally {
@@ -668,6 +805,27 @@ async function completeRest(): Promise<void> {
           <label v-for="row in hitDiceRows" :key="row.die"><span>{{ row.die }} · {{ text(`可用 ${row.available}`, `${row.available} available`) }}</span><input v-model.number="restHitDice[row.die]" type="number" min="0" :max="row.available"></label>
         </div>
         <p v-if="restType === 'short'" class="server-roll-note">{{ text('不用自己填骰点：DiceFrame 会在服务端掷生命骰，刷新或重试也不会重复结算。', 'Do not enter roll results: DiceFrame rolls on the server, and retries cannot apply the rest twice.') }}</p>
+        <fieldset v-if="restType === 'short' && restRecoveryRows.length" class="rest-recovery">
+          <legend>{{ text('短休恢复（可选）', 'Short Rest recovery (optional)') }}</legend>
+          <p class="rest-options-help">{{ text('预算由规则决定：每级最多买回这一级已消耗的数量，合计环阶不能超过预算；不填就是这一项不恢复。', 'The rules set the budget: each level can buy back at most its expended slots, the combined levels may not exceed it, and leaving it empty recovers nothing.') }}</p>
+          <div v-for="item in restRecoveryRows" :key="item.resourceId" class="rest-recovery-row">
+            <div class="rest-recovery-head">
+              <b>{{ item.label }}</b>
+              <span>{{ item.mode === 'points' ? text(`预算 ${item.ceiling} 点`, `${item.ceiling} points`) : text(`预算 ${item.budget} 环`, `${item.budget} combined levels`) }} · {{ text(`今日剩余 ${item.usesLeft} 次`, `${item.usesLeft} left today`) }}</span>
+            </div>
+            <label v-if="item.mode === 'points'" class="rest-recovery-field">
+              <span>{{ text('买回点数', 'Points to regain') }}</span>
+              <input v-model.number="restRecoveryPoints[item.resourceId]" type="number" min="0" :max="item.ceiling">
+            </label>
+            <template v-else>
+              <label v-for="slot in item.slots" :key="slot.level" class="rest-recovery-field">
+                <span>{{ text(`${slot.level} 环（已用 ${slot.expended}）`, `Level ${slot.level} (${slot.expended} expended)`) }}</span>
+                <input v-model.number="restRecoverySlots[item.resourceId][slot.level]" type="number" min="0" :max="Math.min(slot.expended, item.budget)">
+              </label>
+            </template>
+            <p v-if="item.total > item.ceiling" class="rest-options-error" role="alert">{{ text(`超出预算：已选 ${item.total}，最多 ${item.ceiling}。`, `Over budget: ${item.total} chosen, at most ${item.ceiling}.`) }}</p>
+          </div>
+        </fieldset>
         <section v-if="canChangePrepared" class="rest-preparation">
           <div class="section-heading">
             <h3>{{ text('长休结束时的法术准备', 'Spell preparation after this long rest') }}</h3>
@@ -722,6 +880,24 @@ async function completeRest(): Promise<void> {
           <label class="rest-confirm"><input v-model="restConfirmed" type="checkbox"><span>{{ text('我确认游戏内时间会随本次休息推进', 'I understand that in-game time advances during this rest') }}</span></label>
         </div>
         <button type="button" class="primary rest-submit" :disabled="busy || !restConfirmed || !preparedReady || !restChoicesReady || myRestStatus === 'submitted' || restSession?.status === 'resolving'" @click="completeRest">{{ busy ? text('结算中…', 'Resolving…') : restAwaitingDecision ? text('已提交，等待 DM 裁决', 'Submitted; waiting for the GM') : myRestStatus === 'submitted' ? text('已提交，等待队伍', 'Submitted, waiting for party') : restSession?.status === 'resolving' ? text('队伍结算中…', 'Resolving party rest…') : text('确认并结算休息', 'Confirm and resolve rest') }}</button>
+      </section>
+      <section v-if="target === 'game' && (ritualRows.length || ritualFailure)" class="ritual-center">
+        <div class="section-heading">
+          <h3>{{ text('仪式', 'Timed ritual') }}</h3>
+          <span v-if="ritualRows.length">{{ text('结束时推进游戏时间', 'Advances game time when it ends') }}</span>
+        </div>
+        <p v-if="ritualFailure" class="center-error" role="alert">{{ ritualFailure }}</p>
+        <p v-if="ritualRows.length" class="rest-options-help">{{ text('仪式会真的花掉这段时间：结束时才回槽，期间不进入等待状态。', 'The rite really spends its minutes: the slots return when it ends, and nothing is left pending in between.') }}</p>
+        <div v-for="row in ritualRows" :key="row.resource_id" class="ritual-row">
+          <div class="rest-recovery-head">
+            <b>{{ ritualLabel(row) }}</b>
+            <span>{{ text(`${row.minutes} 分钟 · 恢复 ${row.regain} 个 ${row.slot_level} 环 Pact 槽（已用 ${row.expended}/${row.maximum}）`, `${row.minutes} min · regain ${row.regain} level ${row.slot_level} Pact slots (${row.expended}/${row.maximum} expended)`) }}</span>
+          </div>
+          <p class="rest-options-help">{{ text(`今日剩余 ${row.uses_left} 次`, `${row.uses_left} left today`) }}<template v-if="row.full_budget"> · {{ text('已按全部已消耗恢复', 'regains every expended slot') }}</template></p>
+          <button type="button" class="primary ritual-submit" :disabled="ritualBusy || !ritualConfirmed" @click="performRitual(row)">{{ ritualBusy ? text('举行中…', 'Performing…') : text(`举行仪式（${row.minutes} 分钟）`, `Perform the rite (${row.minutes} min)`) }}</button>
+        </div>
+        <label v-if="ritualRows.length" class="rest-confirm"><input v-model="ritualConfirmed" type="checkbox"><span>{{ text('我确认仪式会推进游戏内时间', 'I understand the rite advances in-game time') }}</span></label>
+        <p v-if="ritualNote" class="rest-options-error" role="alert">{{ ritualNote }}</p>
       </section>
       </div>
 

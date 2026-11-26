@@ -352,10 +352,60 @@ export interface RestLandTerrain {
   required: boolean
 }
 
+/** One spell level a Short Rest may buy back, with what is actually expended. */
+export interface RestRecoverySlotRow {
+  level: number
+  expended: number
+  maximum: number
+}
+
+/** What one Short Rest could give back: a slot budget or a points budget. */
+export interface RestShortRecovery {
+  resource_id: string
+  mode: 'spell_slots' | 'points' | string
+  budget: number
+  uses_left: number
+  max_slot_level?: number
+  slots?: RestRecoverySlotRow[]
+  track?: string
+  spent?: number
+}
+
+/** One timed rite the character could perform (Magical Cunning, Eldritch Master). */
+export interface RitualOption {
+  resource_id: string
+  minutes: number
+  uses_left: number
+  slot_level: number
+  maximum: number
+  expended: number
+  regain: number
+  full_budget: boolean
+}
+
+export interface RulesetRitualOptionsResponse extends JsonObject {
+  ok: boolean
+  code?: string
+  error?: string
+  ritual_options?: RitualOption[]
+}
+
+export interface RulesetRitualResponse extends JsonObject {
+  ok: boolean
+  code?: string
+  error?: string
+  character?: JsonObject
+  revision?: number
+  duration_minutes?: number
+  duplicate?: boolean
+}
+
 /** Long-rest choices this character owns; empty fields mean "nothing to ask". */
 export interface RestOptions {
   land_terrain: RestLandTerrain | null
   free_cast: RestFreeCastSlot[]
+  /** Short-rest recovery budgets; absent when the ruleset declares none. */
+  short_recovery?: RestShortRecovery[]
 }
 
 export interface RulesetRestOptionsResponse extends JsonObject {
