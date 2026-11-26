@@ -432,3 +432,82 @@ def debt_by_path(debt: Iterable[DependencyDebt]) -> Mapping[str, tuple[Dependenc
     for item in sorted(debt):
         grouped.setdefault(item.path, []).append(item)
     return {path: tuple(items) for path, items in grouped.items()}
+
+
+#: Line count above which an active-logic source file is a size hotspot
+#: (ENGINEERING_RULES §21.5.1: a review signal, not a max-lines gate).
+FILE_SIZE_HOTSPOT_LINES = 1500
+#: How far a known hotspot may drift from its recorded size in either
+#: direction.  An ordinary edit must not touch the baseline; a real jump, or a
+#: split that removes a few hundred lines, must.
+FILE_SIZE_SLACK_LINES = 100
+#: Not active logic: translation dictionaries and the wire-type declarations.
+FILE_SIZE_EXEMPT_PREFIXES = ("frontend-v2/src/i18n/",)
+FILE_SIZE_EXEMPT_FILES = frozenset({"frontend-v2/src/api/types.ts"})
+
+
+def scan_file_size_hotspots(root: Path) -> dict[str, int]:
+    """Line counts of the active-logic source files above the hotspot line.
+
+    Only files above ``FILE_SIZE_HOTSPOT_LINES`` are reported: files inside the
+    ordinary range are not tracked at all, so this is not a line-count limit.
+    """
+
+    sizes: dict[str, int] = {}
+    for base, suffixes in (
+        (root / "src", {".py"}),
+        (root / "frontend-v2" / "src", {".ts", ".vue"}),
+    ):
+        if not base.exists():
+            continue
+        for path in sorted(base.rglob("*")):
+            if not path.is_file() or path.suffix not in suffixes:
+                continue
+            relative = _relative(root, path)
+            if (
+                relative in FILE_SIZE_EXEMPT_FILES
+                or relative.startswith(FILE_SIZE_EXEMPT_PREFIXES)
+            ):
+                continue
+            try:
+                lines = len(path.read_text(encoding="utf-8-sig").splitlines())
+            except (OSError, UnicodeDecodeError):
+                continue
+            if lines > FILE_SIZE_HOTSPOT_LINES:
+                sizes[relative] = lines
+    return sizes
+
+
+def assert_size_hotspots_match_baseline(
+    actual: Mapping[str, int], baseline: Mapping[str, int], *, boundary: str
+) -> None:
+    """Keep the known size hotspots from growing.
+
+    A file that is not in the baseline may not become a hotspot.  A hotspot may
+    drift by at most ``FILE_SIZE_SLACK_LINES`` around its recorded size: a larger
+    jump is growth that has to be paid for with an extraction, and a larger drop
+    is a split whose baseline entry has to come down with it.  Small moves in
+    either direction are ignored, so ordinary edits never touch the baseline.
+    """
+
+    details = [f"{boundary} size ratchet changed:"]
+    for path in sorted(set(actual) | set(baseline)):
+        current, recorded = actual.get(path), baseline.get(path)
+        if recorded is None:
+            details.append(f"  new hotspot: {path} is {current} lines")
+        elif current is None:
+            details.append(
+                f"  stale entry: {path} is no longer above "
+                f"{FILE_SIZE_HOTSPOT_LINES} lines; remove it"
+            )
+        elif current > recorded + FILE_SIZE_SLACK_LINES:
+            details.append(
+                f"  grew: {path} is {current} lines, more than "
+                f"{FILE_SIZE_SLACK_LINES} above its recorded {recorded}"
+            )
+        elif current < recorded - FILE_SIZE_SLACK_LINES:
+            details.append(
+                f"  shrunk: {path} is {current} lines; lower its baseline entry"
+            )
+    if len(details) > 1:
+        raise AssertionError("\n".join(details))
