@@ -140,6 +140,12 @@ def validate_declarations(
 
     if progression_catalog is None:  # pragma: no cover - guarded by ``available``
         return
+    # 循环外取一次。``LoadedRulesetBundle.get`` 返回的是 deepcopy，放进按特性
+    # 遍历的循环里就是每个特性复制一整份战斗目录——几百次大字典拷贝，把每次
+    # 装载从毫秒推到数秒，而且只表现为"整个测试套件变慢"。
+    combat_conditions = (
+        bundle.get("combat_catalog", "srd_combat_core") or {}
+    ).get("conditions", {})
     for definition in catalog.features_by_key.values():
         spell_ref = definition.parameters.get("granted_spell_id")
         if spell_ref is not None:
@@ -203,10 +209,7 @@ def validate_declarations(
         validate_movement_parameters(definition)
         validate_overchannel_parameters(definition)
         validate_hit_rider_parameters(definition)
-        validate_cunning_strike_parameters(
-            definition,
-            (bundle.get("combat_catalog", "srd_combat_core") or {}).get("conditions", {}),
-        )
+        validate_cunning_strike_parameters(definition, combat_conditions)
         validate_attack_state_parameters(definition)
         validate_mark_parameters(definition)
         if definition.resource_id:

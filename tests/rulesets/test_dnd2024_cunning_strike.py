@@ -9,12 +9,34 @@ so a broken budget would still look right there.
 
 from __future__ import annotations
 
+from copy import deepcopy
+from functools import lru_cache
+
 from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 from src.rulesets.dnd2024.features.attack_declarations import cunning_strike_options
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 
 from dnd2024_monk_common import SequenceRng, advance, monk_instance, with_equipment
+
+
+@lru_cache(maxsize=None)
+def _runtime() -> Dnd2024Runtime:
+    """One runtime per process.
+
+    Loading the bundle and walking a Rogue from 1 to 14 costs seconds; before
+    this cache each test paid it again, which made the whole file the slowest
+    in its CI shard.  The runtime is read-only here -- every test mutates its
+    own GameInstance instead.
+    """
+
+    return Dnd2024Runtime()
+
+
+@lru_cache(maxsize=None)
+def _sheet_template(level: int) -> dict:
+    sheet = _rogue_sheet(_runtime(), level=level)
+    return sheet
 
 
 def _rogue_sheet(runtime: Dnd2024Runtime, *, level: int = 5) -> dict:
@@ -46,8 +68,8 @@ def _instance(
     *, level: int = 5, equipment: tuple[str, ...] = ("item:dagger",),
     enemies: list[dict] | None = None,
 ) -> tuple[Dnd2024Runtime, Dnd2024CombatEngine, object]:
-    runtime = Dnd2024Runtime()
-    sheet = _rogue_sheet(runtime, level=level)
+    runtime = _runtime()
+    sheet = deepcopy(_sheet_template(level))
     if equipment:
         sheet = with_equipment(runtime, sheet, *equipment)
     engine, instance = monk_instance(runtime, sheet)
