@@ -76,6 +76,8 @@ const teleportDistance = ref<number | string>('')
 const movementDistance = ref(5)
 const declareAttackLuck = ref(false)
 const declareTwoHanded = ref(false)
+// 诡诈打击选中的效果 id。代价不随选择提交：服务端按内容表定价。
+const cunningEffects = ref<string[]>([])
 const declareSpellLuck = ref(false)
 const declareMaximize = ref(false)
 const declareDeathSaveLuck = ref(false)
@@ -187,6 +189,26 @@ const pendingDecision = computed(() => (
 const selectedWeapon = computed(() => attackAction.value?.weapons?.find(
   item => (item.weapon_ref || item.id) === selectedWeaponId.value,
 ))
+// 诡诈打击：服务端给出"这一级解锁哪些效果、每项几颗骰、一击最多几项、
+// 池里有多少颗"，面板只负责选择与预算提示。偷袭是否成立、目标体型、
+// 制毒工具这些前提仍由服务端判定——这里挡住的只是明显超额的组合。
+const cunningMenu = computed(() => attackAction.value?.cunning_strike)
+const cunningSpent = computed(() => cunningEffects.value.reduce(
+  (total, effect) => total + Number(cunningMenu.value?.costs?.[effect] ?? 0), 0,
+))
+const cunningTooMany = computed(
+  () => cunningEffects.value.length > Number(cunningMenu.value?.count ?? 1),
+)
+const cunningOverBudget = computed(
+  () => cunningSpent.value > Number(cunningMenu.value?.dice ?? 0),
+)
+const cunningValid = computed(() => !cunningTooMany.value && !cunningOverBudget.value)
+// 效果名是内容词汇（服务端只给 id），前端文案表按 id 查；未知 id 原样显示
+// 而不是消失——那样会让"新效果没配文案"变成看不见的选项。
+function cunningEffectName(effect: string): string {
+  const names = copy.value.cunningStrikeEffects as Record<string, string>
+  return names[effect] || effect
+}
 const attackDistance = computed(() => distanceTo(selectedTargetId.value))
 const selectedWeaponRange = computed(() => selectedWeapon.value
   ? weaponRangeState(selectedWeapon.value, selectedTargetId.value)
@@ -764,6 +786,7 @@ function resetSelections(): void {
   }
   declareAttackLuck.value = false
   declareTwoHanded.value = false
+  cunningEffects.value = []
   declareSpellLuck.value = false
   declareMaximize.value = false
   declareDeathSaveLuck.value = false
@@ -807,6 +830,7 @@ function clearGameScopedState(): void {
   movementDistance.value = 5
   declareAttackLuck.value = false
   declareTwoHanded.value = false
+  cunningEffects.value = []
   declareSpellLuck.value = false
   declareMaximize.value = false
   declareDeathSaveLuck.value = false
@@ -893,12 +917,19 @@ function cancelStaged(): void {
 function stageAttack(): void {
   const weapon = selectedWeapon.value
   if (!weapon || !selectedTargetId.value || !attackAction.value) return
+  if (!cunningValid.value) return
   stage({
     type: 'attack', actor_id: attackAction.value.actor_id,
     target_id: selectedTargetId.value,
     ...(weapon.weapon_ref ? { weapon_ref: weapon.weapon_ref } : { attack_id: weapon.id }),
     ...(declareTwoHanded.value && weapon.damage_two_handed ? { two_handed: true } : {}),
     ...(declareAttackLuck.value ? { spend_luck: true } : {}),
+    ...(cunningEffects.value.length
+      ? {
+          attack_declarations: ['cunning_strike'],
+          cunning_strike_effects: [...cunningEffects.value],
+        }
+      : {}),
   })
 }
 
@@ -1439,6 +1470,32 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
                 <input v-model="declareTwoHanded" type="checkbox" />
                 <span>{{ copy.twoHanded }}<small>{{ copy.twoHandedHint }}</small></span>
               </label>
+              <div v-if="attackAction.cunning_strike" class="cunning-strike" data-testid="cunning-strike">
+                <p class="cunning-head">
+                  <strong>{{ copy.cunningStrike }}</strong>
+                  <small>
+                    {{ copy.cunningStrikePool }} {{ attackAction.cunning_strike.dice }}d6 ·
+                    {{ copy.cunningStrikeSpent }} {{ cunningSpent }}d6 ·
+                    {{ copy.cunningStrikeTooMany }} {{ attackAction.cunning_strike.count }}{{ copy.cunningStrikeItem }}
+                  </small>
+                </p>
+                <p class="dock-hint">{{ copy.cunningStrikeHint }}</p>
+                <label
+                  v-for="effect in attackAction.cunning_strike.effects"
+                  :key="effect"
+                  class="declare-toggle"
+                  :data-cunning-effect="effect"
+                >
+                  <input v-model="cunningEffects" type="checkbox" :value="effect" />
+                  <span>
+                    {{ cunningEffectName(effect) }}
+                    <small>{{ copy.cunningStrikeEach }} {{ attackAction.cunning_strike.costs[effect] ?? 0 }}d6</small>
+                  </span>
+                </label>
+                <p v-if="!cunningValid" class="cunning-warn" data-testid="cunning-over-budget">
+                  {{ cunningOverBudget ? copy.cunningStrikeOver : `${copy.cunningStrikeTooMany} ${attackAction.cunning_strike.count} ${copy.cunningStrikeItem}` }}
+                </p>
+              </div>
               <label v-if="attackAction.lucky_advantage_available" class="declare-toggle">
                 <input v-model="declareAttackLuck" type="checkbox" />
                 <span>{{ copy.luckyAdvantage }}<small>{{ copy.luckyHint }}</small></span>
@@ -1728,6 +1785,10 @@ button, select, input { min-height: 44px; font: inherit; }
 .declare-toggle input { width: auto; min-height: 0; margin-top: 2px; }
 .declare-toggle span { display: grid; gap: 2px; }
 .declare-toggle small { color: #9aa9b4; font-size: 10px; font-weight: 400; }
+.cunning-strike { display: grid; gap: 6px; padding: 9px; border: 1px solid #4a5560; border-radius: 8px; }
+.cunning-head { display: grid; gap: 2px; margin: 0; font-size: 12px; }
+.cunning-head small { color: #9aa9b4; font-size: 10px; font-weight: 400; }
+.cunning-warn { margin: 0; color: #f0a06a; font-size: 11px; }
 /* 右侧栏：目标信息占固定高度，确认按钮紧跟其后，结束类按钮固定在底部，
    这样切换动作/附赠/移动/反应页签时按钮不会上下跳。 */
 .dock-actions { display: grid; gap: 8px; margin-top: auto; align-self: end; }

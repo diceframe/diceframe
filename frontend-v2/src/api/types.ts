@@ -1415,6 +1415,8 @@ export interface RulesetCombatAction extends JsonObject {
   expected_version: number
   weapons?: RulesetCombatWeapon[]
   spells?: RulesetCombatSpell[]
+  /** Rogue Cunning Strike: unlocked effects, their dice price, and the pool. */
+  cunning_strike?: RulesetCunningStrikeMenu
   /** Server-projected items this actor may legally activate right now. */
   items?: RulesetActivatableItem[]
   /** GM-only random treasure tables; the server rolls, the client only picks a ref. */
@@ -1432,6 +1434,20 @@ export interface RulesetCombatAction extends JsonObject {
   requires_target?: boolean
   /** Declared only for actions whose roll can still spend a Lucky point. */
   lucky_advantage_available?: boolean
+}
+
+/**
+ * Cunning Strike menu the server projects on an attack row.
+ *
+ * `dice` is this level's Sneak Attack pool; `count` is how many effects one
+ * attack may carry (two from 11th level). The panel uses both to refuse an
+ * over-budget combination before submitting — the server re-checks anyway.
+ */
+export interface RulesetCunningStrikeMenu extends JsonObject {
+  effects: string[]
+  count: number
+  costs: Record<string, number>
+  dice: number
 }
 
 export interface RulesetActivatableItem {
