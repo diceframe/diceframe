@@ -3,7 +3,7 @@
 | 项 | 值 |
 |---|---|
 | 任务书 | `S0F31_SPELLBOOK_ITEMS_TASK_SPEC_2026-11-07.md`（本片修订版，见其 §0） |
-| 基线 | `f2d86b1a`（2026-11-25，含 #848 成本模型、#849 声明校验拆分） |
+| 基线 | `b0496921`（2026-11-26，GAP-43 栈 #856–#866 与 #844/#847 已合入） |
 | 分支 | `feat/dnd2024-s0f31-spellbook-items` |
 | 交付范围 | UMD 同调 + 充能免收、Ritual Adept、Memorize Spell、Evocation Savant；卷轴 `not_automated` |
 | 状态 | 四项自动化交付完成；卷轴三项按 §1 停止条件保持非完成 |
@@ -83,17 +83,23 @@ pytest tests/rulesets/test_dnd2024_spellbook_items.py                  40 passed
 pytest tests/rulesets/test_dnd2024_spellbook_items.py \
        test_dnd2024_item_destroy.py                                   61 passed
 pytest tests/rulesets tests/architecture -n 6 --dist loadfile \
-       --basetemp=E:/pytest-tmp/f31v5       3136 passed, 225 warnings in 1197.08s
+       --basetemp=E:/pytest-tmp/f31v6       3210 passed, 224 warnings in 1318.92s
 ruff check src/ tests/                                    All checks passed
-mypy (python -m mypy)                                     102 files, no issues
+mypy (python -m mypy)                                     118 files, no issues
 ```
 
-全量那一轮是**在最终代码上重跑的**：核对过程中又改了 `exploration/engine.py`
-（`ritual` 类型收紧），所以此前两轮分别因"启动后又改文件"和"目录已存在被 pytest
-预先删除"作废，没有拿旧结果充数。
+全量跑了两轮，两轮都有意义，不存在"拿旧结果充数"：
+
+1. `f31v5` → 3136 passed，对应 rebase 之前（基座 `f2d86b1a`）。
+2. `f31v6` → 3210 passed，对应 rebase 到 `b0496921` 之后的代码。差额 74 条是上游
+   GAP-43 栈带进来的新用例，不是本片新增——本片自己的两个文件前后都是 61 passed。
+
+再早的两轮作废原因（记下来免得重犯）：核对过程中改过 `exploration/engine.py`
+（`ritual` 类型收紧），worker 早已 import 完成，结果不代表最终代码；另有一轮
+`--basetemp` 指向已存在目录，pytest 先删它 → 删除走沙箱回收站 shim → `Errno 53`。
 
 既有契约风险点不是"新用例是否绿"，而是"共享校验器被改后，别的类的升级/休息是否还绿"
-——这正是 3136 条全量要回答的问题：`spellbook_additions` 仍为 2、`prepared_spells`
+——这正是 3200+ 条全量要回答的问题：`spellbook_additions` 仍为 2、`prepared_spells`
 仍是唯一长休入口，paladin/ranger/cleric 的休息与升级路径全部未受影响。
 
 ## 5. 偏差与未决
@@ -129,7 +135,7 @@ Evocation Savant 先后有过三版，全部在同一处出错——**把"授予
    paladin_auras、overchannel、hold_person、stoneskin、free_casting 等 12 个走
    Wizard 升级路径的文件。
 2. 第二版读反了 SRD 的"you **can** add"，把两个名额做成**可选额度**
-   （`free_spellbook_picks` + 区间校验），并提交 `d67e0ff4`。这是**错的方向**：
+   （`free_spellbook_picks` + 区间校验），并提交 `923c47dc`。这是**错的方向**：
    SRD 第一句是祈使句 "Choose two … and add them"，"can" 只修饰后半段的
    "whenever you gain access to a new level of spell slots"。这一版没有破坏任何人，
    但也把"玩家该有两个免费页"这件事降级成了提示。
@@ -154,13 +160,21 @@ Evocation Savant 先后有过三版，全部在同一处出错——**把"授予
 **与上游 GAP-43 栈的关系**
 
 `_activate_item_events` 在栈顶分支里仍在 `resolution.py`（未搬走），所以本片的
-充能改动不会因搬家失效；但 rebase 到栈合入后的 main 时会有行号冲突，属预期。
+充能改动不会因搬家失效。
+
+2026-11-26 已实际 rebase 到 GAP-43 栈合入后的 main（`b0496921`，含 #856–#866 与
+#844/#847）：**12 个提交里只有 1 处冲突**，在
+`tests/architecture/combat_coupling_baseline.py` —— 上游把 `sacred_weapon_damage` /
+`same_plane` / `sear_undead` 三条 `intent_switch` 随抽取删掉了，本分支只是新增
+`ritual` 一条。解决方式是保留本分支那一条、接受上游的删除，没有手改检测逻辑。
+这个"行号冲突"的预判其实偏悲观：抽取把代码搬了家，但本片的 hunk 都落在没被搬走的
+函数里，只有集合式白名单真的撞上了。
 
 ## 6. 收尾清单（提交前逐项打勾）
 
 - [x] `ruff check src/ tests/` All checks passed
-- [x] `mypy` 102 files, no issues（本机命令是 `C:/Python314/python.exe -m mypy`，该解释器 `Scripts/` 下没有 `mypy.exe`）
-- [x] `pytest tests/rulesets tests/architecture` 3136 passed / 0 failed（最终代码上重跑）
+- [x] `mypy` 118 files, no issues（本机命令是 `C:/Python314/python.exe -m mypy`，该解释器 `Scripts/` 下没有 `mypy.exe`）
+- [x] `pytest tests/rulesets tests/architecture` 3210 passed / 0 failed（rebase 到 `b0496921` 之后重跑）
 - [x] 任务书 §4.1.4 / §4.3 / §4.4 已改成新口径（`charge_roll` 一次掷骰一条、短休走 `prepared_spells`、授权槽 `target=spellbook`），§5 白名单补上 `spells/preparation.py` 与 `runtime.py`
 - [x] `combat_coupling_baseline.py` 的 `intent_switch: ritual` 条目保留，并在条目上方写明它是**拒绝**而非特性分支（删掉这条读取 = 把 fail-closed 的拒绝变成静默改规则）；架构守卫要求集合精确匹配，因此"条目 + 分支"必须同进同出
 
