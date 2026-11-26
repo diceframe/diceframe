@@ -25,6 +25,7 @@ from src.rulesets.dnd2024.combat.obscurement import (
     obscurement_effects,
     obscurement_rank,
     obscurement_row,
+    sense_map,
 )
 
 from dnd2024_monk_common import SequenceRng
@@ -374,6 +375,61 @@ def test_effective_obscurement_reads_the_observers_senses() -> None:
         instance, combat, "enemy:goblin-1", "enemy:goblin-1",
     )
     assert bypass["bypass"] in {"blindsight", "darkvision_fails_magical_darkness"}
+
+
+def test_senses_reach_the_query_in_either_shape() -> None:
+    """A stat block keeps a map; an actor view keeps rows, and both must count.
+
+    ``sense_declarations`` returns ``[{"code", "range_ft", "source"}]`` and
+    ``_player_view`` stores exactly that, while a monster's stat block keeps the
+    flat ``{code: range}`` it was loaded from.  Reading only the mapping made
+    every player character's senses vanish without an error -- the fog blocked
+    sight and nothing said why.
+    """
+
+    rows = [
+        {"code": "blindsight", "range_ft": 30, "source": "feral_senses"},
+        # 同一感官来自两个声明时取更远的那个：多一个来源不该让人看得更近。
+        {"code": "blindsight", "range_ft": 60, "source": "second_source"},
+        # 旗标不是射程；当成 1 尺感官等于凭空造一条规则。
+        {"code": "darkvision", "range_ft": True, "source": "flag_not_a_range"},
+    ]
+    assert sense_map(rows) == {"blindsight": 60}
+    assert sense_map({"darkvision": 60, "blindsight": 30}) == {
+        "darkvision": 60, "blindsight": 30,
+    }
+    assert effective_level(
+        "heavily", magical=True, senses=rows, distance_ft=60,
+    ) == ("none", "blindsight")
+    assert effective_level(
+        "heavily", magical=True, senses=rows, distance_ft=61,
+    ) == ("heavily", "")
+
+
+def test_a_player_characters_senses_are_not_dropped() -> None:
+    """End to end: the actor view's own rows reach the obscurement answer.
+
+    A Ranger 18 owns Feral Senses (Blindsight 30), and the actor view carries it
+    as a declaration row.  Before the shapes were merged, ``effective_obscurement``
+    fell back to "no senses" for every player character -- this asserts the
+    answer a table would actually see, not the field that feeds it.
+    """
+
+    from test_dnd2024_combat import _instance_with_sheet
+    from test_dnd2024_hunters_mark import ranger
+
+    engine, instance = _instance_with_sheet(ranger(18))
+    _start(engine, instance)
+    _zone(engine, instance, origin=0, radius=20, magical=True)
+    combat = _state(instance)["combat"]
+    combat.setdefault("positions", {})["enemy:goblin-1"] = 0
+    combat.setdefault("positions", {})["player:gm"] = 20
+
+    answer = engine.effective_obscurement(
+        instance, combat, "player:gm", "enemy:goblin-1",
+    )
+    assert answer["bypass"] == "blindsight"
+    assert answer["level"] == "none"
 
 
 def test_casting_fog_cloud_leaves_a_nonmagical_zone() -> None:

@@ -18,7 +18,8 @@ pair of booleans flattens that question into something you cannot ask back.
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 #: Ordered, least to most obscuring.
 OBSCUREMENT_LEVELS = ("none", "lightly", "heavily")
@@ -153,21 +154,46 @@ def combine_sources(levels: Iterable[str]) -> str:
 SENSE_KINDS = ("darkvision", "blindsight", "truesight")
 
 
-def sense_range(senses: dict | None, kind: str) -> int:
-    """Declared range of one sense in feet, 0 when the creature does not have it."""
+def sense_map(senses: Any) -> dict[str, int]:
+    """One sense table, from either shape a caller can be holding.
 
-    if not isinstance(senses, dict):
-        return 0
-    value = senses.get(kind)
-    if isinstance(value, bool):
-        return 0
-    if isinstance(value, (int, float)):
-        return int(value)
-    return 0
+    A stat block stores the flat mapping it was loaded from
+    (``{"darkvision": 60}``); an actor view stores what
+    ``sense_declarations`` derived (``[{"code", "range_ft", "source"}]``),
+    because the source is part of what a table has to be able to audit.  Both
+    arrive under the same ``senses`` field, so they are merged here once
+    instead of every consumer guessing: reading only the mapping silently gave
+    every *player character* no senses at all, which is indistinguishable from
+    "this creature has none".
+
+    A code that arrives twice keeps the longer range -- holding two sources of
+    the same sense must never make a creature see less far.
+    """
+
+    merged: dict[str, int] = {}
+    if isinstance(senses, Mapping):
+        pairs: Iterable[tuple[Any, Any]] = senses.items()
+    elif isinstance(senses, Iterable) and not isinstance(senses, (str, bytes)):
+        pairs = (
+            (row.get("code"), row.get("range_ft"))
+            for row in senses
+            if isinstance(row, Mapping)
+        )
+    else:
+        return {}
+    for code, value in pairs:
+        if not isinstance(code, str) or not code:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            # ``{"darkvision": true}`` is a flag, not a range: treating it as
+            # one would invent a 1-foot sense.
+            continue
+        merged[code] = max(merged.get(code, 0), int(value))
+    return merged
 
 
 def effective_level(
-    level: str, *, magical: bool, senses: dict | None, distance_ft: int,
+    level: str, *, magical: bool, senses: Any, distance_ft: int,
 ) -> tuple[str, str]:
     """``(level, bypass)`` after the observer's senses narrow the answer.
 
@@ -178,13 +204,14 @@ def effective_level(
 
     if level == "none":
         return "none", ""
-    blindsight = sense_range(senses, "blindsight")
+    owned = sense_map(senses)
+    blindsight = owned.get("blindsight", 0)
     if blindsight and distance_ft <= blindsight:
         return "none", "blindsight"
-    truesight = sense_range(senses, "truesight")
+    truesight = owned.get("truesight", 0)
     if truesight and distance_ft <= truesight:
         return "none", "truesight"
-    darkvision = sense_range(senses, "darkvision")
+    darkvision = owned.get("darkvision", 0)
     if darkvision and distance_ft <= darkvision:
         if magical:
             # 魔法黑暗明文"Darkvision can't see through it"：降级不成立，
