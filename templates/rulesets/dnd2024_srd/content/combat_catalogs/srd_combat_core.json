@@ -136,7 +136,8 @@
     "blinded": {"kind": "condition", "attack_modes": [{"side": "target", "mode": "advantage"}, {"side": "actor", "mode": "disadvantage"}]},
     "deafened": {"kind": "condition", "attack_modes": []},
     "poisoned": {"kind": "condition", "attack_modes": [{"side": "actor", "mode": "disadvantage"}]},
-    "petrified": {"kind": "condition", "implies_incapacitated": true, "speed_zero": true, "auto_fail_saves": ["str", "dex"], "attack_modes": [{"side": "target", "mode": "advantage"}]}
+    "petrified": {"kind": "condition", "implies_incapacitated": true, "speed_zero": true, "auto_fail_saves": ["str", "dex"], "attack_modes": [{"side": "target", "mode": "advantage"}]},
+    "dazed": {"kind": "condition", "attack_modes": []}
   },
   "condition_effects": {
     "steady_aim_slow": {"kind": "effect", "source_ref": "feature:steady_aim", "speed_zero": true},

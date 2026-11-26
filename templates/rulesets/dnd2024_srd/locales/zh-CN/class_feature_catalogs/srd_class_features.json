@@ -238,7 +238,16 @@
       "colossus_slayer": "巨兽杀手",
       "horde_breaker": "破阵者",
       "escape_the_horde": "脱离兽群",
-      "multiattack_defense": "多重攻击防御"
+      "multiattack_defense": "多重攻击防御",
+      "cunning_strike": "诡诈打击",
+      "improved_cunning_strike": "进阶诡诈打击",
+      "devious_strikes": "凶狡打击",
+      "cunning_strike.poison": "淬毒",
+      "cunning_strike.trip": "摔绊",
+      "cunning_strike.withdraw": "撤步",
+      "cunning_strike.daze": "恍惚",
+      "cunning_strike.knock_out": "击昏",
+      "cunning_strike.obscure": "眩目"
     }
   }
 }

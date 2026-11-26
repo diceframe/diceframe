@@ -9,6 +9,11 @@ from src.rulesets.dnd2024.character.attunement import (
     item_requires_attunement,
     owned_ref_counts,
 )
+from src.rulesets.dnd2024.features.attack_declarations import (
+    cunning_strike_capacity,
+    cunning_strike_options,
+    sneak_attack_dice_count,
+)
 from src.rulesets.dnd2024.features import CombatCapabilityView
 from src.rulesets.dnd2024.features.resources import resource_state
 from src.rulesets.dnd2024.forms import bootstrap_known_forms
@@ -635,6 +640,27 @@ class CombatAvailabilityMixin:
                 "count": cap,
             }
 
+        # 诡诈打击：面板要能显示"有哪些效果、每个几颗骰、这级能用几个、
+        # 池里还剩几颗"，否则玩家只能盲选。空元组 = 没有这个特性，所以
+        # 键的存在本身就说明可用。
+        cunning = cunning_strike_options(self.features, character)
+        if cunning:
+            options["cunning_strike"] = {
+                # 本回合的偷袭已经用掉时，这一击不可能再花骰：面板要能在
+                # 提交前说明原因，而不是让玩家选完只收到一个 skipped。
+                "available": not self._feature_used_this_turn(
+                    combat, actor_id, "sneak_attack",
+                ),
+                "effects": [effect.id for effect in cunning],
+                "count": cunning_strike_capacity(self.features, character),
+                "costs": {effect.id: effect.dice_cost for effect in cunning},
+                "dice": sneak_attack_dice_count(self.features, character),
+                # 效果名来自 bundle 自己的 locale 表，客户端只做兜底，避免
+                # 前后端各存一份"淬毒/摔绊"而在改名时不同步。
+                "names": {
+                    effect.id: effect.name for effect in cunning if effect.name
+                },
+            }
         mark_kind = str(parameter("studied_attacks", "mark_kind") or "")
         if mark_kind:
             marks = (

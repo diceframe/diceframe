@@ -15,7 +15,11 @@ from ..features.attack_declarations import (
 from ..features.models import FeatureCapability, ResourceCost
 from .action_adapter import formula_node_from_dice_formula, roll_damage_node
 from .check_modes import effective_speed
-from .primitives import CombatIntentError, UNARMED_STRIKE_REF, canonical as _canonical, world_minutes
+from .primitives import (
+    CombatIntentError, ONE_MINUTE_DURATION, ONE_MINUTE_ROUNDS, UNARMED_STRIKE_REF,
+    canonical as _canonical, current_turn_slot as _current_turn_slot,
+    world_minutes,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -287,6 +291,7 @@ class CombatMartialActionsMixin:
         declarations.extend(plan_hit_conditions(intent, HitConditionContext(
             self.features, character, weapon, world_minutes(instance),
             lambda feature_id: self._feature_used_this_turn(combat, actor_id, feature_id),
+            intent,
         )))
         return declarations
 
@@ -319,16 +324,23 @@ class CombatMartialActionsMixin:
         if not declarations:
             return events
         attacker = self._actor_view(instance, combat, attacker_id)
-        # Monk feature save DC: 8 + Proficiency Bonus + Wisdom modifier.  It is
-        # not the spell save DC (a Monk may have none) and never a number the
-        # client supplies.
-        dc = (
+        # 没有声明豁免属性的行按僧的默认口径算（8 + PB + WIS）：``open_hand``
+        # 的行由 combat 侧构造、不经内容，旧存档也可能缺这个键。任何自带
+        # ``save_dc_ability`` 的行按自己的属性算——诡诈打击是敏捷，写死 WIS
+        # 会让同一个引擎里长出第二条 DC 公式。
+        fallback_dc = (
             8 + int(attacker.get("proficiency_bonus", 0) or 0)
             + ability_modifier(attacker["abilities"].get("wis", 10))
         )
         for row in declarations:
             if not isinstance(row, dict):
                 continue
+            if row.get("kind") == "cunning_strike":
+                events.extend(self._cunning_strike_events(
+                    instance, combat, attacker, target, row, rng,
+                ))
+                continue
+            dc = self._declared_save_dc(attacker, row, fallback_dc)
             if row.get("kind") == "open_hand":
                 events.extend(self._open_hand_events(
                     instance, combat, attacker_id, target, row, dc, rng,
@@ -411,6 +423,142 @@ class CombatMartialActionsMixin:
                 "turn_index": int(combat.get("turn_index", 0)),
             })
         return events
+
+    @staticmethod
+    def _declared_save_dc(
+        attacker: dict[str, Any], row: dict[str, Any], fallback: int,
+    ) -> int:
+        """The save DC this row states, or the caller's default.
+
+        Rows that name an ability compute their own DC from the attacker's
+        proficiency bonus; the fallback exists only for declarations built in
+        code (Open Hand) and for older held data that predates the key.
+        """
+
+        ability = str(row.get("save_dc_ability") or "")
+        if not ability:
+            return fallback
+        return (
+            8 + int(attacker.get("proficiency_bonus", 0) or 0)
+            + ability_modifier(attacker["abilities"].get(ability, 10))
+        )
+
+    def _cunning_strike_events(
+        self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
+        target: dict[str, Any], row: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Resolve each declared Cunning Strike effect that landed.
+
+        The dice were already withheld from the damage roll (the pool shrank
+        before it was rolled), so nothing here pays for the effect: this only
+        runs the save and applies what a failure carries.  Effects resolve in
+        catalog order, never in the order the client listed them.
+        """
+
+        target_id = str(target["actor_id"])
+        attacker_id = str(attacker["actor_id"])
+        currently_acting = str((combat.get("economy") or {}).get("actor_id") or "")
+        events: list[dict[str, Any]] = []
+        for effect in row.get("effects") or []:
+            if not isinstance(effect, dict):
+                continue
+            if effect.get("speed_divisor"):
+                events.extend(self._withdraw_move_events(combat, attacker, effect))
+                continue
+            ability = str(effect.get("save_ability") or "")
+            condition = str(effect.get("on_fail_condition") or "")
+            if not (ability and condition):
+                continue
+            dc = self._declared_save_dc(attacker, effect, 0)
+            check = self._saving_throw_check(
+                instance, combat, target, target_id, ability, dc, attacker_id,
+                events, rng,
+            )
+            check["source_feature"] = str(effect.get("feature_id") or "")
+            total, replacement = self._strength_total_replacement(
+                target, ability, int(check["total"]),
+            )
+            if replacement:
+                check["total"] = total
+                check["success"] = total >= dc
+                check.update(replacement)
+            events.append(check)
+            # 真实的豁免：Staggering 的"下一次豁免劣势"在这里消费。
+            events.extend(self._consume_save_markers(target_id, target))
+            if check["success"]:
+                continue
+            events.append(
+                self._cunning_condition_event(
+                    effect, target_id, attacker_id, ability, dc, currently_acting,
+                )
+            )
+        return events
+
+    @staticmethod
+    def _cunning_condition_event(
+        effect: dict[str, Any], target_id: str, attacker_id: str,
+        ability: str, dc: int, currently_acting: str = "",
+    ) -> dict[str, Any]:
+        """The condition one failed save carries, with its full metadata."""
+
+        duration = str(effect.get("duration") or "")
+        event: dict[str, Any] = {
+            "type": "condition.applied", "target_id": target_id,
+            "condition": str(effect.get("on_fail_condition") or ""),
+            "duration": duration,
+            "source_actor_id": attacker_id,
+            "source_feature": str(effect.get("feature_id") or ""),
+        }
+        if effect.get("save_repeat"):
+            # 快照豁免的难度：目标之后每回合都用落下时的这个 DC，而不是
+            # 重算攻击者的 DC（那会让"后来涨了熟练"变成buff）。
+            event["save_repeat"] = {"ability": ability, "dc": dc}
+        if effect.get("ends_on_damage"):
+            event["ends_on_damage"] = True
+        limit = [str(value) for value in effect.get("turn_choice_limit") or [] if str(value)]
+        if limit:
+            event["turn_choice_limit"] = limit
+        if duration == ONE_MINUTE_DURATION:
+            event["turns_remaining"] = ONE_MINUTE_ROUNDS
+        if duration == "target_turn_end" and currently_acting == target_id:
+            # 在目标自己的回合里挂上的（借机攻击是最现实的入口）：这一次
+            # 回合结束还不是"下个回合"，要再等一轮。与 statblock rider 同口径。
+            event["expires_after"] = 2
+        return event
+
+    def _withdraw_move_events(
+        self, combat: dict[str, Any], attacker: dict[str, Any], effect: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Withdraw: half a Speed of movement that provokes nothing.
+
+        The allowance is a *budget in feet* like Remarkable Athlete's, not a
+        teleport: the player still submits a ``move`` intent and the movement
+        validator caps it at the remaining pool.  ``provokes_opportunity`` is
+        what the movement check reads to skip the Opportunity Attack window
+        for exactly this allowance.
+        """
+
+        actor_id = str(attacker["actor_id"])
+        slot = _current_turn_slot(combat)
+        if slot is None or str(slot["actor_id"]) != actor_id:
+            # 额度属于"此刻的行动经济"，授予别人等于把池子交给另一个生物。
+            return []
+        speed = max(0, int(attacker.get("speed", 0) or 0))
+        speed = effective_speed(
+            self.catalog.conditions, attacker.get("conditions") or {}, speed,
+        )
+        divisor = int(effect.get("speed_divisor") or 0)
+        if divisor <= 0:
+            return []
+        budget = speed // divisor
+        if budget <= 0:
+            return []
+        return [{
+            "type": "dnd2024.movement.granted", "actor_id": actor_id,
+            "amount": budget, "reason": "cunning_strike_withdraw",
+            "source_feature": str(effect.get("feature_id") or ""),
+            "provokes_opportunity": bool(effect.get("provokes_opportunity", True)),
+        }]
 
     def _open_hand_events(
         self, instance: Any, combat: dict[str, Any], attacker_id: str, target: dict[str, Any],
