@@ -518,6 +518,7 @@ class CombatViewMixin:
             "spell_refs": casting["spell_refs"],
             "class_spell_refs": casting["class_spell_refs"],
             "slots": deepcopy(class_magic.get("slots_current") or {}),
+            "slots_max": deepcopy(class_magic.get("slots_max") or {}),
             # Font of Magic 造的临时槽：单独一栏，绝不并进普通槽表，否则
             # "最多 5 环"和"长休消失"这两件事就没地方可查了。
             "font_slots": casting["font_slots"],
@@ -990,6 +991,10 @@ class CombatViewMixin:
             "features": features,
             "abilities": actor.get("abilities") or {},
             "resources": {"class": class_state},
+            "spellcasting": {"class": {
+                "slots_current": actor.get("slots") or {},
+                "slots_max": actor.get("slots_max") or {},
+            }},
             "equipment": {"item_refs": list(actor.get("equipment_refs") or [])},
             "heroic_inspiration": deepcopy(actor.get("heroic_inspiration")),
             # 长时效果也是特性边界要读的人：光环是否生效、飞行多快都看它。
@@ -1064,6 +1069,13 @@ class CombatViewMixin:
                 }
                 if effect.get("target_scope"):
                     row["target_scope"] = effect["target_scope"]
+                # Innate Sorcery 的 +1 DC 与攻击优势只对"术士法术"生效，而是否为
+                # 术士法术是法术自身的法表归属，不是施法者属性。投影出来，面板才
+                # 能解释同一角色身上为什么有的法术吃到 +1、有的吃不到。
+                row["innate_sorcery_applies"] = bool(
+                    "innate_sorcery" in (actor.get("conditions") or {})
+                    and self.is_sorcerer_spell(spell)
+                )
                 if spell_range != int(effect["range"]):
                     # 被特性改写过的射程要能对账：前端显示的是和，不是原文。
                     row["range_base"] = int(effect["range"])

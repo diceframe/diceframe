@@ -1,0 +1,178 @@
+"""How long a cast actually lasts.
+
+The catalogue states a *base* duration in whichever field the effect happens to
+use -- rounds for a zone, a ``1_hour``-style code for a condition, hours for a
+mark.  Everything that changes it (upcasting, Extended Spell, and later ritual
+casting) must be applied on top of that base rather than written back into the
+catalogue, so one authority answers "when does this end" for zones, conditions
+and marks alike.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Mapping
+
+_MAX_MINUTES = 24 * 60
+_MAX_ROUNDS = 24 * 600
+
+
+@dataclass(frozen=True)
+class Duration:
+    """A resolved duration, in the three units the engine actually uses."""
+
+    rounds: int
+    minutes: int
+    hours: int
+    #: 无法换算成秒数的原文（"concentration"、"until dispelled"）。保留它，
+    #: 这类时长由持有者状态决定结束，不能被改写成 24 小时。
+    raw: str = ""
+
+    @property
+    def total_rounds(self) -> int:
+        """The whole duration in rounds.
+
+        The three units are three spellings of one length, not three segments to
+        add up: ``rounds`` says how the clock ticks while ``minutes`` / ``hours``
+        say how long it runs. So the coarsest populated unit wins -- adding them
+        would make ten rounds read as twenty.
+        """
+
+        if self.hours:
+            return self.hours * 600
+        if self.minutes:
+            return self.minutes * 10
+        return self.rounds
+
+    def as_condition_text(self) -> str:
+        """How this condition ends -- which is not always how long it lasts.
+
+        This string is the reducer's answer to "when does this go away":
+        ``concentration`` means the holder decides, ``target_turn_start`` means
+        the clock does, ``1_minute`` means a minute passes. So the termination
+        rule outranks the length -- writing ``1_hour`` for Hex would leave the
+        condition standing after concentration breaks. The length is still
+        available as ``hours`` / ``total_rounds`` for callers that need it.
+        """
+
+        if self.raw:
+            return self.raw
+        if self.hours:
+            return f"{self.hours}_hour"
+        if self.minutes:
+            return f"{self.minutes}_minute"
+        return f"{self.rounds}_round" if self.rounds else ""
+
+
+def base(effect: Mapping[str, Any], spell: Mapping[str, Any] | None = None) -> Duration:
+    """The catalogue's own duration, before any modifier.
+
+    Three fields can carry it, and they answer different questions:
+
+    * ``duration_rounds`` says the effect *advances in rounds*;
+    * ``condition_duration`` says *what ends it* -- often only "concentration",
+      which is a termination rule, not a length;
+    * the spell's own ``duration`` text carries the real ceiling ("Concentration,
+      up to 1 hour").
+
+    So the first two must not short-circuit the third. Fog Cloud has
+    ``duration_rounds: 10`` and "up to 1 hour"; reading only the rounds field
+    makes a one-hour zone last ten rounds. Hex has ``condition_duration:
+    "concentration"`` and "up to 1 hour"; reading only the code makes Extended
+    Spell double nothing.
+    """
+
+    ceiling = _ceiling(spell)
+    rounds = int(effect.get("duration_rounds", 0) or 0)
+    if rounds:
+        # 轮是推进单位，上限在 spell 里；两者取长的，并把三单位换算自洽，
+        # 否则 ``rounds_left`` 读 rounds、显示读 hours，会各说各话。
+        if ceiling.total_rounds > rounds:
+            return Duration(
+                ceiling.total_rounds, ceiling.minutes, ceiling.hours, raw=ceiling.raw,
+            )
+        return Duration(rounds, rounds // 10 if rounds % 10 == 0 else 0, 0)
+    code = str(effect.get("condition_duration") or "")
+    if code:
+        resolved = _from_code(code)
+        # "concentration" / "target_turn_start" 只说明由什么结束。上限在 spell
+        # 的 "up to X" 里；把上限补上，原文仍保留在 raw 里。
+        if not resolved.total_rounds and ceiling.total_rounds:
+            return Duration(
+                ceiling.total_rounds, ceiling.minutes, ceiling.hours, raw=resolved.raw,
+            )
+        return resolved
+    # 没有可换算的时长时，把原文原样带回：有些条件由其它事实结束（"到你
+    # 下一回合开始"），把它写成 24 小时会让条件永远不消失。
+
+    hours = int(effect.get("mark_duration_hours", 0) or 0)
+    if hours:
+        return Duration(0, hours * 60, hours)
+    text = str((spell or {}).get("duration") or "")
+    resolved = _from_code(text)
+    if not resolved.total_rounds and not resolved.raw:
+        return Duration(0, 0, 0, raw=text)
+    return resolved
+
+
+def effective(
+    effect: Mapping[str, Any],
+    spell: Mapping[str, Any] | None = None,
+    *,
+    slot_level: int = 0,
+    extended: bool = False,
+) -> Duration:
+    """Base duration plus every modifier that applies to *this* cast.
+
+    Upcasting is read from the effect's own per-level increments, so a spell
+    that lengthens with the slot says so in data instead of in code.  Extended
+    Spell doubles whatever comes out, capped at 24 hours.
+    """
+
+    resolved = base(effect, spell)
+    spell_level = int((spell or {}).get("level", 0) or 0)
+    steps = max(0, int(slot_level) - spell_level) if spell_level else 0
+    if steps:
+        resolved = Duration(
+            resolved.rounds + int(effect.get("upcast_duration_rounds", 0) or 0) * steps,
+            resolved.minutes + int(effect.get("upcast_duration_minutes", 0) or 0) * steps,
+            resolved.hours + int(effect.get("upcast_duration_hours", 0) or 0) * steps,
+            raw=resolved.raw,
+        )
+    if extended:
+        # 三单位一起翻倍并一起封顶；丢掉 ``raw`` 会把"由专注结束"抹成空字符串，
+        # 而 Extended 最常落在正是这类法术上（Hex、Bless）。
+        resolved = Duration(
+            min(resolved.rounds * 2, _MAX_ROUNDS),
+            min(resolved.minutes * 2, _MAX_MINUTES),
+            min(resolved.hours * 2, 24),
+            raw=resolved.raw,
+        )
+    return resolved
+
+
+def _ceiling(spell: Mapping[str, Any] | None) -> Duration:
+    """The spell's own stated duration, which is the real upper bound."""
+
+    return _from_code(str((spell or {}).get("duration") or ""))
+
+
+def _from_code(code: str) -> Duration:
+    text = code.strip().lower().replace(" ", "_")
+    if not text:
+        return Duration(0, 0, 0)
+    digits = "".join(ch for ch in text if ch.isdigit())
+    count = int(digits) if digits else 1
+    if "hour" in text:
+        return Duration(0, count * 60, count)
+    if "minute" in text:
+        return Duration(0, count, 0)
+    if "round" in text:
+        # 只有整十轮才有等值的分钟写法：三轮就是三轮（写成 1_minute 会让条件
+        # 多撑两个回合），二十五轮也不能被截成两分钟。
+        return Duration(count, count // 10 if count % 10 == 0 else 0, 0)
+    if text in {"instantaneous", "instant"}:
+        return Duration(0, 0, 0)
+    # 其余都是"由某个事件结束"的代码（target_turn_start、caster_next_turn_end、
+    # concentration……）。原样带回：把它们换算成 24 小时会让条件永不消失。
+    return Duration(0, 0, 0, raw=code)

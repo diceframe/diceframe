@@ -275,6 +275,7 @@ class Dnd2024RestEngine:
         recovery: dict[str, Any] | None = None,
         fiendish_resilience: str | None = None,
         hunter_options: dict[str, Any] | None = None,
+        prepared_spells: dict[str, list[str]] | None = None,
     ) -> dict[str, Any]:
         if free_cast:
             # Spell Mastery 的研究只发生在长休；短休给这个参数不是"没效果"，
@@ -300,6 +301,16 @@ class Dnd2024RestEngine:
             character,
             hunter_options if hunter_options is not None
             else payload.get("hunter_options"),
+        )
+        # 短休换准备（Memorize Spell）与长休共用同一个校验器，只是预算来自
+        # 特性声明而不是职业策略：先算计划，任何一步非法都在状态变化前拒绝。
+        prepared_request = (
+            prepared_spells if prepared_spells is not None
+            else payload.get("prepared_spells")
+        )
+        prepared_change = (
+            self.parse_prepared_spells(character, prepared_request, "short_rest")
+            if prepared_request is not None else None
         )
         events: list[dict[str, Any]] = []
         rolls = hit_die_rolls or {}
@@ -338,6 +349,8 @@ class Dnd2024RestEngine:
         self._recover_free_cast_slots(character, "short", events)
         events.extend(self._apply_short_recovery(character, recovery_plan))
         events.extend(self._apply_hunter_options(character, hunter_plan))
+        if prepared_change:
+            events.extend(self._apply_prepared_spells(character, prepared_change))
         events.extend(self._apply_fiendish_resilience(character, fiendish_choice))
         events.extend(self._reset_relentless_rage_dc(character))
         events.extend(self._apply_attunement(character, payload, attunement))
@@ -475,24 +488,35 @@ class Dnd2024RestEngine:
         }
 
     def parse_prepared_spells(
-        self, payload: dict[str, Any], request: Any,
+        self, payload: dict[str, Any], request: Any, context: str = "long_rest",
     ) -> dict[str, list[str]]:
-        """Validate a Long Rest preparation change without mutating anything.
+        """Validate a rest preparation change without mutating anything.
 
-        The class policy decides whether the change is legal at all (a Bard
-        swaps spells on level-up, not on a rest), then the ordinary spell
-        selection rules apply with the *rest* budget: the cap is
-        ``long_rest_replace`` -- unlimited for Cleric, Druid and Wizard, one for
-        Paladin and Ranger -- never the level-up cap.
+        One budget per rest: the class policy decides whether the change is
+        legal at all (a Bard swaps spells on level-up, not on a rest; a Paladin
+        may replace one per Long Rest), and its Short Rest counterpart is the
+        feature-declared budget (Memorize Spell).  Either way the ordinary spell
+        selection rules apply with the *rest* budget -- never the level-up cap.
         """
 
+        if context not in {"long_rest", "short_rest"}:
+            raise RestError(f"unknown preparation context {context}")
         character = _canonical(payload)
         class_ref, _class_id, level = self._class_state(character)
         policy = PreparationPolicy.for_class(self.bundle, class_ref)
-        if policy is None or not policy.can_change_on_long_rest():
-            raise RestError(
-                "this class cannot change prepared spells on a long rest"
-            )
+        if context == "long_rest":
+            if policy is None or not policy.can_change_on_long_rest():
+                raise RestError(
+                    "this class cannot change prepared spells on a long rest"
+                )
+        else:
+            # 短休换准备不是职业规则，而是特性预算；没有给出预算的职业
+            # 一律拒绝，和长休的 "cannot change" 是同一种拒绝。
+            selection = Dnd2024SpellSelection(self.bundle)
+            if selection.short_rest_replace_budget(character) < 1:
+                raise RestError(
+                    "this character cannot change prepared spells on a short rest"
+                )
         if not isinstance(request, dict):
             raise RestError("prepared_spells must be an object with prepared_spell_refs")
         raw_prepared = request.get("prepared_spell_refs")
@@ -524,7 +548,8 @@ class Dnd2024RestEngine:
                 "spellbook_refs": current["spellbook_refs"],
             },
             previous=current,
-            context="long_rest",
+            context=context,
+            character=character,
         )
         if errors:
             raise RestError("; ".join(errors))

@@ -68,6 +68,16 @@ def _advance_to(
                 })
             elif requirement_id in ("feat_ref", "epic_boon_ref"):
                 choices[requirement_id] = requirement["options"][0]["value"]
+            elif requirement.get("kind") == "metamagic":
+                count = int(requirement.get("count", 1) or 1)
+                choices["metamagic_option_ids"] = [
+                    str(row["value"]) for row in requirement.get("options") or []
+                ][:count]
+            elif requirement.get("kind") == "known_forms":
+                count = int(requirement.get("count", 1) or 1)
+                choices["known_form_refs"] = [
+                    str(row["value"]) for row in requirement.get("options") or []
+                ][:count]
             elif requirement_id == "ability_score_increases":
                 choices["ability_score_increases"] = _ability_choice(
                     character, requirement,

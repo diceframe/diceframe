@@ -24,37 +24,6 @@ from src.rulesets.bundle import LoadedRulesetBundle
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 _OWNER_RE = re.compile(r"^(class|subclass):[a-z0-9][a-z0-9_.-]*$")
-# v1 只表达本 PR 真正实现的效果原语；未知 kind 必须 fail closed，而不是被静默忽略。
-ACTION_KINDS = frozenset({
-    "unarmed_strike", "dash", "dodge", "disengage", "hide", "heal", "rage",
-    "rage_sustain", "action_surge", "bardic_grant", "inspiration_slot_exchange",
-    # Font of Magic 的两个方向是两条独立动作：槽换点不要动作、点换槽要附赠
-    # 动作，合成一个 kind 就只能靠 intent 里的字段猜哪一半被声明了。
-    "font_slot_to_points", "font_create_slot",
-    # 自身增益类：临时生命值、只作用于自己的隐形、以及"除某一伤害类型外
-    # 全部抗性"。三者都不产生攻击或移动，但都必须走同一套资源/经济结算，
-    # 所以作为封闭 kind 声明而不是让客户端拼事件。
-    "temp_hp", "invisible", "resistance_all",
-    # Steady Aim 只给自己两件事：下一次攻击优势、以及本回合剩余速度 0。两个
-    # 后果都落条件，所以它是一个独立的封闭 kind，而不是"buff"的另一种拼法。
-    "steady_aim",
-    # 长时状态类：附赠动作施加一个跨日存在的事实（恐惧、光环、飞行、振动）。
-    # 各自封闭，因为它们的到期与解除规则完全不同，拼成一个 "buff" 就只能靠
-    # intent 里的字段猜是哪一种。
-    "intimidating_presence",
-    "dragon_wings", "end_long_effect", "holy_nimbus", "quivering_palm_end",
-    "restore_feature_use",
-    # Channel Divinity 的效果各自是一个封闭 kind：它们的成本同为一次引导，
-    # 但目标数量、是否要豁免、以及"分配一个预算"这三件事没有任何共同形状，
-    # 合成一个 kind 只会让结算按 intent 字段猜分支。
-    "divine_spark", "turn_undead", "preserve_life", "divine_sense",
-    # 圣疗从 track 池按请求量扣款，声明里给不出固定 amount，所以池只做可用性
-    # 判定，真实扣减由结算发一条按意图金额的 class_resource.spent。
-    "lay_on_hands",
-    # 斥退敌人是"一次魔法动作 + 一次引导，目标数由魅力决定"的多目标控制，
-    # 与 Divine Spark 的单目标、Turn Undead 的固定类型都不同形。
-    "abjure_foes",
-})
 # 动作槽的名字。一个能力最多占一个槽。目录里的旧写法把槽名当键
 # （``action: 1`` / ``bonus_action: 1``），新写法是 ``slot: "action"``；两种都
 # 读，同时出现视为声明错误，不让"占不占动作"有两个来源。
@@ -191,6 +160,13 @@ class ResourceCost:
 
 
 @dataclass(frozen=True, slots=True)
+class SpellSlotCost:
+    """Exchange one slot of an exact level from the class spell slot table."""
+
+    level: int
+
+
+@dataclass(frozen=True, slots=True)
 class CapabilityCost:
     """The action-slot, resource and timing price of one capability.
 
@@ -211,7 +187,7 @@ class CapabilityCost:
     """
 
     slot: str = ""
-    resources: tuple[ResourceCost, ...] = ()
+    resources: tuple[ResourceCost | SpellSlotCost, ...] = ()
     timing: str = ""
 
     @property
@@ -240,6 +216,9 @@ class CapabilityAction:
     effect_id: str = ""
 
 
+ACTIVE_LONG_EFFECT_REQUIREMENT = "active_long_effect:"
+
+
 @dataclass(frozen=True, slots=True)
 class FeatureCapability:
     """A combat capability a class feature grants.
@@ -255,6 +234,8 @@ class FeatureCapability:
     availability but whose spend is decided per intent (Lay On Hands).  A
     fixed ``ResourceCost`` cannot express "up to what is left", so the pool is
     only checked here and charged at resolution.
+
+    ``requires`` lists prerequisites independent of costs and action kinds.
     """
 
     id: str
@@ -270,6 +251,15 @@ class FeatureCapability:
     # 特性自身的使用次数（每长休）。资源表达不了"特性还剩几次"：资源是
     # 角色卡上的条，特性使用是一次性开关，两者在投影上不该混在一起。
     uses_per_long_rest: int = 0
+    requires: tuple[str, ...] = ()
+    # 必须**为空**才算成立的那个资源池：Innate Sorcery 的 2 点术法点价格
+    # 只在次数用完之后才存在。``pool_resource_id`` 要求"还有余额"，这个刚好
+    # 相反，两者都是成本模型说不出来的前置。
+    exhausted_resource_id: str = ""
+    # 第二条价格挂在另一条特性上：Innate Sorcery 属于 1 级特性，而"用术法点
+    # 换一次"从 7 级的 Sorcery Incarnate 才开始。声明出来，引擎就不必记住
+    # "哪条能力在几级多出一种付法"。
+    requires_feature_id: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -791,6 +781,9 @@ class Dnd2024ClassFeatureCatalog:
 
     @classmethod
     def _parse_capability(cls, feature_id: str, raw: Any) -> FeatureCapability:
+        # Handlers depend on declaration types, so look up the registry only at load time.
+        from .kinds import KIND_HANDLERS
+
         if not isinstance(raw, dict):
             raise ClassFeatureError(f"{feature_id} contains an invalid capability")
         capability_id = _require_id(raw.get("id"), f"{feature_id} capability id")
@@ -820,10 +813,26 @@ class Dnd2024ClassFeatureCatalog:
         raw_resources = raw_cost.get("resources") or []
         if not isinstance(raw_resources, list):
             raise ClassFeatureError(f"{capability_id}.cost.resources must be an array")
-        resources: list[ResourceCost] = []
+        resources: list[ResourceCost | SpellSlotCost] = []
+        spell_levels: set[int] = set()
         for raw_resource in raw_resources:
             if not isinstance(raw_resource, dict):
                 raise ClassFeatureError(f"{capability_id} contains an invalid resource cost")
+            if "spell_slot" in raw_resource:
+                if raw_resource.keys() != {"spell_slot"}:
+                    raise ClassFeatureError(
+                        f"{capability_id} spell slot cost must contain only spell_slot"
+                    )
+                level = _require_positive_int(
+                    raw_resource["spell_slot"], f"{capability_id}.cost.resources.spell_slot",
+                )
+                if level > 9:
+                    raise ClassFeatureError(f"{capability_id} spell slot level must be at most 9")
+                if level in spell_levels:
+                    raise ClassFeatureError(f"{capability_id} repeats a spell slot cost level")
+                spell_levels.add(level)
+                resources.append(SpellSlotCost(level))
+                continue
             resources.append(ResourceCost(
                 resource_id=_require_id(
                     raw_resource.get("id"), f"{capability_id} resource cost id",
@@ -868,8 +877,11 @@ class Dnd2024ClassFeatureCatalog:
             if not isinstance(raw_action, dict):
                 raise ClassFeatureError(f"{capability_id} contains an invalid action")
             kind = str(raw_action.get("kind") or "")
-            if kind not in ACTION_KINDS:
-                raise ClassFeatureError(f"{capability_id} declares an unknown action kind")
+            handler = KIND_HANDLERS.get(kind)
+            if handler is None:
+                raise ClassFeatureError(f"{capability_id} declares an unknown action kind: {kind!r}")
+            if handler.requires_resource_cost and not resources:
+                raise ClassFeatureError(f"{capability_id} must declare its price in cost.resources")
             effect_id = str(raw_action.get("effect_id") or "")
             if effect_id:
                 _require_id(effect_id, f"{capability_id} action effect_id")
@@ -880,6 +892,24 @@ class Dnd2024ClassFeatureCatalog:
                 ),
                 effect_id=effect_id,
             ))
+        raw_requires = raw.get("requires", [])
+        if not isinstance(raw_requires, list):
+            raise ClassFeatureError(f"{capability_id}.requires must be an array")
+        requires: list[str] = []
+        for prerequisite in raw_requires:
+            if not isinstance(prerequisite, str) or not prerequisite.startswith(
+                ACTIVE_LONG_EFFECT_REQUIREMENT,
+            ):
+                raise ClassFeatureError(
+                    f"{capability_id}.requires has an unknown prerequisite: {prerequisite!r}"
+                )
+            _require_id(
+                prerequisite.removeprefix(ACTIVE_LONG_EFFECT_REQUIREMENT),
+                f"{capability_id}.requires effect id",
+            )
+            if prerequisite in requires:
+                raise ClassFeatureError(f"{capability_id}.requires repeats {prerequisite!r}")
+            requires.append(prerequisite)
         requires_condition = str(raw.get("requires_condition") or "")
         forbidden_condition = str(raw.get("forbidden_condition") or "")
         if requires_condition and forbidden_condition:
@@ -914,6 +944,20 @@ class Dnd2024ClassFeatureCatalog:
             raise ClassFeatureError(
                 f"{capability_id}.uses_per_long_rest must be a non-negative integer"
             )
+        exhausted_resource_id = str(raw.get("exhausted_resource_id") or "")
+        if exhausted_resource_id:
+            _require_id(exhausted_resource_id, f"{capability_id}.exhausted_resource_id")
+            if exhausted_resource_id in {
+                cost.resource_id for cost in resources if isinstance(cost, ResourceCost)
+            }:
+                # 既"要先花掉一单位"又"必须是零"：没有角色能同时满足。
+                raise ClassFeatureError(
+                    f"{capability_id} cannot both spend and require-empty "
+                    f"{exhausted_resource_id}"
+                )
+        requires_feature_id = str(raw.get("requires_feature_id") or "")
+        if requires_feature_id:
+            _require_id(requires_feature_id, f"{capability_id}.requires_feature_id")
         return FeatureCapability(
             id=capability_id,
             feature_id=feature_id,
@@ -928,6 +972,9 @@ class Dnd2024ClassFeatureCatalog:
             target_kind=target_kind,
             pool_resource_id=pool_resource_id,
             uses_per_long_rest=uses_per_long_rest,
+            requires=tuple(requires),
+            exhausted_resource_id=exhausted_resource_id,
+            requires_feature_id=requires_feature_id,
         )
 
     def label(self, key: str, default: str = "") -> str:
@@ -1008,9 +1055,11 @@ class CombatCapabilityView:
     requires_hostile_target: bool
     costs: tuple[CapabilityCostView, ...]
     target_kind: str = "none"
+    kind_details: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            **({"kind_details": dict(self.kind_details)} if self.kind_details else {}),
             "capability_id": self.id,
             "feature_id": self.feature_id,
             "label": self.name,

@@ -26,6 +26,11 @@ import pytest
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.resting.engine import Dnd2024RestEngine, RestError
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
+from src.rulesets.dnd2024.spells.casting import (
+    apply_free_cast_cost,
+    free_cast_resource,
+    spell_cost_events,
+)
 from src.rulesets.dnd2024.spells.font_of_magic import (
     FontOfMagicError,
     apply_create_slot,
@@ -699,3 +704,250 @@ def test_matrix_21_a_second_long_rest_is_idempotent(
     ]
     assert _font_slots(twice["character"]) == {}
     assert _slots(twice["character"]) == _slots(once["character"])
+
+
+# --------------------------------------------------------------------------
+# F6d (matrix 6/7): Natural Recovery's free-cast face
+# --------------------------------------------------------------------------
+
+
+def _land_druid(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+    level: int = 6, terrain: str = "arid",
+) -> dict:
+    """A Circle of the Land druid after a Long Rest on ``terrain``."""
+
+    sheet = _druid(runtime, level)
+    result = engine.complete_long_rest(deepcopy(_canonical(sheet)), land_terrain=terrain)
+    return result["character"]
+
+
+def _free_cast_pools(actor: dict, spell_ref: str) -> list[str]:
+    return [
+        str(row["resource_id"])
+        for row in actor["spell_grants"]
+        if row.get("spell_ref") == spell_ref and row.get("resource_id")
+    ]
+
+
+def _cast(actor: dict, spell_id: str, level: int, slot_level: int) -> list[dict]:
+    return spell_cost_events(actor, {"id": spell_id, "level": level}, slot_level)
+
+
+def _acting(resolver: Dnd2024ClassFeatureResolver, character: dict) -> dict:
+    actor = resolver.actor_projection(character)
+    actor["actor_id"] = "druid-1"
+    return actor
+
+
+def _spend_free_cast(character: dict) -> None:
+    apply_free_cast_cost(character, {
+        "type": "dnd2024.class_resource.spent",
+        "resource_id": "natural_recovery_cast",
+        "amount": 1,
+    })
+
+
+def test_6a_only_the_land_druid_has_the_free_cast_pool(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+    resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    moon = _druid(runtime, 6)
+    _canonical(moon)["features"]["subclass_ref"] = "subclass:circle_of_the_moon"
+    synced = engine.sync_resources(moon)["resources"]["class"]
+    assert "natural_recovery" not in synced
+    assert "natural_recovery_cast" not in synced
+
+    # 投影层也要挡：`_resource_definitions` 不看 requires_subclass，月德鲁伊
+    # 在 actor 里会拿到 0/0 的幽灵资源。那不是"没显示"，而是"存在但永远为 0"。
+    actor = resolver.actor_projection(_canonical(moon))
+    ids = {str(row["id"]) for row in actor["class_resources"]}
+    assert "natural_recovery" not in ids
+    assert "natural_recovery_cast" not in ids
+    assert all(int(row["maximum"]) > 0 for row in actor["class_resources"])
+
+
+def test_the_pool_only_appears_at_the_level_its_feature_grants_it(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+    resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    # land 3 级就有地形授予，但免费面的池是 6 级才建的；5 级的授予行不能标池，
+    # 否则投影在说"这个法术能被它付账"，而付账时池根本不存在。
+    five = _acting(resolver, _land_druid(engine, runtime, level=5))
+    six = _acting(resolver, _land_druid(engine, runtime, level=6))
+
+    assert _free_cast_pools(five, "spell:fireball") == []
+    assert _free_cast_pools(six, "spell:fireball") == ["natural_recovery_cast"]
+
+
+def test_6b_a_current_terrain_spell_is_paid_with_the_pool(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+    resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    actor = _acting(resolver, _land_druid(engine, runtime, terrain="arid"))
+
+    # fireball 是 arid 5 环授予、德鲁伊 5 级起在表内。同一法术只该有一行授予
+    # （池标在原行上），另起一行会让按 spell_ref 读发布的消费者撞上重复。
+    assert len([row for row in actor["spell_grants"]
+                if row["spell_ref"] == "spell:fireball"]) == 1
+
+    events = _cast(actor, "fireball", 3, 0)
+
+    assert events == [{
+        "type": "dnd2024.class_resource.spent",
+        "actor_id": "druid-1",
+        "resource_id": "natural_recovery_cast",
+        "amount": 1,
+    }]
+
+
+def test_6b_a_slotted_cast_still_pays_a_slot(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+    resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    actor = _acting(resolver, _land_druid(engine, runtime, terrain="arid"))
+
+    # 免费面只在 `slot_level == 0`（明确"不用槽"）时才是候选；带槽施法
+    # 不该顺手把每日一次花掉。
+    events = _cast(actor, "fireball", 3, 3)
+
+    assert events[0]["type"] == "dnd2024.spell.slot_spent"
+    assert all(event["type"] != "dnd2024.class_resource.spent" for event in events)
+
+
+def test_a_cantrip_is_never_a_free_cast(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+    resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    actor = _acting(resolver, _land_druid(engine, runtime, terrain="arid"))
+
+    # fire_bolt 也在 arid 表里（0 环）。戏法不花槽，"省一个槽"无从谈起，
+    # 所以 helper 自己就得拒绝，而不是等调用方先判 level > 0。
+    assert free_cast_resource(actor, "spell:fire_bolt", 0) is None
+
+
+def test_6c_6d_the_pool_runs_out_and_only_covers_grants(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+    resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    character = _land_druid(engine, runtime, terrain="arid")
+
+    # 前置：池满时确实可用。没有这一步，"花掉后不可用"在特性压根没实现时也会绿。
+    assert free_cast_resource(_acting(resolver, character), "spell:fireball", 3) is not None
+
+    _spend_free_cast(character)
+    actor = _acting(resolver, character)
+
+    assert _uses(character, "natural_recovery_cast") == 0
+    assert free_cast_resource(actor, "spell:fireball", 3) is None
+    with pytest.raises(ValueError, match="free spell cast is not available"):
+        _cast(actor, "fireball", 3, 0)
+
+    # 不是本子职授予的法术，即便池子是满的也不能免费。
+    full = _acting(resolver, _land_druid(engine, runtime, terrain="arid"))
+    assert free_cast_resource(full, "spell:cure_wounds", 1) is None
+
+
+def test_6e_the_pool_refills_on_a_long_rest_only(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+    resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    character = _land_druid(engine, runtime)
+    _spend_free_cast(character)
+
+    short = engine.complete_short_rest(deepcopy(character))["character"]
+    long = engine.complete_long_rest(deepcopy(character))["character"]
+
+    assert _uses(short, "natural_recovery_cast") == 0
+    assert _uses(long, "natural_recovery_cast") == 1
+    assert free_cast_resource(
+        _acting(resolver, short), "spell:fireball", 3,
+    ) is None
+    assert free_cast_resource(
+        _acting(resolver, long), "spell:fireball", 3,
+    ) is not None
+
+
+def test_6f_spending_the_free_cast_leaves_the_slot_face_alone(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+    resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    character = _land_druid(engine, runtime)
+    _spend_free_cast(character)
+    spent = _spend_slots(character, {1: 2})
+    before = _slots(spent)
+
+    # 花掉免费面之后，短休的槽恢复照样可用（两个计数互不影响）。
+    result = engine.complete_short_rest(
+        spent, recovery={"natural_recovery": {"slots": {"1": 1}}},
+    )
+
+    assert _slots(result["character"])["1"] == before["1"] + 1
+    assert _uses(result["character"], "natural_recovery") == 0
+    assert _uses(result["character"], "natural_recovery_cast") == 0
+
+
+def test_6f_spending_the_slot_face_leaves_the_free_cast_alone(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+    resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    character = _land_druid(engine, runtime)
+    rested = engine.complete_short_rest(
+        _spend_slots(character, {1: 2}),
+        recovery={"natural_recovery": {"slots": {"1": 1}}},
+    )["character"]
+
+    # 反序：短休面用掉之后，免费面仍然是满的、也仍然可用。
+    assert _uses(rested, "natural_recovery") == 0
+    assert _uses(rested, "natural_recovery_cast") == 1
+    assert free_cast_resource(
+        _acting(resolver, rested), "spell:fireball", 3,
+    ) is not None
+
+
+def test_7_switching_terrain_switches_what_can_be_cast_for_free(
+    engine: Dnd2024RestEngine, runtime: Dnd2024Runtime,
+    resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    arid = _land_druid(engine, runtime, terrain="arid")
+    polar = engine.complete_long_rest(deepcopy(arid), land_terrain="polar")["character"]
+
+    arid_actor = resolver.actor_projection(arid)
+    polar_actor = resolver.actor_projection(polar)
+
+    assert _free_cast_pools(arid_actor, "spell:fireball") == ["natural_recovery_cast"]
+    assert _free_cast_pools(polar_actor, "spell:fireball") == []
+    assert _free_cast_pools(polar_actor, "spell:fog_cloud") == ["natural_recovery_cast"]
+    assert free_cast_resource(arid_actor, "spell:fog_cloud", 1) is None
+
+
+def test_every_free_cast_pool_is_declared_where_the_feature_says(
+    resolver: Dnd2024ClassFeatureResolver,
+) -> None:
+    """内容漂移守卫：`free_cast_resource_id` 是个裸引用，写错就静默失效。
+
+    它跨两张内容表（职业特性 → 休息表），加载期没有外键可查。写成
+    `natural_recovery` 更糟：那会把短休恢复面和免费面重新合并，直接毁掉
+    "两个计数独立"的契约。所以在这里逐条对一遍，让 CI 先红。
+    """
+
+    checked = 0
+    for class_id in resolver.resources.by_class:
+        declarations = resolver.resources.by_class[class_id]
+        for definition in resolver.catalog.class_features(class_id):
+            pool_id = str(definition.parameters.get("free_cast_resource_id") or "")
+            if not pool_id:
+                continue
+            checked += 1
+            pool = declarations.get(pool_id)
+            assert pool is not None, f"{definition.id} names unknown pool {pool_id}"
+            # 池的等级**不必**≤声明它的特性：Circle of the Land Spells 是 3 级，
+            # 而它指向的免费面是 6 级的 Natural Recovery。等级门禁在投影层
+            # （`class_resource_definition` 按 minimum_level 拒绝），由
+            # `test_the_pool_only_appears_at_the_level_its_feature_grants_it` 钉住。
+            if pool.requires_subclass:
+                assert pool.requires_subclass == definition.owner, (
+                    f"{definition.id} is owned by {definition.owner} "
+                    f"but its pool needs {pool.requires_subclass}"
+                )
+    assert checked, "no feature declares a free-cast pool"

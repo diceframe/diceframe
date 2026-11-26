@@ -23,10 +23,16 @@ from src.rulesets.dnd2024.character.reconciliation import (
 )
 from src.rulesets.dnd2024.combat.catalog import Dnd2024CombatCatalog
 from src.rulesets.dnd2024.content.encounter import expand_encounter_enemies
-from src.rulesets.dnd2024.features.models import TURN_START_TIMING
+from src.rulesets.dnd2024.features.combat import spell_slot_count
+from src.rulesets.dnd2024.features.models import SpellSlotCost, TURN_START_TIMING
 from src.rulesets.dnd2024.features import (
     CombatCapabilityView,
     Dnd2024ClassFeatureResolver,
+)
+from src.rulesets.dnd2024.features.attack_declarations import (
+    cunning_strike_capacity,
+    cunning_strike_options,
+    sneak_attack_dice_count,
 )
 from src.rulesets.dnd2024.features.resources import resource_state
 from src.rulesets.dnd2024.forms import bootstrap_known_forms
@@ -61,6 +67,11 @@ from .check_windows import (
     DAMAGE_WINDOW_DECISION,
     LUCKY_RESOURCE,
 )
+from .divine_actions import CombatDivineActionsMixin
+from .stealth_actions import CombatStealthActionsMixin
+from .martial_actions import CombatMartialActionsMixin
+from .support_actions import CombatSupportActionsMixin
+from .ongoing_effects import CombatOngoingEffectsMixin
 from .obscurement import (
     LAND_AID_RANGE_FT,
     SANCTUARY_MOVE_LIMIT_FT,
@@ -149,7 +160,11 @@ def _level_for_bonus(bonus: int) -> str:
 @dataclass(slots=True)
 class Dnd2024CombatEngine(
     CombatValidationMixin, CombatResolutionMixin, CombatReducerMixin, CombatViewMixin, CombatTriggeredSpellsMixin,
-    CombatReactionSpellsMixin, CombatCheckWindowsMixin,
+    CombatReactionSpellsMixin, CombatCheckWindowsMixin, CombatDivineActionsMixin,
+    CombatStealthActionsMixin,
+    CombatMartialActionsMixin,
+    CombatSupportActionsMixin,
+    CombatOngoingEffectsMixin,
 ):
     bundle: LoadedRulesetBundle
     encounter_access: EncounterAccess = field(default_factory=EncounterAccess.blocked)
@@ -712,6 +727,27 @@ class Dnd2024CombatEngine(
                 "count": cap,
             }
 
+        # 诡诈打击：面板要能显示"有哪些效果、每个几颗骰、这级能用几个、
+        # 池里还剩几颗"，否则玩家只能盲选。空元组 = 没有这个特性，所以
+        # 键的存在本身就说明可用。
+        cunning = cunning_strike_options(self.features, character)
+        if cunning:
+            options["cunning_strike"] = {
+                # 本回合的偷袭已经用掉时，这一击不可能再花骰：面板要能在
+                # 提交前说明原因，而不是让玩家选完只收到一个 skipped。
+                "available": not self._feature_used_this_turn(
+                    combat, actor_id, "sneak_attack",
+                ),
+                "effects": [effect.id for effect in cunning],
+                "count": cunning_strike_capacity(self.features, character),
+                "costs": {effect.id: effect.dice_cost for effect in cunning},
+                "dice": sneak_attack_dice_count(self.features, character),
+                # 效果名来自 bundle 自己的 locale 表，客户端只做兜底，避免
+                # 前后端各存一份"淬毒/摔绊"而在改名时不同步。
+                "names": {
+                    effect.id: effect.name for effect in cunning if effect.name
+                },
+            }
         mark_kind = str(parameter("studied_attacks", "mark_kind") or "")
         if mark_kind:
             marks = (
@@ -1267,7 +1303,10 @@ class Dnd2024CombatEngine(
         elif intent_type in {"dash", "dodge", "disengage"}:
             events.extend(self._basic_action_events(combat, intent_type, str(intent["actor_id"])))
         elif intent_type == "hide":
-            events.extend(self._hide_events(instance, combat, intent, rng))
+            events.extend(self._hide_events(
+                instance, combat, str(intent["actor_id"]), rng,
+                intent_id=str(intent.get("intent_id") or ""),
+            ))
         elif intent_type == "land_aid":
             events.extend(self._land_aid_events(instance, combat, intent, rng))
         elif intent_type == "nature_sanctuary":
@@ -2161,7 +2200,9 @@ class Dnd2024CombatEngine(
                 if capability.cost.timing != TURN_START_TIMING:
                     continue
                 affordable = all(
-                    int(resource_state(character, cost.resource_id).get("current", 0) or 0)
+                    spell_slot_count(actor.get("slots") or {}, cost.level) >= 1
+                    if isinstance(cost, SpellSlotCost)
+                    else int(resource_state(character, cost.resource_id).get("current", 0) or 0)
                     >= cost.amount
                     for cost in capability.cost.resources
                 )
@@ -2269,8 +2310,14 @@ class Dnd2024CombatEngine(
             # 不带 ``success`` 当成失败，会为一次不需要的豁免开窗口。
             return []
         dc = max(10, damage // 2)
-        roll = int(rng.randint(1, 20))
         modifier = int(target["saving_throws"].get("con", 0) or 0)
+        concentration = target.get("concentration")
+        extended = bool(
+            isinstance(concentration, dict) and concentration.get("extended")
+        )
+        first = int(rng.randint(1, 20))
+        second = int(rng.randint(1, 20)) if extended else None
+        roll = max(first, second) if extended else first
         # 专注维持是一次体质豁免，条件声明的豁免加值骰同样生效。
         check_bonus_rolls = condition_check_bonus_rolls(
             self.catalog.conditions, target.get("conditions") or {}, "saving_throw", rng,
@@ -2283,7 +2330,10 @@ class Dnd2024CombatEngine(
         success = total >= dc
         events: list[dict[str, Any]] = [{
             "type": "check.resolved", "kind": "concentration", "actor_id": target["actor_id"],
-            "rolls": [roll], "natural": roll, "modifier": modifier,
+            "rolls": [value for value in (first, second) if value is not None],
+            "natural": roll, "modifier": modifier,
+            **({"advantage_sources": [{"code": "extended_spell", "mode": "advantage"}]}
+               if extended else {}),
             "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
             "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
             "total": total, "target": dc, "success": success,
@@ -2482,44 +2532,6 @@ class Dnd2024CombatEngine(
             return str(row.get("level") or "none")
         finally:
             self._cover_depth -= 1
-
-    HIDE_COVER_LEVELS = ("three_quarters", "total")
-
-    def hide_preconditions(
-        self, instance: Any, combat: dict[str, Any], actor_id: str,
-    ) -> dict[str, Any]:
-        """Whether this creature may attempt to Hide here, and why not.
-
-        默认拒绝：SRD 把"能藏"写成一种**例外**（重度遮蔽、¾ 或 Total Cover），
-        the rest of the world being open ground. 一个判定位，三处消费者共用
-        （validation 拒绝、available_intents 投影、结算前复核）。
-        """
-
-        level = self.obscurement_level(combat, actor_id)
-        if level == "heavily":
-            return {"allowed": True, "source": "obscurement", "reason": ""}
-        cover = self.cover_level(instance, combat, actor_id)
-        if cover in self.HIDE_COVER_LEVELS:
-            return {"allowed": True, "source": "cover", "reason": ""}
-        return {
-            "allowed": False, "source": "",
-            "reason": "no heavy obscurement or three-quarters cover",
-        }
-
-    def has_moved_this_turn(
-        self, combat: dict[str, Any], actor_id: str,
-    ) -> bool:
-        """Whether the *current* actor has spent movement this turn.
-
-        ``economy.moved`` is written by the reducer only when the acting
-        creature pays movement, so a target shoved across the field does not
-        count as having moved -- which is what Steady Aim's wording means.
-        """
-
-        economy = combat.get("economy") or {}
-        if str(economy.get("actor_id") or "") != str(actor_id):
-            return False
-        return bool(economy.get("moved"))
 
     def obscurement_level(
         self, combat: dict[str, Any], actor_id: str,

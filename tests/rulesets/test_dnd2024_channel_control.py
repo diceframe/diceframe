@@ -481,10 +481,13 @@ def test_abjure_foes_is_the_only_new_capability(sheets, features) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_sacred_weapon_is_activated_by_the_attack_that_uses_it(sheets) -> None:
+@pytest.mark.parametrize("selection", [
+    {"activate_sacred_weapon": True}, {"attack_declarations": ["sacred_weapon"]},
+])
+def test_sacred_weapon_is_activated_by_the_attack_that_uses_it(sheets, selection) -> None:
     engine, instance = _setup(sheets["paladin3"])
     _start(engine, instance)
-    events, _ = _attack(engine, instance, MELEE, activate_sacred_weapon=True)
+    events, _ = _attack(engine, instance, MELEE, **selection)
 
     spent = _of_type(events, "dnd2024.class_resource.spent")
     assert [row["resource_id"] for row in spent] == ["channel_divinity"]
@@ -527,13 +530,16 @@ def test_a_dodge_cannot_smuggle_a_sacred_weapon_activation(sheets) -> None:
     assert _pool(instance)["current"] == 2
 
 
-def test_sacred_weapon_needs_an_unspent_channel_use(sheets) -> None:
+@pytest.mark.parametrize("selection", [
+    {"activate_sacred_weapon": True}, {"attack_declarations": ["sacred_weapon"]},
+])
+def test_sacred_weapon_needs_an_unspent_channel_use(sheets, selection) -> None:
     engine, instance = _setup(sheets["paladin3"])
     _start(engine, instance)
     _pool(instance)["current"] = 0
     resolved = engine.resolve_intent(instance, _intent(
         instance, type="attack", target_id="enemy:goblin-1", weapon_ref=MELEE,
-        activate_sacred_weapon=True,
+        **selection,
     ), SequenceRng([15, 3, 3, 3, 3]))
     assert resolved["ok"] is False
     assert "channel divinity is already spent" in resolved["error"]

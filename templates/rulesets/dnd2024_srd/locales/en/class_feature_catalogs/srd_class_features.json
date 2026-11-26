@@ -42,6 +42,8 @@
       "barbarian": "Barbarian",
       "rage": "Rage",
       "rages": "Rage Uses",
+      "sorcery_points": "Sorcery Points",
+      "spell_slot_cost": "Level {level} spell slot",
       "rage_sustain": "Sustain Rage",
       "retaliation": "Retaliation",
       "rogue": "Rogue",
@@ -161,6 +163,7 @@
       "mystic_arcanum_8": "Mystic Arcanum (Level 8)",
       "mystic_arcanum_9": "Mystic Arcanum (Level 9)",
       "natural_recovery": "Natural Recovery",
+      "natural_recovery_cast": "Natural Recovery (free cast)",
       "natures_sanctuary": "Nature's Sanctuary",
       "natures_veil": "Nature's Veil",
       "natures_ward": "Nature's Ward",
@@ -235,7 +238,16 @@
       "colossus_slayer": "Colossus Slayer",
       "horde_breaker": "Horde Breaker",
       "escape_the_horde": "Escape the Horde",
-      "multiattack_defense": "Multiattack Defense"
+      "multiattack_defense": "Multiattack Defense",
+      "cunning_strike": "Cunning Strike",
+      "improved_cunning_strike": "Improved Cunning Strike",
+      "devious_strikes": "Devious Strikes",
+      "cunning_strike.poison": "Poison",
+      "cunning_strike.trip": "Trip",
+      "cunning_strike.withdraw": "Withdraw",
+      "cunning_strike.daze": "Daze",
+      "cunning_strike.knock_out": "Knock Out",
+      "cunning_strike.obscure": "Obscure"
     }
   }
 }

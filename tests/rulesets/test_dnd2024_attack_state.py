@@ -647,15 +647,18 @@ def test_frenzy_needs_rage_a_strength_attack_and_the_declaration(
 # 7-9. Brutal Strike: who may declare it, what it forgoes, what it pays
 # --------------------------------------------------------------------------
 
+@pytest.mark.parametrize("selection", [
+    {"brutal_strike": True}, {"attack_declarations": ["brutal_strike"]},
+])
 def test_brutal_strike_needs_reckless_a_strength_attack_and_a_free_budget(
-    runtime: Dnd2024Runtime,
+    runtime: Dnd2024Runtime, selection,
 ) -> None:
     """Matrix 7: every refusal is a rejection, never a silent plain attack."""
 
     engine, instance = _combat(runtime, {"gm": barbarian(17)}, initiative={"gm": 20})
     assert "requires reckless attack" in _rejected(
         engine, instance,
-        _attack_intent(instance, weapon_ref="item:greataxe", brutal_strike=True),
+        _attack_intent(instance, weapon_ref="item:greataxe", **selection),
     )
     # The panel still offers Brutal at the top of the turn, because Reckless may
     # be declared in the same intent; it is the *pair* that is legal, never the
@@ -669,16 +672,16 @@ def test_brutal_strike_needs_reckless_a_strength_attack_and_a_free_budget(
     )
     assert "Strength-based attack" in _rejected(
         engine, instance,
-        _attack_intent(instance, weapon_ref="item:shortbow", brutal_strike=True),
+        _attack_intent(instance, weapon_ref="item:shortbow", **selection),
     )
 
     # Once used -- hit or miss -- the turn's Brutal is gone.
     engine, instance = _combat(runtime, {"gm": barbarian(17)}, initiative={"gm": 20})
     _attack(engine, instance, weapon_ref="item:greataxe", reckless_attack=True,
-            brutal_strike=True, rolls=[12, 3, 5, 5])
+            rolls=[12, 3, 5, 5], **selection)
     assert "already used this turn" in _rejected(
         engine, instance,
-        _attack_intent(instance, weapon_ref="item:greataxe", brutal_strike=True),
+        _attack_intent(instance, weapon_ref="item:greataxe", **selection),
     )
     assert _attack_options(engine, instance)["brutal_strike"]["available"] is False
 
@@ -907,8 +910,8 @@ def test_forceful_blow_pushes_fifteen_feet_and_licenses_the_follow_move(
     assert granted["target_id"] == "enemy:goblin-1"
     # Half of the barbarian's 40-foot Speed.
     assert granted["amount"] == 20
-    assert _combat_state(instance)["economy"]["brutal_move"] == {
-        "amount": 20, "target_id": "enemy:goblin-1",
+    assert _combat_state(instance)["economy"]["move_allowance"] == {
+        "amount": 20, "reason": "brutal_forceful", "target_id": "enemy:goblin-1",
     }
 
     # Moving back toward the pushed creature is inside the allowance, so the
@@ -920,9 +923,9 @@ def test_forceful_blow_pushes_fifteen_feet_and_licenses_the_follow_move(
         "submitted_by": "gm", "actor_id": "player:gm", "distance": 15,
     })
     step = next(event for event in moved if event["type"] == "dnd2024.position.changed")
-    assert step["brutal_move"] is True
+    assert step["move_allowance"] is True
     assert not any(event["type"] == "dnd2024.decision.pending" for event in moved)
-    assert "brutal_move" not in _combat_state(instance)["economy"]
+    assert "move_allowance" not in _combat_state(instance)["economy"]
 
 
 def test_forceful_follow_move_refuses_the_wrong_direction_and_extra_distance(

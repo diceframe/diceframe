@@ -42,6 +42,8 @@
       "barbarian": "野蛮人",
       "rage": "狂暴",
       "rages": "狂暴次数",
+      "sorcery_points": "术法点",
+      "spell_slot_cost": "{level} 环法术位",
       "rage_sustain": "延长狂暴",
       "retaliation": "报复",
       "rogue": "游荡者",
@@ -161,6 +163,7 @@
       "mystic_arcanum_8": "秘奥（8 环）",
       "mystic_arcanum_9": "秘奥（9 环）",
       "natural_recovery": "自然恢复",
+      "natural_recovery_cast": "自然恢复（免费施法）",
       "natures_sanctuary": "自然圣域",
       "natures_veil": "自然帷幕",
       "natures_ward": "自然守护",
@@ -235,7 +238,16 @@
       "colossus_slayer": "巨兽杀手",
       "horde_breaker": "破阵者",
       "escape_the_horde": "脱离兽群",
-      "multiattack_defense": "多重攻击防御"
+      "multiattack_defense": "多重攻击防御",
+      "cunning_strike": "诡诈打击",
+      "improved_cunning_strike": "进阶诡诈打击",
+      "devious_strikes": "凶狡打击",
+      "cunning_strike.poison": "淬毒",
+      "cunning_strike.trip": "摔绊",
+      "cunning_strike.withdraw": "撤步",
+      "cunning_strike.daze": "恍惚",
+      "cunning_strike.knock_out": "击昏",
+      "cunning_strike.obscure": "眩目"
     }
   }
 }

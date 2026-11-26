@@ -3652,6 +3652,44 @@ report unavailable reasons rather than hiding prepared spells with no legal cast
 Monster and NPC profiles optionally declare a canonical `creature_type`; encounters
 preserve it, so extra damage against `fiend` / `undead` never depends on display names.
 
+Class capabilities declare fixed resource prices in `cost.resources`.
+`{"id": "rages", "amount": 1}` spends a class resource, while `{"spell_slot": 5}` exchanges
+one slot of that exact level from the authoritative class spell slot table, not from temporary
+slots. Validation, action projection, and payment read this declaration. Capabilities that
+restore a feature use must declare their price here. A slot exchange sets `exchange: true`
+and does not count as casting a spell for the turn's action economy.
+`requires` lists prerequisites independent of costs and effect kinds. For instance,
+`["active_long_effect:dragon_wings"]` requires an unexpired effect on the acting character;
+both action projection and authoritative validation use the same world-clock-filtered actor view.
+
+New class capability effects register in `features/kinds.py`. Catalog loading rejects
+unknown kinds. Combat validates, pays the declared cost once, then dispatches each effect in
+catalog order. Granted strikes use detached state with costs and preceding events applied;
+combat ending stops further dispatch. Handlers can add display details but cannot override
+shared costs or authority checks. Reactions and decision windows use separate paths.
+`combat/divine_actions.py` owns target validation and events for Channel Divinity
+capabilities (such as Divine Spark, Turn Undead, and Abjure Foes), Lay On Hands,
+and the Life Domain's spell-healing riders.
+The common capability flow still owns shared prerequisites and declared costs.
+`combat/ongoing_effects.py` owns persistent class effects, including effects that outlast
+encounters, turn-limited buffs, and Sacred Weapon binding. It uses the common combat
+helpers for saving throws, damage, and conditions.
+`combat/support_actions.py` owns Bardic Inspiration grants and class spell-slot exchanges.
+The registered adapters pass the selected target or slot level; the combat methods still
+validate the choice against authoritative state.
+`combat/martial_actions.py` owns granted strikes, self-healing and movement, and Monk hit
+conditions. `combat/stealth_actions.py` shares Hide eligibility and settlement between
+ordinary and capability-granted Hide actions.
+
+Attack add-ons register in `features/attack_declarations.py`. New intents select IDs in
+`attack_declarations`: `sacred_weapon`, `light_extra_attack`, `brutal_strike`,
+`stunning_strike`, `quivering_palm`, or `hurl_through_hell`. The registry validates IDs
+and intent surfaces without changing rule timing: Sacred Weapon affects the current roll,
+while Stunning Strike spends Focus after a hit. Legacy flags remain accepted as compatibility
+inputs, but cannot be mixed with the ID array. Hit-spell decisions still read declarations from
+`attack_hit_triggers` on held damage. This field is absent from committed damage events
+and non-GM decision projections.
+
 ---
 
 ## 27.2 Encounter Access
@@ -4939,6 +4977,8 @@ Primary boundary:
 ```text
 src/plugin_host/
 ├─ host.py
+├─ manifest_validation.py
+├─ package_io.py
 ├─ support.py
 ├─ descriptors.py
 ├─ capabilities.py
@@ -4948,6 +4988,13 @@ src/plugin_host/
 ├─ mirrors.py
 └─ ...
 ```
+
+`host.py` orchestrates runtime loading and installation transactions. `manifest_validation.py`
+validates package declarations, configuration schemas, and permission declarations without
+loading a runtime or publishing a plugin. `policy.py` still defines and infers permissions.
+`package_io.py` owns ZIP packing and extraction, package-root lookup, and atomic JSON writes.
+`PluginHost.package_files` remains the public entry point; `host.py` still owns installation,
+publication, recovery, and rollback.
 
 ---
 
@@ -5926,6 +5973,13 @@ The current direction is:
 - preserve facade compatibility;
 - continue moving real domain logic down into services/core;
 - do not create new cross-service coupling merely because “the file is large.”
+
+`WebAPI` retains the content refresh entry points and their call order. `src/webui/content_sources.py`
+rebuilds adventure sources and D&D module catalogs from installed plugin runtimes and puts the
+module that owns the bound adventure first in the catalog source list.
+`src/webui/rule_loading.py` handles world, rule, and runtime lookups and agent ruleset scope.
+`services/adventure_rewards.py` sends adventure item rewards to the existing proposal authority
+instead of writing inventories directly.
 
 ---
 

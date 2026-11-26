@@ -34,6 +34,9 @@ _ITEM_EVENT_FIELDS = {
     "dnd2024.item.consumed": frozenset({"type", "actor_id", "item_ref", "amount"}),
     "dnd2024.item.activated": frozenset({"type", "actor_id", "item_ref", "target_id", "cost"}),
     "dnd2024.item.charge_spent": frozenset({"type", "actor_id", "item_ref", "amount"}),
+    "dnd2024.item.charge_roll": frozenset({
+        "type", "actor_id", "item_ref", "declared", "roll", "threshold", "waived",
+    }),
     "dnd2024.item.destroy_check": frozenset({
         "type", "actor_id", "item_ref", "roll", "threshold", "destroyed",
     }),
@@ -102,6 +105,9 @@ class CombatReducerMixin:
             # condition.blocked 是 S0-MM1 的免疫回执——直到本片之前它只被
             # 产出、从未被消费，任何一次真的免疫都会让整批事件 apply 失败。
             "condition.blocked", "dnd2024.rider.skipped",
+            # 诡诈打击的选择在结算时可能落不了地（偷袭不成立 / 预算不足）：
+            # 事件说明为什么没扣骰、没发效果，状态不变。
+            "dnd2024.cunning_strike.skipped",
             # Multiattack 提前收尾的回执：剩余几击没打出去，原因写在事件里。
             "dnd2024.multiattack.truncated",
         }:
@@ -616,6 +622,24 @@ class CombatReducerMixin:
             current = current if isinstance(current, dict) else {}
             block[feature_id] = {**deepcopy(current), **deepcopy(values)}
             return
+        if event_type == "dnd2024.metamagic.rerolled":
+            # 纯审计事件：谁把哪几颗骰子重掷了、前值后值各是多少。
+            return
+        if event_type == "dnd2024.metamagic.applied":
+            # 记录发生在哪一次施法上：审计需要"这个法术被改了哪几处"，
+            # 而不是只有一条扣点流水。
+            if "quickened_spell" in (event.get("options") or []):
+                combat.setdefault("economy", {})["quickened_cast"] = True
+            combat.setdefault("metamagic_log", []).append({
+                "actor_id": str(event["actor_id"]),
+                "options": [str(item) for item in event.get("options") or []],
+                "cost": int(event.get("cost", 0) or 0),
+            })
+            return
+        if event_type == "dnd2024.metamagic.free_used":
+            # Apotheosis 的免费额度每回合一次：标记跟着当前回合清。
+            combat["economy"]["free_metamagic_used"] = True
+            return
         if event_type == "dnd2024.wild_resurgence.used":
             # 每个自己的回合一次：标记跟着"当前回合的 actor"走，换人就失效。
             if event.get("turn_limited"):
@@ -837,17 +861,13 @@ class CombatReducerMixin:
         if event_type == "dnd2024.movement.granted":
             amount = int(event["amount"])
             combat["economy"]["movement"] = int(combat["economy"].get("movement", 0)) + amount
-            if str(event.get("reason") or "") == "critical_hit":
-                # 暴击后移动单独记账：它既进池（玩家仍要提交 move），又带着
-                # 一份"本次移动免借机攻击"的额度。下一次移动消费掉它，
-                # 不会延续到后续任何移动。
-                combat["economy"]["crit_move"] = amount
-            elif str(event.get("reason") or "") == "brutal_forceful":
-                # Forceful Blow 的跟步额度同样只覆盖一次移动，而且多一个
-                # 方向约束：只能朝被推开的目标走。方向在掷骰侧判定，这里只
-                # 记录额度与目标。
-                combat["economy"]["brutal_move"] = {
+            if event.get("provokes_opportunity") is False:
+                # 一次性免借机额度：覆盖且只覆盖下一次移动。暴击后移动、
+                # Forceful Blow 的跟步、诡诈打击的撤步是同一个形状，差别只
+                # 在有没有方向约束，所以它们共用这一个键。
+                combat["economy"]["move_allowance"] = {
                     "amount": amount,
+                    "reason": str(event.get("reason") or ""),
                     "target_id": str(event.get("target_id") or ""),
                 }
             return
@@ -867,11 +887,16 @@ class CombatReducerMixin:
                 and not event.get("forced")
             ):
                 combat["economy"]["moved"] = True
-            if event.get("crit_move"):
+            if (
+                event.get("move_allowance")
+                or event.get("crit_move")
+                or event.get("brutal_move")
+            ):
                 # 额度只覆盖它自己这一次移动；消费后即失效，其他移动要按
-                # 常规规则判定借机攻击。
+                # 常规规则判定借机攻击。三个标记都清：新事件带 move_allowance，
+                # 旧存档/旧批次可能带另两个，而读取侧认识全部三种。
+                combat["economy"].pop("move_allowance", None)
                 combat["economy"]["crit_move"] = 0
-            if event.get("brutal_move"):
                 combat["economy"].pop("brutal_move", None)
             return
         if event_type == "resource.changed":
@@ -973,6 +998,12 @@ class CombatReducerMixin:
                 raise EventBatchError("sustained condition is not active")
             conditions[condition_id]["sustained_this_turn"] = True
             return
+        if event_type == "dnd2024.spell.cast":
+            # 本回合施放过 1 环+ 法术：Quickened 的双向互斥读这一条，而不是
+            # 只认"扣过法术位"——免费施法与专长来源都不扣位。
+            if int(event.get("slot_level", 0) or 0) >= 1:
+                combat.setdefault("economy", {})["cast_level_one_plus"] = True
+            return
         if event_type == "dnd2024.spell.slot_spent":
             kind, raw_id = _actor_kind(str(event["actor_id"]))
             if kind not in {"player", "companion"}:
@@ -1072,6 +1103,8 @@ class CombatReducerMixin:
                     instance["mark_target_id"] = str(event["mark_target_id"])
                 if event.get("mark_expires_hours") is not None:
                     instance["mark_expires_hours"] = int(event["mark_expires_hours"])
+                if event.get("extended"):
+                    instance["extended"] = True
                 concentration_holder(self._canonical_of(snapshot, kind, raw_id))[
                     "concentration"
                 ] = instance

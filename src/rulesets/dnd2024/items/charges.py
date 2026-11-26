@@ -209,6 +209,37 @@ def spend_charges(current: int, amount: int, maximum: int) -> int:
     return current - amount
 
 
+#: Use Magic Device 的充能免收：每次"会消耗充能"的属性使用掷一次 d6。
+USE_MAGIC_DEVICE = "use_magic_device"
+CHARGE_WAIVE_KEY = "charge_waive_on_d6"
+
+
+def charge_waiver_roll(
+    canonical: Any, resolver: Any, rng: Any,
+) -> tuple[int, int] | None:
+    """One d6 for Use Magic Device, or ``None`` when no roll should happen.
+
+    ``None`` is load-bearing: a table without the feature must keep its RNG
+    stream unchanged, and "no charges spent" / "not a charge-spending property"
+    never reach here at all.  The threshold comes from the declaration rather
+    than a constant, so 6 is data that one feature owns.
+    """
+
+    if resolver is None or not resolver.has_feature(canonical, USE_MAGIC_DEVICE):
+        return None
+    threshold = resolver.feature_value(
+        canonical, USE_MAGIC_DEVICE, CHARGE_WAIVE_KEY, 0,
+    )
+    if (
+        isinstance(threshold, bool)
+        or not isinstance(threshold, int)
+        or not 2 <= threshold <= 6
+    ):
+        # 声明缺失或越界：按普通扣费处理，而不是"免收但没掷骰"。
+        return None
+    return int(rng.randint(1, 6)), threshold
+
+
 def initialize_item_state(
     canonical: dict[str, Any], bundle: Any, held_refs: Iterable[str],
 ) -> bool:

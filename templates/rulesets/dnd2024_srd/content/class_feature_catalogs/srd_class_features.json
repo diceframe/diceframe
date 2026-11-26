@@ -39,6 +39,8 @@
     "barbarian": "Barbarian",
     "rage": "Rage",
     "rages": "Rage Uses",
+    "sorcery_points": "Sorcery Points",
+    "spell_slot_cost": "Level {level} spell slot",
     "rage_sustain": "Sustain Rage",
     "retaliation": "Retaliation",
     "rogue": "Rogue",
@@ -633,6 +635,7 @@
             {
               "id": "quivering_palm_dismiss",
               "cost": {},
+              "requires": ["active_long_effect:quivering_palm"],
               "actions": [
                 {
                   "kind": "end_long_effect",
@@ -927,8 +930,7 @@
             "holy_ward_creature_types": [
               "fiend",
               "undead"
-            ],
-            "restore_slot_level": 5
+            ]
           },
           "capabilities": [
             {
@@ -946,7 +948,9 @@
             },
             {
               "id": "holy_nimbus_restore",
-              "cost": {},
+              "cost": {
+                "resources": [{"spell_slot": 5}]
+              },
               "actions": [
                 {
                   "kind": "restore_feature_use",
@@ -957,6 +961,7 @@
             {
               "id": "holy_nimbus_end",
               "cost": {},
+              "requires": ["active_long_effect:holy_nimbus"],
               "actions": [
                 {
                   "kind": "end_long_effect",
@@ -1440,9 +1445,7 @@
             "dc_ability": "str",
             "condition": "frightened",
             "condition_minutes": 1,
-            "repeat_save": true,
-            "restore_resource": "rages",
-            "restore_resource_amount": 1
+            "repeat_save": true
           },
           "capabilities": [
             {
@@ -1461,7 +1464,9 @@
             },
             {
               "id": "intimidating_presence_restore",
-              "cost": {},
+              "cost": {
+                "resources": [{"id": "rages", "amount": 1}]
+              },
               "actions": [
                 {
                   "kind": "restore_feature_use",
@@ -1612,6 +1617,17 @@
           }
         },
         {
+          "id": "use_magic_device",
+          "owner": "subclass:thief",
+          "minimum_level": 13,
+          "source_ref": "srd-5.2.1:p64:use-magic-device",
+          "summary": "You can attune to up to four magic items at once. Whenever you use a magic item property that expends charges, roll 1d6; on a 6 the property works without expending charges. You can use any Spell Scroll, using Intelligence as your spellcasting ability.",
+          "parameters": {
+            "attunement_slot_bonus": 1,
+            "charge_waive_on_d6": 6
+          }
+        },
+        {
           "id": "thiefs_reflexes",
           "owner": "subclass:thief",
           "minimum_level": 17,
@@ -1642,6 +1658,63 @@
               "wis",
               "cha"
             ]
+          }
+        },
+        {
+          "id": "cunning_strike",
+          "minimum_level": 5,
+          "source_ref": "srd-5.2.1:p62:cunning-strike",
+          "summary": "When you deal Sneak Attack damage, you can spend Sneak Attack dice on one effect before rolling the damage: Poison, Trip, or Withdraw. A save against it uses DC 8 + your Proficiency Bonus + your Dexterity modifier.",
+          "parameters": {
+            "effect_options": ["poison", "trip", "withdraw"],
+            "effects_per_use": 1,
+            "upgrade_level": 11,
+            "effects_per_use_upgrade": 2,
+            "save_dc_ability": "dex",
+            "poison_dice_cost": 1,
+            "poison_save_ability": "con",
+            "poison_condition": "poisoned",
+            "poison_duration": "one_minute",
+            "poison_repeat_save": true,
+            "poison_requires_item": "poisoners_kit",
+            "trip_dice_cost": 1,
+            "trip_save_ability": "dex",
+            "trip_condition": "prone",
+            "trip_max_target_size": "large",
+            "withdraw_dice_cost": 1,
+            "withdraw_speed_divisor": 2,
+            "withdraw_provokes_opportunity": false
+          }
+        },
+        {
+          "id": "improved_cunning_strike",
+          "minimum_level": 11,
+          "source_ref": "srd-5.2.1:p62:improved-cunning-strike",
+          "summary": "You can use two Cunning Strike effects on the same Sneak Attack, paying the dice cost of each.",
+          "parameters": {}
+        },
+        {
+          "id": "devious_strikes",
+          "minimum_level": 14,
+          "source_ref": "srd-5.2.1:p62:devious-strikes",
+          "summary": "Daze, Knock Out, and Obscure join your Cunning Strike options.",
+          "parameters": {
+            "additional_effect_options": ["daze", "knock_out", "obscure"],
+            "daze_dice_cost": 2,
+            "daze_save_ability": "con",
+            "daze_condition": "dazed",
+            "daze_duration": "target_turn_end",
+            "daze_turn_choice_limit": ["move", "action", "bonus_action"],
+            "knock_out_dice_cost": 6,
+            "knock_out_save_ability": "con",
+            "knock_out_condition": "unconscious",
+            "knock_out_duration": "one_minute",
+            "knock_out_repeat_save": true,
+            "knock_out_ends_on_damage": true,
+            "obscure_dice_cost": 3,
+            "obscure_save_ability": "dex",
+            "obscure_condition": "blinded",
+            "obscure_duration": "target_turn_end"
           }
         }
       ]
@@ -2184,9 +2257,7 @@
           "summary": "As a Bonus Action, you sprout dragon wings for 1 hour or until you dismiss them (no action required). For the duration you have a Fly Speed of 60 feet. Once you use this feature, you can't use it again until you finish a Long Rest, unless you spend 3 Sorcery Points (no action required) to restore it.",
           "parameters": {
             "fly_speed_ft": 60,
-            "duration_minutes": 60,
-            "restore_resource": "sorcery_points",
-            "restore_resource_amount": 3
+            "duration_minutes": 60
           },
           "capabilities": [
             {
@@ -2204,7 +2275,9 @@
             },
             {
               "id": "dragon_wings_restore",
-              "cost": {},
+              "cost": {
+                "resources": [{"id": "sorcery_points", "amount": 3}]
+              },
               "actions": [
                 {
                   "kind": "restore_feature_use",
@@ -2215,6 +2288,7 @@
             {
               "id": "dragon_wings_end",
               "cost": {},
+              "requires": ["active_long_effect:dragon_wings"],
               "actions": [
                 {
                   "kind": "end_long_effect",
@@ -2224,6 +2298,74 @@
               ]
             }
           ]
+        },
+        {
+          "id": "innate_sorcery",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p65:innate-sorcery",
+          "summary": "Bonus Action, 1 minute: your Sorcerer spell save DC increases by 1 and you have Advantage on the attack rolls of Sorcerer spells you cast. Twice per Long Rest.",
+          "parameters": {
+            "uses": 2,
+            "spell_save_dc_bonus": 1,
+            "duration_minutes": 1
+          },
+          "capabilities": [
+            {
+              "id": "innate_sorcery",
+              "cost": {
+                "slot": "bonus_action",
+                "resources": [{"id": "innate_sorcery", "amount": 1}]
+              },
+              "forbidden_condition": "innate_sorcery",
+              "target_kind": "none",
+              "actions": [{"kind": "innate_sorcery"}]
+            },
+            {
+              "id": "innate_sorcery_from_points",
+              "cost": {
+                "slot": "bonus_action",
+                "resources": [{"id": "sorcery_points", "amount": 2}]
+              },
+              "forbidden_condition": "innate_sorcery",
+              "exhausted_resource_id": "innate_sorcery",
+              "requires_feature_id": "sorcery_incarnate",
+              "target_kind": "none",
+              "actions": [{"kind": "innate_sorcery"}]
+            }
+          ]
+        },
+        {
+          "id": "metamagic",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p66:metamagic",
+          "summary": "You know two Metamagic options and can apply one to a spell you cast (two while Sorcery Incarnate is active). You gain two more at levels 10 and 17, and may replace one whenever you gain a Sorcerer level.",
+          "parameters": {
+            "options_per_step": 2,
+            "steps": [
+              2,
+              10,
+              17
+            ]
+          }
+        },
+        {
+          "id": "sorcery_incarnate",
+          "minimum_level": 7,
+          "source_ref": "srd-5.2.1:p66:sorcery-incarnate",
+          "summary": "With no Innate Sorcery uses left, spend 2 Sorcery Points to activate it. While it is active you can apply up to two Metamagic options to each spell.",
+          "parameters": {
+            "reactivate_points": 2,
+            "metamagic_slots": 2
+          }
+        },
+        {
+          "id": "arcane_apotheosis",
+          "minimum_level": 20,
+          "source_ref": "srd-5.2.1:p66:arcane-apotheosis",
+          "summary": "While Innate Sorcery is active you can use one Metamagic option on each of your turns without spending Sorcery Points on it.",
+          "parameters": {
+            "free_metamagic_per_turn": 1
+          }
         }
       ]
     },
@@ -2406,13 +2548,14 @@
             ],
             "condition": "incapacitated",
             "condition_turns": 1,
-            "uses_per_long_rest": 1,
-            "restore_slot_level": 5
+            "uses_per_long_rest": 1
           },
           "capabilities": [
             {
               "id": "hurl_through_hell_restore",
-              "cost": {},
+              "cost": {
+                "resources": [{"spell_slot": 5}]
+              },
               "actions": [
                 {
                   "kind": "restore_feature_use",
@@ -2678,7 +2821,7 @@
           "minimum_level": 6,
           "resource_id": "natural_recovery",
           "source_ref": "srd-5.2.1:p46:natural-recovery",
-          "summary": "Once per Long Rest, when you finish a Short Rest, recover expended spell slots with a combined level no higher than half your Druid level (round up); none of them may be level 6 or higher."
+          "summary": "Once per Long Rest, when you finish a Short Rest, recover expended spell slots with a combined level no higher than half your Druid level (round up); none of them may be level 6 or higher. Separately, you can cast one level 1+ spell you have prepared from your Circle Spells feature without expending a spell slot; you must finish a Long Rest before doing so again."
         },
         {
           "id": "circle_of_the_land_spells",
@@ -2687,6 +2830,7 @@
           "source_ref": "srd-5.2.1:p46:circle-of-the-land-spells",
           "summary": "Whenever you finish a Long Rest, choose one type of land: arid, polar, temperate, or tropical; you have the spells listed for your Druid level and lower prepared. The choice replaces the previous land's list rather than adding to it.",
           "parameters": {
+            "free_cast_resource_id": "natural_recovery_cast",
             "terrain_options": [
               "arid",
               "polar",
@@ -2847,6 +2991,12 @@
           "summary": "Once per Long Rest, when you finish a Short Rest, recover expended spell slots with a combined level no higher than half your Wizard level (round up); none of them may be level 6 or higher."
         },
         {
+          "id": "ritual_adept",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p78:ritual-adept",
+          "summary": "You can cast any spell as a Ritual if that spell has the Ritual tag and the spell is in your spellbook. You needn't have the spell prepared, but you must read from the book to cast a spell in this way."
+        },
+        {
           "id": "scholar",
           "minimum_level": 2,
           "source_ref": "srd-5.2.1:p78:scholar",
@@ -2867,6 +3017,31 @@
               "skill:nature",
               "skill:religion"
             ]
+          }
+        },
+        {
+          "id": "evocation_savant",
+          "owner": "subclass:evoker",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p82:evocation-savant",
+          "summary": "Choose two Wizard spells from the Evocation school, each of which must be no higher than level 2, and add them to your spellbook for free. In addition, whenever you gain access to a new level of spell slots in this class, you can add one Wizard spell from the Evocation school to your spellbook for free. The chosen spell must be of a level for which you have spell slots.",
+          "parameters": {
+            "spell_choice_count": 2,
+            "spell_choice_per_new_slot_level": 1,
+            "spell_choice_lists": ["class:wizard"],
+            "spell_choice_school": "evocation",
+            "spell_choice_min_level": 1,
+            "spell_choice_target": "spellbook",
+            "spell_choice_replacement": 0
+          }
+        },
+        {
+          "id": "memorize_spell",
+          "minimum_level": 5,
+          "source_ref": "srd-5.2.1:p79:memorize-spell",
+          "summary": "Whenever you finish a Short Rest, you can study your spellbook and replace one of the level 1+ Wizard spells you have prepared with another level 1+ spell from the book.",
+          "parameters": {
+            "short_rest_replace": 1
           }
         },
         {

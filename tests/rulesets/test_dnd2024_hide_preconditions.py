@@ -16,7 +16,7 @@ import pytest
 from src.engine.modules import ruleset_runtime
 
 from dnd2024_monk_common import SequenceRng
-from test_dnd2024_channel_control import _inject
+from test_dnd2024_channel_control import _apply, _capability, _inject
 from test_dnd2024_combat import _instance, _start
 
 
@@ -141,6 +141,25 @@ def test_the_projection_and_the_refusal_agree() -> None:
 # 6–7: 能力不是后门
 # ---------------------------------------------------------------------------
 
+def test_cunning_hide_checks_the_same_gate_but_pays_a_bonus_action() -> None:
+    from test_dnd2024_action_routing_a import _rogue_combat
+
+    engine, instance = _rogue_combat()
+    denied = _capability(engine, instance, "cunning_hide")
+    assert denied["ok"] is False
+    assert denied["error"] == "no heavy obscurement or three-quarters cover"
+    assert _state(instance)["combat"]["economy"]["bonus_action"] == 1
+
+    _declare_obscurement(engine, instance)
+    events = _apply(engine, instance, _capability(engine, instance, "cunning_hide", [13]))
+    assert [row["resource"] for row in events if row["type"] == "dnd2024.action.spent"] == [
+        "bonus_action",
+    ]
+    check = next(row for row in events if row["type"] == "check.resolved")
+    assert check["kind"] == "hide"
+    assert check["natural"] == 13
+
+
 def test_the_resolver_itself_refuses_regardless_of_entry_point() -> None:
     """能力路径不经过 ``hide`` 意图的校验分支，所以结算层必须再守一次。
 
@@ -155,7 +174,7 @@ def test_the_resolver_itself_refuses_regardless_of_entry_point() -> None:
     combat = _state(instance)["combat"]
     with pytest.raises(CombatIntentError) as excinfo:
         engine._hide_events(
-            instance, combat, {"actor_id": "player:gm"}, SequenceRng([13]),
+            instance, combat, "player:gm", SequenceRng([13]),
             spend_action=False,
         )
     assert "no heavy obscurement or three-quarters cover" in str(excinfo.value)

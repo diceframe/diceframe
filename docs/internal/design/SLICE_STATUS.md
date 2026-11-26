@@ -98,7 +98,7 @@
 | F14 | 命中附加效果、命中后条件、施法侧加值 | ✅ | #763 + 报告（52 条） |
 | F15 | 攻击前声明与连续状态 | ✅ | #783 + 报告（28 条） |
 | F16 | 法术学派、职业与伤害类型修饰 | ⛔ | 停工报告：四项载体里两项无落点 |
-| F17 | Cunning Strike 的 Sneak Attack 骰池预算 | ⛔ | 停工报告：七种效果的前提无权威来源 |
+| F17 | Cunning Strike 的 Sneak Attack 骰池预算 | ✅ | 六种效果全部落地（5 级三种 / 11 级双效果 / 14 级三种），DC = 8+PB+敏捷按行算；F17e 只做了 Cunning Strike 一条，通用攻击声明面板仍是 GAP-48（「部分」）；任务书 `S0F17_CUNNING_STRIKE_TASK_SPEC_2026-11-26.md` §11 有执行记录 |
 | F18 | Hunter's Mark 实例与 Ranger 高等级链 | ✅ | #783 + 报告（24 条） |
 | F19 | Hunter 五项特性、prey riders、伤害反应 | ✅ | #813（第一部分）+ #822（第二部分） |
 | F20 | 战斗开始、先攻与额外首回合 | ✅ | #784 |
@@ -108,8 +108,8 @@
 | F24 | 属性、熟练与总值替换被动 | ✅ | #784 |
 | F25 | Wild Shape（德鲁伊核心，含 Beast Spells / Archdruid） | ⬜ | 有任务书 + 调研 `S0F25_WILD_SHAPE_RESEARCH`；被 **GAP-20/21/22/23** 挡住（变形地基整条未建） |
 | F26 | Land 主动特性 | ⬜ | 有任务书；未开工 |
-| F27 | 召唤物 | ⬜ | 有任务书；只有内容数据，无引擎原语 |
-| F28 | Metamagic | ⬜ | 有任务书；引擎无 `metamagic` 实现 |
+| F27 | ~~召唤物~~（**移出本线**） | ➖ | 实为召唤类法术的效果层（`find_familiar` L1 / `find_steed` L2 / `summon_dragon` L5），三个 feature 只是入口修饰（免材料/免槽一次/类型锁定）。不属于职业特性线，交由法术与召唤子系统处理 |
+| F28 | Metamagic | 🟡 | 本地完成、未提 PR：十选项 + 容器（Sorcery Incarnate / Apotheosis）+ 2/10/17 选择 + 每级替换 + 前端两种 kind；回归见 `S0F28_METAMAGIC_EXECUTION_REPORT` §3 |
 | F29 | Divine Words 类 | ⬜ | 有任务书；未开工 |
 | F30 | 长时效应 | ⬜ | 有任务书；未开工 |
 | F31 | 法术书与物品 | ⬜ | 有任务书；未开工 |

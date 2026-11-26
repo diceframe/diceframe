@@ -14,8 +14,10 @@ import pytest
 from scripts.architecture_fitness import (
     DependencyDebt,
     assert_debt_matches_allowlist,
+    assert_size_hotspots_match_baseline,
     scan_backend_concrete_ruleset_debt,
     scan_combat_feature_coupling,
+    scan_file_size_hotspots,
     scan_frontend_concrete_ruleset_debt,
     scan_service_locator_debt,
 )
@@ -23,6 +25,7 @@ from combat_coupling_baseline import (  # noqa: E402 - sibling baseline module
     COMBAT_COUPLING_ALLOWLIST,
     DECLARED_INTENT_TYPES,
 )
+from file_size_baseline import SIZE_BASELINE  # noqa: E402 - sibling baseline module
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -194,8 +197,13 @@ def test_a_new_feature_branch_and_intent_switch_are_rejected(tmp_path: Path) -> 
     module = tmp_path / "src/rulesets/dnd2024/combat/resolution.py"
     module.parent.mkdir(parents=True)
     module.write_text(
-        "def resolve(engine, character, action, intent):\n"
+        "def resolve(engine, character, action, intent, row):\n"
         "    if action.kind == 'brand_new_feature':\n"
+        "        return True\n"
+        "    # The same branch, spelled the way a dict row is read.\n"
+        "    if row.get('kind') == 'brand_new_row_kind':\n"
+        "        return True\n"
+        "    if row['kind'] == 'brand_new_subscript_kind':\n"
         "        return True\n"
         "    if engine.features.has_feature(character, 'brand_new_feature'):\n"
         "        return True\n"
@@ -211,6 +219,14 @@ def test_a_new_feature_branch_and_intent_switch_are_rejected(tmp_path: Path) -> 
         DependencyDebt(
             "src/rulesets/dnd2024/combat/resolution.py",
             "kind_branch", "brand_new_feature",
+        ),
+        DependencyDebt(
+            "src/rulesets/dnd2024/combat/resolution.py",
+            "kind_branch", "brand_new_row_kind",
+        ),
+        DependencyDebt(
+            "src/rulesets/dnd2024/combat/resolution.py",
+            "kind_branch", "brand_new_subscript_kind",
         ),
         DependencyDebt(
             "src/rulesets/dnd2024/combat/resolution.py",
@@ -232,3 +248,74 @@ def test_a_new_feature_branch_and_intent_switch_are_rejected(tmp_path: Path) -> 
             set(),
             boundary="dnd2024 combat -> concrete feature",
         )
+
+
+def test_an_actor_kind_comparison_is_not_feature_coupling(tmp_path: Path) -> None:
+    module = tmp_path / "src/rulesets/dnd2024/combat/resolution.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(
+        "def resolve(actor, row):\n"
+        "    if actor.get('kind') == 'player':\n"
+        "        return row['kind'] == 'enemy'\n",
+        encoding="utf-8",
+    )
+
+    assert scan_combat_feature_coupling(tmp_path) == set()
+
+
+def test_known_size_hotspots_do_not_grow() -> None:
+    """A hotspot may drift a little, never jump; the baseline ratchets down."""
+
+    assert_size_hotspots_match_baseline(
+        scan_file_size_hotspots(ROOT),
+        SIZE_BASELINE,
+        boundary="active-logic source files above 1500 lines",
+    )
+
+
+def _sized(root: Path, relative: str, lines: int) -> None:
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("x\n" * lines, encoding="utf-8")
+
+
+def test_size_ratchet_tracks_hotspots_only_and_moves_one_way(tmp_path: Path) -> None:
+    _sized(tmp_path, "src/hot.py", 1600)
+    _sized(tmp_path, "src/ordinary.py", 1500)
+    _sized(tmp_path, "frontend-v2/src/features/View.vue", 1501)
+    # Translation dictionaries and wire-type declarations are not active logic.
+    _sized(tmp_path, "frontend-v2/src/i18n/messages/en.ts", 3000)
+    _sized(tmp_path, "frontend-v2/src/api/types.ts", 2000)
+
+    hotspots = scan_file_size_hotspots(tmp_path)
+    assert hotspots == {
+        "src/hot.py": 1600, "frontend-v2/src/features/View.vue": 1501,
+    }
+    recorded = dict(hotspots)
+
+    def ratchet() -> None:
+        assert_size_hotspots_match_baseline(
+            scan_file_size_hotspots(tmp_path), recorded,
+            boundary="synthetic size ratchet",
+        )
+
+    ratchet()
+    # An ordinary edit in either direction never touches the baseline.
+    _sized(tmp_path, "src/hot.py", 1700)
+    ratchet()
+    _sized(tmp_path, "src/hot.py", 1501)
+    ratchet()
+
+    with pytest.raises(AssertionError, match="grew"):
+        _sized(tmp_path, "src/hot.py", 1701)
+        ratchet()
+    with pytest.raises(AssertionError, match="shrunk"):
+        _sized(tmp_path, "src/hot.py", 1699)
+        recorded["src/hot.py"] = 1800
+        ratchet()
+    with pytest.raises(AssertionError, match="stale entry"):
+        _sized(tmp_path, "src/hot.py", 1500)
+        ratchet()
+    with pytest.raises(AssertionError, match="new hotspot"):
+        _sized(tmp_path, "src/ordinary.py", 1501)
+        ratchet()

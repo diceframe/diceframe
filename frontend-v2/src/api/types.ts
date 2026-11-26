@@ -352,10 +352,60 @@ export interface RestLandTerrain {
   required: boolean
 }
 
+/** One spell level a Short Rest may buy back, with what is actually expended. */
+export interface RestRecoverySlotRow {
+  level: number
+  expended: number
+  maximum: number
+}
+
+/** What one Short Rest could give back: a slot budget or a points budget. */
+export interface RestShortRecovery {
+  resource_id: string
+  mode: 'spell_slots' | 'points' | string
+  budget: number
+  uses_left: number
+  max_slot_level?: number
+  slots?: RestRecoverySlotRow[]
+  track?: string
+  spent?: number
+}
+
+/** One timed rite the character could perform (Magical Cunning, Eldritch Master). */
+export interface RitualOption {
+  resource_id: string
+  minutes: number
+  uses_left: number
+  slot_level: number
+  maximum: number
+  expended: number
+  regain: number
+  full_budget: boolean
+}
+
+export interface RulesetRitualOptionsResponse extends JsonObject {
+  ok: boolean
+  code?: string
+  error?: string
+  ritual_options?: RitualOption[]
+}
+
+export interface RulesetRitualResponse extends JsonObject {
+  ok: boolean
+  code?: string
+  error?: string
+  character?: JsonObject
+  revision?: number
+  duration_minutes?: number
+  duplicate?: boolean
+}
+
 /** Long-rest choices this character owns; empty fields mean "nothing to ask". */
 export interface RestOptions {
   land_terrain: RestLandTerrain | null
   free_cast: RestFreeCastSlot[]
+  /** Short-rest recovery budgets; absent when the ruleset declares none. */
+  short_recovery?: RestShortRecovery[]
 }
 
 export interface RulesetRestOptionsResponse extends JsonObject {
@@ -1365,6 +1415,8 @@ export interface RulesetCombatAction extends JsonObject {
   expected_version: number
   weapons?: RulesetCombatWeapon[]
   spells?: RulesetCombatSpell[]
+  /** Rogue Cunning Strike: unlocked effects, their dice price, and the pool. */
+  cunning_strike?: RulesetCunningStrikeMenu
   /** Server-projected items this actor may legally activate right now. */
   items?: RulesetActivatableItem[]
   /** GM-only random treasure tables; the server rolls, the client only picks a ref. */
@@ -1382,6 +1434,24 @@ export interface RulesetCombatAction extends JsonObject {
   requires_target?: boolean
   /** Declared only for actions whose roll can still spend a Lucky point. */
   lucky_advantage_available?: boolean
+}
+
+/**
+ * Cunning Strike menu the server projects on an attack row.
+ *
+ * `dice` is this level's Sneak Attack pool; `count` is how many effects one
+ * attack may carry (two from 11th level). The panel uses both to refuse an
+ * over-budget combination before submitting — the server re-checks anyway.
+ */
+export interface RulesetCunningStrikeMenu extends JsonObject {
+  /** False once this turn's Sneak Attack is spent: the pool below is moot. */
+  available: boolean
+  effects: string[]
+  count: number
+  costs: Record<string, number>
+  dice: number
+  /** Display names from the bundle locale; the panel falls back to its own. */
+  names?: Record<string, string>
 }
 
 export interface RulesetActivatableItem {

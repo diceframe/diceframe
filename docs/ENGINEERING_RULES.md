@@ -805,6 +805,8 @@ DiceFrame 的代码组织目标是让一个功能的主要行为具有明确 own
 
 这些数字是 review signal，不是机械 CI 红线。
 
+已经越过 1500 行的文件受一条**只降不升的尺寸棘轮**约束（`tests/architecture/file_size_baseline.py`）：每个热点登记当前行数，只允许在上下 100 行内浮动——涨得更多就必须先抽出一块，降得更多就必须在同一次改动里下调登记值；新文件不得进入热点。1500 行以内的文件不被跟踪，所以它不是 `max-lines` 门槛，只保证已知的热点在拆分期间不再扩大。
+
 以下类型可以合理超过上述范围：
 
 - i18n dictionary；
@@ -1281,3 +1283,28 @@ See [ADR-0011](adr/0011-application-actions-and-agent-delegation.md).
 - Hub 收录的内容 **MUST** 全年龄；NSFW 内容与版权角色二创卡 **MUST NOT** 上架；AI 生成的图像 / 语音内容 **MUST** 携带生成标注。
 - 官方口径（README、官网、Release Notes、社区公告）**MUST** 使用游戏语言（章节、路线、结局、通关），**MUST NOT** 使用情感陪伴语言或暗示"AI 角色不是 AI"。
 - 玩法模式的 transport 能力由模式契约声明（`bot_surface: full | read_only | none`），绑定准入单点执行；新增玩法 **MUST NOT** 在 bot bridge、平台插件或 generic path 中以具体玩法分支实现限制或放行。
+
+---
+
+## 25. 主动职业特性的唯一入口：单一激活通道
+
+"主动使用"指玩家在自己回合里花动作 / 附赠动作 / 反应 / 回合开始窗口，主动宣告一次职业特性。这类特性 **MUST** 声明为该特性的激活声明（当前实现为 `FeatureCapability`），并通过**一个**通用激活意图提交；**MUST NOT** 为单个特性新开意图类型。
+
+> **通道名不参与约定。** 本节约束的是"一条通道、一份声明、一份投影"，不是某个具体类名。当前实现是 `FeatureCapability` + `class_capability` + `combat_capabilities`。若后续把主动与触发合并为统一的 Activation 模型，替换类名、意图名与投影函数属于**实现变更**：本节各条 MUST 原样适用，**且不允许借这次替换重新引入任何特性专用意图**——替换容器是为了减少分叉，不是为了给它换一个更好听的名字。
+
+- 成本、可用性与阻断原因 **MUST** 来自 `src/rulesets/dnd2024/features/combat.py::combat_capabilities` 的同一份投影。意图校验 **MUST NOT** 复制一份"还剩几次、够不够付、动作花没花"的判断——两份判据迟早分叉，而分叉后表现为"面板说能用、提交被拒"或反过来。
+- 需要玩家额外选择（形态、区域原点、法术位、兑换数量）时，选择 **MUST** 作为该意图的 payload 字段（`form_ref` / `origin` / `slot_level` / `uses`），由该能力注册的 kind handler（`features/kinds.py::KIND_HANDLERS`）在结算期读取；**MUST NOT** 因为"要多选一步"就拆成第二种意图。
+- 模型缺口 **MUST** 先补进 capability 模型本身（`TARGET_KINDS`、kind 注册表、成本与前置字段 `requires`），而不是在特性侧绕开。新增取值时 **MUST** 同时补加载校验、视图投影与前端渲染，缺一即视为未完成。
+- 触发型特性（命中后、被击中后）同样适用：它们是"带前置事实的激活"，前置事实由校验期读权威状态判定，而不是另开一条由前端自报的通道。主动型与触发型在**声明、成本、门禁、投影**上是同一套事实，差别只有"谁发起这一刻"（玩家宣告 vs 事件发生）。因此两者的实现 **SHOULD** 收敛到同一个模型；在收敛之前，触发型 **MUST NOT** 自己复制一份成本与可用性判据。
+- 引擎里有实现、面板上没有入口，**不算交付**。capability 通道的入口由投影自动给出；专用意图则要自己补一遍投影与前端，这正是这条规则要消除的重复。
+- 例外 **MUST** 登记在本节表格里，写明缺哪一项模型能力、退出条件与负责人；没有登记的第二条路径视为架构退化。
+
+### 25.1 已登记例外
+
+| 特性 | 缺的模型能力 | 退出条件 | 负责人 |
+|---|---|---|---|
+| Land's Aid（`land_aid`） | capability 只能声明**一个**目标位，而这条要"原点 + 区域内每个目标各自身份"：谁吃 2d6/3d6/4d6、谁被治疗。用 `target_id` 表达不了，用 `damage_targets` 这类字段又等于在 capability 外面另建一套目标协议。 | 给 payload 加"区域 + 每目标角色分配"的声明（例如 `payload_kind: "area_assignment"`，区域 id 仍由服务端派生），并让 `_land_aid_actions` 的投影与校验改成读声明而不是读专用意图。 | DND2024 主线 |
+| Superior Hunter's Prey（`superior_hunters_prey`） | 前置事实是"本回合刚对**已标记**目标造成过标记伤害"，且每回合只能一次；这条走的是命中后的 rider 链路，与 F19 的既有意图绑在一起。 | 迁移为 capability（前置事实由校验期读权威状态判定，`once_per_turn` 走通用标记），同时删掉该意图类型。 | DND2024 猎手切片 |
+| Wild Shape / Wild Resurgence / Nature Magician / Nature's Sanctuary（`form.assume` / `form.revert` / `wild_resurgence` / `nature_magician` / `nature_sanctuary`） | F25 / F26 的既有专用意图。它们要读两个**运行时事实**：角色此刻是否在形态里（`forms.active`）、以及自己有哪些区域在场上（区域在战场图上而不在角色卡上）。`CombatContext` 目前不带这两项，所以硬迁会把"能不能用"的判断塞回结算期。 | 给 `CombatContext` 补 `active_form` 与 `zone_kinds` 两个入参（由战斗层作为运行时事实传入），然后逐个迁移并删除意图类型。 | DND2024 capability 迁移切片 |
+
+新增例外需要在本节加一行；把缺口补完、迁移完成后删掉那一行。

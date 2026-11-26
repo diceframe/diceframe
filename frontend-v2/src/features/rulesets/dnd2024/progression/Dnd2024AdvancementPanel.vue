@@ -111,6 +111,68 @@ function syncKnownForms(): void {
   else delete choices.value.known_form_refs
 }
 
+// Metamagic：与已知形态同一形状（共用 requirements 通道、提交键不同）。
+// 2/10/17 级是**必答**槽位，不选就不能确认升级——后端在通用规则里判。
+const metamagicRequirement = computed<JsonObject | null>(() => (
+  requirements.value.find(item => item.kind === 'metamagic') as JsonObject | undefined
+) || null
+)
+const metamagicPicks = ref<string[]>([])
+
+function metamagicLimit(): number {
+  return Number(metamagicRequirement.value?.count || 0)
+}
+
+function metamagicLabel(value: string): string {
+  const rows = (metamagicRequirement.value?.options as JsonObject[] | undefined) || []
+  const row = rows.find(item => String(item.value) === value)
+  return String(row?.name || value)
+}
+
+function syncMetamagic(): void {
+  if (metamagicPicks.value.length) {
+    choices.value.metamagic_option_ids = [...metamagicPicks.value]
+  } else {
+    delete choices.value.metamagic_option_ids
+  }
+}
+
+function toggleMetamagic(value: string): void {
+  const index = metamagicPicks.value.indexOf(value)
+  if (index >= 0) metamagicPicks.value.splice(index, 1)
+  else if (metamagicPicks.value.length < metamagicLimit()) metamagicPicks.value.push(value)
+  syncMetamagic()
+  void refresh()
+}
+
+// 每级可换一个已知选项：替换是可选动作（原文 "can replace"），所以留空即不换。
+const metamagicReplaceRequirement = computed<JsonObject | null>(() => (
+  requirements.value.find(item => item.kind === 'metamagic_replace') as JsonObject | undefined
+) || null
+)
+const metamagicDrop = ref('')
+const metamagicAdd = ref('')
+
+function syncMetamagicReplace(): void {
+  if (metamagicDrop.value && metamagicAdd.value) {
+    choices.value.metamagic_replace = { drop: metamagicDrop.value, add: metamagicAdd.value }
+  } else {
+    delete choices.value.metamagic_replace
+  }
+}
+
+function setMetamagicDrop(value: string): void {
+  metamagicDrop.value = value
+  syncMetamagicReplace()
+  void refresh()
+}
+
+function setMetamagicAdd(value: string): void {
+  metamagicAdd.value = value
+  syncMetamagicReplace()
+  void refresh()
+}
+
 function toggleKnownForm(ref: string): void {
   const index = knownForms.value.indexOf(ref)
   if (index >= 0) knownForms.value.splice(index, 1)
@@ -547,6 +609,8 @@ onMounted(() => {
 
       <fieldset v-if="subclassRequirement"><legend>{{ text('选择子职', 'Choose subclass') }}</legend><select :value="choices.subclass_ref || ''" @change="setChoice('subclass_ref', ($event.target as HTMLSelectElement).value)"><option value="" disabled>{{ text('请选择', 'Choose') }}</option><option v-for="option in (subclassRequirement.options as JsonObject[])" :key="String(option.value)" :value="option.value">{{ option.name }}</option></select></fieldset>
 
+      <fieldset v-if="metamagicRequirement"><legend>{{ text('超魔选项', 'Metamagic options') }}</legend><p class="spell-help">{{ text(`术士 2 级获得超魔，本级要选 ${metamagicLimit()} 个；不选无法确认升级（错过不会补）。`, `Metamagic arrives at Sorcerer 2; choose ${metamagicLimit()} now. The level cannot be confirmed without them.`) }}</p><p class="spell-help"><b>{{ text(`已选 ${metamagicPicks.length} / 需要 ${metamagicLimit()}`, `${metamagicPicks.length} selected / ${metamagicLimit()} required`) }}</b></p><div class="feat-grid"><label v-for="option in (metamagicRequirement.options as JsonObject[])" :key="String(option.value)"><input type="checkbox" :disabled="!metamagicPicks.includes(String(option.value)) && metamagicPicks.length >= metamagicLimit()" :checked="metamagicPicks.includes(String(option.value))" @change="toggleMetamagic(String(option.value))"><span><b>{{ option.name || option.value }}</b></span></label></div></fieldset>
+      <fieldset v-if="metamagicReplaceRequirement"><legend>{{ text('替换一个超魔选项（可选）', 'Replace one Metamagic option (optional)') }}</legend><p class="spell-help">{{ text('每次获得术士等级可以换掉一个已知选项；换成的必须是尚未拥有的。', 'Each Sorcerer level may replace one known option with one you do not know.') }}</p><div class="feat-grid"><label><span>{{ text('换掉', 'Replace') }}<select :value="metamagicDrop" @change="setMetamagicDrop(($event.target as HTMLSelectElement).value)"><option value="">{{ text('不换', 'Keep all') }}</option><option v-for="value in ((metamagicReplaceRequirement.known as string[]) || [])" :key="value" :value="value">{{ metamagicLabel(value) }}</option></select></span></label><label><span>{{ text('换成', 'With') }}<select :value="metamagicAdd" @change="setMetamagicAdd(($event.target as HTMLSelectElement).value)"><option value="">{{ text('未选择', 'Not chosen') }}</option><option v-for="option in (metamagicReplaceRequirement.options as JsonObject[])" :key="String(option.value)" :value="String(option.value)">{{ option.name || option.value }}</option></select></span></label></div></fieldset>
       <fieldset v-if="knownFormsRequirement"><legend>{{ text('已知野兽形态', 'Known beast forms') }}</legend><p class="spell-help">{{ text(`Wild Shape 在 2 级开始，本级要选满 ${knownFormLimit()} 个形态；CR 上限 ${knownFormsRequirement.cr_cap}，8 级前不能选带飞行速度的形态。长休时可以用一个替换其中一个。`, `Wild Shape starts at level 2; choose ${knownFormLimit()} forms now. CR cap ${knownFormsRequirement.cr_cap}, and no flying forms before level 8. A long rest can swap one of them.`) }}</p><p class="spell-help"><b>{{ text(`已选 ${knownForms.length} / 需要 ${knownFormLimit()}`, `${knownForms.length} selected / ${knownFormLimit()} required`) }}</b></p><div class="feat-grid"><label v-for="option in (knownFormsRequirement.options as JsonObject[])" :key="String(option.value)"><input type="checkbox" :disabled="!knownFormIsPicked(String(option.value)) && knownForms.length >= knownFormLimit()" :checked="knownFormIsPicked(String(option.value))" @change="toggleKnownForm(String(option.value))"><span><b>{{ option.name || option.value }}</b><small>CR {{ option.cr }}</small></span></label></div></fieldset>
 
       <fieldset v-for="spec in featureChoiceRequirements" :key="String(spec.id)"><legend>{{ featureChoiceTitle(spec) }}</legend><p class="spell-help">{{ text(`本级需要选择 ${spec.count} 项。标灰的选项写着不可选的原因：本规则集尚未实现的专长会一直无法选中，前置条件不足的补齐后即可。`, `Choose ${spec.count} for this level. Greyed options name their reason: feats this ruleset does not implement stay unavailable, while unmet prerequisites become selectable once satisfied.`) }}</p><div class="feat-grid"><label v-for="option in (spec.options as JsonObject[])" :key="String(option.value)" :class="{ unavailable: option.available === false }"><input :type="Number(spec.count || 1) > 1 ? 'checkbox' : 'radio'" :name="String(spec.id)" :disabled="option.available === false || (!featureChoiceIsPicked(spec, String(option.value)) && featureChoiceAtLimit(spec))" :checked="featureChoiceIsPicked(spec, String(option.value))" @change="toggleFeatureChoice(spec, String(option.value))"><span><b>{{ option.name || option.value }}</b><small v-if="option.available === false">{{ unavailableLabel(option) }}</small><code v-if="option.source_ref">{{ option.source_ref }}</code></span></label></div></fieldset>

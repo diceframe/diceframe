@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import re
-from copy import deepcopy
 from typing import Any
 
 from src.engine.player_control import is_ai_controlled
-from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.content.contracts import CREATURE_TYPES
 
 from ..character.attunement import (
@@ -19,12 +17,17 @@ from ..character.attunement import (
     owned_ref_counts,
 )
 from .action_adapter import is_supported_damage_formula
+from ..features.attack_declarations import (
+    BRUTAL_STRIKE, CUNNING_STRIKE_EFFECTS_KEY, LIGHT_EXTRA_ATTACK, SELECTION_KEY,
+    STUNNING_STRIKE, declaration_value, selection_error, validate_cunning_strike,
+    validate_uses, validate_weapon_selection,
+)
+from ..features.kinds import KIND_HANDLERS, KindContext
 from ..features.models import ClassFeatureError
 from ..forms import (
     FormState, FormStateError, bootstrap_known_forms, mode_for, restrictions,
 )
 from ..features.resources import (
-    long_effect_active,
     OVERCHANNEL_FEATURE_ID,
     OVERCHANNEL_OWNER,
     OVERCHANNEL_SPELL_CLASS,
@@ -42,6 +45,7 @@ from ..items.charges import (
     validate_charges_declaration,
     validate_destroy_declaration,
 )
+from ..spells.font_of_magic import declaring_class_level
 from ..spells.font_of_magic import (
     FontOfMagicError,
     create_slot_plan,
@@ -49,6 +53,8 @@ from ..spells.font_of_magic import (
     parse_created_slot_costs,
     slot_to_points_plan,
 )
+from ..spells.metamagic import MetamagicError
+from ..character.primitives import ability_modifier
 from .cover import COVER_LEVELS
 from .obscurement import (
     LAND_AID_RANGE_FT,
@@ -59,7 +65,6 @@ from .obscurement import (
 )
 from .primitives import (
     slot_available,
-    world_minutes,
     CONDITION_CODES,
     DICE_RE,
     GM_CONDITION_DURATIONS,
@@ -74,9 +79,7 @@ from .primitives import (
     RIDER_PUSH_MAXIMUM_FT,
     RIDER_PUSH_MINIMUM_FT,
     LEGENDARY_RESISTANCE_DEFAULT_PER_DAY,
-    SACRED_WEAPON_CONDITION,
     stand_up_declaration,
-    UNARMED_STRIKE_REF,
     SIZE_CODES,
     TRAIT_IDS,
     TRAIT_PARAMS,
@@ -84,6 +87,7 @@ from .primitives import (
     actor_kind as _actor_kind,
     canonical as _canonical,
     rider_attack_kind,
+    world_minutes,
 )
 from .check_modes import condition_flags, effective_speed, marked_target_id, owned_mark, vision_codes
 from .hands import apply_swap
@@ -829,6 +833,9 @@ class CombatValidationMixin:
             raise CombatIntentError(
                 f"state version conflict: expected {expected}, current {state['version']}"
             )
+        error = selection_error(intent, intent_type)
+        if error:
+            raise CombatIntentError(error)
         combat = state["combat"]
         gm_uid = str(getattr(instance, "gm_uid", "") or "")
         submitted_by = str(intent.get("submitted_by") or "")
@@ -1180,6 +1187,10 @@ class CombatValidationMixin:
         if intent_type == "cast_spell":
             if actor.get("spellcasting_allowed") is False:
                 raise CombatIntentError("this shape does not allow spellcasting")
+            if intent.get("ritual"):
+                # 仪式是 10 分钟的施法方式，战斗里没有这个时间；静默按普通施法
+                # 处理等于偷偷免掉了那 10 分钟，所以显式拒绝而不是忽略字段。
+                raise CombatIntentError("ritual casting is not available in combat")
             self._validate_shaped_spellcasting(instance, actor_id, intent)
             self._validate_spell(instance, combat, intent, actor, economy)
         if intent_type == "activate_item":
@@ -1450,6 +1461,93 @@ class CombatValidationMixin:
         if reason:
             raise CombatIntentError(f"beast spells cannot cast it: {reason}")
 
+    def _validate_metamagic(
+        self, intent: dict[str, Any], actor: dict[str, Any],
+        spell: dict[str, Any], effect: dict[str, Any], combat: dict[str, Any],
+    ) -> None:
+        """Metamagic is priced and checked before anything is rolled.
+
+        Validation and settlement both call ``metamagic.plan`` -- the difference
+        is only that this one turns its refusal into a combat error, so a bad
+        request never deducts a point or spends a slot.
+        """
+
+        if not (intent.get("metamagic") or []):
+            return
+        if effect.get("mode") == "triggered_damage":
+            # 触发型法术（至圣斩等）走另一条结算路径，不经过 _spell_events 的
+            # 效果处理；接受超魔只会"扣了点、什么也没改"，所以直接拒绝。
+            raise CombatIntentError("metamagic cannot modify a triggered spell")
+        character = self._feature_character(actor)
+        if not self.features.has_feature(character, "metamagic"):
+            raise CombatIntentError("this character has no Metamagic feature")
+        try:
+            plan = self._metamagic_plan(
+                intent, character, spell, effect, combat,
+                conditions=actor.get("conditions") or {},
+            )
+        except MetamagicError as exc:
+            raise CombatIntentError(str(exc)) from None
+        if plan.has("careful_spell"):
+            # 原文：最多等于魅力调整值（至少 1 个）的生物，且必须是本法术的
+            # 目标之一——否则 1 点就能让任意多个生物免疫。
+            limit = max(1, ability_modifier(int(actor["abilities"].get("cha", 10))))
+            chosen = list(plan.parameter("careful_spell") or ())
+            if len(chosen) > limit:
+                raise CombatIntentError(
+                    f"Careful Spell can protect at most {limit} creatures"
+                )
+            declared = {
+                str(intent.get("target_id") or ""),
+                *[str(item) for item in intent.get("target_ids") or []],
+            } - {""}
+            if not set(chosen) <= declared:
+                raise CombatIntentError(
+                    "Careful Spell targets must be targets of this spell"
+                )
+        if plan.has("empowered_spell"):
+            # Empowered Spell 的重掷数量上限是魅力调整值（至少一颗）。
+            limit = max(1, ability_modifier(int(actor["abilities"].get("cha", 10))))
+            count = int(plan.parameter("empowered_spell") or 0)
+            if count > limit:
+                raise CombatIntentError(
+                    f"Empowered Spell can reroll at most {limit} dice"
+                )
+
+    def _metamagic_plan(
+        self, intent: dict[str, Any], character: dict[str, Any],
+        spell: dict[str, Any], effect: dict[str, Any], combat: dict[str, Any],
+        conditions: dict[str, Any] | None = None,
+    ) -> Any:
+        from ..spells import metamagic
+
+        known = self.features.metamagic_known(character)
+        economy = combat.get("economy") or {}
+        # `_feature_character` 只带特性切片，不带条件：Innate 是否激活必须问
+        # actor view，否则 Incarnate 的双名额与 Apotheosis 的免费永远为假。
+        active = "innate_sorcery" in (
+            conditions if conditions is not None
+            else (character.get("conditions") or {})
+        )
+        incarnate = (
+            active and self.features.has_feature(character, "sorcery_incarnate")
+        )
+        apotheosis = (
+            active and self.features.has_feature(character, "arcane_apotheosis")
+        )
+        return metamagic.plan(
+            intent,
+            spell=spell,
+            effect=effect,
+            known=known,
+            points=int((character.get("resources") or {}).get("class", {})
+                       .get("sorcery_points", {}).get("current", 0) or 0),
+            incarnate=incarnate,
+            apotheosis=apotheosis,
+            free_used_this_turn=bool(economy.get("free_metamagic_used")),
+            cast_level_one_plus_this_turn=bool(economy.get("cast_level_one_plus")),
+        )
+
     def _spell_entity(self, spell_ref: str) -> dict[str, Any] | None:
         """与其它施法校验读同一本目录：`self.spells`，不是 bundle.get。
 
@@ -1583,7 +1681,6 @@ class CombatValidationMixin:
             raise CombatIntentError(
                 f"the sanctuary can move at most {SANCTUARY_MOVE_LIMIT_FT} feet"
             )
-
     def _validate_land_feature(
         self, instance: Any, intent: dict[str, Any], state: dict[str, Any],
     ) -> None:
@@ -1670,8 +1767,8 @@ class CombatValidationMixin:
             and int(economy.get("surge_action", 0) or 0) > 0
         ):
             raise CombatIntentError(
-                "while frightened this way you can only take one action "
-                "on your turn: Action Surge cannot buy another"
+                "your turn is limited to one of move, one action or one Bonus "
+                "Action: Action Surge cannot buy another action"
             )
         spent = {
             name for name in limit
@@ -1684,8 +1781,8 @@ class CombatValidationMixin:
             }
             used = ", ".join(sorted(labels.get(name, name) for name in spent))
             raise CombatIntentError(
-                "while frightened this way you can only move, take an action, "
-                f"or take a Bonus Action on your turn: you already chose to {used}"
+                "your turn is limited to one of move, one action or one Bonus "
+                f"Action: you already chose to {used}"
             )
 
     def _turn_choice_limit(self, conditions: dict[str, Any]) -> list[str]:
@@ -1732,47 +1829,6 @@ class CombatValidationMixin:
             self._feature_character(actor), capability_id,
         )
         if capability is not None:
-            # 特性自身的使用次数：这里的拒绝与资源不足同形，客户端拿到的
-            # 是 ok=false 而不是运行期异常。
-            if any(
-                action.kind == "restore_feature_use"
-                for action in capability.actions
-            ):
-                # 没有已用次数时"恢复"是无意义的支付：拒绝而不是白扣一格槽。
-                used = feature_usage_count(
-                    self._feature_character(actor), capability.feature_id,
-                    capability.feature_id,
-                )
-                if used < 1:
-                    raise CombatIntentError(
-                        "this feature has no use left to restore"
-                    )
-                # 支付能力也要挡在这里：零槽/零点时不能让 reducer 抛
-                # EventBatchError，客户端应该拿到 ok=false。
-                character = self._feature_character(actor)
-                slot_level = int(self.features.feature_value(
-                    character, capability.feature_id, "restore_slot_level", 0,
-                ) or 0)
-                if slot_level:
-                    # 槽表在视图的 ``slots`` 上；``_feature_character`` 的切片
-                    # 不带施法块，读它只会得到"零槽"的假结论。
-                    slots = actor.get("slots") or {}
-                    if int(slots.get(str(slot_level), 0) or 0) < 1:
-                        raise CombatIntentError(
-                            f"no level {slot_level} spell slot is available"
-                        )
-                resource_id = str(self.features.feature_value(
-                    character, capability.feature_id, "restore_resource", "",
-                ) or "")
-                amount = int(self.features.feature_value(
-                    character, capability.feature_id, "restore_resource_amount", 0,
-                ) or 0)
-                if resource_id:
-                    state = resource_state(character, resource_id)
-                    if int(state.get("current", 0) or 0) < amount:
-                        raise CombatIntentError(
-                            f"not enough {resource_id} to restore this feature"
-                        )
             if capability.uses_per_long_rest:
                 used = feature_usage_count(
                     self._feature_character(actor), capability.feature_id,
@@ -1795,24 +1851,29 @@ class CombatValidationMixin:
                     f"{self.features.catalog.label(capability_id, capability_id)} cannot be "
                     f"used while {self.features.catalog.label(forbidden, forbidden)} is active"
                 )
-        if capability_id == "quivering_palm_end":
-            # 结束振动必须先有振动：放在校验层，客户端拿到 ok=false 而不是
-            # 运行期异常。
-            if long_effect_active(
-                self._feature_character(actor), "quivering_palm",
-                world_minutes(instance),
-            ) is None:
-                raise CombatIntentError("no creature is under Quivering Palm")
-            # 规则要求持有者与目标同处一个位面。仓库没有权威位面系统，所以
-            # 这里要求调用方**显式断言**，而不是默认成立——默认成立等于偷偷
-            # 替玩家做了一个它无法验证的判断。
-            if intent.get("same_plane") is not True:
-                raise CombatIntentError(
-                    "Quivering Palm requires an explicit same-plane assertion"
+            feature_character = self._feature_character(actor)
+            if (
+                capability.requires_feature_id
+                and not self.features.has_feature(
+                    feature_character, capability.requires_feature_id,
                 )
-        if capability_id == "steady_aim":
-            if self.has_moved_this_turn(combat, str(actor["actor_id"])):
-                raise CombatIntentError("you have already moved this turn")
+            ):
+                # 第二条价格挂在更高的另一条特性上：能力属于低等级特性，所以
+                # 这里要问"那条特性在不在"，而不是把等级写进引擎。
+                raise CombatIntentError(
+                    f"{self.features.catalog.label(capability_id, capability_id)} requires "
+                    f"{self.features.catalog.label(capability.requires_feature_id, capability.requires_feature_id)}"
+                )
+            if capability.exhausted_resource_id:
+                # 与池相反：还有余额时这条价格根本不成立。
+                state = resource_state(
+                    feature_character, capability.exhausted_resource_id,
+                )
+                if int(state.get("current", 0) or 0) > 0:
+                    raise CombatIntentError(
+                        f"{self.features.catalog.label(capability.exhausted_resource_id, capability.exhausted_resource_id)} "
+                        "is not exhausted yet"
+                    )
         rider_move = intent.get("rider_move")
         if rider_move is not None:
             allowed = capability is not None and capability_id in {
@@ -1832,12 +1893,14 @@ class CombatValidationMixin:
             ) // 2
             if rider_move > allowance:
                 raise CombatIntentError("granted movement exceeds half your speed")
-        if capability is not None and any(
-            action.kind == "hide" for action in capability.actions
-        ):
-            gate = self.hide_preconditions(instance, combat, str(actor["actor_id"]))
-            if not gate["allowed"]:
-                raise CombatIntentError(str(gate["reason"]))
+        if capability is not None:
+            context = KindContext(self, instance, combat, actor, intent)
+            for action in capability.actions:
+                validate = KIND_HANDLERS[action.kind].validate
+                if validate is not None:
+                    reason = validate(capability, action, context)
+                    if reason:
+                        raise CombatIntentError(reason)
         choice = intent.get("open_hand_choice")
         if choice is not None:
             # Open Hand Technique 只在 Flurry of Blows 授予的攻击上成立；把它
@@ -1871,438 +1934,21 @@ class CombatValidationMixin:
             raise CombatIntentError(view.blocked_reason or "class capability is not available")
         if capability is None:  # pragma: no cover - availability already proved it
             raise CombatIntentError("class capability is not available to this actor")
-        has_unarmed_strike = any(
-            action.kind == "unarmed_strike" for action in capability.actions
-        )
-        has_bardic_grant = any(
-            action.kind == "bardic_grant" for action in capability.actions
-        )
-        if has_unarmed_strike:
-            # 复用 canonical 徒手打击校验：目标必须存活且敌对、射程由同一份
-            # 攻击档案决定，Combat 不自己算命中/伤害。
-            rider_actor = deepcopy(actor)
-            # The capability's own spend precedes every granted hit. Validate
-            # rider affordability against that balance, not the original pool.
-            for cost in capability.cost.resources:
-                for pool in rider_actor.get("class_resources") or []:
-                    if pool.get("id") == cost.resource_id:
-                        pool["current"] = int(pool.get("current", 0)) - cost.amount
-            self._validate_attack(instance, combat, {
-                "target_id": str(intent.get("target_id") or ""),
-                "weapon_ref": UNARMED_STRIKE_REF,
-                **{key: intent[key] for key in (
-                    "unarmed_damage_type", "rider_damage_type", "stunning_strike",
-                ) if key in intent},
-            }, rider_actor)
-        elif has_bardic_grant:
-            # 授予目标是另一位、能看见或听见你、且在 60 尺内的友方活体，并且
-            # 对方此刻没有一枚未过期的骰。这些事实在校验期就能用同一组权威
-            # 状态判定，所以非法提交在这里得到结构化拒绝，而不是等到结算时
-            # 抛异常；resolution 仍会重验一遍（纵深防御，且它要写缩略视图）。
-            target_id = str(intent.get("target_id") or "")
-            target = self._actor_view(instance, combat, target_id)
-            if target_id == actor["actor_id"]:
-                raise CombatIntentError("you cannot grant Bardic Inspiration to yourself")
-            if str(target.get("side") or "") != str(actor.get("side") or "") or target["hp"] <= 0:
-                raise CombatIntentError("Bardic Inspiration targets a living ally")
-            range_ft = self.features.feature_value(
-                self._feature_character(actor), "bardic_inspiration", "range_ft", 0,
-            )
-            if not isinstance(range_ft, int) or range_ft <= 0:
-                raise CombatIntentError("no Bardic Inspiration range is declared")
-            self._require_range(combat, actor["actor_id"], target_id, range_ft)
-            # "can see or hear you"：现有状态词表里能同时切断两条通道的只有
-            # 隐身施予者 + 目盲承受者；deafened 未建模，因此不参与判定。
-            if (
-                "invisible" in (actor.get("conditions") or {})
-                and "blinded" in (target.get("conditions") or {})
-            ):
-                raise CombatIntentError("the target can neither see nor hear you")
-            if self._active_bardic_instance(instance, combat, target_id) is not None:
-                raise CombatIntentError("the target already holds a Bardic Inspiration die")
-        elif any(action.kind == "inspiration_slot_exchange" for action in capability.actions):
-            # Font 的槽换次数：必须有已消耗次数、且该法术位仍然可用。
-            character = self._canonical_actor(instance, actor)
-            pool = dict(resource_state(character, "bardic_inspiration"))
-            if int(pool.get("current", 0) or 0) >= int(pool.get("maximum", 0) or 0):
-                raise CombatIntentError("no expended Bardic Inspiration use to regain")
-            slot_level = intent.get("slot_level")
-            if isinstance(slot_level, bool) or not isinstance(slot_level, int) or slot_level < 1:
-                raise CombatIntentError("a spell slot level is required")
-            slots = dict(
-                ((character.get("spellcasting") or {}).get("class") or {}).get("slots_current") or {}
-            )
-            if int(slots.get(str(slot_level), 0) or 0) < 1:
-                raise CombatIntentError("the spell slot is already spent")
-        elif any(action.kind == "font_slot_to_points" for action in capability.actions):
-            # 槽换点没有动作成本，所以"能不能换"全在这里判：源槽必须是真槽、
-            # 目标点数不能超过上限（超了整笔拒绝，不静默截断）。
-            try:
-                slot_to_points_plan(
-                    self._canonical_actor(instance, actor),
-                    intent.get("slot_level"),
-                )
-            except FontOfMagicError as exc:
-                raise CombatIntentError(str(exc)) from exc
-        elif any(action.kind == "font_create_slot" for action in capability.actions):
-            # 点换槽的五行走内容表；等级下限按"授予该特性的职业等级"算，
-            # 不是角色总等级——兼职时两者不是一回事。
-            character = self._canonical_actor(instance, actor)
-            definition = self.features.feature_definition(capability.feature_id)
-            class_id = str(getattr(definition, "class_id", "") or "")
-            try:
-                costs = parse_created_slot_costs(
-                    self.features.feature_value(
-                        character, capability.feature_id, "created_slot_costs", (),
-                    )
-                )
-                create_slot_plan(
-                    character, intent.get("slot_level"), costs,
-                    declaring_class_level(character, class_id),
-                )
-            except FontOfMagicError as exc:
-                raise CombatIntentError(str(exc)) from exc
-        elif any(action.kind == "divine_spark" for action in capability.actions):
-            self._validate_divine_spark(instance, combat, intent, actor, capability)
-        elif any(action.kind == "turn_undead" for action in capability.actions):
-            self._validate_turn_undead(instance, combat, intent, actor, capability)
-        elif any(action.kind == "preserve_life" for action in capability.actions):
-            self._validate_preserve_life(instance, combat, intent, actor, capability)
-        elif any(action.kind == "lay_on_hands" for action in capability.actions):
-            self._validate_lay_on_hands(instance, combat, intent, actor, capability)
-        elif any(action.kind == "abjure_foes" for action in capability.actions):
-            self._validate_abjure_foes(instance, combat, intent, actor, capability)
-        elif capability.requires_hostile_target:
+        if SELECTION_KEY in intent and declaration_value(intent, STUNNING_STRIKE) and not any(
+            KIND_HANDLERS[action.kind].grants_attack for action in capability.actions
+        ):
+            raise CombatIntentError("Stunning Strike requires a granted attack")
+        context = KindContext(self, instance, combat, actor, intent)
+        for action in capability.actions:
+            validate = KIND_HANDLERS[action.kind].validate_available
+            if validate is not None:
+                validate(capability, action, context)
+        if capability.requires_hostile_target:
             target = self._actor_view(
                 instance, combat, str(intent.get("target_id") or ""),
             )
             if str(target.get("side") or "") == str(actor.get("side") or "") or target["hp"] <= 0:
                 raise CombatIntentError("this capability requires a living hostile target")
-
-    def _capability_range(
-        self, actor: dict[str, Any], capability: Any, key: str, default: int,
-    ) -> int:
-        """The declared reach of one capability, in feet.
-
-        Range comes from the feature declaration, never from the intent: a
-        client that sends a friendlier number must not be able to widen it.
-        The declaring feature is read (not the capability id) because the
-        Channel Divinity options are capabilities *of* one feature, and their
-        numbers live in that feature's parameters under a prefixed key.
-        """
-
-        range_ft = self.features.feature_value(
-            self._feature_character(actor), capability.feature_id, key, default,
-        )
-        return int(range_ft) if isinstance(range_ft, int) and range_ft > 0 else default
-
-    def _validate_divine_spark(
-        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
-        actor: dict[str, Any], capability: Any,
-    ) -> None:
-        """Divine Spark: another living creature, 30 feet, one of two modes."""
-
-        target_id = str(intent.get("target_id") or "")
-        if not target_id:
-            raise CombatIntentError("Divine Spark requires a target")
-        if target_id == str(actor["actor_id"]):
-            raise CombatIntentError("Divine Spark cannot target yourself")
-        target = self._actor_view(instance, combat, target_id)
-        if target["hp"] <= 0:
-            raise CombatIntentError("Divine Spark targets a living creature")
-        self._require_range(
-            combat, str(actor["actor_id"]), target_id,
-            self._capability_range(actor, capability, "spark_target_range_ft", 30),
-        )
-        mode = str(intent.get("spark_mode") or "")
-        if mode not in {"heal", "damage"}:
-            raise CombatIntentError("Divine Spark must be declared as heal or damage")
-        damage_type = str(intent.get("damage_type") or "")
-        allowed = [
-            str(kind) for kind in (
-                self.features.feature_value(
-                    self._feature_character(actor), capability.feature_id,
-                    "spark_damage_types", ["necrotic", "radiant"],
-                ) or []
-            )
-        ]
-        if mode == "damage":
-            if damage_type not in allowed:
-                raise CombatIntentError(
-                    "Divine Spark damage must be one of its declared damage types"
-                )
-        elif damage_type:
-            raise CombatIntentError("Divine Spark healing does not choose a damage type")
-
-    def _validate_turn_undead(
-        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
-        actor: dict[str, Any], capability: Any,
-    ) -> None:
-        """Turn Undead: a de-duplicated set of Undead inside the declared reach."""
-
-        raw = intent.get("target_ids")
-        if not isinstance(raw, list) or not raw:
-            raise CombatIntentError("Turn Undead requires at least one Undead target")
-        targets = [str(item) for item in raw]
-        if len(set(targets)) != len(targets):
-            raise CombatIntentError("Turn Undead targets must not repeat")
-        limit = self._capability_range(actor, capability, "turn_target_range_ft", 30)
-        for target_id in targets:
-            target = self._actor_view(instance, combat, target_id)
-            if target["hp"] <= 0:
-                raise CombatIntentError("Turn Undead targets a living Undead")
-            if "undead" not in str(target.get("creature_type") or "").lower():
-                raise CombatIntentError("Turn Undead targets only Undead creatures")
-            self._require_range(combat, str(actor["actor_id"]), target_id, limit)
-        if intent.get("sear_undead") not in (None, False):
-            if intent.get("sear_undead") is not True:
-                raise CombatIntentError("sear_undead must be a boolean")
-            if not self.features.has_feature(
-                self._feature_character(actor), "sear_undead",
-            ):
-                raise CombatIntentError("sear undead is not available to this actor")
-
-    def _validate_abjure_foes(
-        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
-        actor: dict[str, Any], capability: Any,
-    ) -> None:
-        """Abjure Foes: exactly Charisma-modifier creatures you can see.
-
-        "Exactly" is the rule, not a convenience: the feature targets *a number
-        of creatures equal to* the modifier, so a shorter list is as illegal as
-        a longer one, and refusing the whole intent is the only rejection that
-        cannot leave a partially-paid Channel use behind.
-        """
-
-        raw = intent.get("target_ids")
-        if not isinstance(raw, list) or not raw:
-            raise CombatIntentError("Abjure Foes requires at least one target")
-        targets = [str(item) for item in raw]
-        if len(set(targets)) != len(targets):
-            raise CombatIntentError("Abjure Foes targets must not repeat")
-        character = self._feature_character(actor)
-        ability = str(self.features.feature_value(
-            character, capability.feature_id, "target_count_ability", "cha",
-        ) or "cha")
-        minimum = int(self.features.feature_value(
-            character, capability.feature_id, "target_count_minimum", 1,
-        ) or 1)
-        count = max(
-            minimum,
-            ability_modifier(int((actor.get("abilities") or {}).get(ability, 10) or 10)),
-        )
-        if len(targets) != count:
-            raise CombatIntentError(
-                f"Abjure Foes must target exactly {count} creatures"
-            )
-        limit = self._capability_range(actor, capability, "target_range_ft", 60)
-        for target_id in targets:
-            if target_id == str(actor["actor_id"]):
-                raise CombatIntentError("Abjure Foes cannot target yourself")
-            target = self._actor_view(instance, combat, target_id)
-            if target["hp"] <= 0:
-                raise CombatIntentError("Abjure Foes targets a living creature")
-            self._require_range(combat, str(actor["actor_id"]), target_id, limit)
-            if not self._spell_target_visible(instance, combat, actor, target):
-                raise CombatIntentError("Abjure Foes targets creatures you can see")
-
-    def _validate_preserve_life(
-        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
-        actor: dict[str, Any], capability: Any,
-    ) -> None:
-        """Preserve Life: a split of one budget, capped by each target's half HP.
-
-        Both ceilings are checked here because both are facts the server owns:
-        the budget is 5 x Cleric level for *this* action, and a creature can
-        never be restored above half its Hit Point maximum by this feature.
-        """
-
-        rows = intent.get("allocations")
-        if not isinstance(rows, list) or not rows:
-            raise CombatIntentError("Preserve Life requires at least one allocation")
-        character = self._feature_character(actor)
-        per_level = self.features.feature_value(
-            character, capability.id, "preserve_life_per_level", 5,
-        )
-        state = self.features.class_state(character)
-        level = int(state[1]) if state else 0
-        budget = int(per_level or 5) * level
-        limit = self._capability_range(actor, capability, "target_range_ft", 30)
-        seen: set[str] = set()
-        total = 0
-        for row in rows:
-            if not isinstance(row, dict):
-                raise CombatIntentError("each Preserve Life allocation must name a target")
-            target_id = str(row.get("target_id") or "")
-            amount = row.get("amount")
-            if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
-                raise CombatIntentError("a Preserve Life amount must be a non-negative integer")
-            if target_id in seen:
-                raise CombatIntentError("a Preserve Life target may appear only once")
-            seen.add(target_id)
-            target = self._actor_view(instance, combat, target_id)
-            if target["hp"] <= 0:
-                raise CombatIntentError("Preserve Life targets a living creature")
-            self._require_range(combat, str(actor["actor_id"]), target_id, limit)
-            maximum = int(target["max_hp"])
-            if int(target["hp"]) * 2 > maximum:
-                raise CombatIntentError(
-                    "Preserve Life targets only Bloodied creatures"
-                )
-            ceiling = max(0, maximum // 2 - int(target["hp"]))
-            if amount > ceiling:
-                raise CombatIntentError(
-                    "Preserve Life cannot restore a creature above half its Hit Points"
-                )
-            total += amount
-        if total > budget:
-            raise CombatIntentError(
-                "the Preserve Life allocation exceeds this use's budget"
-            )
-        if total <= 0:
-            raise CombatIntentError("Preserve Life requires a positive allocation")
-
-    def _lay_on_hands_conditions(
-        self, actor: dict[str, Any], capability_id: str,
-    ) -> tuple[dict[str, int], int]:
-        """Conditions this Paladin may pay to remove, and the price of each.
-
-        Restoring Touch (level 14) is a second declaration over the same pool,
-        so the allowed set is the union of what each owned feature names.  The
-        base list is never edited in place: a character without the feature
-        simply has the shorter set.
-        """
-
-        character = self._feature_character(actor)
-        cost = int(self.features.feature_value(
-            character, capability_id, "condition_cost", 5,
-        ) or 5)
-        allowed: dict[str, int] = {
-            str(code): cost
-            for code in (self.features.feature_value(
-                character, "lay_on_hands", "removable_conditions", ["poisoned"],
-            ) or [])
-        }
-        for code in self.features.feature_value(
-            character, "restoring_touch", "removable_conditions", [],
-        ) or []:
-            allowed[str(code)] = int(self.features.feature_value(
-                character, "restoring_touch", "condition_cost", 5,
-            ) or 5)
-        return allowed, cost
-
-    def _validate_lay_on_hands(
-        self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
-        actor: dict[str, Any], capability: Any,
-    ) -> None:
-        """Lay On Hands: one touched creature, a pool that pays, conditions owned."""
-
-        target_id = str(intent.get("target_id") or "")
-        if not target_id:
-            raise CombatIntentError("Lay On Hands requires a target")
-        target = self._actor_view(instance, combat, target_id)
-        if "dead" in (target.get("conditions") or {}):
-            raise CombatIntentError("Lay On Hands cannot restore a dead creature")
-        self._require_range(
-            combat, str(actor["actor_id"]), target_id,
-            self._capability_range(actor, capability, "target_range_ft", 5),
-        )
-        amount = intent.get("healing_amount", 0)
-        if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
-            raise CombatIntentError("healing_amount must be a non-negative integer")
-        raw_conditions = intent.get("remove_conditions") or []
-        if not isinstance(raw_conditions, list):
-            raise CombatIntentError("remove_conditions must be an array")
-        conditions = [str(code) for code in raw_conditions]
-        if len(set(conditions)) != len(conditions):
-            raise CombatIntentError("a condition may be removed only once per use")
-        allowed, _base_cost = self._lay_on_hands_conditions(actor, capability.id)
-        held = target.get("conditions") or {}
-        total = amount
-        for condition_id in conditions:
-            if condition_id not in allowed:
-                raise CombatIntentError(
-                    "this Paladin cannot remove that condition with Lay On Hands"
-                )
-            if condition_id not in held:
-                # 目标身上没有这个状态时拒绝，而不是照扣 5 点却什么也没移除。
-                raise CombatIntentError(
-                    "the target does not have the condition being removed"
-                )
-            total += allowed[condition_id]
-        if total <= 0:
-            raise CombatIntentError(
-                "Lay On Hands needs healing or a condition to remove"
-            )
-        character = self._canonical_actor(instance, actor)
-        pool = resource_state(character, "lay_on_hands")
-        if int(pool.get("current", 0) or 0) < total:
-            raise CombatIntentError("the Lay On Hands pool is too small for that use")
-
-    def _validate_sacred_weapon(
-        self, intent: dict[str, Any], actor: dict[str, Any],
-        weapon: dict[str, Any], combat: dict[str, Any],
-    ) -> None:
-        """Sacred Weapon is declared on an attack, not as its own action.
-
-        Two facts are re-derived here rather than trusted from the panel: that
-        this is the *first* attack of a real Attack action (a Channel use
-        cannot be bolted on to the second swing of a round, nor to an
-        opportunity attack), and that the weapon being imbued is the very
-        weapon this attack uses -- a Melee weapon the actor is carrying.
-        """
-
-        declared = intent.get("activate_sacred_weapon")
-        damage_choice = intent.get("sacred_weapon_damage")
-        if declared in (None, False) and damage_choice is None:
-            return
-        character = self._feature_character(actor)
-        if not self.features.has_feature(character, "sacred_weapon"):
-            raise CombatIntentError("sacred weapon is not available to this actor")
-        weapon_ref = str(weapon.get("weapon_ref") or "")
-        binding = (actor.get("conditions") or {}).get(SACRED_WEAPON_CONDITION)
-        bound_here = (
-            isinstance(binding, dict)
-            and str(binding.get("weapon_ref") or "") == weapon_ref
-        )
-        if declared not in (None, False):
-            if declared is not True:
-                raise CombatIntentError("activate_sacred_weapon must be a boolean")
-            if weapon.get("ranged") or weapon.get("unarmed"):
-                raise CombatIntentError(
-                    "sacred weapon imbues a Melee weapon you are holding"
-                )
-            economy = combat.get("economy") or {}
-            if int(economy.get("attacks_remaining", 0) or 0) > 0:
-                raise CombatIntentError(
-                    "sacred weapon is imbued when you take the Attack action, "
-                    "not after its first attack"
-                )
-            if (
-                int(economy.get("action", 0) or 0) < 1
-                and int(economy.get("surge_action", 0) or 0) < 1
-            ):
-                raise CombatIntentError("sacred weapon requires the Attack action")
-            pool = resource_state(character, "channel_divinity")
-            if int(pool.get("current", 0) or 0) < 1:
-                raise CombatIntentError("channel divinity is already spent")
-        if damage_choice is not None:
-            if not bound_here and declared is not True:
-                raise CombatIntentError(
-                    "this weapon carries no sacred weapon bond"
-                )
-            allowed = [
-                str(value) for value in (
-                    self.features.feature_value(
-                        character, "sacred_weapon", "weapon_damage_type_choices",
-                        ["normal", "radiant"],
-                    ) or []
-                )
-            ]
-            if str(damage_choice) not in allowed:
-                raise CombatIntentError(
-                    "the declared sacred weapon damage type is not available"
-                )
 
     def _validate_two_handed(
         self, actor: dict[str, Any], intent: dict[str, Any], weapon: dict[str, Any],
@@ -2503,7 +2149,7 @@ class CombatValidationMixin:
         if actor["kind"] not in {"player", "companion"}:
             return
         resource = (
-            "bonus_action" if intent.get("light_extra_attack")
+            "bonus_action" if declaration_value(intent, LIGHT_EXTRA_ATTACK)
             else self._spend_action_resource(combat)
         )
         record = (combat.get("loading_shots") or {}).get(str(actor["actor_id"]))
@@ -2529,7 +2175,7 @@ class CombatValidationMixin:
         otherwise -- that decision lives in resolution, next to the damage roll.
         """
 
-        declared = intent.get("light_extra_attack")
+        declared = declaration_value(intent, LIGHT_EXTRA_ATTACK)
         if declared is None:
             return
         if declared is not True:
@@ -2678,20 +2324,10 @@ class CombatValidationMixin:
     def _validate_attack(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], actor: dict[str, Any],
     ) -> None:
-        if intent.get("hurl_through_hell"):
-            # 要求了 Hurl 却不满足条件时在校验层拒绝：结算层抛异常会冒泡，
-            # 客户端应该拿到 ok=false 与可读原因。
-            character = self._feature_character(actor)
-            if not self.features.has_feature(character, "hurl_through_hell"):
-                raise CombatIntentError(
-                    "Hurl Through Hell is not available to this actor"
-                )
-            if feature_usage_count(
-                character, "hurl_through_hell", "hurl_through_hell",
-            ) >= 1:
-                raise CombatIntentError(
-                    "Hurl Through Hell has no use left until a long rest"
-                )
+        character = self._feature_character(actor)
+        error = validate_uses(self.features, character, intent, "attack")
+        if error:
+            raise CombatIntentError(error)
         target_id = str(intent.get("target_id") or "")
         target = self._actor_view(instance, combat, target_id)
         # 敌我判断基于 side：companion/player 同为 party，互不视为合法攻击目标。
@@ -2725,6 +2361,29 @@ class CombatValidationMixin:
         if distance > long_range:
             raise CombatIntentError(f"target is out of range ({distance} > {long_range} feet)")
         self._validate_hit_riders(actor, intent, combat)
+        error = validate_weapon_selection(self.features, character, intent, weapon, world_minutes(instance))
+        if error:
+            raise CombatIntentError(error)
+        # 只有真的带了载荷才进这条校验：`validate_cunning_strike` 要读一次
+        # 背包（制毒工具），而绝大多数攻击什么也没声明——把它放在无条件路径
+        # 上等于给每次攻击加一次全量物品统计。
+        if intent.get(CUNNING_STRIKE_EFFECTS_KEY) is not None:
+            error = validate_cunning_strike(
+                self.features, character, intent,
+                target_size=str(target.get("size") or ""),
+                # 只有玩家与伙伴有背包权威（`_activation_payload` 就是这两条
+                # 路径）；敌人的攻击也会走到这里，`_companion()` 对它会直接报错。
+                carried_refs=(
+                    owned_ref_counts(self._activation_payload(instance, actor))
+                    if actor["kind"] in {"player", "companion"} else None
+                ),
+                speed=effective_speed(
+                    self.catalog.conditions, actor.get("conditions") or {},
+                    max(0, int(actor.get("speed", 0) or 0)),
+                ),
+            )
+            if error:
+                raise CombatIntentError(error)
         self._validate_attack_state_options(instance, combat, intent, actor, weapon, distance)
 
     def _validate_save_action_intent(
@@ -2901,7 +2560,7 @@ class CombatValidationMixin:
         """
 
         reckless = intent.get("reckless_attack")
-        brutal = intent.get("brutal_strike")
+        brutal = declaration_value(intent, BRUTAL_STRIKE)
         effects = intent.get("brutal_strike_effects")
         if reckless is None and brutal is None and effects is None:
             return
@@ -3062,7 +2721,7 @@ class CombatValidationMixin:
 
         unarmed_type = intent.get("unarmed_damage_type")
         rider_type = intent.get("rider_damage_type")
-        stunning = intent.get("stunning_strike")
+        stunning = declaration_value(intent, STUNNING_STRIKE)
         if intent.get("open_hand_choice") is not None:
             raise CombatIntentError(
                 "open hand technique applies only to Flurry of Blows attacks"
@@ -3212,6 +2871,9 @@ class CombatValidationMixin:
         cost = declaration["cost"]
         if not slot_available(economy, cost):
             raise CombatIntentError(f"the {cost.replace('_', ' ')} has already been spent")
+        # Quickened 的双向互斥都靠这一条：本回合只要施放过 1 环+ 法术（含免费
+        # 施法与专长来源），就不能再 Quickened，也不能在被 Quickened 之后放。
+
         canonical = self._canonical_actor(instance, actor)
         payload = self._activation_payload(instance, actor)
         # Consumables are removed from the live inventory when the batch is
@@ -3275,8 +2937,15 @@ class CombatValidationMixin:
             raise CombatIntentError("spell is not deterministically automated yet")
         if spell_ref not in actor["spell_refs"]:
             raise CombatIntentError("spell is not prepared or known by the actor")
+        self._validate_metamagic(intent, actor, spell, effect, combat)
         if effect["mode"] == "reaction_defense":
             raise CombatIntentError("this spell is cast as a reaction when you are hit")
+        error = validate_uses(
+            self.features, self._feature_character(actor), intent, "cast_spell",
+            attack_roll=effect["mode"] == "spell_attack",
+        )
+        if error:
+            raise CombatIntentError(error)
         trigger = hit_spell_decision(combat, actor["actor_id"])
         if effect["mode"] == "triggered_damage" and trigger is None:
             raise CombatIntentError("this spell requires a pending melee hit")
@@ -3290,12 +2959,29 @@ class CombatValidationMixin:
         if intent.get("spend_luck") and effect["mode"] != "spell_attack":
             raise CombatIntentError("spend_luck requires a spell attack roll")
         self._validate_lucky_spend(instance, intent, actor)
-        cost = "bonus_action" if str(spell["casting_time"]).startswith("Bonus Action") else "action"
+        plan = self._metamagic_plan(
+            intent, self._feature_character(actor), spell, effect, combat,
+            conditions=actor.get("conditions") or {},
+        ) if intent.get("metamagic") else None
+        # Quickened Spell 把"一个动作的施法"改成附赠动作：成本要按它读，
+        # 否则玩家付了附赠动作却仍被要求有动作。
+        quickened = bool(plan and plan.has("quickened_spell"))
+        cost = "bonus_action" if (
+            quickened or str(spell["casting_time"]).startswith("Bonus Action")
+        ) else "action"
         if not slot_available(economy, cost):
             raise CombatIntentError(f"the {cost.replace('_', ' ')} has already been spent")
+        # Quickened 的双向互斥都靠这一条：本回合只要施放过 1 环+ 法术（含免费
+        # 施法与专长来源），就不能再 Quickened，也不能在被 Quickened 之后放。
+
         slot_level = intent.get("slot_level", spell["level"])
         if isinstance(slot_level, bool) or not isinstance(slot_level, int):
             raise CombatIntentError("slot_level must be an integer")
+        if economy.get("quickened_cast") and slot_level >= 1:
+            # Quickened 之后本回合不能再放 1 环+（戏法不受限）。
+            raise CombatIntentError(
+                "a level 1+ spell cannot be cast after Quickened Spell this turn"
+            )
         if spell["level"] == 0:
             if slot_level != 0:
                 raise CombatIntentError("a cantrip does not use a spell slot")
@@ -3317,8 +3003,16 @@ class CombatValidationMixin:
         ]
         required_count = int(effect.get("target_count", 1) or 1)
         upcast_targets = int(effect.get("upcast_target_count", 0) or 0)
+        if not upcast_targets and bool(effect.get("upcast_target_bonus")):
+            # 数据里"可升环多选一个目标"有两种写法：布尔标记只说明"每升一环
+            # 多一个目标"，等价于 count=1。
+            upcast_targets = 1
         if upcast_targets:
             required_count += upcast_targets * max(0, slot_level - int(spell["level"]))
+        if plan is not None and plan.has("twinned_spell") and upcast_targets:
+            # Twinned Spell 把法术的**有效环阶** +1：多出来的一个目标不花更高
+            # 的槽，槽位仍按原环阶结算。
+            required_count += upcast_targets
         has_duplicates = len(set(target_ids)) != len(target_ids)
         if not target_ids or len(target_ids) > required_count or (
             has_duplicates and not effect.get("repeat_targets")
@@ -3371,7 +3065,7 @@ class CombatValidationMixin:
                 # 射程是特性可能改写过的值（德鲁伊 15 的元素之怒），不是目录原文。
                 self._require_range(
                     combat, actor["actor_id"], target_id,
-                    self._spell_effective_range(actor, spell, effect),
+                    self._spell_effective_range(actor, spell, effect, plan),
                 )
             if effect.get("marks_target") and not self._spell_target_visible(
                 instance, combat, actor, target,
