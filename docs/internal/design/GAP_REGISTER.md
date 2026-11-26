@@ -56,7 +56,7 @@
 | GAP-42 | 玩家申报骰面（实体骰）没有通道 | 战斗里每个 d20 都来自服务端 rng；`src/engine/dice.py::parse_player_roll` 只服务老通用引擎的聊天掷骰，不绑定任何 `check.resolved` | 桌上掷实体骰的玩家无法把自己的点数交给引擎，只能由服务端重掷 | 需先定信任模型（谁能申报、如何审计、GM 可否覆盖），未立项 | 未开工 |
 | GAP-41 | rider 的生物类型前提无法表达 | Ghoul 的麻痹写明「非亡灵非精灵」；`parse_riders` 见到这类前提整条不导入 | 这类 rider 在目录里缺席（宁可缺席也不对所有目标生效） | S0-MM4 | 未开工 |
 
-| GAP-43 | 触发式行动没有统一入口 | `check_windows.py::WINDOW_REGISTRY` 17 条只覆盖"改骰"一类（surface 为 attack/attack_check/attack_damage/ability_check/save），`attack_hit` 组在 main 上仍是 4 个意图布尔（`stunning_strike` / `brutal_strike` / `activate_sacred_weapon` / `light_extra_attack`），另 2 个随 #841 引入（`hurl_through_hell` / `quivering_palm`），`_attack_hit_events` 里 `if intent.get("hurl_through_hell")` 按 feature id 分支；`check_windows.py:27-29` 的纪律"never a branch in resolution.py"只作用在 post 面 | 新增一个触发式行动要改 validation + resolution 至少三处；同一特性两套机制（Quivering Palm 施加走意图布尔、结束走 capability）；反应类（Shield）靠条件有无表达可用性，"要不要自动用"没有位置 | `GAP43_ACTIVATION_TASK_SPEC_2026-11-24.md`（已定稿） | 已立项 |
+| GAP-43 | 触发式行动没有统一入口 | `check_windows.py::WINDOW_REGISTRY` 17 条只覆盖"改骰"一类（surface 为 attack/attack_check/attack_damage/ability_check/save），`attack_hit` 组在 main 上仍是 4 个意图布尔（`stunning_strike` / `brutal_strike` / `activate_sacred_weapon` / `light_extra_attack`），另 2 个随 #841 引入（`hurl_through_hell` / `quivering_palm`），`_attack_hit_events` 里 `if intent.get("hurl_through_hell")` 按 feature id 分支；`check_windows.py:27-29` 的纪律"never a branch in resolution.py"只作用在 post 面 | 新增一个触发式行动要改 validation + resolution 至少三处；同一特性两套机制（Quivering Palm 施加走意图布尔、结束走 capability）；反应类（Shield）靠条件有无表达可用性，"要不要自动用"没有位置 | `GAP43_ACTIVATION_TASK_SPEC_2026-11-24.md`（已定稿） | 已执行（#848、#853–#857、#863；2026-11-25） |
 
 
 ## 按片索引

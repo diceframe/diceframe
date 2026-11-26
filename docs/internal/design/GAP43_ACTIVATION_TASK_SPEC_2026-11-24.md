@@ -7,7 +7,7 @@
 | 规则基准 | SRD 5.2.1 的动作成本原文 |
 | 代码基线 | **等 #836 / #838 / #839 / #841 合并后**，基于当时的 main |
 | 前置任务 | #515（shrink-only 护栏）、SP3、F14、F20、F21、F28、F30 |
-| 状态 | 待执行；2026-11-24 按维护者在 #843 的口径修订 |
+| 状态 | **A–H 已执行**（2026-11-25，执行记录见 §12）；2026-11-24 按维护者在 #843 的口径修订 |
 | 修订 | 初稿把 trigger/window 并入同一类型、给 effects 设闭集；两处均被否，已改 |
 
 ## 1. 范围与完成定义
@@ -192,3 +192,42 @@ git diff --check
 > 新增一种效果 = 一个 handler + 一行注册，不改中央分发路径。
 > 成本只有一份实现 `_pay_cost()`；禁止 `economy[cost]` 这类直接索引。
 > 触发式行动（trigger / window）仍走各自注册表，与 `Activation` 共用成本与前提的写法，不共用类型。
+
+## 12. 执行记录（2026-11-25）
+
+执行者：维护者侧与 Guan612（按维护者的交接说明）。本节只记事实；§1–§11 保留原计划，不改写。
+
+### 12.1 落地情况
+
+| 步骤 | PR | 结果 |
+|---|---|---|
+| 第一步前半：Cost 拆成 `slot` / `resources` / `timing` | #848 | `action` / `turn_start` 留为只读别名；7 处 `economy[cost]` 收敛为 `slot_available()`；扣费收敛为 `_pay_cost()`；9 条空成本用测试固定 |
+| 第一步后半：`*_restore` 的成本 | #853 | 4 条 restore 的成本搬进 `cost.resources`，新增 `{"spell_slot": N}`；空成本 9 → 5；事件逐字节一致 |
+| 第二步：kind 注册表 | #854、#855、#856 | `features/kinds.py::KIND_HANDLERS`，29 个 kind 全部走注册表，旧的 `action.kind` 链删除；未注册的 kind 在装载期报错 |
+| 第三步：`attack_hit` 声明化 | #857 | `features/attack_declarations.py`：按 canonical id 声明，旧 flag 只在声明边界读取；保留「声明随被扣住的伤害事件走、不上 wire」的契约 |
+| E：dismiss 的前提 | #863（原样并入 #852） | `requires: ["active_long_effect:<id>"]`；投影与提交读同一份按世界时钟过滤后的快照 |
+| 第四步：按 kind 拆文件 | #858、#864、#865、#866 | `combat/divine_actions.py`、`ongoing_effects.py`、`martial_actions.py`、`stealth_actions.py`、`support_actions.py` |
+| F / G：`plugin_host` | #859、#860 | `manifest_validation.py`、`package_io.py`；`host.py` 2679 → 2299 行 |
+| H：`WebAPI` 两簇 | #861、#862 | `webui/content_sources.py`、`webui/rule_loading.py`、`services/adventure_rewards.py`；`api.py` 4290 → 4079 行 |
+| S0-F28 的接入 | #847 | `innate_sorcery` 作为注册的 kind 接入 |
+
+### 12.2 执行后的事实（main `7750d501`，#847 合入前）
+
+- `combat/resolution.py` 7624 → 5664 行，其中 `action.kind ==` 比较 **0 处**；`combat/validation.py` 3616 → 3138 行。
+- 守卫基线 296 → 243（搬家只改路径键，净值只减）。
+- 旧的 `attack_hit` 布尔在 `validation.py` 里的直接读取 **0 处**。
+- 新增一个 kind 的成本 = 一个 handler + `KIND_HANDLERS` 里的一行。
+
+### 12.3 与原计划的差异
+
+- 类名保留 `CapabilityCost`，没有改名 `Cost`。
+- `Cost.uses` 没有搬：使用次数仍在 `FeatureCapability.uses_per_long_rest`（见 #848 的 Design Note）。
+- 目录 JSON 仍以旧写法为主（`action: 1` / `turn_start: true`），加载器同时接受 `slot` / `timing`；内容迁移是独立的一步。
+- §3.2 的 `Activation` 没有作为新类型落地：`FeatureCapability` 继续承担声明，`Capability` / `Operation` 的区分由 `slot` 是否为空表达。
+
+### 12.4 未完成 / 后续
+
+- **前置条件有两套写法**：#847 的 `requires_feature_id` / `exhausted_resource_id` 与 #863 的 `requires` 是同一类东西。建议并成 `requires: ["feature:<id>", "exhausted_resource:<id>"]`。
+- **I**：守卫基线的纪律（新增条目必须写明由哪一步删除）已按此执行；CI 的行数趋势报告没有做。
+- `features/resolver.py` 的其余候选切分（spell grants、passive readers）不在本次范围。
+- S0-F28 自己记录的未落地项见 #847：Twinned 的有效环阶只作用于目标数、选项清单两份硬编码、2 / 10 / 17 级的选项数需对 SRD 确认。
