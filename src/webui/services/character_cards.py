@@ -288,6 +288,16 @@ def list_shareable_character_cards(
 # Provenance only the plugin import path may set; a card carrying them is
 # shown at every table, so a game save must never forge them.
 PLUGIN_CARD_MARKERS = ("source_plugin", "plugin_content_id", "raw_sillytavern")
+#: Label a save that carries no source of its own is filed under.
+DEFAULT_CARD_SOURCE = "角色卡库"
+#: Server bookkeeping a table save cannot legitimately carry.  When such a save
+#: replaces a matched library card in place, the existing card's own markers are
+#: kept: plugin ownership drives enable/disable/uninstall cleanup and table
+#: visibility, and the Tavern original is what a re-export round trip needs.
+#: ``ruleset_revision`` is deliberately *not* kept: the replacement content is a
+#: rebuild, so a client holding the pre-rebuild revision must refresh instead of
+#: advancing on top of it.
+_PRESERVED_ON_REPLACE = (*PLUGIN_CARD_MARKERS, CARD_PROVENANCE_KEY)
 # Identity a game save must not dictate: it would let a sheet overwrite an
 # existing library card by id.
 _CARD_IDENTITY_KEYS = ("id", "card_id")
@@ -318,7 +328,7 @@ def strip_card_provenance(character: dict) -> dict:
 
 def preview_character_card_create(dependencies: CharacterCardDependencies, character: dict) -> dict[str, Any]:
     """Validate a reusable blueprint and expose every create conflict without writing."""
-    source = str(character.get("source") or "角色卡库")
+    source = str(character.get("source") or DEFAULT_CARD_SOURCE)
     candidate = _to_character_card(character, source=source)
     if dependencies.normalize_ruleset_card is not None:
         candidate = dependencies.normalize_ruleset_card(candidate)
@@ -360,7 +370,7 @@ def save_character_card(
     character = strip_card_provenance(character)
     if from_game:
         character = _strip_untrusted_card_fields(character)
-    source = str(character.get("source") or "角色卡库")
+    source = str(character.get("source") or DEFAULT_CARD_SOURCE)
     # Game creation passes a player wrapper with mechanics nested under
     # ``character_sheet``. Convert that wrapper to the reusable card shape
     # before professional validation so the canonical blueprint is not missed.
@@ -398,9 +408,20 @@ def save_character_card(
     for existing in cards:
         if same_card(existing):
             card["id"] = existing.get("id") or card["id"]
-            provenance = card_provenance(existing)
-            if provenance is not None:
-                card[CARD_PROVENANCE_KEY] = provenance
+            for key in _PRESERVED_ON_REPLACE:
+                if key == CARD_PROVENANCE_KEY:
+                    provenance = card_provenance(existing)
+                    if provenance is not None:
+                        card[CARD_PROVENANCE_KEY] = provenance
+                    continue
+                kept = existing.get(key)
+                if kept not in (None, "", {}) and card.get(key) in (None, "", {}):
+                    card[key] = copy.deepcopy(kept)
+            # A table save carries no source of its own; only an explicit one may
+            # relabel a card (the plugin/user label is otherwise the record).
+            existing_source = str(existing.get("source") or "")
+            if existing_source and source == DEFAULT_CARD_SOURCE:
+                card["source"] = existing_source
             break
     cards = [c for c in cards if not same_card(c)]
     cards.append(card)

@@ -12,6 +12,7 @@ from src.llm.context_builder import (
     _compact_state_view,
     _context_total_len,
     _detect_max_chars, _estimate_tokens, _truncate, _format_history,
+    _drop_narrative_profiles,
     _shrink_section, _shrink_to_window, build_context, build_player_safe_context,
 )
 
@@ -561,3 +562,54 @@ async def test_build_player_safe_context_keeps_private_manual_rolls_scoped():
         provider_name="deepseek", visibility="party",
     )
     assert "私密检定" not in party_text
+
+
+class TestDropNarrativeProfiles:
+    def test_drops_only_the_projection_and_leaves_the_sheet(self):
+        state = {"players": {
+            "u1": {"character_sheet": {
+                "hp": 9, "narrative_profile": {"personality": "冷静"},
+            }},
+            "u2": {"character_sheet": {"hp": 7}},
+            "u3": "not-a-player",
+        }}
+
+        _drop_narrative_profiles(state)
+
+        assert state["players"]["u1"]["character_sheet"] == {"hp": 9}
+        assert state["players"]["u2"]["character_sheet"] == {"hp": 7}
+        assert state["players"]["u3"] == "not-a-player"
+
+    def test_tolerates_degenerate_state(self):
+        _drop_narrative_profiles({})
+        _drop_narrative_profiles({"players": []})
+        _drop_narrative_profiles({"players": {"u1": {"character_sheet": "nope"}}})
+
+
+@pytest.mark.asyncio
+async def test_an_over_budget_state_sheds_the_narrative_profile_first(monkeypatch):
+    """人物资料让位，而不是让硬截断把后面的角色整段切掉。"""
+
+    monkeypatch.setenv("TRPG_MAX_CONTEXT_CHARS", "3000")
+    profile = {"personality": "冷" * 120, "backstory": "故" * 160}
+    state = {
+        "world_name": "测试世界", "round_number": 1, "scene": "广场",
+        "players": {
+            "u1": {"character_name": "甲", "character_sheet": {"hp": 9, "narrative_profile": dict(profile)}},
+            "u2": {"character_name": "乙", "character_sheet": {"hp": 7, "narrative_profile": dict(profile)}},
+        },
+    }
+
+    context = await build_context(
+        DummyInstance(),
+        gm_prompt_filled="你是测试 GM。",
+        lorebook_entries=[],
+        player_message="继续。",
+        provider_name="unknown-model",
+        state_view=state,
+    )
+
+    assert "narrative_profile" not in state["players"]["u1"]["character_sheet"]
+    assert "narrative_profile" not in state["players"]["u2"]["character_sheet"]
+    # 两个角色仍然都在状态里：没有把后面的角色截掉。
+    assert "甲" in context and "乙" in context

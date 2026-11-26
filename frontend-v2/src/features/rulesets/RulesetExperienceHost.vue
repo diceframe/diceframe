@@ -37,17 +37,48 @@ function onBuilderSubmit(
   character: CharacterSheet,
   options?: { targetLevel?: number },
 ): void {
+  const carried = withCarriedNarrative(character)
   const target = Math.floor(Number(options?.targetLevel || 0))
   if (props.chain && target > 1) {
-    chaining.value = { character, targetLevel: target }
+    chaining.value = { character: carried, targetLevel: target }
     return
   }
-  emit('submit', character, options)
+  emit('submit', carried, options)
 }
 
 function onChainCompleted(character: CharacterSheet): void {
   chaining.value = null
-  emit('submit', character)
+  emit('submit', withCarriedNarrative(character))
+}
+// 建卡器只重建机制：它拿到的是一份 draft，人物资料（ruleset_character.profile）
+// 和头像都不在 draft 里，所以「用一张已写好的卡重新打开建卡器」默认会把设定清空。
+// 这里从建卡器打开时的那张卡把它们带回来，避免提交后角色卡退回初始状态。
+function withCarriedNarrative(character: CharacterSheet): CharacterSheet {
+  const initial = props.initial
+  if (!initial) return character
+  const next: CharacterSheet = { ...character }
+  const source = initial.ruleset_character
+  const target = next.ruleset_character
+  const sourceProfile = (
+    source && typeof source === 'object' && !Array.isArray(source)
+      ? (source as Record<string, unknown>).profile
+      : undefined
+  )
+  if (
+    target
+    && typeof target === 'object'
+    && !Array.isArray(target)
+    && sourceProfile
+    && typeof sourceProfile === 'object'
+    && !Array.isArray(sourceProfile)
+    && !(target as Record<string, unknown>).profile
+  ) {
+    next.ruleset_character = { ...(target as Record<string, unknown>), profile: { ...sourceProfile as Record<string, string> } }
+  }
+  if (!next.portrait && initial.portrait && typeof initial.portrait === 'object') {
+    next.portrait = { ...initial.portrait }
+  }
+  return next
 }
 let sequence = 0
 const host = ref<HTMLElement | null>(null)

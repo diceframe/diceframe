@@ -66,6 +66,12 @@ CharacterSheetView = TypedDict(
         "_armor": int,
         "_special_stats": dict[str, int],
         "_madness": dict[str, Any],
+        # Optional ruleset projection of the player-authored narrative profile
+        # (personality / backstory / ideals ...) the narrator may portray.  It
+        # is presentation text only and never a mechanical input; the writing
+        # ruleset decides which fields it exposes and how tightly it truncates
+        # (see ``src.rulesets.dnd2024.narrative_profile``).
+        "narrative_profile": dict[str, str],
     },
     total=False,
 )

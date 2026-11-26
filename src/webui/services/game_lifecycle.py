@@ -32,7 +32,7 @@ from src.webui.services._common import (
     professional_character_validation_error,
     resolve_default_scene_image,
 )
-from src.webui.services import game_creation_phases, game_seed_lifecycle
+from src.webui.services import game_creation_phases, game_seed_lifecycle, ruleset_characters
 from src.webui.game_lifecycle_context import (
     CreationPhase,
     CreationTransaction,
@@ -352,10 +352,13 @@ async def create_game(
         )
         if runtime and runtime.capabilities.character_builder == "professional":
             players = [
-                runtime.normalize_character_submission(
-                    selected_rule,
+                ruleset_characters.carry_narrative_fields(
                     character,
-                    resolved_language,
+                    runtime.normalize_character_submission(
+                        selected_rule,
+                        character,
+                        resolved_language,
+                    ),
                 )
                 for character in players
             ]

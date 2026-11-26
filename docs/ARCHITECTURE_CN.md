@@ -2325,6 +2325,8 @@ LLM
 
 而不是让 context_builder 自己 import D&D 并计算 D&D 状态。
 
+玩家在高级角色中心写的人物资料（`ruleset_character.profile`）也只能由该规则投影：D&D 2024 在 `build_llm_view` 的 `sheet.narrative_profile` 里给出有界摘要（`src/rulesets/dnd2024/narrative_profile.py`，按字段与总量双重截断，`notes` 不外传），开局叙事通过可选 `NarrativeProfileRuntime` 取同一份摘录。资料是呈现文本，`hp` / 资源 / 等级仍只来自 canonical 机制字段；generic engine 不读也不修 profile。
+
 ---
 
 ## 15.4 Player-safe Q&A
@@ -2991,6 +2993,7 @@ migrate_state
 - `TemporaryEncounterPlannerRuntime`
 - `AutomaticIntentRuntime`
 - `GameDetailProjectionRuntime`
+- `NarrativeProfileRuntime`（把玩家在高级角色中心写的人物资料以有界叙事摘要交给旁白；资料本身只存在于该规则自己的 canonical 角色里，所以只有该规则能决定哪些字段是旁白素材、截断多紧。`build_llm_view` 的 `narrative_profile` 与开局叙事共用同一份摘录；`notes` 标注为“仅供自己记录”，不出角色卡，返回值只能是呈现文本，不能是机制）
 - `PlayerJoinRuntime`
 - `CharacterRevivalRuntime`
 - `LiveAdvancementPolicyRuntime`
