@@ -341,6 +341,50 @@ def test_light_extra_attack_needs_a_light_weapon(runtime) -> None:
     assert "must use a Light weapon" in result["error"]
 
 
+def test_the_extra_attack_cannot_use_its_own_enabler(runtime) -> None:
+    """A Light weapon is not its own reference, no matter what the other hand holds.
+
+    SRD: the extra attack is made "with a different Light weapon" -- different
+    from the one that triggered it.  Holding a dagger in the other hand does not
+    make a second shortsword attack legal.
+    """
+
+    inputs = _two_light_weapons(runtime, style=False)
+    engine, instance = inputs.engine, inputs.instance
+
+    _apply(engine, instance, _resolve(
+        engine, instance, _attack_intent(instance, weapon="shortsword"),
+    ))
+    _turn(engine, instance)
+
+    result = _resolve(
+        engine, instance,
+        _attack_intent(instance, weapon="shortsword", light_extra_attack=True),
+    )
+
+    assert result["ok"] is False
+    assert "needs a different Light weapon" in result["error"]
+
+
+def test_a_light_weapon_is_a_valid_reference_for_the_other_one(runtime) -> None:
+    """The mirror image: dagger after shortsword is exactly the legal shape."""
+
+    inputs = _two_light_weapons(runtime, style=False)
+    engine, instance = inputs.engine, inputs.instance
+
+    _apply(engine, instance, _resolve(
+        engine, instance, _attack_intent(instance, weapon="shortsword"),
+    ))
+    _turn(engine, instance)
+
+    result = _resolve(
+        engine, instance,
+        _attack_intent(instance, weapon="dagger", light_extra_attack=True),
+    )
+
+    assert result["ok"] is True, result
+
+
 # --------------------------------------------------------------------------
 # 4. Loading：每次 action / Bonus Action / Reaction 只能射一发
 # --------------------------------------------------------------------------

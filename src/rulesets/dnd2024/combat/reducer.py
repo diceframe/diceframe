@@ -781,14 +781,29 @@ class CombatReducerMixin:
             else:
                 economy["attacks_remaining"] -= 1
             if event.get("light_weapon"):
-                # "本回合用 Light 武器攻击过"是 Light 追加攻击的唯一前提，
-                # 记在回合标识上，标识一变即失效。
-                combat.setdefault("light_attacks", {})[
-                    str(event["actor_id"])
-                ] = {
-                    "round": int(combat.get("round", 0) or 0),
-                    "turn_index": int(combat.get("turn_index", 0) or 0),
-                }
+                # Light 追加攻击的准入要回答的是"本回合有没有用**另一把** Light
+                # 武器攻击过"，参照点是触发它的那一次攻击，不是"另一只手拿了
+                # 什么"。所以账本记武器引用，并按回合标识重建；列表保留重复项
+                # （同一把武器打两次仍是同一个参照点，不会变出第二个）。
+                actor_key = str(event["actor_id"])
+                ledger = combat.setdefault("light_attacks", {})
+                record = ledger.get(actor_key)
+                this_round = int(combat.get("round", 0) or 0)
+                this_turn = int(combat.get("turn_index", 0) or 0)
+                if (
+                    not isinstance(record, dict)
+                    or int(record.get("round", -1)) != this_round
+                    or int(record.get("turn_index", -1)) != this_turn
+                ):
+                    record = {
+                        "round": this_round,
+                        "turn_index": this_turn,
+                        "weapon_refs": [],
+                    }
+                    ledger[actor_key] = record
+                weapon_ref = str(event.get("weapon_ref") or "")
+                if weapon_ref:
+                    record.setdefault("weapon_refs", []).append(weapon_ref)
             if event.get("loading_weapon"):
                 # "每次 action/Bonus/Reaction 只能射一发"：窗口用支付它的经济
                 # 池标识，所以同一窗口里的第二发会被校验拒绝，换一个窗口
