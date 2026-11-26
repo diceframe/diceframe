@@ -20,7 +20,6 @@ SIZE_BASELINE: dict[str, int] = {
     "frontend-v2/src/features/lorebook/LorebookView.vue": 1778,
     "frontend-v2/src/features/play/PlayView.vue": 2124,
     "frontend-v2/src/features/rulesets/dnd2024/combat/Dnd2024CombatPanel.vue": 1772,
-    "src/commands/round_processor.py": 1917,
     "src/engine/economy.py": 1639,
     "src/plugin_host/host.py": 2299,
     "src/rulesets/dnd2024/combat/check_windows.py": 1854,
