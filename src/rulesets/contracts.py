@@ -288,6 +288,22 @@ class GameDetailProjectionRuntime(Protocol):
 
 
 @runtime_checkable
+class NarrativeProfileRuntime(Protocol):
+    """Optional narrative excerpt a ruleset exposes to the narrator.
+
+    The player-authored profile bag lives inside the ruleset's own canonical
+    character, so only the writing ruleset can say which fields are narrator
+    material and how tightly to bound them.  The generic opening prompt reads
+    this hook; the per-round context gets the same excerpt through
+    ``build_llm_view``.  Returning presentation text, never mechanics.
+    """
+
+    def character_narrative_profile(
+        self, character: dict[str, Any],
+    ) -> dict[str, str]: ...
+
+
+@runtime_checkable
 class IntentResultProjectionRuntime(Protocol):
     """Optional viewer projection of an authoritative intent/automation payload.
 

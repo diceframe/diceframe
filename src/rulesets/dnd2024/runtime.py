@@ -41,6 +41,7 @@ from src.rulesets.dnd2024.character.reconciliation import (
     Dnd2024CharacterStateReconciler,
     merge_live_character_projection,
 )
+from src.rulesets.dnd2024.narrative_profile import narrative_profile_excerpt
 from src.rulesets.dnd2024.campaign import CAMPAIGN_INTENT_TYPES, Dnd2024CampaignEngine
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 import src.rulesets.dnd2024.combat.visibility as combat_visibility
@@ -1642,6 +1643,12 @@ class Dnd2024Runtime:
             sheet["conditions"] = deepcopy(canonical.get("conditions") or {})
             sheet["spellcasting"] = deepcopy(canonical.get("spellcasting") or {})
             sheet["derived"] = deepcopy(canonical.get("derived") or {})
+            # The narrator has to know who the character is.  The authored
+            # profile is presentation text only, and it shares the state budget
+            # with every other sheet, so it enters bounded (see narrative_profile).
+            narrative = narrative_profile_excerpt(source)
+            if narrative:
+                sheet["narrative_profile"] = narrative
         gameplay = self.gameplay_view(
             instance, str(getattr(instance, "gm_uid", "") or ""), True,
         )
@@ -1658,6 +1665,13 @@ class Dnd2024Runtime:
             "policy": "Narrate resolved events only; never invent or mutate mechanics.",
         }
         return state
+
+    def character_narrative_profile(
+        self, character: dict[str, Any],
+    ) -> dict[str, str]:
+        """The bounded narrator excerpt of one character (opening prompt hook)."""
+
+        return narrative_profile_excerpt(character)
 
     def director_proposal(
         self, instance: Any, campaign: dict[str, Any] | None = None,

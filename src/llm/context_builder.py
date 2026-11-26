@@ -82,6 +82,27 @@ def _compact_state_view(state: dict) -> None:
             sheet["key_items_note"] = f"共 {total} 件，列出最近 {shown} 件{suffix}"
 
 
+def _drop_narrative_profiles(state: dict) -> None:
+    """Shed the narrator profile excerpts before anything else is cut.
+
+    ``narrative_profile`` is a bounded presentation extra a ruleset runtime adds
+    to the LLM view (see ``src.rulesets.dnd2024.narrative_profile``).  When the
+    state still exceeds its budget after inventory compaction, dropping it costs
+    narration flavour; letting ``_truncate`` cut the JSON instead would cost whole
+    characters.  Only the local state copy is touched — player cards are not.
+    """
+
+    players = state.get("players")
+    if not isinstance(players, dict):
+        return
+    for pdata in players.values():
+        if not isinstance(pdata, dict):
+            continue
+        sheet = pdata.get("character_sheet")
+        if isinstance(sheet, dict):
+            sheet.pop("narrative_profile", None)
+
+
 def _detect_max_chars(provider_name: str = "") -> int:
     """根据模型名称检测上下文窗口大小。若设定了环境变量 TRPG_MAX_CONTEXT_CHARS 则直接使用。"""
     env_override = os.getenv("TRPG_MAX_CONTEXT_CHARS")
@@ -648,6 +669,9 @@ async def build_context(
     # 超预算时压缩背包/关键物品为最近条目 + 计数，避免整段丢弃或硬截断 JSON
     if len(state_json) > budget_state:
         _compact_state_view(state)
+        state_json = json.dumps(state, ensure_ascii=False)
+    if len(state_json) > budget_state:
+        _drop_narrative_profiles(state)
         state_json = json.dumps(state, ensure_ascii=False)
     state_json = _truncate(state_json, budget_state)
     parts.append(localized_text(language, {"en": "## Game State", "zh-CN": "【游戏状态】", "ja": "## ゲーム状態", "de": "## Spielstatus"}) + f"\n{state_json}")
