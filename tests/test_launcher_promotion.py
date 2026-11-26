@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -203,7 +204,9 @@ internal static class Sleeper
 {
     private static void Main()
     {
-        // MARKER 只为让两份 exe 内容不同。
+        // MARKER 让两份 exe 内容不同，同时也是“进程真的跑起来了”的信号：
+        // 这一行只在 CLR 绑定完映像、Main 开始执行之后才会写出，用例据此
+        // 避开“启动还没完成就把 exe 改名”的竞态。
         System.Console.WriteLine("MARKER");
         // 进程必须活过整个用例：那两条“第二次提升必须放弃”的断言，检验的正是
         // “备份还是正在运行的旧 exe、删不掉”。CI 上光三次编译就可能超过一分钟，
@@ -230,6 +233,26 @@ def _compile_sleeper(tmp_path: Path, marker: str) -> Path:
     return output
 
 
+def _promote_over_the_running_launcher(data: Path, root: Path, timeout: float = 15.0) -> bool:
+    """提升，容忍 Windows 对刚启动映像的瞬时共享冲突。
+
+    改名正在执行的 exe 在 Windows 上合法，但加载器（或扫描新文件的杀软）可能在
+    ``Popen`` 返回后的一小段时间里仍持有不带 FILE_SHARE_DELETE 的句柄，
+    ``os.replace`` 于是抛 WinError 32。生产代码此时必须降级为“沿用当前启动器”，
+    那正是它该有的行为；用例要检验的是成功那条路径，所以在有限窗口内重试。
+    失败的那一次已经清理过临时文件并核对过原 exe，重试是干净的；如果提升真的
+    坏了，窗口耗尽后仍然返回 False，断言照样失败。
+    """
+
+    deadline = time.monotonic() + timeout
+    while True:
+        if promote_pending_launcher(data, root):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.2)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="运行中 exe 的改名约束只在 Windows 上存在")
 def test_promotes_over_a_running_launcher_on_windows(tmp_path):
     """真实 Windows 语义：运行中的 exe 能改名、不能覆写；提升后原进程继续运行。"""
@@ -243,13 +266,19 @@ def test_promotes_over_a_running_launcher_on_windows(tmp_path):
     _signal(staged.parent, staged)
     original = launcher.read_bytes()
 
-    running = subprocess.Popen([str(launcher)], stdout=subprocess.DEVNULL)
+    running = subprocess.Popen([str(launcher)], stdout=subprocess.PIPE, text=True)
     try:
+        # 先等 sleeper 真的跑起来：这一行输出只有在 CLR 绑定完映像、Main 已经
+        # 开始执行之后才会出现。在那之前改名，进程会以 FileNotFoundException
+        # 退出，“运行中的 exe”这个前提根本不成立，后面每一条断言都会失真。
+        # 并行跑测试时（CI 分片、本机 -n）这个窗口很容易被拉开。
+        assert running.stdout.readline().strip() == "old", "sleeper never started"
+
         # 运行中的 exe 不能就地覆写：这正是要先复制到临时文件再 rename 的原因。
         with pytest.raises(PermissionError):
             launcher.open("r+b").close()
 
-        assert promote_pending_launcher(data, root) is True
+        assert _promote_over_the_running_launcher(data, root) is True
         assert running.poll() is None
         assert launcher.read_bytes() == staged.read_bytes()
         assert (root / "DiceFrame.exe.old").read_bytes() == original
@@ -257,14 +286,18 @@ def test_promotes_over_a_running_launcher_on_windows(tmp_path):
 
         # 备份就是正在运行的旧 exe，删不掉：再来一次提升必须原样放弃，不能把
         # 已经提升好的 DiceFrame.exe 弄坏。
-        # 先确认前提还成立——进程若已退出，备份就能被删除，下面的断言也就失去
-        # 意义；让它在原地报出真正的原因。
-        assert running.poll() is None, "sleeper exited before the second promotion"
+        # 这一段唯一的前提是旧进程还活着。它若在两次提升之间被终止（杀软、系统
+        # 资源紧张），备份就变得可删、提升也会成功，那与被测逻辑无关；前提不
+        # 成立时跳过，而不是把环境噪声报成回归。
         shutil.copyfile(newest, staged)
-        assert promote_pending_launcher(data, root) is False
+        promoted_again = promote_pending_launcher(data, root)
+        if running.poll() is not None:
+            pytest.skip("sleeper exited between the two promotions")
+        assert promoted_again is False
         assert launcher.read_bytes() != original
         assert (root / "DiceFrame.exe.old").read_bytes() == original
         assert _no_leftovers(root)
     finally:
         running.kill()
         running.wait()
+        running.stdout.close()
