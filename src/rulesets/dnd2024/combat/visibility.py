@@ -29,6 +29,11 @@ _PUBLIC_DECISION_FIELDS = frozenset({
     "check", "resource_id", "die_sides", "damage_sides", "damage_event",
     "attack_total", "armor_class", "critical", "spells", "features",
     "threat_actor_ids", "movement",
+    # 拨挡的重定向窗口：目标列表、豁免 DC、Focus 价格与伤害骰都属于"玩家要做的
+    # 那个决定"本身。不投影它，玩家会收到一个只有 redirect/decline 两个选项
+    # 却看不到任何目标的窗口。窗口内部的结算链（damage_event/next_decision）
+    # 仍按既有规则过滤。
+    "redirect",
 })
 _PUBLIC_DAMAGE_FIELDS = frozenset({
     "type", "resource", "target_id", "delta", "amount", "damage_type",

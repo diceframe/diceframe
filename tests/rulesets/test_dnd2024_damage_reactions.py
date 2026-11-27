@@ -344,3 +344,27 @@ def test_declining_the_redirect_costs_nothing() -> None:
 
     assert int(focus_state(instance).get("current", 0) or 0) == focus_before
     assert _pending(instance) is None
+
+
+def test_the_owner_sees_the_redirect_targets_in_their_own_window() -> None:
+    """The player projection is a whitelist; `redirect` has to be on it."""
+
+    from src.rulesets.dnd2024.combat.visibility import public_pending_decision
+
+    engine, instance, _sheet = _instance(level=3, focus=3, enemy=[goblin(), _second_goblin()])
+    _hit(engine, instance, [15, 4])
+    _resolve(engine, instance, {
+        "option": "feature", "feature_id": "deflect_attacks",
+    }, SequenceRng([10]))
+
+    decision = _pending(instance)
+    assert decision is not None
+    projected = public_pending_decision(decision, viewer_id="gm")
+    assert projected is not None, "the owner must receive their own window"
+    redirect = projected["redirect"]
+    # 任务书 §4.2.4：攻击者本人没有被规则排除，不能擅自加条件。
+    assert {row["actor_id"] for row in redirect["targets"]} == {
+        "enemy:goblin-1", "enemy:goblin-2",
+    }
+    assert redirect["save_dc"] > 0
+    assert projected["options"] == ["redirect", "decline"]
