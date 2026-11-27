@@ -1,7 +1,8 @@
 # 切片 S0-F32 执行报告：祈唤主干与八项核心
 
 - 任务书：`S0F32_INVOCATION_CORE_TASK_SPEC_2026-11-07.md`（维护者资料，未入库；下文 §n 均指该任务书）
-- 开发基线：`b6fb7c82`（main，含 #868 自由施法面、#869 法术书物品、#870 玩家感官形状修复）
+- 开发基线：`0b12b0ea`（main，含 #888 对 `resolution.py` 的拆分；本片随后把法术侧改动落在
+  `spell_resolution.py` / `validation_spells.py`，池编排落在 `progression/choices.py`）
 - 状态台账：`S0_INVOCATION_STATUS_2026-11-26.md`（28 项祈唤逐项四档状态）
 - 缺口登记：`GAP_REGISTER.md` GAP-44（法术攻击无多束抽象）
 
@@ -94,8 +95,8 @@
 
 | 项 | 结果 |
 |---|---|
-| 全量 `pytest tests/rulesets tests/architecture` | 3260 passed / 0 failed |
-| 本切片用例 | 42 条 |
+| 全量 `pytest tests/rulesets tests/architecture` | **3350 passed / 0 failed**（基座 `0b12b0ea`） |
+| 本切片用例 | 42 条（`test_dnd2024_invocation_core.py`） |
 | `ruff check src/ tests/` / `mypy` | 干净 / 120 files |
-| 前端 | `vue-tsc -b`（仅既有 `driver.js` 缺包）、`eslint --max-warnings 0`、`vitest` 26 条 |
+| 前端 | `vue-tsc -b`（仅既有 `driver.js` 缺包）、`eslint --max-warnings 0`、`vitest` 27 条 |
 | 体积棘轮 | resolution +78、validation +45、engine +13、resolver +86、advancement +72，全 ≤100 |
