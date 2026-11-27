@@ -28,7 +28,7 @@ from src.rulesets.dnd2024.items.charges import (
     charges_of,
     validate_charges_declaration,
 )
-from .weapon_masteries import nick_active
+from .weapon_masteries import cleave_grant, nick_active
 from .check_modes import (
     HUNTERS_MARK_REF,
     condition_flags,
@@ -377,6 +377,9 @@ class CombatAvailabilityMixin:
         actions.extend(
             self._light_extra_attack_rows(instance, actor, combat, economy, version)
         )
+        cleave_row = self._cleave_row(instance, actor, combat, version)
+        if cleave_row:
+            actions.append(cleave_row)
         if int(economy.get("action", 0) or 0) > 0 or int(
             economy.get("attacks_remaining", 0) or 0
         ) > 0 or int(economy.get("surge_action", 0) or 0) > 0:
@@ -800,6 +803,61 @@ class CombatAvailabilityMixin:
                 "unavailable_reason": "" if available else reason,
             })
         return rows
+
+    def _cleave_row(
+        self, instance: Any, actor: dict[str, Any], combat: dict[str, Any],
+        version: int,
+    ) -> dict[str, Any] | None:
+        """Cleave, offered only when the prerequisite is already true.
+
+        The row carries ``cleave_from``: the panel posts an ordinary attack with
+        that field, so the engine has one attack path instead of a second one
+        for granted attacks.
+        """
+
+        if actor["kind"] not in {"player", "companion"}:
+            return None
+        actor_id = str(actor["actor_id"])
+        if ((combat.get("granted_attacks") or {}).get(actor_id) or {}).get("cleave"):
+            return None
+        weapons = [w for w in self._available_attacks(actor) if cleave_grant(w)]
+        if not weapons:
+            return None
+        round_index = int(combat.get("round", 0) or 0)
+        turn_index = int(combat.get("turn_index", 0) or 0)
+        hits = [
+            row for row in combat.get("attack_history") or []
+            if str(row.get("actor_id") or "") == actor_id
+            and int(row.get("round", 0) or 0) == round_index
+            and int(row.get("turn_index", 0) or 0) == turn_index
+            and bool(row.get("hit"))
+            and any(
+                str(w.get("weapon_ref") or "") == str(row.get("weapon_ref") or "")
+                for w in weapons
+            )
+        ]
+        if not hits:
+            return None
+        original_id = str(hits[-1].get("target_id") or "")
+        limit = int((cleave_grant(weapons[0]) or {}).get("target_within_ft") or 0)
+        targets = [
+            target for target in self._hostile_targets(instance, combat, actor_id)
+            if int(target["hp"]) > 0
+            and str(target["actor_id"]) != original_id
+            and self._distance(combat, str(target["actor_id"]), original_id) <= limit
+        ]
+        if not targets:
+            return None
+        return {
+            "type": "cleave",
+            "label": "Cleave",
+            "actor_id": actor_id,
+            "expected_version": version,
+            "weapons": weapons,
+            "targets": targets,
+            "cleave_from": original_id,
+            "cost": "",
+        }
 
     def _party_targets(
         self, instance: Any, combat: dict[str, Any],

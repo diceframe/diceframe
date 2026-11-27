@@ -1139,6 +1139,10 @@ class CombatValidationMixin(
                 # 两次吐息"。
                 if intent.get("second_target_of"):
                     pass
+                elif intent_type == "attack" and intent.get("cleave_from"):
+                    # Cleave 的第二击与 Horde Breaker 同构：不付动作、不占
+                    # `attacks_remaining`，前提与额度由各自的校验回答。
+                    pass
                 elif (
                     intent_type == "attack"
                     and declaration_value(intent, LIGHT_EXTRA_ATTACK) is True

@@ -645,9 +645,11 @@ class CombatAttackResolutionMixin:
                     and nick_active(self.features, self._feature_character(actor), weapon)
                 ),
                 free=bool(
-                    declaration_value(intent, LIGHT_EXTRA_ATTACK)
-                    and nick_active(self.features, self._feature_character(actor), weapon)
+                    (declaration_value(intent, LIGHT_EXTRA_ATTACK)
+                     and nick_active(self.features, self._feature_character(actor), weapon))
+                    or intent.get("cleave_from")
                 ),
+                cleave_extra=bool(intent.get("cleave_from")),
                 weapon=weapon,
                 # Multiattack 的第一次攻击为"这一次动作"开一张总额度，后续
                 # 每一击都从同一份额度里扣：动作只付一次，次数不重复付。
@@ -720,13 +722,14 @@ class CombatAttackResolutionMixin:
             target["kind"] == "enemy" and "rage" in actor["conditions"]
             and str((combat.get("economy") or {}).get("actor_id") or "") == str(actor_id)
         )
-        if (
+        if intent.get("cleave_from") or (
             declaration_value(intent, LIGHT_EXTRA_ATTACK)
             and actor["kind"] in {"player", "companion"}
             and not bool(actor.get("light_extra_attack_ability_damage"))
         ):
-            # Light 追加攻击默认不吃属性调整值，但负值仍然生效（规则原文：
-            # "unless that modifier is negative"），所以这里只压掉正数。
+            # Light 追加攻击与 Cleave 的第二击都不吃属性调整值，但负值仍然
+            # 生效（规则原文："unless that modifier is negative"），所以这里
+            # 只压掉正数。
             # 唯一例外是 Two-Weapon Fighting 风格，由角色投影回答。
             modifier = min(0, modifier)
         settlement = {

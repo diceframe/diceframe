@@ -231,6 +231,10 @@ class CombatHitResolutionMixin:
                 "duration": str(mastery.get("duration") or "until_stand"),
                 "source_actor_id": actor_id,
             }
+        if kind == "granted_attack":
+            # Cleave 不在命中时产生任何效果：它授予的是"下一击"的资格，
+            # 由 attack 意图上的 `cleave_from` 声明、由校验回答。
+            return {}
         return {
             "condition": str(mastery["condition"]),
             "duration": str(mastery["duration"]),
@@ -448,7 +452,7 @@ class CombatHitResolutionMixin:
             # miss must not leave its mastery effect behind.  The entry keeps the
             # mastery's own kind, because push and topple are not conditions.
             entry = self._mastery_effect_entry(mastery, actor_id)
-            if entry.get("kind") == "save_condition":
+            if entry and entry.get("kind") == "save_condition":
                 # DC = 8 + 熟练加值 + 这次攻击用的属性调整。用攻击的权威
                 # 属性函数而不是 check["modifier"]：后者含魔法加值，会把
                 # DC 抬到一个规则里没有的数。
@@ -457,7 +461,8 @@ class CombatHitResolutionMixin:
                     8 + int(actor["proficiency_bonus"])
                     + ability_modifier(actor["abilities"][ability])
                 )
-            damage_event["mastery_effects"] = [entry]
+            if entry:
+                damage_event["mastery_effects"] = [entry]
         offer = self._hit_spell_offer(
             instance, combat, actor, weapon, target_id, damage_event, intent,
         )

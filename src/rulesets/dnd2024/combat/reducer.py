@@ -114,11 +114,22 @@ class CombatReducerMixin:
             # round/turn_index 记账，查询方自己按当前回合过滤，因此不需要
             # 在回合边界做清理。
             history = combat.setdefault("attack_history", [])
+            # 命中与武器都必须落在这里：Cleave 的前提是"我上一次**命中**用的
+            # 是带 Cleave 的武器"，而回合经济只答得了"打没打过谁"。
+            weapon = combat.pop("pending_attack_weapon", None)
+            same_attack = (
+                isinstance(weapon, dict)
+                and str(weapon.get("actor_id") or "") == str(event.get("actor_id") or "")
+                and int(weapon.get("round", -1)) == int(combat.get("round", 0) or 0)
+                and int(weapon.get("turn_index", -1)) == int(combat.get("turn_index", 0) or 0)
+            )
             history.append({
                 "actor_id": str(event.get("actor_id") or ""),
                 "target_id": str(event.get("target_id") or ""),
                 "round": int(combat.get("round", 0) or 0),
                 "turn_index": int(combat.get("turn_index", 0) or 0),
+                "hit": bool(event.get("success")),
+                "weapon_ref": str((weapon or {}).get("weapon_ref") or "") if same_attack else "",
             })
             return
         if event_type in {
@@ -802,6 +813,17 @@ class CombatReducerMixin:
             # Bonus Action 的攻击（Light 追加攻击、附赠攻击能力）不走
             # ``attacks_remaining``：那份额度只属于 Attack action，借给它等于
             # 白送一次行动。
+            if event.get("weapon_ref") or event.get("cleave_extra"):
+                # 下一次 check.resolved{kind: attack} 会把它并进 attack_history。
+                combat["pending_attack_weapon"] = {
+                    "actor_id": str(event["actor_id"]),
+                    "weapon_ref": str(event.get("weapon_ref") or ""),
+                    "round": int(combat.get("round", 0) or 0),
+                    "turn_index": int(combat.get("turn_index", 0) or 0),
+                }
+            if event.get("cleave_extra"):
+                granted = combat.setdefault("granted_attacks", {})
+                granted.setdefault(str(event["actor_id"]), {})["cleave"] = True
             if free:
                 pass
             elif resource == "bonus_action" or int(economy.get("attacks_remaining", 0) or 0) <= 0:

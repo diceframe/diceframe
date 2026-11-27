@@ -63,9 +63,15 @@ WEAPON_MASTERY_EFFECTS: dict[str, dict[str, Any]] = {
     # part of the Attack action instead of a Bonus Action, once per turn.  The
     # economy change lives in the attack flow; this entry only declares it.
     "nick": {"kind": "light_extra_as_action"},
-    # Catalog slot this slice deliberately does not implement (needs a second
-    # attack roll and a second target, i.e. a new intent field).
-    "cleave": {"kind": "unimplemented"},
+    # Hit face: one more attack against a *different* creature within 5 feet of
+    # the first, once per turn.  The second attack is its own intent (own roll,
+    # own target); this entry only says the weapon grants it and how far.
+    "cleave": {
+        "kind": "granted_attack",
+        "on": "hit",
+        "target_within_ft": 5,
+        "once_per_turn": True,
+    },
 }
 
 
@@ -82,3 +88,15 @@ def nick_active(features: Any, character: Any, weapon: dict[str, Any]) -> bool:
     if WEAPON_MASTERY_EFFECTS.get(mastery, {}).get("kind") != "light_extra_as_action":
         return False
     return bool(features.has_feature(character, WEAPON_MASTERY_FEATURE_ID))
+
+
+def cleave_grant(weapon: dict[str, Any]) -> dict[str, Any] | None:
+    """The Cleave grant this weapon carries, if any.
+
+    Does not ask whether the character may use masteries: the follow-up
+    validator gates on ``weapon_mastery`` once, and asking twice would let the
+    two answers drift.
+    """
+
+    effect = WEAPON_MASTERY_EFFECTS.get(str(weapon.get("mastery") or ""), {})
+    return effect if effect.get("kind") == "granted_attack" else None

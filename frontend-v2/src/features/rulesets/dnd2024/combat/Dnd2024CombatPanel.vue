@@ -39,6 +39,7 @@ import type { BattlefieldLabels } from './hud/labels'
 import TargetCard from './hud/TargetCard.vue'
 import { useFeedback } from './hud/useFeedback'
 import { combatCopy } from './combatCopy'
+import { cleaveIntent, lightExtraIntent, lightRowsForTab, remainingAttacks } from './grantedAttacks'
 import {
   friendlyCombatError as friendlyCombatErrorFor, intentId, localizedTerm as localizedTermFor,
 } from './combatSupport'
@@ -116,24 +117,22 @@ const attackAction = computed(() => action('attack'))
 const lightAttackActions = computed<RulesetCombatAction[]>(() => (
   actions.value.filter(item => item.type === 'light_attack')
 ))
-const lightAttackRowsForDockTab = computed(() => lightAttackActions.value.filter(
-  row => (dockTab.value === 'bonus' ? row.cost === 'bonus_action' : row.cost !== 'bonus_action'),
-))
-const attacksRemaining = computed(() => Number(
-  (combat.value?.economy as JsonObject | undefined)?.attacks_remaining ?? 0,
-))
+const lightAttackRowsForDockTab = computed(
+  () => lightRowsForTab(lightAttackActions.value, dockTab.value),
+)
+const attacksRemaining = computed(() => remainingAttacks(combat.value))
+
+const cleaveAction = computed(() => actions.value.find(item => item.type === 'cleave'))
+
+function stageCleave(): void {
+  const action = cleaveAction.value
+  const payload = action && cleaveIntent(action, selectedTargetId.value)
+  if (payload) stage(payload)
+}
 
 function stageLightExtra(row: RulesetCombatAction): void {
-  const weapon = (row.weapons || [])[0]
-  if (!weapon || !selectedTargetId.value) return
-  stage({
-    type: 'attack',
-    actor_id: String(row.actor_id || ''),
-    target_id: selectedTargetId.value,
-    ...(weapon.weapon_ref ? { weapon_ref: String(weapon.weapon_ref) } : { attack_id: String(weapon.id) }),
-    // 服务端按这一次声明改走"追加攻击"的校验与经济：不带这个字段就是普通攻击。
-    light_extra_attack: true,
-  })
+  const payload = lightExtraIntent(row, selectedTargetId.value)
+  if (payload) stage(payload)
 }
 const formAssumeAction = computed(() => action('form.assume'))
 const formRevertAction = computed(() => action('form.revert'))
@@ -1708,6 +1707,9 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               <template #icon><NIcon :component="RibbonOutline" /></template>
             </ActionTile>
             <template v-if="dockTab === 'action'">
+              <ActionTile v-if="cleaveAction" :label="copy.cleave" :hint="copy.cleaveHint" :disabled="busy || !selectedTargetId" data-tile="cleave" @click="stageCleave()">
+                <template #icon><NIcon :component="FlashOutline" /></template>
+              </ActionTile>
               <ActionTile v-for="row in lightAttackRowsForDockTab" :key="`light-${row.cost}`" :label="copy.lightExtraAttack" :hint="row.nick ? copy.lightExtraFree : copy.lightExtraBonus" :disabled="busy || row.available === false || !selectedTargetId" :data-tile="`light-extra-${row.cost || 'free'}`" @click="stageLightExtra(row)">
                 <template #icon><NIcon :component="FlashOutline" /></template>
               </ActionTile>
