@@ -159,7 +159,7 @@ class PlayerStateApplier:
                         default_current=current_san, max_key="max_sanity", default_max=99,
                     )
                     logger.info("理智检定: %s d100=%d / san=%d %s, 损失=%d (%s)",
-                                uid, outcome["roll"], outcome["threshold"], outcome["verdict"],
+                                uid, outcome["roll"], outcome["threshold"], outcome["verdict_code"],
                                 outcome["loss"], outcome["loss_spec"])
                     pud["san_check_result"] = outcome
                     self._madness.apply_madness(instance, uid, cs, prev - cs["sanity"])

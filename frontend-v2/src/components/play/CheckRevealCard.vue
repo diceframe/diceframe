@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { CheckResult, CheckRevealRecord } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
+import { isSuccessVerdict, verdictCodeOf, verdictLabel } from '@/utils/checkVerdict'
 import CocDiceFaces from '@/features/play/dice/CocDiceFaces.vue'
 import { cocCopy } from '@/features/play/dice/cocCopy'
 import PushDecisionPanel from '@/features/play/check-decisions/PushDecisionPanel.vue'
@@ -42,7 +43,8 @@ watch(revealed, (value, previous) => {
   if (trayTimer !== undefined) window.clearTimeout(trayTimer)
   recentReveal.value = value && !previous
   // Only live reveals reach the DF Agent avatar; history renders revealed.
-  if (recentReveal.value) reportAssistantReaction(status.value)
+  // An unknown verdict has no outcome to react to.
+  if (recentReveal.value && status.value !== 'unknown') reportAssistantReaction(status.value)
   // Keep the tray expanded after a live reveal.  The old timeout made the
   // result disappear again a few seconds after the animation, which is easy
   // to miss during play.  `trayExpanded` remains a user-controlled opt-out:
@@ -77,18 +79,27 @@ watch(pendingClickReveal, (pending) => {
   else revealed.value = true
 })
 
-const status = computed<'critical' | 'fumble' | 'success' | 'failure'>(() => {
+const status = computed<'critical' | 'fumble' | 'success' | 'failure' | 'unknown'>(() => {
+  const code = verdictCodeOf(props.check)
+  if (code === 'critical_success') return 'critical'
+  if (code === 'critical_failure') return 'fumble'
+  if (code) return isSuccessVerdict(code) ? 'success' : 'failure'
+  // No code (custom ruleset runtime or a pre-code save): the stored flags are
+  // the only structure left, and the label itself is shown verbatim below.
+  // Guessing from its wording — or defaulting to "success" — would be a lie.
   if (props.check.is_critical) return 'critical'
   if (props.check.is_fumble) return 'fumble'
-  const verdict = String(props.check.verdict || '').toLowerCase()
-  return verdict.includes('成功') || verdict.includes('success') ? 'success' : 'failure'
+  return 'unknown'
 })
-const statusLabel = computed(() => ({
-  critical: t('criticalSuccess'),
-  fumble: t('criticalFailure'),
-  success: t('checkSuccess'),
-  failure: t('checkFailure'),
-})[status.value])
+const statusLabel = computed(() => (status.value === 'unknown'
+  ? String(props.check.verdict || '')
+  : {
+      critical: t('criticalSuccess'),
+      fumble: t('criticalFailure'),
+      success: t('checkSuccess'),
+      failure: t('checkFailure'),
+      unknown: '',
+    }[status.value]))
 const math = computed(() => {
   const check = props.check
   if (typeof check.threshold === 'number') {
@@ -189,9 +200,9 @@ onUnmounted(() => { stopRevealAnimation(); if (trayTimer !== undefined) window.c
           {{ t(check.difficulty === 'hard' ? 'checkRequiredHard' : 'checkRequiredExtreme', { max: check.required_threshold ?? 0 }) }}
         </span>
         <span v-if="check.opposed?.opponent_verdict">
-          {{ t('checkOpposedDetail', { name: check.opponent_name || t('checkOpponent'), verdict: check.opposed.opponent_verdict }) }}
+          {{ t('checkOpposedDetail', { name: check.opponent_name || t('checkOpponent'), verdict: verdictLabel(check.opposed.opponent_verdict) || check.opposed.opponent_verdict }) }}
         </span>
-        <span v-if="check.achieved_verdict">{{ t('checkAchievedVerdict', { verdict: check.achieved_verdict }) }}</span>
+        <span v-if="check.achieved_verdict">{{ t('checkAchievedVerdict', { verdict: verdictLabel(check.achieved_verdict) || check.achieved_verdict }) }}</span>
         <span v-if="check.modifier_breakdown">{{ t('checkModifierBreakdown', { detail: check.modifier_breakdown }) }}</span>
         <span v-if="check.advantage_note">{{ t('checkAdvantageNote', { detail: check.advantage_note }) }}</span>
         <span v-if="plannerSources">{{ t('checkPlannerSources', { detail: plannerSources }) }}</span>

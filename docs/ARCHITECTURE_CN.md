@@ -4890,6 +4890,7 @@ World locale 只能修改：
 ```text
 src/plugin_host/
 ├─ host.py
+├─ install_journal.py
 ├─ manifest_validation.py
 ├─ package_io.py
 ├─ support.py
@@ -4906,6 +4907,7 @@ src/plugin_host/
 和权限声明的校验，不加载运行时、不发布插件。权限定义与推导仍由 `policy.py` 负责。
 `package_io.py` 负责 ZIP 打包与解压、定位包根目录和原子写入 JSON；`PluginHost.package_files`
 仍是对外入口，安装事务及其发布、恢复和回滚仍由 `host.py` 负责。
+`install_journal.py` 负责安装日志的读写与崩溃恢复；发布锁与安装事务仍由 `host.py` 持有和编排。
 
 ---
 
@@ -6554,6 +6556,8 @@ AI 席位和检定授权的离席/重开清理由所属模块注册生命周期 
 后端文案的统一入口是 `src/localization/messages.py` 的 `t("命名空间.键", 语言)`（python-i18n），文案放在 `src/localization/locales/` 下，目录与源码一一对应：`src/webui/services/x.py` 的文案在 `locales/webui/services/x.<语言>.yml`，命名空间是 `webui.services.x`；占位符写成 `%{name}`，只要求 zh-CN 与 en，回退链为 目标语言 → en → zh-CN。语言有两个来源：返回给请求方的接口提示不传语言，取 `src/webui/request_language.py` 从标准 `Accept-Language` 协商出的语言（前端把它显式设为界面语言；没带头或没有受支持语言时保持中文原文）；写进存档、时间线或发给模型的对局内容显式传对局语言。`src/webui/errors.py` 的错误出口对已登记错误码按协商语言替换 `error` 文案，并保留 `error_code`。存量文案按模块逐步迁入，未迁移的保持原文。
 
 `frontend-v2/src/i18n/policy.ts` 按审核过的英文来源指纹筛选社区译文，递归覆盖 API 错误；缺失、新增和过时键通过 Vue I18n 回退英文。英文改动不重新生成接受基线，志愿者通过 `locales:review` 逐键登记审核。`locales:check` 阻止核心键不齐，社区缺口仅报告，不阻塞功能发布。共享后端文案/字段 helper 与 typed content overlay 遵守暂停状态；集中目录外的功能内及后端文本不自动检测来源过时。见[翻译维护](zh/translations.md)。
+
+检定成功等级是身份而不是文案：`src/engine/check_verdict.py` 定义 `critical_failure` / `failure` / `success` / `regular_success` / `hard_success` / `extreme_success` / `critical_success` 及其 rank，显示文本在 `locales/engine/check_verdict.<语言>.yml`。`CheckResult.verdict` 只是解析时按对局语言冻结的展示文本，不参与任何判断；机制分支、推骰资格、幸运抵扣、SAN 成功集合、AI 伤害白名单与击杀判定都读 `check_verdict.code_of(check)`（依次取 `verdict_code`、runtime 显式 `success`、已落盘骰值重算、`src/compat/verdict_labels.py` 中的精确旧标签）。未知 code 时这些可选分支不启用，绝不从译文猜测。基于叙事文本的校验同样只消费 code，句子归属用角色名，代词与成败词表按语言放在 `src/engine/intent/locales/<lang>/narration.json`，缺资源则跳过。见 [ADR-0015](adr/0015-backend-localization-contract.md)（本地实现，阶段一，未升存档 schema）。
 
 ## 托管 Docker 程序与数据事务
 

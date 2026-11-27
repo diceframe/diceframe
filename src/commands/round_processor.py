@@ -788,7 +788,7 @@ class RoundProcessor:
 
         response, data = await call_llm_with_tag_retry(
             self.llm_client, instance, gm_prompt, context, combat_model,
-            dice_block, self.narrative_max_tokens, actions_text,
+            list(checks.last_checks(instance)), self.narrative_max_tokens, actions_text,
             on_delta=buffered_stream or on_delta,
             on_reset=quality_reset if buffered_stream is not None else on_reset,
             public_narration_context=public_narration_context,

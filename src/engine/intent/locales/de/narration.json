@@ -1,0 +1,30 @@
+{
+  "second_person": [
+    "du",
+    "dich",
+    "dir",
+    "dein",
+    "deine",
+    "ihr",
+    "euch"
+  ],
+  "failure_words": [
+    "scheiterst",
+    "scheitert",
+    "schlägst fehl",
+    "verfehlst",
+    "verfehlt",
+    "kannst nicht",
+    "misslingt",
+    "daneben"
+  ],
+  "success_words": [
+    "gelingt",
+    "schaffst",
+    "geschafft",
+    "triffst",
+    "getroffen",
+    "erfolgreich",
+    "streckst"
+  ]
+}

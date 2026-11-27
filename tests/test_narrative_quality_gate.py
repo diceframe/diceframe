@@ -98,7 +98,7 @@ async def test_quality_gate_repairs_once_and_accepts_rewritten_response() -> Non
         "GM",
         "context",
         "hp_based",
-        "",
+        [],
         512,
         quality_gate=lambda candidate, parsed: inspect_narrative_output(candidate, parsed),
         quality_repair_instruction=lambda issues: quality_repair_instruction(
@@ -216,7 +216,7 @@ async def test_quality_gate_still_runs_when_a_dice_conflict_is_accepted() -> Non
         "GM",
         "context",
         "hp_based",
-        "【系统检定·必须遵循】大成功",
+        [{"actor_name": "调查员", "actor_ref": "player:p1", "verdict_code": "critical_success"}],
         512,
         quality_gate=gate,
         quality_repair_instruction=lambda issues: "rewrite",

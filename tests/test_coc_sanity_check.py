@@ -11,7 +11,7 @@ import pytest
 from src.commands.madness_tracker import MadnessTracker
 from src.commands.player_state_applier import PlayerStateApplier
 from src.commands.state_recap import build_state_change_messages, snapshot_public_player_state
-from src.engine import dice_rules_coc
+from src.engine import check_verdict, dice_rules_coc
 from src.engine.dice_rng import DiceResult
 from src.engine.dice_rules_coc import SanityLoss, parse_sanity_loss, resolve_sanity_check
 from src.engine.game_instance import GameInstance
@@ -66,18 +66,18 @@ def test_loss_text_round_trips():
 
 # ---------- 成功等级结算 ----------
 
-@pytest.mark.parametrize("verdict", ["普通成功", "困难成功", "极难成功", "大成功"])
+@pytest.mark.parametrize("verdict", [check_verdict.REGULAR_SUCCESS, check_verdict.HARD_SUCCESS, check_verdict.EXTREME_SUCCESS, check_verdict.CRITICAL_SUCCESS])
 def test_every_success_level_takes_the_success_loss(monkeypatch, verdict):
     _fix_d100(monkeypatch, 20, verdict)
     seen = _fix_loss_roll(monkeypatch, 4)
     outcome = resolve_sanity_check(55, parse_sanity_loss("1/1d6"))
     assert outcome["loss"] == 1
-    assert outcome["verdict"] == verdict
+    assert outcome["verdict_code"] == verdict
     assert seen == []  # 成功损失是固定值，不掷失败骰
 
 
 def test_success_loss_can_be_a_die(monkeypatch):
-    _fix_d100(monkeypatch, 20, "普通成功")
+    _fix_d100(monkeypatch, 20, check_verdict.REGULAR_SUCCESS)
     seen = _fix_loss_roll(monkeypatch, 2)
     outcome = resolve_sanity_check(55, parse_sanity_loss("1d3/1d10"))
     assert outcome["loss"] == 2
@@ -85,7 +85,7 @@ def test_success_loss_can_be_a_die(monkeypatch):
 
 
 def test_failure_rolls_the_failure_loss(monkeypatch):
-    _fix_d100(monkeypatch, 80, "失败")
+    _fix_d100(monkeypatch, 80, check_verdict.FAILURE)
     seen = _fix_loss_roll(monkeypatch, 5)
     outcome = resolve_sanity_check(55, parse_sanity_loss("0/1d6"))
     assert outcome["loss"] == 5
@@ -95,7 +95,7 @@ def test_failure_rolls_the_failure_loss(monkeypatch):
 
 @pytest.mark.parametrize(("raw", "maximum"), [("0/1d6", 6), ("1/1d4+1", 5), ("1d10", 10), ("0/3", 3)])
 def test_fumble_takes_the_maximum_failure_loss(monkeypatch, raw, maximum):
-    _fix_d100(monkeypatch, 100, "大失败")
+    _fix_d100(monkeypatch, 100, check_verdict.CRITICAL_FAILURE)
     seen = _fix_loss_roll(monkeypatch, 1)
     outcome = resolve_sanity_check(55, parse_sanity_loss(raw))
     assert outcome["loss"] == maximum
@@ -103,7 +103,7 @@ def test_fumble_takes_the_maximum_failure_loss(monkeypatch, raw, maximum):
 
 
 def test_legacy_single_die_halves_on_success(monkeypatch):
-    _fix_d100(monkeypatch, 30, "困难成功")
+    _fix_d100(monkeypatch, 30, check_verdict.HARD_SUCCESS)
     _fix_loss_roll(monkeypatch, 5)
     assert resolve_sanity_check(70, parse_sanity_loss("1d6"))["loss"] == 3
 
@@ -113,7 +113,7 @@ def test_threshold_is_clamped_to_percentile_range(monkeypatch):
 
     def fake_check(threshold):
         thresholds.append(threshold)
-        return DiceResult(formula="d100", rolls=[50], modifier=0, total=50, natural=50), "失败"
+        return DiceResult(formula="d100", rolls=[50], modifier=0, total=50, natural=50), check_verdict.FAILURE
 
     monkeypatch.setattr(dice_rules_coc, "check_coc", fake_check)
     _fix_loss_roll(monkeypatch, 1)
@@ -136,13 +136,13 @@ def _instance(*uids: str, sanity: int = 50) -> GameInstance:
 
 def test_regular_success_with_zero_success_loss_keeps_sanity(monkeypatch):
     """回归：旧实现判断笼统的「成功」，普通/困难/极难成功都吃满额损失。"""
-    _fix_d100(monkeypatch, 20, "普通成功")
+    _fix_d100(monkeypatch, 20, check_verdict.REGULAR_SUCCESS)
     _fix_loss_roll(monkeypatch, 6)
     inst = _instance("p1")
     update = {"p1": {"san_check_loss": "0/1d6"}}
     PlayerStateApplier(MadnessTracker()).apply_players(inst, update)
     assert inst.get_character_sheet("p1")["sanity"] == 50
-    assert update["p1"]["san_check_result"]["verdict"] == "普通成功"
+    assert update["p1"]["san_check_result"]["verdict_code"] == check_verdict.REGULAR_SUCCESS
 
 
 def test_unknown_notation_is_not_resolved_as_six(monkeypatch):
@@ -166,7 +166,7 @@ def test_bystander_cannot_take_san_or_hp_without_authoritative_presence(monkeypa
     （或被诱导的模型）可以替不在场的人掷 SAN；现在 fail closed，越权目标整条丢弃。
     """
 
-    _fix_d100(monkeypatch, 80, "失败")
+    _fix_d100(monkeypatch, 80, check_verdict.FAILURE)
     _fix_loss_roll(monkeypatch, 4)
     inst = _instance("actor", "bystander")
     update = {
@@ -187,7 +187,7 @@ def test_bystander_cannot_take_san_or_hp_without_authoritative_presence(monkeypa
 def test_dead_or_unknown_targets_never_resolve_a_san_check(monkeypatch):
     """已死亡 / 不存在的 UID 即使出现在标签里也不会被结算。"""
 
-    _fix_d100(monkeypatch, 80, "失败")
+    _fix_d100(monkeypatch, 80, check_verdict.FAILURE)
     _fix_loss_roll(monkeypatch, 6)
     inst = _instance("actor", "dead")
     inst.players["dead"]["character_sheet"]["deceased"] = True
@@ -232,7 +232,7 @@ def test_dead_bystander_is_not_checked(monkeypatch):
     ("ja", "【正気度ロール】调查员p1：d100=80 / 正気度 50 → 失敗、喪失 4（0/1d6）"),
 ])
 def test_sanity_check_result_is_published(monkeypatch, language, expected):
-    _fix_d100(monkeypatch, 80, "失败")
+    _fix_d100(monkeypatch, 80, check_verdict.FAILURE)
     _fix_loss_roll(monkeypatch, 4)
     inst = _instance("p1")
     inst.language = language
