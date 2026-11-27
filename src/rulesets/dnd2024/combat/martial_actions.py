@@ -619,6 +619,7 @@ class CombatMartialActionsMixin:
             )
             events.append({
                 "type": "dnd2024.position.changed", "actor_id": target_id,
+                "feet": distance, "away_from": attacker_id,
                 "distance": direction * distance, "forced": True,
                 "source_feature": "open_hand_technique",
             })

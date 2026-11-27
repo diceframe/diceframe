@@ -1038,9 +1038,11 @@ class Dnd2024CombatEngine(
     def _attack_cost_event(
         self, combat: dict[str, Any], actor: dict[str, Any], *, resource: str = "",
         weapon: dict[str, Any] | None = None, attacks_per_action: int = 0,
+        nick_extra: bool = False, free: bool = False, cleave_extra: bool = False,
     ) -> dict[str, Any]:
         return {
             "type": "dnd2024.attack.spent", "actor_id": actor["actor_id"],
+            **({"free": True} if free else {}),
             "resource": resource or self._spend_action_resource(combat),
             "attacks_per_action": (
                 attacks_per_action or self._attacks_per_action(actor)
@@ -1048,6 +1050,10 @@ class Dnd2024CombatEngine(
             # 归约需要知道"这一击用的是不是 Light 武器"，才能回答下一问：
             # "本回合还允许 Light 追加攻击吗"。
             "light_weapon": bool((weapon or {}).get("light")),
+            # Nick：这一次 Light 追加攻击由 Attack action 承担，不花附赠动作。
+            # 归约据此记账，保证同一回合只给一次。
+            **({"nick_extra": True} if nick_extra else {}),
+            **({"cleave_extra": True} if cleave_extra else {}),
             # 但"用 Light 武器攻击过"还不够：追加攻击的参照点是**触发它的那一次
             # 攻击所用的武器**（"a different Light weapon"），所以账本必须记下
             # 每一下的武器，而不是只记一个布尔。空串代表徒手或没有武器档案。
