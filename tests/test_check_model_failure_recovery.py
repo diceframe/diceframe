@@ -38,7 +38,7 @@ async def test_dedicated_provider_failure_does_not_use_offline_check_fallback(
     async def provider_failure(*_args, **_kwargs):
         raise LLMToolCallError("provider unavailable", frozenset({503}))
 
-    monkeypatch.setattr("src.commands.round_processor.plan_round_checks", provider_failure)
+    monkeypatch.setattr("src.commands.round_checks.plan_round_checks", provider_failure)
 
     def offline_fallback_must_not_run(*_args, **_kwargs):
         raise AssertionError("dedicated check-model failure used offline fallback")
@@ -154,7 +154,7 @@ async def test_direct_process_round_rolls_back_dedicated_provider_failure(
     async def provider_failure(*_args, **_kwargs):
         raise LLMToolCallError("provider unavailable", frozenset({503}))
 
-    monkeypatch.setattr("src.commands.round_processor.plan_round_checks", provider_failure)
+    monkeypatch.setattr("src.commands.round_checks.plan_round_checks", provider_failure)
 
     with pytest.raises(CheckModelNotConfigured) as rejected:
         await processor.process_round(instance)

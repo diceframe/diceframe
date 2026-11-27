@@ -108,6 +108,9 @@ class CombatReducerMixin:
             # 诡诈打击的选择在结算时可能落不了地（偷袭不成立 / 预算不足）：
             # 事件说明为什么没扣骰、没发效果，状态不变。
             "dnd2024.cunning_strike.skipped",
+            # 拨挡攻击把这一次伤害压小了：明细（骰值、原值、减后值）在事件里，
+            # 真正的 HP 变化仍由随后的 resource.changed 承担。
+            "dnd2024.damage.reduced",
             # Multiattack 提前收尾的回执：剩余几击没打出去，原因写在事件里。
             "dnd2024.multiattack.truncated",
         }:
@@ -247,7 +250,9 @@ class CombatReducerMixin:
             # 握持、骑乘与两个攻击窗口账本都是"这一场"的事实：战斗结束就没有
             # 回合，也没有"手上拿着什么"。留着它们只会让下一场之前的读取看到
             # 一场已经结束的战斗的姿势。
-            for key in ("hands", "mounted", "light_attacks", "loading_shots"):
+            for key in (
+                "hands", "mounted", "light_attacks", "loading_shots", "attack_marks",
+            ):
                 combat[key] = {}
             # 狂暴靠每回合攻击或附赠动作续期；按回合计时的效果也只在回合
             # 边界到期。战斗结束后没有回合，它们随之结束；``duration=combat``

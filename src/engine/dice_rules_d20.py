@@ -7,6 +7,7 @@ D&D 规则宣传。
 
 from __future__ import annotations
 
+from src.engine import check_verdict
 from src.engine.dice_rng import DiceResult, roll, roll_die
 
 
@@ -60,10 +61,10 @@ def d20_verdict(
 ) -> str:
     """按规则阈值结算已掷出的 d20；阈值为 None 时只比较总值与 DC。"""
     if crit_on is not None and crit_on <= natural <= 20:
-        return "大成功"
+        return check_verdict.CRITICAL_SUCCESS
     if fumble_on is not None and 1 <= natural <= fumble_on:
-        return "大失败"
-    return "成功" if total >= dc else "失败"
+        return check_verdict.CRITICAL_FAILURE
+    return check_verdict.SUCCESS if total >= dc else check_verdict.FAILURE
 
 
 def check_d20(
@@ -72,7 +73,7 @@ def check_d20(
     crit_on: int | None = 20,
     fumble_on: int | None = 1,
 ) -> tuple[DiceResult, str]:
-    """d20 属性检定，返回 (结果, "成功"/"失败"/"大成功"/"大失败")。
+    """d20 属性检定，返回 (结果, 成功等级 code)。
 
     娱乐化房规：自然 20/1 走大成功/大失败通道（见模块 docstring）。
 
@@ -86,8 +87,8 @@ def check_d20(
     verdict = d20_verdict(
         result.natural, result.total, dc, crit_on=crit_on, fumble_on=fumble_on,
     )
-    result.is_critical = verdict == "大成功"
-    result.is_fumble = verdict == "大失败"
+    result.is_critical = check_verdict.is_critical(verdict)
+    result.is_fumble = check_verdict.is_fumble(verdict)
     return result, verdict
 
 

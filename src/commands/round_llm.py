@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import logging
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
 from src.commands.narrative_application import apply_parsed_data_to_response as _apply_parsed
@@ -532,7 +532,7 @@ async def call_llm_with_tag_retry(
     gm_prompt: str,
     context: str,
     combat_model: str,
-    dice_block: str,
+    check_results: Sequence[Mapping[str, Any]],
     narrative_max_tokens: int,
     actions_text: str = "",
     *,
@@ -680,7 +680,9 @@ async def call_llm_with_tag_retry(
                 )
 
         narration = response.narration or response.content
-        dice_conflict = bool(dice_block) and not validate_dice_constraint(dice_block, narration)
+        dice_conflict = bool(check_results) and not validate_dice_constraint(
+            check_results, narration, language=instance.language,
+        )
         if dice_conflict and dice_retry < 1:
             dice_retry += 1
             retry_kind = "dice"

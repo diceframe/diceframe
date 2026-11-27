@@ -19,7 +19,7 @@ def game():
     inst.gm_uid = "gm"
     inst.players = {"a": {"character_name": "A", "character_sheet": {"hp": 10, "luck": 50, "skills": [{"name": "Investigate", "value": 40}]}},
                     "b": {"character_sheet": {"luck": 50}}}
-    checks.replace_last_checks(inst, [{'check_id': 'c1', 'actor_uid': 'a', 'kind': 'check', 'skill': 'Investigate', 'dice': 'd100', 'dice_mechanic': 'coc_bonus_penalty', 'roll': 60, 'rolls': [60], 'threshold': 40, 'verdict': '失败', 'advantage_mode': '', 'luck_spend_available': True, 'luck_decision': 'pending'}])
+    checks.replace_last_checks(inst, [{'check_id': 'c1', 'actor_uid': 'a', 'kind': 'check', 'skill': 'Investigate', 'dice': 'd100', 'dice_mechanic': 'coc_bonus_penalty', 'roll': 60, 'rolls': [60], 'threshold': 40, 'verdict': '失败', 'verdict_code': 'failure', 'advantage_mode': '', 'luck_spend_available': True, 'luck_decision': 'pending'}])
     inst.complete_round_check_preparation()
     return inst
 
@@ -83,7 +83,9 @@ def test_push_requires_owner_request_keeper_risk_and_owner_confirmation():
 
 @pytest.mark.parametrize("changes", [
     {"kind": "attack"}, {"kind": "sanity"}, {"attribute_key": "luck", "skill": ""},
-    {"dice": "d20"}, {"opponent": "enemy:1"}, {"verdict": "普通成功"}, {"actor_ref": "companion:x"},
+    {"dice": "d20"}, {"opponent": "enemy:1"}, {"actor_ref": "companion:x"},
+    # 只有一档普通成功：不是失败，因此不给推骰。
+    {"verdict": "普通成功", "verdict_code": "regular_success", "roll": 20, "rolls": [20]},
 ])
 def test_unpushable_checks_never_become_blocking_decisions(changes):
     from src.engine import check_decisions

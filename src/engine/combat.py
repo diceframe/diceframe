@@ -13,23 +13,11 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from .character_utils import armor_value, set_hp
+from . import check_verdict
 from .dice import roll
 from .dice_rng import DiceResult
 
 logger = logging.getLogger("trpg")
-
-_SUCCESS_VERDICTS = {
-    "成功",
-    "普通成功",
-    "困难成功",
-    "极难成功",
-    "大成功",
-    "success",
-    "regular success",
-    "hard success",
-    "extreme success",
-    "critical success",
-}
 
 
 @dataclass
@@ -71,9 +59,9 @@ class AttackResult:
 
 
 def _check_succeeded(check_result: Mapping[str, Any]) -> bool:
-    if bool(check_result.get("is_fumble")):
-        return False
-    return str(check_result.get("verdict") or "").strip().casefold() in _SUCCESS_VERDICTS
+    """Success comes from the verdict code, never from its translated label."""
+
+    return check_verdict.is_success(check_verdict.code_of(check_result))
 
 
 def calc_hp_based_damage(

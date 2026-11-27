@@ -45,6 +45,7 @@ from .divine_actions import CombatDivineActionsMixin
 from .stealth_actions import CombatStealthActionsMixin
 from .martial_actions import CombatMartialActionsMixin
 from .support_actions import CombatSupportActionsMixin
+from .defensive_tactics import CombatDefensiveTacticsMixin
 from .ongoing_effects import CombatOngoingEffectsMixin
 from .primitives import (
     TURN_WINDOW_CLOSED_EVENT,
@@ -58,6 +59,8 @@ from .primitives import (
 )
 from .reducer import CombatReducerMixin
 from .resolution import CombatResolutionMixin
+from .spell_resolution import CombatSpellResolutionMixin
+from .hit_resolution import CombatHitResolutionMixin
 from .validation import CombatValidationMixin
 from .view import CombatViewMixin
 from .triggered_spells import CombatTriggeredSpellsMixin, hit_spell_decision
@@ -96,12 +99,15 @@ class Dnd2024CombatEngine(
     # environment rules; they must stay ahead of the sibling mixins so that
     # ``super(CombatAvailabilityMixin, self)`` still reaches CombatViewMixin.
     CombatAvailabilityMixin, CombatConditionsMixin, CombatEnvironmentMixin,
-    CombatValidationMixin, CombatResolutionMixin, CombatReducerMixin, CombatViewMixin, CombatTriggeredSpellsMixin,
+    CombatValidationMixin, CombatResolutionMixin,
+    CombatSpellResolutionMixin, CombatHitResolutionMixin,
+    CombatReducerMixin, CombatViewMixin, CombatTriggeredSpellsMixin,
     CombatReactionSpellsMixin, CombatCheckWindowsMixin, CombatDivineActionsMixin,
     CombatStealthActionsMixin,
     CombatMartialActionsMixin,
     CombatSupportActionsMixin,
     CombatOngoingEffectsMixin,
+    CombatDefensiveTacticsMixin,
 ):
     bundle: LoadedRulesetBundle
     encounter_access: EncounterAccess = field(default_factory=EncounterAccess.blocked)

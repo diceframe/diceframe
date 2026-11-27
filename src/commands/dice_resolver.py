@@ -15,38 +15,20 @@ from src.engine.checks import (
     resolve_check_request,
     roll_check_request,
 )
+from src.engine import check_verdict
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text
 from src.engine.modules.check_modes import apply_grant
 from src.rules.rule_system import RuleSystem
 
 
-_VERDICT_MAPPINGS = {
-    "en": {
-        "大成功": "Critical Success",
-        "极难成功": "Extreme Success",
-        "困难成功": "Hard Success",
-        "普通成功": "Regular Success",
-        "成功": "Success",
-        "失败": "Failure",
-        "大失败": "Critical Failure",
-    },
-    "de": {
-        "大成功": "Kritischer Erfolg",
-        "极难成功": "Extremer Erfolg",
-        "困难成功": "Schwerer Erfolg",
-        "普通成功": "Normaler Erfolg",
-        "成功": "Erfolg",
-        "失败": "Fehlschlag",
-        "大失败": "Kritischer Fehlschlag",
-    },
-}
+def _verdict_text(instance: GameInstance, check: dict[str, Any]) -> str:
+    """Verdict label for GM constraints: rendered from the code, never guessed."""
 
-
-def _verdict_text(verdict: str, english: bool, lang: str = "en") -> str:
-    if not english:
-        return verdict
-    return _VERDICT_MAPPINGS.get(lang, _VERDICT_MAPPINGS["en"]).get(verdict, verdict)
+    return (
+        check_verdict.render(check_verdict.code_of(check), instance.language)
+        or str(check.get("verdict") or "")
+    )
 
 
 class DiceResolver:
@@ -215,7 +197,8 @@ class DiceResolver:
         rule: RuleSystem | None,
         check: dict[str, Any],
     ) -> str:
-        verdict = str(check.get("verdict") or "")
+        verdict = check_verdict.render(check_verdict.code_of(check), instance.language) or \
+            str(check.get("verdict") or "")
         if (
             check.get("planner_source") == "runtime"
             or check.get("dice") == "runtime"
@@ -224,10 +207,22 @@ class DiceResolver:
             return DiceResolver.format_runtime_constraint(instance, check)
         if check.get("dice") == "d100":
             threshold = int(check.get("threshold", 1) or 1)
-            if check.get("skill"):
-                subject = f"技能「{check['skill']}」{threshold}%"
+            skill_name = str(check.get("skill") or "")
+            attribute_name = str(check.get("attribute") or "int")
+            if skill_name:
+                subject = localized_text(instance.language, {
+                    "en": f"Skill {skill_name} {threshold}%",
+                    "zh-CN": f"技能「{skill_name}」{threshold}%",
+                    "ja": f"技能「{skill_name}」{threshold}%",
+                    "de": f"Fertigkeit {skill_name} {threshold}%",
+                })
             else:
-                subject = f"属性「{check.get('attribute') or 'int'}」={threshold}%"
+                subject = localized_text(instance.language, {
+                    "en": f"Attribute {attribute_name} = {threshold}%",
+                    "zh-CN": f"属性「{attribute_name}」={threshold}%",
+                    "ja": f"属性「{attribute_name}」={threshold}%",
+                    "de": f"Attribut {attribute_name} = {threshold}%",
+                })
             luck_cost = check.get("luck_cost")
             luck_hint = ""
             if check.get("luck_spend_available") and luck_cost:
@@ -241,7 +236,7 @@ class DiceResolver:
                 "en": (
                     "\n[System Check - Must Follow]\n"
                     f"Check: d100={check['roll']} vs {subject}\n"
-                    f"Result: {_verdict_text(verdict, True)}{luck_hint}\n"
+                    f"Result: {verdict}{luck_hint}\n"
                     "Requirement: narrate this server-resolved result without changing the roll or outcome.\n"
                 ),
                 "zh-CN": (
@@ -266,21 +261,42 @@ class DiceResolver:
                     f"Probe: d100={check['roll']} vs {subject}\n"
                     f"Erfolgsschwellen: normal≤{threshold}, schwer≤{check['hard_threshold']}, "
                     f"extrem≤{check['extreme_threshold']}\n"
-                    f"Ergebnis: {_verdict_text(verdict, True, 'de')}{luck_hint}\n"
+                    f"Ergebnis: {verdict}{luck_hint}\n"
                     "Anforderung: Erzähle dieses vom Server ermittelte Ergebnis, ohne Wurf oder Ausgang zu ändern.\n"
                 ),
             })
 
         rolls = list(check.get("rolls") or [check.get("roll")])
         mode = str(check.get("advantage_mode") or "")
-        if mode == "advantage":
-            roll_label = f"d20优势={rolls} 取 {check['roll']}"
-        elif mode == "disadvantage":
-            roll_label = f"d20劣势={rolls} 取 {check['roll']}"
-        else:
-            roll_label = f"d20={check['roll']}"
+        roll_label = localized_text(instance.language, {
+            "en": (
+                f"d20 advantage={rolls} keep {check['roll']}" if mode == "advantage"
+                else f"d20 disadvantage={rolls} keep {check['roll']}" if mode == "disadvantage"
+                else f"d20={check['roll']}"
+            ),
+            "zh-CN": (
+                f"d20优势={rolls} 取 {check['roll']}" if mode == "advantage"
+                else f"d20劣势={rolls} 取 {check['roll']}" if mode == "disadvantage"
+                else f"d20={check['roll']}"
+            ),
+            "ja": (
+                f"d20有利={rolls} 採用 {check['roll']}" if mode == "advantage"
+                else f"d20不利={rolls} 採用 {check['roll']}" if mode == "disadvantage"
+                else f"d20={check['roll']}"
+            ),
+            "de": (
+                f"d20 Vorteil={rolls} behalte {check['roll']}" if mode == "advantage"
+                else f"d20 Nachteil={rolls} behalte {check['roll']}" if mode == "disadvantage"
+                else f"d20={check['roll']}"
+            ),
+        })
         if check.get("advantage_note"):
-            roll_label += f"（{check['advantage_note']}）"
+            roll_label += localized_text(instance.language, {
+                "en": f" ({check['advantage_note']})",
+                "zh-CN": f"（{check['advantage_note']}）",
+                "ja": f"（{check['advantage_note']}）",
+                "de": f" ({check['advantage_note']})",
+            })
         attribute = str(check.get("attribute") or "")
         modifier = int(check.get("modifier", 0) or 0)
         total = int(check.get("total", 0) or 0)
@@ -289,7 +305,7 @@ class DiceResolver:
             "en": (
                 "\n[System Check - Must Follow]\n"
                 f"Check: {roll_label} + {attribute} {modifier:+d} = {total} vs DC {dc}\n"
-                f"Result: {_verdict_text(verdict, True)}\n"
+                f"Result: {verdict}\n"
                 "Requirement: narrate this server-resolved result without changing the roll or outcome.\n"
             ),
             "zh-CN": (
@@ -307,8 +323,8 @@ class DiceResolver:
             ),
             "de": (
                 "\n[Systemseitige Probe - Muss befolgt werden]\n"
-                f"Probe: {roll_label} + {attribute} {modifier:+d} = {total} vs SG {dc}\n"
-                f"Ergebnis: {_verdict_text(verdict, True, 'de')}\n"
+                f"Probe: {roll_label} + Attribut {attribute} {modifier:+d} = {total} vs SG {dc}\n"
+                f"Ergebnis: {verdict}\n"
                 "Anforderung: Erzähle dieses vom Server ermittelte Ergebnis, ohne Wurf oder Ausgang zu ändern.\n"
             ),
         })
@@ -335,7 +351,7 @@ class DiceResolver:
             target = check.get("dc", check.get("threshold"))
             if isinstance(target, int) and not isinstance(target, bool):
                 detail += f" vs {target}"
-            body = f"{detail.strip()} → {check.get('verdict')}"
+            body = f"{detail.strip()} → {check_verdict.render(check_verdict.code_of(check), instance.language) or check.get('verdict')}"
         return localized_text(instance.language, {
             "en": (
                 "\n[System Check - Must Follow]\n"

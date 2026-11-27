@@ -35,6 +35,8 @@ class Resolver:
         return [{
             "check_id": request["check_id"], "dice": "2d8", "roll": roll,
             "rolls": [4, roll - 4], "dc": 12, "verdict": "failure",
+            # 可选契约：声明后由 code 渲染，而不是把作者文字当身份
+            "verdict_code": "failure",
         } for request in requests]
 
 
@@ -87,6 +89,8 @@ def setup(resolver):
     current = {"instance": instance}
     processor.registry = SimpleNamespace(get=lambda _key: current["instance"])
     processor.check_model_enabled = False
+    processor.check_llm_client = None
+    processor._advance_adventure_world = None
     processor.llm_client = PlannerClient()
     processor._prompt = SimpleNamespace(load_rule_context=lambda *_: SimpleNamespace(
         rule=rule, dice_system="none",
@@ -141,7 +145,7 @@ async def test_runtime_2d8_prompt_and_regeneration_preserve_actual_dice():
     ]
     for block in blocks:
         assert "2d8=4+4 = 8 vs 12" in block
-        assert "failure" in block
+        assert "失败" in block  # code 渲染为对局语言，而不是原样回显作者文字
         assert "d20" not in block
         assert "必须遵循" in block
 

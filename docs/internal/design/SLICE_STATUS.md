@@ -92,7 +92,7 @@
 | F10C | 战前潜行（遭遇前） | ⏸ | **缺口 GAP-5**：Surprised 机制不存在，产物无消费者 |
 | F10D | Fast Hands ①③（工具存在性 + 借用 + 动作降级） | ⬜ | `S0F10D_..._TASK_SPEC`；等 F10B 合入后复用其检定函数 |
 | F10E | Fast Hands ②（Utilize） | ⏸ | **缺口 GAP-6 / GAP-16 / GAP-18**：数据齐（35 个工具的 utilize 表），缺 GM 施加后果与区域触发 |
-| F11 | 伤害反应与远程重定向 | ⬜ | 有任务书；原阻塞（需 Total Cover）已由 #806/#822 解除，**无人接手** |
+| F11 | 伤害反应与远程重定向 | 🔵 | PR #881 待合并；Retaliation 早已落地，本片完成 Deflect Attacks / Deflect Energy（`test_dnd2024_damage_reactions.py` 14 条）；**Slow Fall 按 §7 停工**（无 fall trigger，GAP-50） |
 | F12 | 豁免优势、Evasion、邪魔韧性、无情狂怒 | ✅ | #763 + 执行报告（35 条） |
 | F13 | 条件免疫、抑制与移除 | ✅ | #763 + 报告（30 条） |
 | F14 | 命中附加效果、命中后条件、施法侧加值 | ✅ | #763 + 报告（52 条） |
@@ -107,12 +107,12 @@
 | F23 | 武器增益、控制与 Smite 光环 | ✅ | #784 |
 | F24 | 属性、熟练与总值替换被动 | ✅ | #784 |
 | F25 | Wild Shape（德鲁伊核心，含 Beast Spells / Archdruid） | ⬜ | 有任务书 + 调研 `S0F25_WILD_SHAPE_RESEARCH`；被 **GAP-20/21/22/23** 挡住（变形地基整条未建） |
-| F26 | Land 主动特性 | ⬜ | 有任务书；未开工 |
+| F26 | Land 主动特性 | ✅ | #839 + 执行报告；区域模型复用既有 zone |
 | F27 | ~~召唤物~~（**移出本线**） | ➖ | 实为召唤类法术的效果层（`find_familiar` L1 / `find_steed` L2 / `summon_dragon` L5），三个 feature 只是入口修饰（免材料/免槽一次/类型锁定）。不属于职业特性线，交由法术与召唤子系统处理 |
-| F28 | Metamagic | 🟡 | 本地完成、未提 PR：十选项 + 容器（Sorcery Incarnate / Apotheosis）+ 2/10/17 选择 + 每级替换 + 前端两种 kind；回归见 `S0F28_METAMAGIC_EXECUTION_REPORT` §3 |
+| F28 | Metamagic | ✅ | #847 + 执行报告；十选项 + 容器 + 2/10/17 选择 + 每级替换 + 前端两种 kind |
 | F29 | Divine Words 类 | ⬜ | 有任务书；未开工 |
-| F30 | 长时效应 | ⬜ | 有任务书；未开工 |
-| F31 | 法术书与物品 | ⬜ | 有任务书；未开工 |
+| F30 | 长时效应 | ✅ | #841 + 执行报告（44 条）；角色级 long_effect 存储 + 世界时钟到期 |
+| F31 | 法术书与物品 | ✅ | #869 + 执行报告；Use Magic Device / 仪式 / Evocation Savant |
 | F32 | 祈唤主干 | ⬜ | 有任务书；引擎无 `eldritch_invocation` 实现 |
 | F33 | 祈唤施法 | ⬜ | 有任务书；未开工 |
 | F34 | 祈唤刃 | ⬜ | 有任务书；未开工 |

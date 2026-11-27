@@ -1,0 +1,38 @@
+{
+  "second_person": [
+    "you",
+    "your",
+    "yours"
+  ],
+  "failure_words": [
+    "fail",
+    "fails",
+    "failed",
+    "cannot",
+    "can't",
+    "miss",
+    "misses",
+    "missed",
+    "misses",
+    "lose",
+    "lost",
+    "does not",
+    "doesn't"
+  ],
+  "success_words": [
+    "succeed",
+    "succeeds",
+    "succeeded",
+    "success",
+    "manage",
+    "manages",
+    "managed",
+    "hit",
+    "hits",
+    "land",
+    "lands",
+    "connect",
+    "connects",
+    "true"
+  ]
+}

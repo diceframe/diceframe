@@ -14,6 +14,7 @@ from typing import Any
 
 from src.engine.constants import COMBAT_ATTACK_KEYWORDS
 from src.engine.character_utils import armor_ac_components, armor_value, get_resource
+from src.engine import check_verdict
 from src.engine.dice import (
     check_d100_bonus,
     coc_success_level,
@@ -469,8 +470,8 @@ def roll_check_request(request: dict[str, Any], rule: RuleSystem | None = None) 
             fumble = value == 100
         else:
             verdict = coc_success_level(value, max(1, min(99, int(target))))
-            critical = verdict == "大成功"
-            fumble = verdict == "大失败"
+            critical = check_verdict.is_critical(verdict)
+            fumble = check_verdict.is_fumble(verdict)
     return {
         "ok": True,
         "check_id": str(request.get("check_id") or ""),
@@ -508,6 +509,17 @@ def _attribute_label(rule: RuleSystem | None, key: str) -> str:
             if attribute.get("key") == key:
                 return str(attribute.get("name") or key)
     return key
+
+
+def _localized_check_label(language: object, subject: str) -> str:
+    """Check label suffix in the game language; never a Chinese-only literal."""
+
+    return localized_text(language, {
+        "en": f"{subject} Check",
+        "zh-CN": f"{subject}检定",
+        "ja": f"{subject}判定",
+        "de": f"{subject}-Probe",
+    })
 
 
 def default_check_attribute(text: str, rule: RuleSystem | None) -> str:
@@ -824,15 +836,15 @@ def resolve_check_request(
         if opposed is not None:
             # 对抗检定双方都按常规难度掷骰，比较成功等级；difficulty 不再叠加。
             difficulty = ""
-            if opposed["outcome"] != "win" and achieved != "大失败":
-                verdict = "失败"
+            if opposed["outcome"] != "win" and not check_verdict.is_fumble(achieved):
+                verdict = check_verdict.FAILURE
         elif difficulty:
             verdict = apply_required_level(achieved, difficulty)
             needed = max(1, required_threshold(threshold, difficulty))
         luck = int(character_sheet.get("luck", 0) or 0)
         # 幸运只能把差一点的失败补到所需档位；对抗检定不开放花幸运。
-        # 幸运检定本身不能再花幸运（7e）。
-        luck_cost = roll_value - needed if verdict == "失败" and opposed is None and not stat_check else 0
+        # 幸运检定本身不能再花幸运（7e）。大失败不能靠幸运救回。
+        luck_cost = roll_value - needed if verdict == check_verdict.FAILURE and opposed is None and not stat_check else 0
         if difficulty:
             common["difficulty"] = difficulty
             common["required_threshold"] = needed
@@ -843,17 +855,20 @@ def resolve_check_request(
             if verdict != achieved:
                 common["achieved_verdict"] = achieved
         common.update({
-            "label": common["label"] or f"{skill_name or _stat_or_attribute_label(rule, attribute_key)}检定",
+            "label": common["label"] or _localized_check_label(
+                instance.language, skill_name or _stat_or_attribute_label(rule, attribute_key),
+            ),
             "attribute": _attribute_label(rule, attribute_key) if attribute_key else None,
             "attribute_key": attribute_key,
             "threshold": threshold,
             "hard_threshold": threshold // 2,
             "extreme_threshold": threshold // 5,
-            "verdict": verdict,
+            "verdict": check_verdict.render(verdict, instance.language),
+            "verdict_code": verdict,
             "luck_spend_available": 0 < luck_cost <= luck,
             "luck_cost": luck_cost if 0 < luck_cost <= luck else None,
-            "is_critical": verdict == "大成功",
-            "is_fumble": verdict == "大失败",
+            "is_critical": check_verdict.is_critical(verdict),
+            "is_fumble": check_verdict.is_fumble(verdict),
         })
         return common
 
@@ -919,7 +934,7 @@ def resolve_check_request(
     )
     attribute_label = _attribute_label(rule, attribute_key)
     common.update({
-        "label": common["label"] or f"{skill_name or attribute_label}检定",
+        "label": common["label"] or _localized_check_label(instance.language, skill_name or attribute_label),
         "attribute": attribute_label,
         "attribute_key": attribute_key,
         "modifier": modifier,
@@ -941,8 +956,9 @@ def resolve_check_request(
         "opponent_roll": opponent_roll,
         "opponent_modifier": opponent_modifier if opponent_name else None,
         "opponent_total": opponent_total,
-        "verdict": verdict,
-        "is_critical": verdict == "大成功",
-        "is_fumble": verdict == "大失败",
+        "verdict": check_verdict.render(verdict, instance.language),
+        "verdict_code": verdict,
+        "is_critical": check_verdict.is_critical(verdict),
+        "is_fumble": check_verdict.is_fumble(verdict),
     })
     return common
