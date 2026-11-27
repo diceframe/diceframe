@@ -1362,7 +1362,15 @@ def _validate_capability_ids_are_unique(
     id space was class features only.
     """
 
-    from .feat_models import load_feat_definitions
+    from .feat_models import FeatDefinitionError, load_feat_definitions
+
+    try:
+        feat_definitions = load_feat_definitions(bundle)
+    except FeatDefinitionError:
+        # 专长声明本身非法时，报错应由真正消费它的组件给出（升级引擎会把它
+        # 转成 ProgressionCatalogError）。这里只问"能力 id 是否唯一"，不该
+        # 抢在前面用另一种错误类型回答同一个问题。
+        return
 
     seen: dict[str, str] = {}
 
@@ -1378,5 +1386,5 @@ def _validate_capability_ids_are_unique(
 
     for definition in catalog.features_by_key.values():
         claim(definition.id, definition.capabilities)
-    for feat_definition in load_feat_definitions(bundle).values():
+    for feat_definition in feat_definitions.values():
         claim(feat_definition.id, feat_definition.capabilities)
