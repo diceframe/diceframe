@@ -286,6 +286,7 @@ class CombatReducerMixin:
             # 一场已经结束的战斗的姿势。
             for key in (
                 "hands", "mounted", "light_attacks", "loading_shots", "attack_marks",
+                "granted_attacks",
             ):
                 combat[key] = {}
             # 狂暴靠每回合攻击或附赠动作续期；按回合计时的效果也只在回合
@@ -823,7 +824,18 @@ class CombatReducerMixin:
                 }
             if event.get("cleave_extra"):
                 granted = combat.setdefault("granted_attacks", {})
-                granted.setdefault(str(event["actor_id"]), {})["cleave"] = True
+                actor_key = str(event["actor_id"])
+                this_round = int(combat.get("round", 0) or 0)
+                this_turn = int(combat.get("turn_index", 0) or 0)
+                entry = granted.get(actor_key)
+                if (
+                    not isinstance(entry, dict)
+                    or int(entry.get("round", -1)) != this_round
+                    or int(entry.get("turn_index", -1)) != this_turn
+                ):
+                    entry = {"round": this_round, "turn_index": this_turn}
+                    granted[actor_key] = entry
+                entry["cleave"] = True
             if free:
                 pass
             elif resource == "bonus_action" or int(economy.get("attacks_remaining", 0) or 0) <= 0:

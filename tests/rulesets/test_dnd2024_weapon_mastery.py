@@ -1025,3 +1025,69 @@ def test_attack_history_records_the_hit_and_the_weapon() -> None:
     assert row["hit"] is True
     assert row["weapon_ref"] == "item:greataxe"
     assert row["target_id"] == "enemy:goblin-1"
+
+
+def test_cleave_resets_on_next_turn_and_filters_out_of_reach_or_untrained() -> None:
+    """Cleave is once per turn (not once per combat) and respects mastery + reach in availability."""
+
+    _, engine, instance = _instance(
+        equipment=["item:greataxe"],
+        enemies=[
+            _goblin("goblin-1", position=5, hp=40),
+            _goblin("goblin-2", position=5, hp=40),
+            _goblin("goblin-far", position=10, hp=40),
+        ],
+    )
+    first = _attack_with(engine, instance, "greataxe", rolls=[15, 6], target_id="enemy:goblin-1")
+    assert first["ok"] is True, first
+
+    # Availability only offers targets within reach (goblin-2 at 5ft, not goblin-far at 10ft)
+    cleave_rows = [
+        row for row in engine.available_intents(instance, "gm")
+        if row.get("type") == "cleave"
+    ]
+    assert len(cleave_rows) == 1
+    assert [t["actor_id"] for t in cleave_rows[0]["targets"]] == ["enemy:goblin-2"]
+
+    # Use Cleave on round 1
+    version = ruleset_runtime.state(instance)["version"]
+    cleave_r1 = engine.resolve_intent(instance, {
+        "intent_id": f"cleave-r1-{version}", "type": "attack",
+        "expected_version": version, "submitted_by": "gm",
+        "actor_id": "player:gm", "target_id": "enemy:goblin-2",
+        "weapon_ref": "item:greataxe", "cleave_from": "enemy:goblin-1",
+    }, SequenceRng([15, 6]))
+    assert cleave_r1["ok"] is True, cleave_r1
+    engine.apply_batch(instance, cleave_r1["event_batch"])
+
+    # Advance to next turn (round 2) and hit again -> Cleave must be available again
+    combat = ruleset_runtime.state(instance)["combat"]
+    combat["round"] = int(combat.get("round", 1)) + 1
+    combat["economy"]["action"] = 1
+    combat["economy"]["attacks_remaining"] = 0
+    second_hit = _attack_with(engine, instance, "greataxe", rolls=[15, 6], target_id="enemy:goblin-1")
+    assert second_hit["ok"] is True, second_hit
+
+    version = ruleset_runtime.state(instance)["version"]
+    cleave_r2 = engine.resolve_intent(instance, {
+        "intent_id": f"cleave-r2-{version}", "type": "attack",
+        "expected_version": version, "submitted_by": "gm",
+        "actor_id": "player:gm", "target_id": "enemy:goblin-2",
+        "weapon_ref": "item:greataxe", "cleave_from": "enemy:goblin-1",
+    }, SequenceRng([15, 6]))
+    assert cleave_r2["ok"] is True, cleave_r2
+
+    # Character without weapon_mastery (Wizard) must not be offered Cleave in availability
+    _, wiz_engine, wiz_instance = _instance(
+        equipment=["item:greataxe"],
+        enemies=[_goblin("goblin-1", position=5, hp=40), _goblin("goblin-2", position=5, hp=40)],
+    )
+    wiz_instance.players["gm"]["character_sheet"]["ruleset_character"]["build"]["class_levels"] = [
+        {"class_ref": "class:wizard", "level": 1},
+    ]
+    wiz_hit = _attack_with(wiz_engine, wiz_instance, "greataxe", rolls=[18, 6], target_id="enemy:goblin-1")
+    assert wiz_hit["ok"] is True, wiz_hit
+    assert not [
+        row for row in wiz_engine.available_intents(wiz_instance, "gm")
+        if row.get("type") == "cleave"
+    ]

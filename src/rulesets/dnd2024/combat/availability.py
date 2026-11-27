@@ -28,7 +28,7 @@ from src.rulesets.dnd2024.items.charges import (
     charges_of,
     validate_charges_declaration,
 )
-from .weapon_masteries import cleave_grant, nick_active
+from .weapon_masteries import WEAPON_MASTERY_FEATURE_ID, cleave_grant, nick_active
 from .check_modes import (
     HUNTERS_MARK_REF,
     condition_flags,
@@ -817,14 +817,23 @@ class CombatAvailabilityMixin:
 
         if actor["kind"] not in {"player", "companion"}:
             return None
+        if not self.features.has_feature(
+            self._feature_character(actor), WEAPON_MASTERY_FEATURE_ID,
+        ):
+            return None
         actor_id = str(actor["actor_id"])
-        if ((combat.get("granted_attacks") or {}).get(actor_id) or {}).get("cleave"):
+        round_index = int(combat.get("round", 0) or 0)
+        turn_index = int(combat.get("turn_index", 0) or 0)
+        granted = (combat.get("granted_attacks") or {}).get(actor_id) or {}
+        if (
+            granted.get("cleave")
+            and int(granted.get("round", -1)) == round_index
+            and int(granted.get("turn_index", -1)) == turn_index
+        ):
             return None
         weapons = [w for w in self._available_attacks(actor) if cleave_grant(w)]
         if not weapons:
             return None
-        round_index = int(combat.get("round", 0) or 0)
-        turn_index = int(combat.get("turn_index", 0) or 0)
         hits = [
             row for row in combat.get("attack_history") or []
             if str(row.get("actor_id") or "") == actor_id
@@ -839,12 +848,19 @@ class CombatAvailabilityMixin:
         if not hits:
             return None
         original_id = str(hits[-1].get("target_id") or "")
-        limit = int((cleave_grant(weapons[0]) or {}).get("target_within_ft") or 0)
+        hit_weapon_ref = str(hits[-1].get("weapon_ref") or "")
+        hit_weapon = next(
+            (w for w in weapons if str(w.get("weapon_ref") or "") == hit_weapon_ref),
+            weapons[0],
+        )
+        limit = int((cleave_grant(hit_weapon) or {}).get("target_within_ft") or 0)
+        reach = int(hit_weapon.get("long_range") or hit_weapon.get("range", 5) or 5)
         targets = [
             target for target in self._hostile_targets(instance, combat, actor_id)
             if int(target["hp"]) > 0
             and str(target["actor_id"]) != original_id
             and self._distance(combat, str(target["actor_id"]), original_id) <= limit
+            and self._distance(combat, actor_id, str(target["actor_id"])) <= reach
         ]
         if not targets:
             return None

@@ -275,11 +275,15 @@ class CombatValidationAttackMixin:
             self._feature_character(actor), WEAPON_MASTERY_FEATURE_ID,
         ):
             raise CombatIntentError("this character has not unlocked weapon masteries")
-        granted = (combat.get("granted_attacks") or {}).get(actor_id) or {}
-        if granted.get("cleave"):
-            raise CombatIntentError("Cleave is already used this turn")
         round_index = int(combat.get("round", 0) or 0)
         turn_index = int(combat.get("turn_index", 0) or 0)
+        granted = (combat.get("granted_attacks") or {}).get(actor_id) or {}
+        if (
+            granted.get("cleave")
+            and int(granted.get("round", -1)) == round_index
+            and int(granted.get("turn_index", -1)) == turn_index
+        ):
+            raise CombatIntentError("Cleave is already used this turn")
         weapon_ref = str(weapon.get("weapon_ref") or "")
         hit_before = any(
             str(row.get("actor_id") or "") == actor_id
