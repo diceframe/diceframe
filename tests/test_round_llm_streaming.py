@@ -285,7 +285,7 @@ async def test_call_llm_with_tag_retry_streams_narration_only():
         resets.append(1)
 
     response, _data = await call_llm_with_tag_retry(
-        llm, instance, "GM", "ctx", "hp_based", "", 1024, "actions",
+        llm, instance, "GM", "ctx", "hp_based", [], 1024, "actions",
         on_delta=on_delta, on_reset=on_reset,
     )
 
@@ -315,7 +315,7 @@ async def test_call_llm_with_tag_retry_repairs_malformed_protocol_once():
         deltas.clear()
 
     response, data = await call_llm_with_tag_retry(
-        llm, instance, "GM", "ctx", "hp_based", "", 1024, "actions",
+        llm, instance, "GM", "ctx", "hp_based", [], 1024, "actions",
         on_delta=on_delta, on_reset=on_reset,
     )
 
@@ -342,7 +342,7 @@ async def test_call_llm_with_tag_retry_stream_length_budgets_reach_four_times():
         deltas.clear()
 
     response, _data = await call_llm_with_tag_retry(
-        llm, instance, "GM", "ctx", "hp_based", "", 1024, "actions",
+        llm, instance, "GM", "ctx", "hp_based", [], 1024, "actions",
         on_delta=on_delta, on_reset=on_reset,
     )
 
@@ -368,7 +368,7 @@ async def test_call_llm_with_tag_retry_stream_length_stops_after_four_times():
 
     with pytest.raises(OutputTruncatedError):
         await call_llm_with_tag_retry(
-            llm, instance, "GM", "ctx", "hp_based", "", 1024, "actions",
+            llm, instance, "GM", "ctx", "hp_based", [], 1024, "actions",
             on_delta=on_delta, on_reset=on_reset,
         )
 
@@ -391,7 +391,7 @@ async def test_stream_length_retry_does_not_consume_dice_rewrite():
         resets.append(1)
 
     response, _data = await call_llm_with_tag_retry(
-        llm, instance, "GM", "ctx", "hp_based", "大成功", 1024, "actions",
+        llm, instance, "GM", "ctx", "hp_based", [{"actor_name": "调查员", "actor_ref": "player:p1", "verdict_code": "critical_success"}], 1024, "actions",
         on_delta=on_delta, on_reset=on_reset,
     )
 
@@ -420,7 +420,7 @@ async def test_call_llm_with_tag_retry_resets_on_dice_contradiction():
         resets.append(1)
 
     response, _data = await call_llm_with_tag_retry(
-        llm, instance, "GM", "ctx", "hp_based", "大成功", 1024, "actions",
+        llm, instance, "GM", "ctx", "hp_based", [{"actor_name": "调查员", "actor_ref": "player:p1", "verdict_code": "critical_success"}], 1024, "actions",
         on_delta=on_delta, on_reset=on_reset,
     )
 
@@ -445,7 +445,7 @@ async def test_call_llm_with_tag_retry_caps_at_one_retry():
         resets.append(1)
 
     response, _data = await call_llm_with_tag_retry(
-        llm, instance, "GM", "ctx", "hp_based", "大成功", 1024, "actions",
+        llm, instance, "GM", "ctx", "hp_based", [{"actor_name": "调查员", "actor_ref": "player:p1", "verdict_code": "critical_success"}], 1024, "actions",
         on_delta=on_delta, on_reset=on_reset,
     )
 

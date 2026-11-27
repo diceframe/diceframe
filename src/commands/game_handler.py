@@ -27,7 +27,6 @@ from src.commands.puzzle_processor import PuzzleProcessor
 from src.commands.round_helpers import (
     default_quick_actions_by_class,
     should_multi_step,
-    validate_dice_constraint,
 )
 from src.commands.round_processor import RoundNotProcessed, RoundProcessor
 from src.commands.state_update_applier import StateUpdateApplier
@@ -457,11 +456,6 @@ class GameHandler:
     def _should_multi_step(instance: GameInstance, actions_text: str) -> bool:
         """兼容旧内部调用；实际逻辑已拆到 round_helpers。"""
         return should_multi_step(instance, actions_text)
-
-    @staticmethod
-    def _validate_dice_constraint(dice_block: str, narration: str) -> bool:
-        """兼容旧内部调用；实际逻辑已拆到 round_helpers。"""
-        return validate_dice_constraint(dice_block, narration)
 
     @staticmethod
     def _default_quick_actions_by_class(class_name: str) -> list[str]:

@@ -1,0 +1,10 @@
+# src/engine/check_verdict.py 的成功等级显示文本。
+# 键是稳定 code；新增语言只加资源文件，不修改机制代码。
+"en":
+  critical_failure: "Critical Failure"
+  failure: "Failure"
+  success: "Success"
+  regular_success: "Regular Success"
+  hard_success: "Hard Success"
+  extreme_success: "Extreme Success"
+  critical_success: "Critical Success"

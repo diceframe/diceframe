@@ -6555,6 +6555,8 @@ AI 席位和检定授权的离席/重开清理由所属模块注册生命周期 
 
 `frontend-v2/src/i18n/policy.ts` 按审核过的英文来源指纹筛选社区译文，递归覆盖 API 错误；缺失、新增和过时键通过 Vue I18n 回退英文。英文改动不重新生成接受基线，志愿者通过 `locales:review` 逐键登记审核。`locales:check` 阻止核心键不齐，社区缺口仅报告，不阻塞功能发布。共享后端文案/字段 helper 与 typed content overlay 遵守暂停状态；集中目录外的功能内及后端文本不自动检测来源过时。见[翻译维护](zh/translations.md)。
 
+检定成功等级是身份而不是文案：`src/engine/check_verdict.py` 定义 `critical_failure` / `failure` / `success` / `regular_success` / `hard_success` / `extreme_success` / `critical_success` 及其 rank，显示文本在 `locales/engine/check_verdict.<语言>.yml`。`CheckResult.verdict` 只是解析时按对局语言冻结的展示文本，不参与任何判断；机制分支、推骰资格、幸运抵扣、SAN 成功集合、AI 伤害白名单与击杀判定都读 `check_verdict.code_of(check)`（依次取 `verdict_code`、runtime 显式 `success`、已落盘骰值重算、`src/compat/verdict_labels.py` 中的精确旧标签）。未知 code 时这些可选分支不启用，绝不从译文猜测。基于叙事文本的校验同样只消费 code，句子归属用角色名，代词与成败词表按语言放在 `src/engine/intent/locales/<lang>/narration.json`，缺资源则跳过。见 [ADR-0015](adr/0015-backend-localization-contract.md)（本地实现，阶段一，未升存档 schema）。
+
 ## 托管 Docker 程序与数据事务
 
 标准库 owner `src/docker_launcher/data_versions.py` 由服务入口在导入应用前调用。runtime API 保持 1，Python/系统运行时兼容时，已部署启动器可以直接接收新包。`versioned-copy-v1` 保留旧程序自己的数据，启动失败自动恢复不需要不可逆的降级迁移。

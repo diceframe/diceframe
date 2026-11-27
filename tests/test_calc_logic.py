@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import pytest
 
+from src.engine import check_verdict
+
 from src.commands.tag_handlers import LIMITS_BY_COMBAT_MODEL, parse_player_tag
 from src.commands.tag_parser import _new_result, parse_tag_state
 
@@ -233,7 +235,7 @@ def test_san_check_critical_success_halves_loss(monkeypatch):
 
     monkeypatch.setattr(
         dice_rules_coc, "check_coc",
-        lambda threshold: (DiceResult(formula="d100", rolls=[3], modifier=0, total=3, natural=3), "大成功"),
+        lambda threshold: (DiceResult(formula="d100", rolls=[3], modifier=0, total=3, natural=3), check_verdict.CRITICAL_SUCCESS),
     )
     monkeypatch.setattr(dice_rules_coc, "roll", lambda formula: SimpleNamespace(total=6, rolls=[6]))
 
@@ -255,7 +257,7 @@ def test_san_check_failure_takes_full_loss(monkeypatch):
 
     monkeypatch.setattr(
         dice_rules_coc, "check_coc",
-        lambda threshold: (DiceResult(formula="d100", rolls=[60], modifier=0, total=60, natural=60), "失败"),
+        lambda threshold: (DiceResult(formula="d100", rolls=[60], modifier=0, total=60, natural=60), check_verdict.FAILURE),
     )
     monkeypatch.setattr(dice_rules_coc, "roll", lambda formula: SimpleNamespace(total=6, rolls=[6]))
 

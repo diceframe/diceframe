@@ -10,36 +10,28 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from src.engine import check_verdict
 from src.engine.dice_rng import MAX_DICE_COUNT, DiceResult, parse_dice_formula, roll, roll_die
 from src.localization.messages import t
 
 # 理智检定中算作「成功」的等级；coc_success_level 不会返回笼统的「成功」。
-SANITY_SUCCESS_VERDICTS = frozenset({"普通成功", "困难成功", "极难成功", "大成功"})
+SANITY_SUCCESS_CODES = check_verdict.SUCCESS_CODES
 MAX_SANITY_FIXED_LOSS = 100
 
 
 def coc_success_level(roll_value: int, threshold: int) -> str:
-    """CoC 7e 风格成功等级。"""
-    if roll_value <= 1:
-        return "大成功"
-    if roll_value >= 100 or (threshold < 50 and roll_value >= 96):
-        return "大失败"
-    if roll_value > threshold:
-        return "失败"
-    if roll_value <= threshold // 5:
-        return "极难成功"
-    if roll_value <= threshold // 2:
-        return "困难成功"
-    return "普通成功"
+    """CoC 7e 风格成功等级；返回稳定 code，显示文本在边界渲染。"""
+
+    return check_verdict.percentile_code(roll_value, threshold)
 
 
 def check_coc(threshold: int) -> tuple[DiceResult, str]:
-    """CoC 7e 风格 d100 检定，返回成功等级。"""
+    """CoC 7e 风格 d100 检定，返回 (结果, 成功等级 code)。"""
     threshold = max(1, min(99, int(threshold)))
     result = roll("d100")
     verdict = coc_success_level(result.natural, threshold)
-    result.is_critical = verdict == "大成功"
-    result.is_fumble = verdict == "大失败"
+    result.is_critical = check_verdict.is_critical(verdict)
+    result.is_fumble = check_verdict.is_fumble(verdict)
     return result, verdict
 
 
@@ -78,7 +70,8 @@ def check_d100_bonus(threshold: int, bonus_dice: int = 0, penalty_dice: int = 0)
     # 确实是“同一个位 + 多个十位”，而不是简单掷两次完整 d100。
     result = DiceResult(formula="d100", rolls=candidates, modifier=0,
                         total=total, natural=total,
-                        is_critical=(verdict == "大成功"), is_fumble=(verdict == "大失败"))
+                        is_critical=check_verdict.is_critical(verdict),
+                        is_fumble=check_verdict.is_fumble(verdict))
     return result, verdict
 
 
@@ -156,20 +149,20 @@ def resolve_sanity_check(current_sanity: int, loss: SanityLoss) -> dict[str, Any
     """
     threshold = max(1, min(99, int(current_sanity)))
     result, verdict = check_coc(threshold)
-    if verdict in SANITY_SUCCESS_VERDICTS:
+    if verdict in SANITY_SUCCESS_CODES:
         if loss.split:
             amount, loss_rolls = _roll_sanity_loss(loss.success)
         else:
             full, loss_rolls = _roll_sanity_loss(loss.failure)
             amount = (full + 1) // 2
-    elif verdict == "大失败":
+    elif check_verdict.is_fumble(verdict):
         amount, loss_rolls = _roll_sanity_loss(loss.failure, maximum=True)
     else:
         amount, loss_rolls = _roll_sanity_loss(loss.failure)
     return {
         "roll": result.natural,
         "threshold": threshold,
-        "verdict": verdict,
+        "verdict_code": verdict,
         "loss": amount,
         "loss_spec": loss.text,
         "loss_rolls": loss_rolls,
@@ -178,15 +171,12 @@ def resolve_sanity_check(current_sanity: int, loss: SanityLoss) -> dict[str, Any
 
 # ---- 难度档位与对抗检定 ----
 
-DIFFICULTY_LEVELS = ("regular", "hard", "extreme")
-_SUCCESS_RANK = {"大失败": -1, "失败": 0, "普通成功": 1, "困难成功": 2, "极难成功": 3, "大成功": 4}
-_REQUIRED_RANK = {"regular": 1, "hard": 2, "extreme": 3}
-REQUIRED_LEVEL_VERDICT = {"regular": "普通成功", "hard": "困难成功", "extreme": "极难成功"}
+DIFFICULTY_LEVELS = check_verdict.DIFFICULTY_LEVELS
+REQUIRED_LEVEL_CODE = check_verdict.REQUIRED_LEVEL_CODE
 
 
 def normalize_difficulty(value: Any) -> str:
-    text = str(value or "").strip().lower()
-    return text if text in DIFFICULTY_LEVELS else "regular"
+    return check_verdict.normalize_difficulty(value)
 
 
 def required_threshold(threshold: int, difficulty: str) -> int:
@@ -200,15 +190,13 @@ def required_threshold(threshold: int, difficulty: str) -> int:
 
 
 def success_rank(verdict: str) -> int:
-    return _SUCCESS_RANK.get(str(verdict or ""), 0)
+    return check_verdict.rank(verdict) or 0
 
 
 def apply_required_level(verdict: str, difficulty: str) -> str:
     """成功但没达到所需档位时判为失败；大成功、失败、大失败保持原样。"""
-    rank = success_rank(verdict)
-    if 1 <= rank < _REQUIRED_RANK.get(difficulty, 1):
-        return "失败"
-    return verdict
+
+    return check_verdict.apply_required_level(verdict, difficulty)
 
 
 def opposed_outcome(actor_verdict: str, actor_threshold: int,

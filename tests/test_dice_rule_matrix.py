@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from src.commands.dice_resolver import DiceResolver
+from src.engine import check_verdict
 from src.engine.checks import roll_check_request
 from src.engine.dice import check_d100_bonus, coc_success_level, d20_critical_thresholds, d20_verdict, roll
 from src.engine.game_instance import GameInstance
@@ -15,16 +16,16 @@ from src.engine.modules import checks
 
 def _expected_coc(roll_value: int, threshold: int) -> str:
     if roll_value == 1:
-        return "大成功"
+        return check_verdict.CRITICAL_SUCCESS
     if roll_value == 100 or (threshold < 50 and roll_value >= 96):
-        return "大失败"
+        return check_verdict.CRITICAL_FAILURE
     if roll_value > threshold:
-        return "失败"
+        return check_verdict.FAILURE
     if roll_value <= threshold // 5:
-        return "极难成功"
+        return check_verdict.EXTREME_SUCCESS
     if roll_value <= threshold // 2:
-        return "困难成功"
-    return "普通成功"
+        return check_verdict.HARD_SUCCESS
+    return check_verdict.REGULAR_SUCCESS
 
 
 def _expected_d20(
@@ -35,10 +36,10 @@ def _expected_d20(
     fumble_on: int | None,
 ) -> str:
     if crit_on is not None and natural >= crit_on:
-        return "大成功"
+        return check_verdict.CRITICAL_SUCCESS
     if fumble_on is not None and natural <= fumble_on:
-        return "大失败"
-    return "成功" if total >= dc else "失败"
+        return check_verdict.CRITICAL_FAILURE
+    return check_verdict.SUCCESS if total >= dc else check_verdict.FAILURE
 
 
 def test_coc_success_table_matches_independent_oracle_exhaustively() -> None:
@@ -149,8 +150,8 @@ def test_dnd5e_ability_checks_do_not_auto_succeed_or_fail(
         fumble_on=fumble_on,
     )
 
-    assert high_dc_verdict == "失败"
-    assert low_dc_verdict == "成功"
+    assert high_dc_verdict == check_verdict.FAILURE
+    assert low_dc_verdict == check_verdict.SUCCESS
     assert (crit_on, fumble_on) == (None, None)
 
 
@@ -197,12 +198,12 @@ def test_builtin_custom_d20_genres_cap_runaway_dc_and_resolve_normally(rule_file
 
     assert checks.last_check(instance)["dc"] == 20
     assert checks.last_check(instance)["total"] == 20
-    assert checks.last_check(instance)["verdict"] == "成功"
+    assert checks.last_check(instance)["verdict_code"] == check_verdict.SUCCESS
 
 
 @pytest.mark.parametrize(
     "skill_value,expected_verdict",
-    [(40, "大失败"), (80, "失败")],
+    [(40, check_verdict.CRITICAL_FAILURE), (80, check_verdict.FAILURE)],
 )
 def test_custom_d100_resolver_uses_coc7e_fumble_threshold(
     skill_value: int,
@@ -238,7 +239,7 @@ def test_custom_d100_resolver_uses_coc7e_fumble_threshold(
     DiceResolver().resolve_action_check(instance, action, rule)
 
     assert checks.last_check(instance)["threshold"] == skill_value
-    assert checks.last_check(instance)["verdict"] == expected_verdict
+    assert checks.last_check(instance)["verdict_code"] == expected_verdict
 
 
 def test_unsupported_custom_dice_system_is_rejected_explicitly() -> None:

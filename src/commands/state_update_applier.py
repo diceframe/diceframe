@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from src.compat.callbacks import load_world_template as load_world_template_compat
 from src.commands.affection_effects import settle_affection
+from src.engine import check_verdict
 from src.engine.game_instance import GameInstance
 from src.commands.item_category_resolver import ItemCategoryResolver
 from src.commands.madness_tracker import MadnessTracker
@@ -56,7 +57,7 @@ def discard_unresolved_player_damage(instance: GameInstance, update: dict) -> No
     failed_uids = {
         str(check.get("actor_uid") or "")
         for check in (checks.last_checks(instance) or [])
-        if str(check.get("verdict") or "") in {"失败", "大失败", "failure", "fumble"}
+        if check_verdict.is_failure(check_verdict.code_of(check))
     }
     players_update = update.get("players")
     if not isinstance(players_update, dict):

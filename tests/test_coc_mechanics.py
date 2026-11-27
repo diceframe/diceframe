@@ -13,6 +13,7 @@ import pytest
 from src.commands.check_planner import normalize_check_specs
 from src.engine import check_decisions, checks as checks_engine
 from src.engine.character_utils import roll_attribute_formula, roll_attributes, roll_special_stat_value
+from src.engine import check_verdict
 from src.engine.dice_rng import DiceResult
 from src.engine.dice_rules_coc import apply_required_level, opposed_outcome, required_threshold
 from src.engine.game_instance import GameInstance, GameState
@@ -65,19 +66,19 @@ def resolve(inst: GameInstance, rule: RuleSystem, action: dict, request: dict, r
 
 def test_required_threshold_and_level():
     assert [required_threshold(60, level) for level in ("regular", "hard", "extreme")] == [60, 30, 12]
-    assert apply_required_level("普通成功", "hard") == "失败"
-    assert apply_required_level("困难成功", "hard") == "困难成功"
-    assert apply_required_level("大成功", "extreme") == "大成功"
-    assert apply_required_level("大失败", "regular") == "大失败"
+    assert apply_required_level(check_verdict.REGULAR_SUCCESS, "hard") == check_verdict.FAILURE
+    assert apply_required_level(check_verdict.HARD_SUCCESS, "hard") == check_verdict.HARD_SUCCESS
+    assert apply_required_level(check_verdict.CRITICAL_SUCCESS, "extreme") == check_verdict.CRITICAL_SUCCESS
+    assert apply_required_level(check_verdict.CRITICAL_FAILURE, "regular") == check_verdict.CRITICAL_FAILURE
 
 
 @pytest.mark.parametrize(("actor", "actor_value", "opponent", "opponent_value", "expected"), [
-    ("困难成功", 50, "普通成功", 80, "win"),
-    ("普通成功", 80, "困难成功", 50, "lose"),
-    ("普通成功", 60, "普通成功", 50, "win"),
-    ("普通成功", 50, "普通成功", 50, "tie"),
-    ("失败", 50, "大失败", 50, "tie"),
-    ("普通成功", 50, "大失败", 90, "win"),
+    (check_verdict.HARD_SUCCESS, 50, check_verdict.REGULAR_SUCCESS, 80, "win"),
+    (check_verdict.REGULAR_SUCCESS, 80, check_verdict.HARD_SUCCESS, 50, "lose"),
+    (check_verdict.REGULAR_SUCCESS, 60, check_verdict.REGULAR_SUCCESS, 50, "win"),
+    (check_verdict.REGULAR_SUCCESS, 50, check_verdict.REGULAR_SUCCESS, 50, "tie"),
+    (check_verdict.FAILURE, 50, check_verdict.CRITICAL_FAILURE, 50, "tie"),
+    (check_verdict.REGULAR_SUCCESS, 50, check_verdict.CRITICAL_FAILURE, 90, "win"),
 ])
 def test_opposed_outcome(actor, actor_value, opponent, opponent_value, expected):
     assert opposed_outcome(actor, actor_value, opponent, opponent_value) == expected
@@ -102,8 +103,8 @@ def test_regular_success_fails_a_hard_check_and_luck_targets_the_hard_threshold(
     inst = coc_game()
     action, request = plan(inst, coc(), {"skill": "侦查", "difficulty": "hard"})
     result = resolve(inst, coc(), action, request, 40)
-    assert result["verdict"] == "失败"
-    assert result["achieved_verdict"] == "普通成功"
+    assert result["verdict_code"] == check_verdict.FAILURE
+    assert result["achieved_verdict"] == check_verdict.REGULAR_SUCCESS
     assert result["required_threshold"] == 30
     assert result["luck_cost"] == 10
 
@@ -112,7 +113,7 @@ def test_hard_success_passes_a_hard_check():
     inst = coc_game()
     action, request = plan(inst, coc(), {"skill": "侦查", "difficulty": "hard"})
     result = resolve(inst, coc(), action, request, 25)
-    assert result["verdict"] == "困难成功"
+    assert result["verdict_code"] == check_verdict.HARD_SUCCESS
     assert "achieved_verdict" not in result
 
 
@@ -124,15 +125,15 @@ def test_opposed_check_rolls_the_opponent_and_compares_levels(monkeypatch):
 
     def fake_check(threshold):
         calls.append(threshold)
-        return DiceResult(formula="d100", rolls=[30], modifier=0, total=30, natural=30), "困难成功"
+        return DiceResult(formula="d100", rolls=[30], modifier=0, total=30, natural=30), check_verdict.HARD_SUCCESS
 
     monkeypatch.setattr(checks_engine, "check_coc", fake_check)
     action, request = plan(inst, coc(), {"skill": "潜行", "opponent": "p2", "opponent_skill": "聆听"})
     result = resolve(inst, coc(), action, request, 45)  # 潜行 50 → 普通成功；对手 30/70 → 困难成功
     assert calls == [70]
     assert result["opposed"]["outcome"] == "lose"
-    assert result["verdict"] == "失败"
-    assert result["achieved_verdict"] == "普通成功"
+    assert result["verdict_code"] == check_verdict.FAILURE
+    assert result["achieved_verdict"] == check_verdict.REGULAR_SUCCESS
     assert result["luck_cost"] is None
     # 重试同一请求不会重掷对手骰。
     monkeypatch.setattr(checks_engine, "check_coc", Mock(side_effect=AssertionError("rerolled")))
@@ -146,19 +147,20 @@ def test_opponent_without_values_falls_back_to_an_ordinary_check(monkeypatch):
     action, request = plan(inst, coc(), {"skill": "潜行", "opponent": "p2", "opponent_skill": "聆听"})
     result = resolve(inst, coc(), action, request, 45)
     assert "opposed" not in result
-    assert result["verdict"] == "普通成功"
+    assert result["verdict_code"] == check_verdict.REGULAR_SUCCESS
 
 
 # ---------- 孤注一掷与幸运 ----------
 
-def push_game(verdict: str = "失败", **extra) -> GameInstance:
+def push_game(verdict: str = check_verdict.FAILURE, **extra) -> GameInstance:
     inst = GameInstance(("web", "push", "bot"), state=GameState.ACTIVE_JUDGMENT)
     inst.gm_uid = "gm"
     inst.players = {"a": {"character_name": "A", "character_sheet": {"hp": 10, "luck": 50,
                                                                      "skills": [{"name": "Investigate", "value": 60}]}}}
     checks.replace_last_checks(inst, [{
         "check_id": "c1", "actor_uid": "a", "kind": "check", "skill": "Investigate", "dice": "d100",
-        "dice_mechanic": "coc_bonus_penalty", "roll": 40, "rolls": [40], "threshold": 60, "verdict": verdict,
+        "dice_mechanic": "coc_bonus_penalty", "roll": 40, "rolls": [40], "threshold": 60,
+        "verdict_code": verdict, "verdict": check_verdict.render(verdict, "zh-CN"),
         "advantage_mode": "", "luck_spend_available": True, "luck_decision": "pending", **extra,
     }])
     inst.complete_round_check_preparation()
@@ -166,7 +168,7 @@ def push_game(verdict: str = "失败", **extra) -> GameInstance:
 
 
 def test_fumbles_are_not_pushable_under_coc():
-    inst = push_game("大失败", roll=100, rolls=[100])
+    inst = push_game(check_verdict.CRITICAL_FAILURE, roll=100, rolls=[100])
     check_decisions.prepare(inst, coc())
     assert checks.last_checks(inst)[0].get("push") is None
 
@@ -184,8 +186,8 @@ def test_pushed_reroll_keeps_the_required_level():
     change("gm", "offer", consequence="管家听到动静")
     change("a", "confirm", rng=Mock(return_value=45))
     check = checks.last_checks(inst)[0]
-    assert check["verdict"] == "失败"
-    assert check["achieved_verdict"] == "普通成功"
+    assert check["verdict_code"] == check_verdict.FAILURE
+    assert check["achieved_verdict"] == check_verdict.REGULAR_SUCCESS
 
 
 @pytest.mark.asyncio
@@ -194,7 +196,7 @@ async def test_spending_luck_on_a_hard_check_reaches_hard_success():
     result = await inst.resolve_luck_decision("c1", "a", True)
     assert result["ok"]
     check = checks.last_checks(inst)[0]
-    assert check["verdict"] == "困难成功"
+    assert check["verdict_code"] == check_verdict.HARD_SUCCESS
     assert check["luck_spent"] == 10
 
 
@@ -213,7 +215,7 @@ def test_luck_roll_uses_the_sheet_value_and_never_offers_luck():
     action, request = plan(inst, coc(), {"attribute": "幸运值"})
     assert (request["attribute"], request["target"], request["label"]) == ("luck", 45, "幸运值检定")
     result = resolve(inst, coc(), action, request, 60)
-    assert result["threshold"] == 45 and result["verdict"] == "失败"
+    assert result["threshold"] == 45 and result["verdict_code"] == check_verdict.FAILURE
     assert result["luck_cost"] is None and result["luck_spend_available"] is False
 
 
@@ -241,7 +243,7 @@ def test_untrained_skill_rolls_at_its_derived_base():
     action, request = plan(inst, coc(), {"skill": "闪避"})
     assert request["untrained_skill_value"] == 35
     result = resolve(inst, coc(), action, request, 30)
-    assert (result["skill"], result["threshold"], result["verdict"]) == ("闪避", 35, "普通成功")
+    assert (result["skill"], result["threshold"], result["verdict_code"]) == ("闪避", 35, check_verdict.REGULAR_SUCCESS)
 
 
 def test_untrained_localized_skill_name_is_recognized():

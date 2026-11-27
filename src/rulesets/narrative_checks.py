@@ -139,6 +139,16 @@ def _canonical_check(
         check["dc"] = check["threshold"]
     check["is_critical"] = bool(answer.get("is_critical") or answer.get("critical"))
     check["is_fumble"] = bool(answer.get("is_fumble") or answer.get("fumble"))
+    # 可选契约（ADR-0015）：runtime 可以直接声明稳定 code，或声明 success 布尔。
+    # 两者都缺失时核心不自作解释，由 check_verdict.code_of 回退到精确旧标签。
+    from src.engine import check_verdict
+
+    declared = check_verdict.normalize(answer.get("verdict_code"))
+    if declared:
+        check["verdict_code"] = declared
+    explicit_success = answer.get("success")
+    if isinstance(explicit_success, bool):
+        check["success"] = explicit_success
     detail = str(answer.get("detail") or "").strip()
     if detail:
         check["detail"] = detail[:300]
