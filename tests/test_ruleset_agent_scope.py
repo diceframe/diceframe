@@ -298,6 +298,21 @@ def test_cover_is_refused_before_combat_starts():
     assert captured == {}
 
 
+def test_non_gm_cannot_probe_cover_targets_or_declare_cover():
+    captured: dict = {}
+    tool = _tool(_deps(_battle_game(), SimpleNamespace(uid="p1", is_gm=False), captured))
+
+    result = asyncio.run(tool.handler({
+        "game_key": GAME_KEY, "run_id": "run-1",
+        "target_id": "unknown", "level": "half",
+    }, "p1"))
+
+    assert result["ok"] is False
+    assert result["code"] == "FORBIDDEN"
+    assert "targets" not in result
+    assert captured == {}
+
+
 def test_the_tool_tells_the_model_where_target_ids_come_from():
     tool = _tool(_deps(_battle_game(), SimpleNamespace(uid="gm", is_gm=True), {}))
 

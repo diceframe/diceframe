@@ -143,6 +143,7 @@ files = [
     "src/webui/services/adventure_rewards.py",
     "src/webui/services/adventures.py",
     "src/webui/services/assistant.py",
+    "src/webui/services/assistant_ruleset_tools.py",
     "src/webui/services/character_cards.py",
     "src/webui/services/characters.py",
     "src/webui/services/content_pack_maps.py",
