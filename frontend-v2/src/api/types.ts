@@ -1194,6 +1194,38 @@ export interface RulesetSelectedClassSpells extends JsonObject {
   spellbook_refs?: string[]
 }
 
+export interface RulesetInvocationOptionBind {
+  value: string
+  available: boolean
+  unavailable_reasons?: string[]
+}
+
+export interface RulesetInvocationOption {
+  value: string
+  name?: string
+  source_ref?: string
+  available: boolean
+  unavailable_reasons?: string[]
+  bind_options?: RulesetInvocationOptionBind[]
+}
+
+/** 按职业表计数的选项池（祈唤）：建卡时可能已经有一个名额。 */
+export interface RulesetInvocationChoice {
+  id: string
+  owner: string
+  feature_id: string
+  choice_id: string
+  count: number
+  total: number
+  selected_refs?: unknown[]
+  options: RulesetInvocationOption[]
+  replace?: {
+    count: number
+    drop_options: (string | { ref: string; object_ref?: string })[]
+    add_options: string[]
+  }
+}
+
 export interface RulesetBuilderChoices {
   ability_methods: RulesetAbilityMethodChoice[]
   classes: RulesetChoice[]
@@ -1211,6 +1243,7 @@ export interface RulesetBuilderChoices {
   species_feats: RulesetChoice[]
   species_feat_count: number
   feat_choices: RulesetFeatChoice[]
+  invocation_choices?: RulesetInvocationChoice[]
   class_tools: RulesetChoice[]
   class_tool_count: number
   recommended_base_abilities: Record<string, number>

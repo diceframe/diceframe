@@ -253,6 +253,72 @@ describe('D&D 2024 advancement panel', () => {
     )
   })
 
+  it('submits a bound pick as {ref, object_ref} and offers the swap slot', async () => {
+    mocks.preview.mockResolvedValue({
+      ok: true, rule_id: 'dnd2024_srd',
+      advancement: {
+        ok: true, errors: [], from_level: 1, to_level: 2, class_ref: 'class:warlock',
+        source_ref: 'srd-5.2.1:p70:warlock-features',
+        content_version: 'srd-5.2.1+r5',
+        requirements: [{
+          id: 'feature_choice:class:warlock:eldritch_invocations:invocations',
+          kind: 'feature_choice', required: true,
+          owner: 'class:warlock', feature_id: 'eldritch_invocations',
+          choice_id: 'invocations', count: 1, total: 1, owned: 0, shortfall: 0,
+          options: [{
+            value: 'feature:agonizing_blast', name: 'Agonizing Blast',
+            available: true, unavailable_reasons: [],
+            bind_options: [
+              { value: 'spell:eldritch_blast', available: true },
+              { value: 'spell:chill_touch', available: false, unavailable_reasons: ['already_bound'] },
+            ],
+          }, {
+            value: 'feature:eldritch_mind', name: 'Eldritch Mind',
+            available: true, unavailable_reasons: [],
+          }],
+        }],
+        diff: {
+          proficiency_bonus: { before: 2, after: 2 }, hp: { gain: 5 },
+          gained_feature_ids: ['eldritch_invocations'],
+          spell_slot_changes: {}, abilities: {},
+        },
+        snapshot: {},
+      },
+    })
+    const wrapper = mount(Dnd2024AdvancementPanel, {
+      props: { ruleId: 'dnd2024_srd', character, language: 'en' },
+    })
+    await flushPromises()
+
+    const agonizing = wrapper.findAll('label').find(
+      label => label.text().includes('Agonizing Blast'),
+    )
+    await agonizing!.get('input').trigger('change')
+    await flushPromises()
+
+    // 绑定对象必须跟着这一次选择一起提交：只发反射字符串会被服务端拒成
+    // "must be bound to one known_cantrip"，玩家在界面上点什么都过不去。
+    expect(mocks.preview).toHaveBeenLastCalledWith(
+      'dnd2024_srd',
+      character,
+      {
+        hp_method: 'fixed',
+        feature_choices: [{
+          owner: 'class:warlock',
+          feature_id: 'eldritch_invocations',
+          choice_id: 'invocations',
+          selected_refs: [{ ref: 'feature:agonizing_blast', object_ref: 'spell:eldritch_blast' }],
+        }],
+      },
+      'en',
+    )
+
+    const bindSelect = agonizing!.get('select')
+    expect(bindSelect.findAll('option')).toHaveLength(2)
+    expect(await bindSelect.find('option[value="spell:chill_touch"]').attributes('disabled'))
+      .toBeDefined()
+  })
+
   it('uses the live entity endpoint when game and player IDs are present', async () => {
     const wrapper = mount(Dnd2024AdvancementPanel, {
       props: {
