@@ -224,8 +224,13 @@ def _battle_game(status: str = "active"):
         run_id="run-1",
         players={"p1": {"character_name": "Alice"}},
         modules={"ruleset_runtime": {
-            "version": 7,
-            "combat": {"status": status, "enemies": {"goblin": {"name": "Goblin"}}},
+            "schema_version": 1,
+            "binding": {"id": "core:dnd2024"},
+            "state": {
+                "version": 7,
+                "combat": {"status": status, "enemies": {"goblin": {"name": "Goblin"}}},
+            },
+            "event_ledger": [],
         }},
     )
 
@@ -290,6 +295,21 @@ def test_cover_is_refused_before_combat_starts():
     }, "gm"))
 
     assert result["code"] == "COMBAT_NOT_ACTIVE"
+    assert captured == {}
+
+
+def test_non_gm_cannot_probe_cover_targets_or_declare_cover():
+    captured: dict = {}
+    tool = _tool(_deps(_battle_game(), SimpleNamespace(uid="p1", is_gm=False), captured))
+
+    result = asyncio.run(tool.handler({
+        "game_key": GAME_KEY, "run_id": "run-1",
+        "target_id": "unknown", "level": "half",
+    }, "p1"))
+
+    assert result["ok"] is False
+    assert result["code"] == "FORBIDDEN"
+    assert "targets" not in result
     assert captured == {}
 
 
