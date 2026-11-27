@@ -693,6 +693,20 @@
       "source_ref": "srd-5.2.1:p54:paladins-smite",
       "features": [
         {
+          "id": "fighting_style",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p54:fighting-style",
+          "summary": "You gain a Fighting Style feat of your choice. Whenever you gain a level, you can replace it with another Fighting Style feat.",
+          "parameters": {},
+          "choice": {
+            "id": "fighting_style_feat",
+            "kind": "advancement_feat",
+            "category": "fighting_style",
+            "count": 1,
+            "enabled_options": ["feat:archery", "feat:defense"]
+          }
+        },
+        {
           "id": "lay_on_hands",
           "minimum_level": 1,
           "resource_id": "lay_on_hands",
@@ -1007,6 +1021,20 @@
     "fighter": {
       "source_ref": "srd-5.2.1:p47:fighter-features",
       "features": [
+        {
+          "id": "fighting_style",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p48:fighting-style",
+          "summary": "You gain a Fighting Style feat of your choice. Whenever you gain a level, you can replace it with another Fighting Style feat.",
+          "parameters": {},
+          "choice": {
+            "id": "fighting_style_feat",
+            "kind": "advancement_feat",
+            "category": "fighting_style",
+            "count": 1,
+            "enabled_options": ["feat:archery", "feat:defense"]
+          }
+        },
         {
           "id": "second_wind",
           "minimum_level": 1,
@@ -1752,6 +1780,20 @@
     "ranger": {
       "source_ref": "srd-5.2.1:p59:ranger-features",
       "features": [
+        {
+          "id": "fighting_style",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p59:fighting-style",
+          "summary": "You gain a Fighting Style feat of your choice. Whenever you gain a level, you can replace it with another Fighting Style feat.",
+          "parameters": {},
+          "choice": {
+            "id": "fighting_style_feat",
+            "kind": "advancement_feat",
+            "category": "fighting_style",
+            "count": 1,
+            "enabled_options": ["feat:archery", "feat:defense"]
+          }
+        },
         {
           "id": "favored_enemy",
           "minimum_level": 1,

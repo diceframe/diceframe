@@ -472,8 +472,9 @@ def test_fighter_second_wind_declaration_and_capability_load() -> None:
         "class": {"second_wind": {"current": 2, "maximum": 2}},
     })
 
+    # 战斗风格现在是 1 级的特性（GAP-57），按目录顺序排在战士特性最前。
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "second_wind", "weapon_mastery",
+        "fighting_style", "second_wind", "weapon_mastery",
     ]
     capability = resolver.declared_capability(character, "second_wind")
 
@@ -505,7 +506,8 @@ def test_fighter_action_surge_declaration_and_capability_load() -> None:
     })
 
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "second_wind", "weapon_mastery", "action_surge", "tactical_mind",
+        "fighting_style", "second_wind", "weapon_mastery", "action_surge",
+        "tactical_mind",
     ]
     capability = resolver.declared_capability(character, "action_surge")
 
@@ -534,8 +536,9 @@ def test_level_one_fighter_does_not_own_action_surge() -> None:
         "class": {"second_wind": {"current": 2, "maximum": 2}},
     })
 
+    # 战斗风格现在是 1 级的特性（GAP-57），按目录顺序排在战士特性最前。
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "second_wind", "weapon_mastery",
+        "fighting_style", "second_wind", "weapon_mastery",
     ]
     assert resolver.declared_capability(character, "action_surge") is None
 

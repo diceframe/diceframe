@@ -295,8 +295,17 @@ class CharacterValidationMixin:
         if not isinstance(ref, str) or not ref:
             errors.append("fighting style feat choice must be a feat reference")
             return
+        slot = _fighting_style_slot(self.bundle, class_entity)
         definition = load_feat_definitions(self.bundle).get(_ref_id(ref, "feat"))
-        if definition is None or definition.category != "fighting_style":
+        if (
+            slot is None
+            or slot.choice is None
+            or definition is None
+            or definition.category != "fighting_style"
+            # 白名单是"可实现"而不是"属于该类别"：GWF 声明了类别却没有任何效果，
+            # 让它在建卡期通过，就会得到一个"选了什么都不会发生"的角色。
+            or ref not in slot.choice.enabled_options
+        ):
             errors.append(f"fighting style feat choice is not an available fighting style: {ref}")
             return
         # 槽位只收战斗风格，而战斗风格不声明施法前置；真出现了再解析职业表，
@@ -397,3 +406,21 @@ def _slot_profile_at(bundle: Any, class_ref: Any, level: int) -> str:
     except Exception:  # noqa: BLE001 - an unknown class is already a draft error
         return ""
     return str(snapshot.get("slot_profile") or "")
+
+
+def _fighting_style_slot(bundle: Any, class_entity: dict[str, Any] | None):
+    """The class's level-1 Fighting Style slot declaration, or ``None``.
+
+    The slot is a real ``ClassFeatureDefinition`` now, so the build path reads the
+    same declaration the level-up path does.  Before this, the gate was "is
+    ``fighting_style`` in ``level_1_feature_ids``", which could not express the
+    whitelist and could not see the two classes that gain it at level 2.
+    """
+
+    from src.rulesets.dnd2024.features.models import Dnd2024ClassFeatureCatalog
+
+    class_id = str((class_entity or {}).get("id") or "")
+    if not class_id:
+        return None
+    catalog = Dnd2024ClassFeatureCatalog.from_bundle(bundle)
+    return catalog.features_by_key.get((f"class:{class_id}", "fighting_style"))

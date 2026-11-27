@@ -381,7 +381,8 @@ def test_supplied_fighting_style_choice_fails_closed() -> None:
         runtime.validate_character(None, monk)
     )
 
-    for ref in ("feat:grappler", "feat:not_a_feat"):
+    # 三个都不该通过：类别不符、不存在、以及"有声明但没有效果"的 GWF。
+    for ref in ("feat:grappler", "feat:not_a_feat", "feat:great_weapon_fighting"):
         draft = fighter_draft(runtime)
         draft["class_feature_feat_choices"] = {"fighting_style": ref}
         assert (
