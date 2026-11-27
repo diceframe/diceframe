@@ -162,7 +162,7 @@ def repair_ruleset_health_display(character_sheet: dict[str, Any]) -> dict[str, 
         return character_sheet
     canonical_resources = canonical.get("resources")
     hp = canonical_resources.get("hp") if isinstance(canonical_resources, dict) else None
-    if not isinstance(hp, int):
+    if isinstance(hp, bool) or not isinstance(hp, int):
         return character_sheet
     max_hp = int(canonical_resources.get("max_hp", 0) or 0)
 
@@ -189,7 +189,7 @@ def repair_ruleset_health_display(character_sheet: dict[str, Any]) -> dict[str, 
         character_sheet["death_saves"] = deepcopy(conditions["death_saves"])
     else:
         character_sheet.pop("death_saves", None)
-    character_sheet["status"] = "dead" if deceased else "downed" if hp == 0 else "active"
+    character_sheet["status"] = "dead" if deceased else "downed" if hp <= 0 else "active"
     if not deceased:
         character_sheet.pop("death_round", None)
     return character_sheet

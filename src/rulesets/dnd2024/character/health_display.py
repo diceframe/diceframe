@@ -28,6 +28,6 @@ def sync_health_display(sheet: dict[str, Any], canonical: Mapping[str, Any]) -> 
         sheet["death_saves"] = deepcopy(conditions["death_saves"])
     else:
         sheet.pop("death_saves", None)
-    sheet["status"] = "dead" if deceased else "downed" if hp == 0 else "active"
+    sheet["status"] = "dead" if deceased else "downed" if hp <= 0 else "active"
     if not deceased:
         sheet.pop("death_round", None)

@@ -90,6 +90,27 @@ def test_repair_requires_int_canonical_hp() -> None:
     assert sheet == original
 
 
+def test_repair_ignores_bool_canonical_hp() -> None:
+    for bad_hp in (True, False):
+        sheet = _diverged_sheet({"resources": {"hp": bad_hp, "max_hp": 10}, "conditions": {}})
+        original = deepcopy(sheet)
+
+        repair_ruleset_health_display(sheet)
+
+        assert sheet == original
+
+
+def test_repair_marks_negative_canonical_hp_downed() -> None:
+    canonical = _canonical(-3)
+    sheet = _diverged_sheet(canonical)
+
+    repair_ruleset_health_display(sheet)
+
+    assert sheet["hp"] == -3
+    assert sheet["status"] == "downed"
+    assert sheet["deceased"] is False
+
+
 def test_loading_repairs_diverged_save_display_from_canonical() -> None:
     canonical = _canonical(0, {"unconscious": {}, "death_saves": {"successes": 0, "failures": 2}})
     instance = _instance_with_sheet(_diverged_sheet(canonical))
