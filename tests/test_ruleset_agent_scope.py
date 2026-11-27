@@ -224,8 +224,13 @@ def _battle_game(status: str = "active"):
         run_id="run-1",
         players={"p1": {"character_name": "Alice"}},
         modules={"ruleset_runtime": {
-            "version": 7,
-            "combat": {"status": status, "enemies": {"goblin": {"name": "Goblin"}}},
+            "schema_version": 1,
+            "binding": {"id": "core:dnd2024"},
+            "state": {
+                "version": 7,
+                "combat": {"status": status, "enemies": {"goblin": {"name": "Goblin"}}},
+            },
+            "event_ledger": [],
         }},
     )
 
@@ -272,7 +277,7 @@ def test_an_unknown_target_comes_back_with_the_current_list():
 
     # 裸 id 是模型最可能先试的形状：错误里必须直接给出可填的值，
     # 否则它只能对着 "target actor does not exist" 猜第二次。
-    assert result["code"] == "UNKNOWN_TARGET"
+    assert result["error_code"] == "UNKNOWN_TARGET"
     assert [row["actor_id"] for row in result["targets"]] == [
         "player:p1", "enemy:goblin",
     ]
@@ -289,7 +294,22 @@ def test_cover_is_refused_before_combat_starts():
         "target_id": "enemy:goblin", "level": "half",
     }, "gm"))
 
-    assert result["code"] == "COMBAT_NOT_ACTIVE"
+    assert result["error_code"] == "COMBAT_NOT_ACTIVE"
+    assert captured == {}
+
+
+def test_non_gm_cannot_probe_cover_targets_or_declare_cover():
+    captured: dict = {}
+    tool = _tool(_deps(_battle_game(), SimpleNamespace(uid="p1", is_gm=False), captured))
+
+    result = asyncio.run(tool.handler({
+        "game_key": GAME_KEY, "run_id": "run-1",
+        "target_id": "unknown", "level": "half",
+    }, "p1"))
+
+    assert result["ok"] is False
+    assert result["error_code"] == "FORBIDDEN"
+    assert "targets" not in result
     assert captured == {}
 
 

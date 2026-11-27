@@ -23,6 +23,7 @@ from src.rulesets.dnd2024.character.attunement import (
     item_requires_attunement,
 )
 from src.rulesets.dnd2024.character.builder import ability_modifier
+from src.rulesets.dnd2024.character.health_display import sync_health_display
 from src.rulesets.dnd2024.combat.action_adapter import (
     formula_node_from_dice_formula,
     heal_ability_modifier_node,
@@ -933,6 +934,7 @@ class Dnd2024ExplorationEngine:
                         and str(event.get("actor_id") or "") == f"player:{uid}"
                     ):
                         remove_destroyed_item(sheet, str(event["item_ref"]))
+                sync_health_display(sheet, canonical)
                 updated_sheets[uid] = sheet
             ruleset_runtime.replace_state(instance, ruleset_state)
             for uid, sheet in updated_sheets.items():

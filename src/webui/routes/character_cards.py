@@ -9,6 +9,7 @@ from aiohttp import web
 from src.webui.routes._common import _get_api, _require_confirmed_request
 from src.webui.access_control import PAIRED_DEVICE_ID_KEY
 from src.webui.routes.auth import ACCESS_PASSWORD_CONFIGURED_KEY
+from src.webui.errors import declared_error_code
 
 
 def sees_full_card_library(request: web.Request) -> bool:
@@ -88,9 +89,9 @@ async def _api_character_card_advancement(request: web.Request, action: str) -> 
         result = {"ok": False, "code": "INVALID_ADVANCEMENT", "error": str(exc)}
     if result.get("ok"):
         status = 200
-    elif result.get("code") == "CHARACTER_NOT_FOUND":
+    elif declared_error_code(result) == "CHARACTER_NOT_FOUND":
         status = 404
-    elif result.get("code") == "STALE_CHARACTER_REVISION":
+    elif declared_error_code(result) == "STALE_CHARACTER_REVISION":
         status = 409
     else:
         status = 422
@@ -108,7 +109,7 @@ async def api_character_card_advancement_apply(request: web.Request) -> web.Resp
 def _choice_status(result: dict[str, Any]) -> int:
     if result.get("ok"):
         return 200
-    code = str(result.get("code") or "")
+    code = declared_error_code(result)
     if code == "CHARACTER_NOT_FOUND":
         return 404
     if code == "STALE_CHARACTER_REVISION":

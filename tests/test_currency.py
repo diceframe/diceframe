@@ -428,7 +428,7 @@ def test_gm_command_integer_currency_stays_canonical():
 
     # 非货币资源继续走通用资源路径（规则未声明 → 明确报错，不影响货币分支）。
     result = _parse_gm_resource_change(instance, "张三的幸运+1", spirit)
-    assert result == {"error": "当前规则没有资源：幸运"}
+    assert result == {"error": "当前规则没有资源：幸运", "error_code": "game_master_resource_missing_in_rule"}
 
 
 # ===== 规则 CRUD 校验 =====

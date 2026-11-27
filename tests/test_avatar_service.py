@@ -40,8 +40,8 @@ def test_avatar_upload_rejects_invalid_or_tiny_images(tmp_path):
     invalid = service.save_upload(base64.b64encode(b"not an image").decode("ascii"))
     tiny = service.save_upload(_encoded_image((16, 16)))
 
-    assert invalid == {"ok": False, "error": "无法读取该头像图片"}
-    assert tiny == {"ok": False, "error": "头像尺寸不能小于 32×32"}
+    assert invalid == {"ok": False, "error": "无法读取该头像图片", "error_code": "avatars_unreadable_image"}
+    assert tiny == {"ok": False, "error": "头像尺寸不能小于 32×32", "error_code": "avatars_too_small"}
     assert service.file("../escape") is None
 
 
@@ -60,5 +60,5 @@ def test_list_and_delete_user_avatars(tmp_path):
     assert service.file(first) is None
     assert service.list_user_avatars()["total"] == 1
 
-    assert service.delete(first) == {"ok": False, "error": "头像不存在"}
-    assert service.delete("../escape") == {"ok": False, "error": "无效的头像 ID"}
+    assert service.delete(first) == {"ok": False, "error": "头像不存在", "error_code": "avatars_not_found"}
+    assert service.delete("../escape") == {"ok": False, "error": "无效的头像 ID", "error_code": "avatars_invalid_id"}

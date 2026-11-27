@@ -1,8 +1,8 @@
 """Bridge narrative HP to the same canonical state used by combat and rest."""
 from copy import deepcopy
 
-from src.engine.character_utils import set_hp
 from src.engine.health import record_health_event
+from src.rulesets.dnd2024.character.health_display import sync_health_display
 from src.rulesets.events import stable_batch_id
 
 
@@ -50,16 +50,6 @@ def settle_narrative_hp(engine, instance, user_id: str, delta: int) -> int:
     sheet = instance.get_character_sheet(user_id)
     canonical = sheet["ruleset_character"]
     after = int(canonical["resources"].get("hp", 0) or 0)
-    set_hp(sheet, after, int(canonical["resources"].get("max_hp", 0) or 0))
-    conditions = canonical.get("conditions") or {}
-    sheet["deceased"] = "dead" in conditions
-    for key in ("death_saves",):
-        if key in conditions:
-            sheet[key] = deepcopy(conditions[key])
-        else:
-            sheet.pop(key, None)
-    sheet["status"] = "dead" if sheet["deceased"] else "downed" if after == 0 else "active"
-    if not sheet["deceased"]:
-        sheet.pop("death_round", None)
+    sync_health_display(sheet, canonical)
     instance.set_character_sheet(user_id, sheet)
     return after - before

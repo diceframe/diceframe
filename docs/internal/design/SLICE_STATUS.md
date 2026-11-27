@@ -109,7 +109,7 @@
 | F22 | Channel Divinity 与治疗分配/rider | ✅ | #784 |
 | F23 | 武器增益、控制与 Smite 光环 | ✅ | #784 |
 | F24 | 属性、熟练与总值替换被动 | ✅ | #784 |
-| F25 | Wild Shape（德鲁伊核心，含 Beast Spells / Archdruid） | 🟡 | #830 地基 + #836 收尾 + #838 修复（均在 main）；`S0F25_WILD_SHAPE_EXECUTION_REPORT` §6.2 列明未完成：R1b 建卡/长休选形态、R4b 失能/死亡立即结束与时长到期、R5 Wild Resurgence（依赖 F6 临时槽与先攻钩子） |
+| F25 | Wild Shape（德鲁伊核心，含 Beast Spells / Archdruid） | ✅ | #830 地基 + #836 收尾（`2026-11-22`）；`forms/` 已进 main，`attacks` 走 replace 覆盖；遗留项见执行报告 §8.2（无甲防御加值不参与形态 AC） |
 | F26 | Land 主动特性 | ✅ | #839 + 执行报告；区域模型复用既有 zone |
 | F27 | ~~召唤物~~（**移出本线**） | ➖ | 实为召唤类法术的效果层（`find_familiar` L1 / `find_steed` L2 / `summon_dragon` L5），三个 feature 只是入口修饰（免材料/免槽一次/类型锁定）。不属于职业特性线，交由法术与召唤子系统处理 |
 | F28 | Metamagic | ✅ | #847 + 执行报告；十选项 + 容器 + 2/10/17 选择 + 每级替换 + 前端两种 kind |
@@ -137,13 +137,13 @@
 | 片 | 内容 | 状态 | 证据 |
 |---|---|---|---|
 | S0-MM1 | stat block 事实层（size / speeds / 三组防御 / 条件免疫 / senses / cr / xp） | ✅ | #809 |
-| S0-MM2 | 六维参与检定 + 六字段 + CR0–1 全类型目录（135 条）+ 查询 | 🔵 | `S0MM2_..._EXECUTION_REPORT`；2653 passed |
-| S0-MM3a | 攻击多段伤害 `damage[]` + 附带效果 `riders[]`（四种 kind） | 🔵 | `feat/dnd2024-s0mm3a-attack-riders`（叠在 #829 上）+ `S0MM3A_ATTACK_RIDERS_TASK_SPEC` |
-| S0-MM3b | Multiattack 三原语 `repeat` / `combo` / `choice`，生物内别名，整批原子 | 🔵 | 同上分支（与 MM3a 同一提交，见执行报告 §5） |
-| S0-MM3c | 存档型动作 `save_action` + 半伤独立骰池 + `recharge` / `per_day` | 🔵 | 同上分支 |
-| S0-MM3d | 八个高频被动特质（闭集 id，未知即拒绝） | 🔵 | 同上分支 |
-| S0-MM3e | 条件自带的解除声明：`escape`（挣脱）与 `stand_up`（花半速起身）+ prone 的距离门槛 | 🔵 | 同上分支第三个提交；关掉 GAP-38/39 |
-| S0-MM3+ 余项 | 怪物施法 / 巢穴与传奇动作 / 剩余 318 条特质、507 条动作 | ⬜ | 未立项 |
+| S0-MM2 | 六维参与检定 + 六字段 + CR0–1 全类型目录（135 条）+ 查询 | ✅ | #829（`2026-11-22`）+ `S0MM2_..._EXECUTION_REPORT` |
+| S0-MM3a | 攻击多段伤害 `damage[]` + 附带效果 `riders[]`（四种 kind） | ✅ | #835（`2026-11-22`，+16092/−176，a–e 同一次合并） |
+| S0-MM3b | Multiattack 三原语 `repeat` / `combo` / `choice`，生物内别名，整批原子 | ✅ | #835 |
+| S0-MM3c | 存档型动作 `save_action` + 半伤独立骰池 + `recharge` / `per_day` | ✅ | #835 |
+| S0-MM3d | 八个高频被动特质（闭集 id，未知即拒绝） | ✅ | #835 |
+| S0-MM3e | 条件自带的解除声明：`escape`（挣脱）与 `stand_up`（花半速起身）+ prone 的距离门槛 | ✅ | #835；关掉 GAP-38/39 |
+| S0-MM3+ 余项 | 怪物施法 / 巢穴与传奇动作 / 剩余特质与动作 | ⬜ | 未立项。**内容侧现状**（`2026-11-27` 实测 135 条）：132 条有 `attacks`、148 条攻击用了多段 `damage[]`、15 条带 `riders`、11 条 `multiattack`、7 条 `save_action`、46 条 `traits`、**0 条怪物施法**；`cr` 只覆盖 0–1，CR 2+ 一条未进目录 |
 
 ## H 与休息
 

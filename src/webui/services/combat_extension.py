@@ -35,6 +35,7 @@ from src.engine.combat_scheduler import (
 from src.engine.game_instance import GameInstance, GameState
 from src.engine.modules import combat_extension_state, progression_state
 from src.localization.messages import t
+from src.webui.errors import error_payload
 
 _COMBAT_EXTENSION_SCHEMA = 1
 
@@ -583,14 +584,11 @@ def scheduler_advance(
 
     config = load_config(rule)
     if config is None or config.scheduler is None:
-        return {"ok": False, "code": "COMBAT_EXTENSION_NOT_CONFIGURED",
-                "error": t("webui.services.combat_extension.no_combat_scheduler")}
+        return error_payload("webui.services.combat_extension.no_combat_scheduler", code="COMBAT_EXTENSION_NOT_CONFIGURED")
     if not _extension_schema_supported(instance):
-        return {"ok": False, "code": "COMBAT_STATE_UNSUPPORTED",
-                "error": t("webui.services.combat_extension.state_version_unsupported")}
+        return error_payload("webui.services.combat_extension.state_version_unsupported", code="COMBAT_STATE_UNSUPPORTED")
     if instance.state != GameState.ACTIVE_ACTION:
-        return {"ok": False, "code": "ROUND_NOT_ACCEPTING_ACTIONS",
-                "error": t("webui.services.combat_extension.not_player_action_phase")}
+        return error_payload("webui.services.combat_extension.not_player_action_phase", code="ROUND_NOT_ACCEPTING_ACTIONS")
     try:
         state, scheduler_state = _ensure_state(instance, config)
         scheduler = scheduler_from_config(config.scheduler)
@@ -759,36 +757,36 @@ def resolve_combat_action(
     """服务端结算一次战斗动作 intent；成功后写回状态并按需存档。"""
 
     if not isinstance(intent, Mapping):
-        return {"ok": False, "code": "INVALID_INTENT", "error": t("webui.services.combat_extension.intent_not_object")}
+        return error_payload("webui.services.combat_extension.intent_not_object", code="INVALID_INTENT")
     raw_intent_id = intent.get("intent_id")
     intent_id = raw_intent_id.strip() if isinstance(raw_intent_id, str) else ""
     if not intent_id or len(intent_id) > 160:
-        return {"ok": False, "code": "INVALID_INTENT_ID", "error": t("webui.services.combat_extension.intent_id_required")}
+        return error_payload("webui.services.combat_extension.intent_id_required", code="INVALID_INTENT_ID")
 
     raw_action_id = intent.get("action_id")
     action_id = raw_action_id.strip() if isinstance(raw_action_id, str) else ""
     if not action_id:
-        return {"ok": False, "code": "INVALID_ACTION_ID", "error": t("webui.services.combat_extension.action_id_required")}
+        return error_payload("webui.services.combat_extension.action_id_required", code="INVALID_ACTION_ID")
     raw_actor = intent.get("actor_id")
     if raw_actor is None:
         requested_actor = f"player:{actor_uid}"
     elif isinstance(raw_actor, str) and raw_actor.strip():
         requested_actor = raw_actor.strip()
     else:
-        return {"ok": False, "code": "INVALID_ACTOR_ID", "error": t("webui.services.combat_extension.actor_id_required")}
+        return error_payload("webui.services.combat_extension.actor_id_required", code="INVALID_ACTOR_ID")
     raw_targets = intent.get("target_ids")
     if raw_targets is None:
         target_ids_for_fingerprint: tuple[str, ...] = ()
     elif not isinstance(raw_targets, list):
-        return {"ok": False, "code": "INVALID_TARGETS", "error": t("webui.services.combat_extension.target_ids_not_string_list")}
+        return error_payload("webui.services.combat_extension.target_ids_not_string_list", code="INVALID_TARGETS")
     elif len(raw_targets) > 1:
         # The phase-2 contract has no server-declared area-target policy.
         # Accepting an arbitrary list would let one paid action apply its
         # effect repeatedly, so multi-target actions must be introduced with
         # an explicit ruleset capability first.
-        return {"ok": False, "code": "INVALID_TARGETS", "error": t("webui.services.combat_extension.single_target_only")}
+        return error_payload("webui.services.combat_extension.single_target_only", code="INVALID_TARGETS")
     elif any(not isinstance(item, str) or not item.strip() for item in raw_targets):
-        return {"ok": False, "code": "INVALID_TARGETS", "error": t("webui.services.combat_extension.target_ids_empty")}
+        return error_payload("webui.services.combat_extension.target_ids_empty", code="INVALID_TARGETS")
     else:
         target_ids_for_fingerprint = tuple(item.strip() for item in raw_targets)
     fingerprint = _intent_fingerprint(
@@ -805,24 +803,20 @@ def resolve_combat_action(
 
     config = load_config(rule)
     if config is None:
-        return {"ok": False, "code": "COMBAT_EXTENSION_NOT_CONFIGURED",
-                "error": t("webui.services.combat_extension.no_combat_extension")}
+        return error_payload("webui.services.combat_extension.no_combat_extension", code="COMBAT_EXTENSION_NOT_CONFIGURED")
     if not _extension_schema_supported(instance):
-        return {"ok": False, "code": "COMBAT_STATE_UNSUPPORTED",
-                "error": t("webui.services.combat_extension.state_version_unsupported")}
+        return error_payload("webui.services.combat_extension.state_version_unsupported", code="COMBAT_STATE_UNSUPPORTED")
     decl = config.action(action_id)
     if decl is None:
-        return {"ok": False, "code": "ACTION_NOT_FOUND", "error": t("webui.services.combat_extension.unknown_action")}
+        return error_payload("webui.services.combat_extension.unknown_action", code="ACTION_NOT_FOUND")
 
     is_gm_entity = requested_actor.startswith(("npc:", "enemy:"))
     if not viewer_is_gm and requested_actor != f"player:{actor_uid}":
-        return {"ok": False, "code": "ACTOR_FORBIDDEN",
-                "error": t("webui.services.combat_extension.own_entity_only")}
+        return error_payload("webui.services.combat_extension.own_entity_only", code="ACTOR_FORBIDDEN")
     if is_gm_entity and not viewer_is_gm:
-        return {"ok": False, "code": "ACTOR_FORBIDDEN", "error": t("webui.services.combat_extension.entity_gm_only")}
+        return error_payload("webui.services.combat_extension.entity_gm_only", code="ACTOR_FORBIDDEN")
     if instance.state != GameState.ACTIVE_ACTION:
-        return {"ok": False, "code": "ROUND_NOT_ACCEPTING_ACTIONS",
-                "error": t("webui.services.combat_extension.not_player_action_phase")}
+        return error_payload("webui.services.combat_extension.not_player_action_phase", code="ROUND_NOT_ACCEPTING_ACTIONS")
 
     target_ids = target_ids_for_fingerprint
 
@@ -847,11 +841,7 @@ def resolve_combat_action(
         and raw_scheduler_marker is not None
         and _scheduler is None
     ):
-        return {
-            "ok": False,
-            "code": "SCHEDULER_STATE_INVALID",
-            "error": t("webui.services.combat_extension.scheduler_state_corrupted"),
-        }
+        return error_payload("webui.services.combat_extension.scheduler_state_corrupted", code="SCHEDULER_STATE_INVALID")
     if requested_actor not in state.entities:
         # NPC 行动者按需播种（GM 驱动 NPC 的入口）。
         if (requested_actor.startswith("npc:")
@@ -861,7 +851,7 @@ def resolve_combat_action(
                 requested_actor: _seed_pools(instance, config, requested_actor),
             })
         else:
-            return {"ok": False, "code": "ACTOR_NOT_FOUND", "error": t("webui.services.combat_extension.entity_missing")}
+            return error_payload("webui.services.combat_extension.entity_missing", code="ACTOR_NOT_FOUND")
     for target_id in target_ids or (requested_actor,):
         if target_id in state.entities:
             continue
@@ -878,8 +868,7 @@ def resolve_combat_action(
                 target_id: _seed_pools(instance, config, target_id),
             })
             continue
-        return {"ok": False, "code": "TARGET_NOT_FOUND",
-                "error": t("webui.services.combat_extension.target_missing", target_id=target_id)}
+        return error_payload("webui.services.combat_extension.target_missing", target_id=target_id, code="TARGET_NOT_FOUND")
 
     scheduler_instance = (
         scheduler_from_config(config.scheduler)
@@ -897,8 +886,7 @@ def resolve_combat_action(
             scheduler_state,
             _scheduler_combat_state(instance, config, state.buffs, state),
         ):
-            return {"ok": False, "code": "SCHEDULER_NOT_READY",
-                    "error": t("webui.services.combat_extension.entity_not_ready")}
+            return error_payload("webui.services.combat_extension.entity_not_ready", code="SCHEDULER_NOT_READY")
 
     actor_pool = state.entities.get(requested_actor, {}).get(config.hp_resource)
     if (
@@ -907,8 +895,7 @@ def resolve_combat_action(
         requested_actor.startswith("player:")
         and _player_is_dead(instance, requested_actor.removeprefix("player:"))
     ):
-        return {"ok": False, "code": "ACTOR_DEFEATED",
-                "error": t("webui.services.combat_extension.entity_cannot_act")}
+        return error_payload("webui.services.combat_extension.entity_cannot_act", code="ACTOR_DEFEATED")
     staged_records: dict[str, dict[str, Any]] = {}
     if decl.consume_item is not None:
         if requested_actor.startswith("player:"):
@@ -921,8 +908,7 @@ def resolve_combat_action(
             record = {}
         inventory = record.get("inventory")
         if not isinstance(inventory, list):
-            return {"ok": False, "code": "ITEM_MISSING",
-                    "error": t("webui.services.combat_extension.item_missing", item=decl.consume_item.item, qty=decl.consume_item.qty)}
+            return error_payload("webui.services.combat_extension.item_missing", item=decl.consume_item.item, qty=decl.consume_item.qty, code="ITEM_MISSING")
         remaining = decl.consume_item.qty
         kept: list[Any] = []
         for row in inventory:
@@ -941,8 +927,7 @@ def resolve_combat_action(
                 continue
             kept.append(row)
         if remaining > 0:
-            return {"ok": False, "code": "ITEM_MISSING",
-                    "error": t("webui.services.combat_extension.item_missing", item=decl.consume_item.item, qty=decl.consume_item.qty)}
+            return error_payload("webui.services.combat_extension.item_missing", item=decl.consume_item.item, qty=decl.consume_item.qty, code="ITEM_MISSING")
         record["inventory"] = kept
         staged_records[requested_actor] = record
 
@@ -961,7 +946,7 @@ def resolve_combat_action(
     try:
         outcome = apply_combat_action(state, combat_action, context)
     except ValueError as exc:
-        return {"ok": False, "code": "ACTION_REJECTED", "error": str(exc)}
+        return {"ok": False, "error_code": "ACTION_REJECTED", "error": str(exc)}
 
     # Calculate scheduler consumption before committing any state.  A failed
     # consume must leave both the action result and inventory untouched.
@@ -976,7 +961,7 @@ def resolve_combat_action(
                 requested_actor,
             )
         except (TypeError, ValueError, AttributeError, KeyError) as exc:
-            return {"ok": False, "code": "ACTION_REJECTED", "error": str(exc)}
+            return {"ok": False, "error_code": "ACTION_REJECTED", "error": str(exc)}
 
     # Stage all character/NPC writes.  Only entities whose pools changed are
     # written back; this preserves an external rest/edit on untouched actors.
@@ -1098,10 +1083,9 @@ def _replay_intent(
         return None
     raw = records.get(intent_id)
     if not isinstance(raw, Mapping):
-        return {"ok": False, "code": "INTENT_RECORD_INVALID",
-                "error": t("webui.services.combat_extension.idempotency_record_corrupted")}
+        return error_payload("webui.services.combat_extension.idempotency_record_corrupted", code="INTENT_RECORD_INVALID")
     if raw.get("fingerprint") != fingerprint:
-        return {"ok": False, "code": "INTENT_ID_CONFLICT", "error": t("webui.services.combat_extension.intent_id_reused")}
+        return error_payload("webui.services.combat_extension.intent_id_reused", code="INTENT_ID_CONFLICT")
     result = raw.get("result")
     action = result.get("action") if isinstance(result, Mapping) else None
     events = result.get("events") if isinstance(result, Mapping) else None
@@ -1115,8 +1099,7 @@ def _replay_intent(
         or not isinstance(events, list)
         or any(not isinstance(event, Mapping) for event in events)
     ):
-        return {"ok": False, "code": "INTENT_RECORD_INVALID",
-                "error": t("webui.services.combat_extension.idempotency_record_corrupted")}
+        return error_payload("webui.services.combat_extension.idempotency_record_corrupted", code="INTENT_RECORD_INVALID")
     replay = deepcopy(dict(result))
     replay["replayed"] = True
     return replay

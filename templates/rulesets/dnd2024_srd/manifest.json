@@ -12,5 +12,12 @@
   "license": {
     "id": "CC-BY-4.0",
     "attribution": "legal/ATTRIBUTION.md"
+  },
+  "content_packs": {
+    "primary": "srd-5.2.1",
+    "declared": [
+      "srd-5.2.1",
+      "phb-2024"
+    ]
   }
 }

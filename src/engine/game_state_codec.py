@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from src.compat.characters import repair_ruleset_health_display
 from src.engine.game_state_contracts import GamePersistedState
 from src.engine.language import DEFAULT_LANGUAGE, normalize_language
 from src.migrations.instance import normalize_game_state_payload
@@ -96,6 +97,11 @@ class GameStateCodec:
             ready_players=set(data.get("ready_players", [])),
             away_players=set(data.get("away_players", [])),
         )
+        # 旧存档可能留下与 canonical 矛盾的显示层 HP；加载时按 canonical 修复显示副本。
+        for player in instance.players.values():
+            sheet = player.get("character_sheet") if isinstance(player, dict) else None
+            if isinstance(sheet, dict):
+                repair_ruleset_health_display(sheet)
         from src.engine.modules import adventure_runtime_state
 
         # An empty or unknown play mode (for example from an in-memory new run)
