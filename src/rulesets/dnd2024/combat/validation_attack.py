@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 from ..character.attunement import AttunementError, canonical_item_ref, inventory_ref_counts, owned_ref_counts
+from .weapon_masteries import nick_active
 from ..features.attack_declarations import BRUTAL_STRIKE, CUNNING_STRIKE_EFFECTS_KEY, LIGHT_EXTRA_ATTACK, STUNNING_STRIKE, declaration_value, validate_cunning_strike, validate_uses, validate_weapon_selection
 from .primitives import CombatIntentError, rider_attack_kind, world_minutes
 from .check_modes import effective_speed, marked_target_id
@@ -238,6 +239,14 @@ class CombatValidationAttackMixin:
         economy = combat.get("economy") or {}
         if str(economy.get("actor_id") or "") != str(actor["actor_id"]):
             raise CombatIntentError("the extra attack can only be made on your own turn")
+        if nick_active(self.features, self._feature_character(actor), weapon):
+            # Nick：这一次属于 Attack action，不花附赠动作，但每回合只有一次。
+            # "另一把 Light 武器"这条不受影响，所以放在它之后判。
+            if bool(record.get("nick_used")):
+                raise CombatIntentError(
+                    "Nick already gave its extra attack this turn"
+                )
+            return
         if int(economy.get("bonus_action", 0) or 0) < 1:
             raise CombatIntentError(
                 "the extra attack costs a Bonus Action that is already spent"

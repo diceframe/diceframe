@@ -59,6 +59,29 @@ _TURN_SCOPED_DURATIONS = frozenset({
 })
 
 
+def _position_delta(combat: dict[str, Any], event: dict[str, Any]) -> int:
+    """How far this event moves the actor, in whatever geometry exists.
+
+    A forced move says "N feet away from that actor"; turning that into a
+    number needs positions, and positions belong here.  One-dimensional today
+    (a sign), a unit vector when the map grows a second axis -- and only this
+    function changes then.
+
+    ``distance`` is still accepted for events written before ``feet`` /
+    ``away_from`` existed; both are emitted during the transition.
+    """
+
+    feet = event.get("feet")
+    away_from = str(event.get("away_from") or "")
+    if isinstance(feet, int) and not isinstance(feet, bool) and feet and away_from:
+        positions = combat.get("positions") or {}
+        here = int(positions.get(str(event["actor_id"]), 0) or 0)
+        there = int(positions.get(away_from, 0) or 0)
+        # 同格时恒取向 +1：显式规则，不是比较符的副产物。
+        return feet if here >= there else -feet
+    return int(event.get("distance") or 0)
+
+
 class CombatReducerMixin:
     """Apply validated events to a detached authoritative snapshot."""
 
@@ -770,11 +793,18 @@ class CombatReducerMixin:
             return
         if event_type == "dnd2024.attack.spent":
             economy = combat["economy"]
+            # Nick：这次追加攻击由 Attack action 承担，两个额度都不扣。
+            # 用显式标记而不是空 resource —— 空串在成本事件里的含义是
+            # "让引擎决定扣哪个"，两者不能共用一个值。额度不扣，但账本照记：
+            # "本回合用过哪把 Light 武器"与"Nick 额度用掉了"都要从这一条得出。
+            free = bool(event.get("free"))
             resource = str(event.get("resource") or "action")
             # Bonus Action 的攻击（Light 追加攻击、附赠攻击能力）不走
             # ``attacks_remaining``：那份额度只属于 Attack action，借给它等于
             # 白送一次行动。
-            if resource == "bonus_action" or int(economy.get("attacks_remaining", 0) or 0) <= 0:
+            if free:
+                pass
+            elif resource == "bonus_action" or int(economy.get("attacks_remaining", 0) or 0) <= 0:
                 if int(economy.get(resource, 0) or 0) < 1:
                     raise EventBatchError(
                         "Bonus Action is already spent"
@@ -812,6 +842,10 @@ class CombatReducerMixin:
                 weapon_ref = str(event.get("weapon_ref") or "")
                 if weapon_ref:
                     record.setdefault("weapon_refs", []).append(weapon_ref)
+                if event.get("nick_extra"):
+                    # Nick 的额度记在同一个回合账本里：记录本就按
+                    # (round, turn_index) 重建，所以下个回合自动复位。
+                    record["nick_used"] = True
             if event.get("loading_weapon"):
                 # "每次 action/Bonus/Reaction 只能射一发"：窗口用支付它的经济
                 # 池标识，所以同一窗口里的第二发会被校验拒绝，换一个窗口
@@ -893,9 +927,9 @@ class CombatReducerMixin:
             return
         if event_type == "dnd2024.position.changed":
             actor_id = str(event["actor_id"])
-            combat["positions"][actor_id] = int(combat["positions"].get(actor_id, 0)) + int(
-                event["distance"]
-            )
+            combat["positions"][actor_id] = int(
+                combat["positions"].get(actor_id, 0)
+            ) + _position_delta(combat, event)
             cost = int(event.get("movement_cost", 0) or 0)
             if cost:
                 remaining = int(combat["economy"].get("movement", 0) or 0)

@@ -108,6 +108,9 @@ def _companion(
 def _goblin(enemy_id: str = "goblin-1", *, position: int = 5, hp: int = 40) -> dict:
     return {
         "id": enemy_id, "name": "Goblin", "hp": hp, "armor_class": 12,
+        # 真实 stat block 都带体型；Push 的"Large 或更小"按它判，缺省是
+        # fail closed（不推），所以夹具必须给出这个事实。
+        "size": "small",
         "speed": 30, "position": position, "initiative_modifier": 2,
         "abilities": {"str": 8, "dex": 14, "con": 10, "int": 10, "wis": 8, "cha": 8},
         "saving_throws": {"dex": 2, "wis": -1, "con": 0},
@@ -670,10 +673,7 @@ def test_uncanny_dodge_halves_the_hit_but_keeps_the_mastery_condition() -> None:
     assert applied["source_actor_id"] == "player:gm"
 
 
-@pytest.mark.parametrize(
-    ("weapon", "mastery"),
-    [("item:greataxe", "cleave"), ("item:quarterstaff", "topple")],
-)
+@pytest.mark.parametrize(("weapon", "mastery"), [("item:greataxe", "cleave")])
 def test_unimplemented_properties_fail_closed(weapon: str, mastery: str) -> None:
     _runtime, engine, instance = _instance(equipment=[weapon])
 
@@ -718,3 +718,172 @@ def test_the_five_weapon_classes_own_the_weapon_mastery_feature() -> None:
         "build": {"class_levels": [{"class_ref": "class:wizard", "level": 1}]},
     }
     assert resolver.has_feature(wizard, "weapon_mastery") is False
+
+
+# --------------------------------------------------------------------------
+# S0-F7R：push / topple / nick
+# --------------------------------------------------------------------------
+
+
+def test_push_moves_the_target_ten_feet_away() -> None:
+    _runtime, engine, instance = _instance(equipment=["item:greatclub"])
+
+    events = _attack(engine, instance, weapon="item:greatclub", rolls=[15, 4, 5])
+
+    push = next(
+        (event for event in events if event["type"] == "dnd2024.position.changed"),
+        None,
+    )
+    assert push is not None, [event["type"] for event in events]
+    assert push["feet"] == 10
+    assert push["away_from"] == "player:gm"
+    assert push["forced"] is True
+    # 过渡期双写：方向仍是远离攻击者的符号。
+    assert push["distance"] == 10
+    # 位置权威读的是 feet/away_from，不是发射点算好的符号。
+    assert ruleset_runtime.state(instance)["combat"]["positions"]["enemy:goblin-1"] == 15
+
+
+def test_push_leaves_a_huge_target_in_place() -> None:
+    _runtime, engine, instance = _instance(equipment=["item:greatclub"])
+    ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["size"] = "huge"
+
+    events = _attack(engine, instance, weapon="item:greatclub", rolls=[15, 4, 5])
+
+    assert not [
+        event for event in events if event["type"] == "dnd2024.position.changed"
+    ]
+    assert _damage_to(events, "enemy:goblin-1")["amount"] > 0
+
+
+def test_topple_forces_a_constitution_save_then_prone() -> None:
+    _runtime, engine, instance = _instance(equipment=["item:battleaxe"], abilities={"str": 16})
+
+    events = _attack(engine, instance, weapon="item:battleaxe", rolls=[15, 4, 2])
+
+    save = _check(events, kind="saving_throw")
+    assert save["ability"] == "con"
+    # 8 + PB(2) + Str(+3)
+    assert save["target"] == 13
+    assert save["success"] is False
+    assert _applied(events, "prone")["duration"] == "until_stand"
+
+
+def test_topple_applies_nothing_when_the_save_succeeds() -> None:
+    _runtime, engine, instance = _instance(equipment=["item:battleaxe"], abilities={"str": 16})
+
+    events = _attack(engine, instance, weapon="item:battleaxe", rolls=[15, 4, 20])
+
+    assert _check(events, kind="saving_throw")["success"] is True
+    assert not [event for event in events if event["type"] == "condition.applied"]
+
+
+@pytest.mark.parametrize(("level", "proficiency"), [(1, 2), (5, 3)])
+def test_topple_dc_tracks_proficiency_and_ability(
+    level: int, proficiency: int,
+) -> None:
+    """DC = 8 + 熟练加值 + 这次攻击用的属性调整，不写死。"""
+
+    _runtime, engine, instance = _instance(
+        equipment=["item:battleaxe"], level=level,
+    )
+    sheet = instance.players["gm"]["character_sheet"]["ruleset_character"]
+    modifier = (int(sheet["abilities"]["str"]) - 10) // 2
+
+    events = _attack(engine, instance, weapon="item:battleaxe", rolls=[15, 4, 20])
+
+    assert _check(events, kind="saving_throw")["target"] == 8 + proficiency + modifier
+
+
+# --------------------------------------------------------------------------
+# S0-F7R：Nick 与 Light 追加攻击的入口
+# --------------------------------------------------------------------------
+
+
+def _light_pair(*, nick: bool) -> tuple:
+    """两把 Light 武器；``nick`` 决定追加攻击那一把带不带 Nick。
+
+    ``_instance`` 起手就把回合交给玩家，所以这里不需要再"开始回合"。
+    """
+
+    _, engine, instance = _instance(
+        equipment=["item:club", "item:dagger" if nick else "item:shortsword"],
+    )
+    return engine, instance
+
+
+def _attack_with(engine, instance, weapon: str, *, rolls, light_extra: bool = False,
+                 target_id: str = "enemy:goblin-1"):
+    version = ruleset_runtime.state(instance)["version"]
+    intent = {
+        "intent_id": f"nick-{version}", "type": "attack",
+        "expected_version": version, "submitted_by": "gm",
+        "actor_id": "player:gm", "target_id": target_id,
+        "weapon_ref": f"item:{weapon}",
+    }
+    if light_extra:
+        intent["light_extra_attack"] = True
+    resolved = engine.resolve_intent(instance, intent, SequenceRng(rolls))
+    if resolved.get("ok"):
+        engine.apply_batch(instance, resolved["event_batch"])
+    return resolved
+
+
+def test_nick_makes_the_extra_attack_free() -> None:
+    engine, instance = _light_pair(nick=True)
+
+    first = _attack_with(engine, instance, "club", rolls=[15, 4])
+    assert first["ok"] is True, first
+    before = ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"]
+
+    extra = _attack_with(engine, instance, "dagger", rolls=[15, 4], light_extra=True)
+    assert extra["ok"] is True, extra
+    # 不花附赠动作：额度一点没动。
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == before
+
+
+def test_nick_is_once_per_turn() -> None:
+    engine, instance = _light_pair(nick=True)
+
+    _attack_with(engine, instance, "club", rolls=[15, 4])
+    assert _attack_with(engine, instance, "dagger", rolls=[15, 4], light_extra=True)["ok"]
+
+    ledger = ruleset_runtime.state(instance)["combat"]["light_attacks"]
+    assert ledger["player:gm"].get("nick_used") is True, ledger
+    again = _attack_with(engine, instance, "dagger", rolls=[15, 4], light_extra=True)
+    assert again["ok"] is False
+    assert "Nick" in again["error"]
+
+
+def test_without_nick_the_extra_attack_still_costs_the_bonus_action() -> None:
+    engine, instance = _light_pair(nick=False)
+
+    _attack_with(engine, instance, "club", rolls=[15, 4])
+    extra = _attack_with(engine, instance, "shortsword", rolls=[15, 4], light_extra=True)
+
+    assert extra["ok"] is True, extra
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == 0
+
+
+def test_the_action_list_offers_the_light_extra_attack() -> None:
+    engine, instance = _light_pair(nick=True)
+
+    assert not [
+        action for action in engine.available_intents(instance, instance.gm_uid)
+        if action["type"] == "light_attack"
+    ], "没有 Light 攻击账本之前不该出现入口"
+
+    _attack_with(engine, instance, "club", rolls=[15, 4])
+
+    rows = [
+        action for action in engine.available_intents(instance, instance.gm_uid)
+        if action["type"] == "light_attack"
+    ]
+    ledger = ruleset_runtime.state(instance)["combat"]["light_attacks"]
+    assert len(rows) == 1, (ledger, rows)
+    row = rows[0]
+    # Nick 那一把：不花附赠动作，且只列出"另一把" Light 武器。
+    assert row["cost"] == ""
+    assert row["nick"] is True
+    assert {weapon["weapon_ref"] for weapon in row["weapons"]} == {"item:dagger"}
+    assert row["targets"]

@@ -111,6 +111,30 @@ const adventureActive = computed(() => String(
   gameplay.value?.campaign?.tutorial?.status || '',
 ) === 'active')
 const attackAction = computed(() => action('attack'))
+// Light 追加攻击是服务端给的一张独立动作行（`type: light_attack`）：规则决定
+// 它花不花附赠动作（Nick 不花），面板只负责把它画出来并按成本分页。
+const lightAttackActions = computed<RulesetCombatAction[]>(() => (
+  actions.value.filter(item => item.type === 'light_attack')
+))
+const lightAttackRowsForDockTab = computed(() => lightAttackActions.value.filter(
+  row => (dockTab.value === 'bonus' ? row.cost === 'bonus_action' : row.cost !== 'bonus_action'),
+))
+const attacksRemaining = computed(() => Number(
+  (combat.value?.economy as JsonObject | undefined)?.attacks_remaining ?? 0,
+))
+
+function stageLightExtra(row: RulesetCombatAction): void {
+  const weapon = (row.weapons || [])[0]
+  if (!weapon || !selectedTargetId.value) return
+  stage({
+    type: 'attack',
+    actor_id: String(row.actor_id || ''),
+    target_id: selectedTargetId.value,
+    ...(weapon.weapon_ref ? { weapon_ref: String(weapon.weapon_ref) } : { attack_id: String(weapon.id) }),
+    // 服务端按这一次声明改走"追加攻击"的校验与经济：不带这个字段就是普通攻击。
+    light_extra_attack: true,
+  })
+}
 const formAssumeAction = computed(() => action('form.assume'))
 const formRevertAction = computed(() => action('form.revert'))
 // 变形之后只要还有 Wild Shape 次数，服务端会同时给出「变形」和「恢复原形」。
@@ -1670,7 +1694,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
 
           <template #tiles>
             <template v-if="dockTab === 'action'">
-              <ActionTile v-if="attackAction" :label="copy.attack" :hint="selectedWeapon?.name || selectedWeapon?.id" :active="dockMode === 'attack'" data-tile="attack" @click="openDockMode('attack')">
+              <ActionTile v-if="attackAction" :label="copy.attack" :hint="attacksRemaining > 1 ? `${attacksRemaining} × ${selectedWeapon?.name || selectedWeapon?.id}` : (selectedWeapon?.name || selectedWeapon?.id)" :active="dockMode === 'attack'" data-tile="attack" @click="openDockMode('attack')">
                 <template #icon><NIcon :component="FlashOutline" /></template>
               </ActionTile>
             </template>
@@ -1684,6 +1708,9 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               <template #icon><NIcon :component="RibbonOutline" /></template>
             </ActionTile>
             <template v-if="dockTab === 'action'">
+              <ActionTile v-for="row in lightAttackRowsForDockTab" :key="`light-${row.cost}`" :label="copy.lightExtraAttack" :hint="row.nick ? copy.lightExtraFree : copy.lightExtraBonus" :disabled="busy || row.available === false || !selectedTargetId" :data-tile="`light-extra-${row.cost || 'free'}`" @click="stageLightExtra(row)">
+                <template #icon><NIcon :component="FlashOutline" /></template>
+              </ActionTile>
               <ActionTile v-if="capabilityActions.length || currentClassResources.length" :label="copy.classAbilities" :active="dockMode === 'capability'" data-tile="capability" @click="openDockMode('capability')">
                 <template #icon><NIcon :component="RibbonOutline" /></template>
               </ActionTile>

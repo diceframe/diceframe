@@ -47,6 +47,8 @@ class CombatHitResolutionMixin:
 
     if TYPE_CHECKING:
         # Supplied by the combat engine and its other mixins; no runtime state.
+        @staticmethod
+        def attack_ability(actor: dict[str, Any], weapon: dict[str, Any]) -> str: ...
         def _actor_view(self, instance: Any, combat: dict[str, Any], actor_id: str) -> dict[str, Any]: ...
         def _all_targets(self, instance: Any, combat: dict[str, Any]) -> list[dict[str, Any]]: ...
         def _attack_state_riders(
@@ -203,6 +205,37 @@ class CombatHitResolutionMixin:
         ):
             return None
         return effect
+
+    @staticmethod
+    def _mastery_effect_entry(mastery: dict[str, Any], actor_id: str) -> dict[str, Any]:
+        """One mastery effect as the commit step needs it.
+
+        Conditions are the simple case; push and topple keep their own kind
+        because they need positions or a saving throw, and both of those are
+        only authoritative at commit time (a Shield can still cancel the hit).
+        """
+
+        kind = str(mastery.get("kind") or "")
+        if kind == "push":
+            return {
+                "kind": "push",
+                "feet": int(mastery.get("feet") or 0),
+                "size_at_most": str(mastery.get("size_at_most") or ""),
+                "source_actor_id": actor_id,
+            }
+        if kind == "save_condition":
+            return {
+                "kind": "save_condition",
+                "ability": str(mastery.get("ability") or "con"),
+                "condition": str(mastery["condition"]),
+                "duration": str(mastery.get("duration") or "until_stand"),
+                "source_actor_id": actor_id,
+            }
+        return {
+            "condition": str(mastery["condition"]),
+            "duration": str(mastery["duration"]),
+            "source_actor_id": actor_id,
+        }
 
     def _miss_mastery_events(
         self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
@@ -412,12 +445,19 @@ class CombatHitResolutionMixin:
             not mastery.get("requires_damage") or damage > 0
         ):
             # Held like ``feature_use``: an attack that a reaction turns into a
-            # miss must not leave its mastery condition behind.
-            damage_event["mastery_effects"] = [{
-                "condition": str(mastery["condition"]),
-                "duration": str(mastery["duration"]),
-                "source_actor_id": actor_id,
-            }]
+            # miss must not leave its mastery effect behind.  The entry keeps the
+            # mastery's own kind, because push and topple are not conditions.
+            entry = self._mastery_effect_entry(mastery, actor_id)
+            if entry.get("kind") == "save_condition":
+                # DC = 8 + 熟练加值 + 这次攻击用的属性调整。用攻击的权威
+                # 属性函数而不是 check["modifier"]：后者含魔法加值，会把
+                # DC 抬到一个规则里没有的数。
+                ability = self.attack_ability(actor, weapon)
+                entry["dc"] = (
+                    8 + int(actor["proficiency_bonus"])
+                    + ability_modifier(actor["abilities"][ability])
+                )
+            damage_event["mastery_effects"] = [entry]
         offer = self._hit_spell_offer(
             instance, combat, actor, weapon, target_id, damage_event, intent,
         )
@@ -706,7 +746,11 @@ class CombatHitResolutionMixin:
         consequences, extra_damage = self._hit_tail_events(
             instance, combat, attacker_id, target, damage_event, rng,
         )
-        events = list(self._submit_hit_damage(damage_event))
+        events = list(self._submit_hit_damage(
+            damage_event,
+            instance=instance, combat=combat, attacker_id=attacker_id,
+            target=target, rng=rng,
+        ))
         events.extend(consequences)
         if damage_event.get("critical"):
             events.extend(
@@ -995,8 +1039,11 @@ class CombatHitResolutionMixin:
             applied.append(meta)
         return applied
 
-    @staticmethod
-    def _submit_hit_damage(damage_event: dict[str, Any]) -> list[dict[str, Any]]:
+    def _submit_hit_damage(
+        self, damage_event: dict[str, Any], *,
+        instance: Any, combat: dict[str, Any], attacker_id: str,
+        target: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
         """Commit a final hit's damage, then any deferred feature use.
 
         Hit damage is rolled once and held while the defender decides on
@@ -1038,13 +1085,101 @@ class CombatHitResolutionMixin:
                 if isinstance(row, dict) and row.get("feature_id"):
                     events.append({"type": "dnd2024.feature.used", **row})
         if isinstance(mastery_effects, list):
-            for effect in mastery_effects:
-                if not isinstance(effect, dict) or not effect.get("condition"):
+            events.extend(self._mastery_commit_events(
+                instance, combat, attacker_id, target, event["target_id"],
+                mastery_effects, rng,
+            ))
+        return events
+
+    def _commit_hit_damage(
+        self, instance: Any, combat: dict[str, Any], damage_event: dict[str, Any],
+        rng: Any, *, attacker_id: str = "",
+    ) -> list[dict[str, Any]]:
+        """``_submit_hit_damage`` with the context mastery effects need.
+
+        Reaction and triggered-spell paths land a hit they did not compute, so
+        they resolve the target here instead of threading it through every
+        decision payload.  Inert for them: only weapon hits put ``mastery_effects``
+        on the event, and those were built by the attacker's own path.
+        """
+
+        target = self._actor_view(instance, combat, str(damage_event["target_id"]))
+        return self._submit_hit_damage(
+            damage_event,
+            instance=instance, combat=combat, attacker_id=attacker_id,
+            target=target, rng=rng,
+        )
+
+    def _mastery_commit_events(
+        self, instance: Any, combat: dict[str, Any], attacker_id: str,
+        target: dict[str, Any], target_id: str,
+        mastery_effects: list[Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Mastery effects that a committed hit actually lands.
+
+        Called only after the hit is final, so a Shield or Uncanny Dodge that
+        turned it into a miss never pushes anyone or rolls a save.  Conditions,
+        pushes and save-or-condition all come through here for that reason.
+        """
+
+        events: list[dict[str, Any]] = []
+        for effect in mastery_effects:
+            if not isinstance(effect, dict):
+                continue
+            kind = str(effect.get("kind") or "condition")
+            if kind == "push":
+                limit = str(effect.get("size_at_most") or "")
+                if limit and not size_at_most(str(target.get("size") or ""), limit):
+                    continue
+                feet = int(effect.get("feet") or 0)
+                if feet <= 0:
+                    continue
+                # 方向不在这里算：事件只说"推多远、远离谁"。1D 与将来的 2D
+                # 都由位置权威（reducer）解释这一句，发射点不认识几何。
+                events.append({
+                    "type": "dnd2024.position.changed",
+                    "actor_id": target_id,
+                    "feet": feet,
+                    "away_from": attacker_id,
+                    # 过渡期双写：旧事件重放与既有消费者仍读这个有符号值。
+                    "distance": feet * (
+                        1 if self._position(combat, target_id)
+                        >= self._position(combat, attacker_id) else -1
+                    ),
+                    "forced": True,
+                    "source_rider": "push",
+                })
+                continue
+            if kind == "save_condition":
+                ability = str(effect.get("ability") or "con")
+                dc = int(effect.get("dc") or 0)
+                if dc <= 0:
+                    # DC 由命中方算好写进来；缺失说明声明有误，fail closed：
+                    # 不掷骰、也不施加条件，避免"必然失败"的豁免。
+                    continue
+                check = self._saving_throw_check(
+                    instance, combat, target, target_id, ability, dc,
+                    attacker_id, events, rng,
+                )
+                # `_saving_throw_check` 只把"传奇抗性"之类的补充追加到列表，
+                # 豁免本身是返回值：不 append 就只剩 apply、没有掷骰记录。
+                events.append(check)
+                if check["success"]:
                     continue
                 events.append({
-                    "type": "condition.applied", "target_id": event["target_id"],
-                    **effect,
+                    "type": "condition.applied",
+                    "target_id": target_id,
+                    "condition": str(effect["condition"]),
+                    "duration": str(effect.get("duration") or "until_stand"),
+                    "source_actor_id": attacker_id,
                 })
+                continue
+            if not effect.get("condition"):
+                continue
+            events.append({
+                "type": "condition.applied", "target_id": target_id,
+                **effect,
+            })
         return events
 
     def _enemy_zero_hp_feature_events(

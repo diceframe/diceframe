@@ -12,6 +12,7 @@ from .primitives import CombatIntentError, attack_damage_parts, trait_ids
 from .check_modes import condition_check_bonus_rolls, condition_flags, mode_from_sources
 from src.rulesets.dnd2024.features.attack_declarations import BRUTAL_STRIKE, LIGHT_EXTRA_ATTACK, SACRED_WEAPON, declaration_value
 from .reaction_spells import effective_armor_class
+from .weapon_masteries import nick_active
 
 
 class CombatAttackResolutionMixin:
@@ -632,7 +633,21 @@ class CombatAttackResolutionMixin:
             *self._spell_end_trigger_events(actor, "attack_roll"),
             *([self._attack_cost_event(
                 combat, actor,
-                resource="bonus_action" if declaration_value(intent, LIGHT_EXTRA_ATTACK) else "",
+                resource=(
+                    ""
+                    if declaration_value(intent, LIGHT_EXTRA_ATTACK)
+                    and nick_active(self.features, self._feature_character(actor), weapon)
+                    else "bonus_action"
+                    if declaration_value(intent, LIGHT_EXTRA_ATTACK) else ""
+                ),
+                nick_extra=bool(
+                    declaration_value(intent, LIGHT_EXTRA_ATTACK)
+                    and nick_active(self.features, self._feature_character(actor), weapon)
+                ),
+                free=bool(
+                    declaration_value(intent, LIGHT_EXTRA_ATTACK)
+                    and nick_active(self.features, self._feature_character(actor), weapon)
+                ),
                 weapon=weapon,
                 # Multiattack 的第一次攻击为"这一次动作"开一张总额度，后续
                 # 每一击都从同一份额度里扣：动作只付一次，次数不重复付。

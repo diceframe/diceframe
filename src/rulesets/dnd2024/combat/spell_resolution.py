@@ -1308,6 +1308,7 @@ class CombatSpellResolutionMixin:
                 direction = 1 if self._position(combat, target_id) >= self._position(combat, actor_id) else -1
                 events.append({
                     "type": "dnd2024.position.changed", "actor_id": target_id,
+                    "feet": int(effect["push"]), "away_from": actor_id,
                     "distance": direction * int(effect["push"]), "forced": True,
                 })
         # 使用计数与自伤都落在法术效果之后、胜利判定之前：计数是这次施法的

@@ -115,7 +115,10 @@ class CombatTriggeredSpellsMixin:
             events.extend(self._spell_end_trigger_events(
                 self._actor_view(instance, combat, decision["actor_id"]), "spell_cast",
             ))
-        events.extend(self._submit_hit_damage(decision["damage_event"]))
+        events.extend(self._commit_hit_damage(
+            instance, combat, decision["damage_event"], rng,
+            attacker_id=str(decision.get("actor_id") or ""),
+        ))
         # 这条路径同样是"命中落地"：rider（光耀/神圣/原始打击）与命中后条件
         # （震慑击、散手技巧）在直通路径由 ``_resolve_committed_hit`` 结算，
         # 决策路径若漏掉它们，会变成"有至圣斩窗口的角色悄悄少了半个特性"。
