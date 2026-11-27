@@ -27,7 +27,12 @@ MAX_TEMPORARY_SLOT_LEVEL = 9
 from src.rulesets.dnd2024.spells.casting import apply_free_cast_cost
 from src.rulesets.events import EventBatchError
 from .primitives import actor_kind as _actor_kind
-from .primitives import FEATURE_STATE_KEYS, PERSISTENT_RAGE_DURATION, RELENTLESS_RAGE_DECISION
+from .primitives import (
+    FEATURE_STATE_KEYS,
+    INTIMIDATING_PRESENCE_DURATION,
+    PERSISTENT_RAGE_DURATION,
+    RELENTLESS_RAGE_DECISION,
+)
 
 
 _ITEM_EVENT_FIELDS = {
@@ -55,7 +60,7 @@ _GRANTABLE_FLAGS = frozenset({"action_surge_used", "fleet_step_available"})
 _TURN_SCOPED_DURATIONS = frozenset({
     "actor_turn_start", "target_turn_start", "target_turn_end",
     "caster_turn_end", "caster_next_turn_end", "after_next_attack",
-    "attacker_next_turn_start",
+    "attacker_next_turn_start", INTIMIDATING_PRESENCE_DURATION,
 })
 
 

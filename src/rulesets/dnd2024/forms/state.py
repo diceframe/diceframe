@@ -152,22 +152,30 @@ def merged_refs_for(state: FormState, item_refs: Iterable[str]) -> list[str]:
     return [str(ref) for ref in item_refs if mode_for(state, str(ref)) == "merge"]
 
 
+def inactive_refs_for(state: FormState, item_refs: Iterable[str]) -> list[str]:
+    """Every equipped item that is no longer worn while shaped (merged or dropped).
+
+    Both ``merge`` (absorbed into the form) and ``drop`` (left on the ground)
+    stop providing worn AC, held hands, and carried activation effects while
+    the form lasts; only items explicitly set to ``wear`` stay active.
+    """
+
+    return [str(ref) for ref in item_refs if mode_for(state, str(ref)) != "wear"]
+
+
 def restrictions(state: FormState) -> dict[str, bool]:
     """What the shape costs you while it lasts.
 
     ``spellcasting`` is the only hard one in the SRD; equipment follows the
-    declared mode (merged equipment has no effect, it is not merely hidden).
+    declared mode (merged or dropped equipment has no worn effect).
     """
 
     allow_spells = state.beast_spells or state.effect_id not in NO_SPELLCASTING
+    modes = (state.equipment_modes or {"*": "merge"}).values()
     return {
         "spellcasting": allow_spells,
-        "equipment_effects": any(
-            mode != "merge" for mode in (state.equipment_modes or {"*": "merge"}).values()
-        ),
-        "equipment_visible": any(
-            mode != "merge" for mode in (state.equipment_modes or {"*": "merge"}).values()
-        ),
+        "equipment_effects": any(mode == "wear" for mode in modes),
+        "equipment_visible": any(mode != "merge" for mode in modes),
     }
 
 
@@ -207,6 +215,7 @@ __all__ = [
     "RECOMMENDED_FORMS",
     "assume_form",
     "bootstrap_known_forms",
+    "inactive_refs_for",
     "known_form_count",
     "learn_form",
     "merged_refs_for",

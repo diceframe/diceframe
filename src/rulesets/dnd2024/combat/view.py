@@ -11,8 +11,8 @@ from src.rulesets.dnd2024.features import CombatCapabilityView
 from ..character.builder import ability_modifier
 from ..character.derivation import derive_armor_class
 from ..forms import (
-    FormState, FormStateError, StatPanel, assume_form, merged_refs_for,
-    panel_from_view, restrictions,
+    FormState, FormStateError, StatPanel, assume_form, inactive_refs_for,
+    merged_refs_for, panel_from_view, restrictions,
 )
 from src.rulesets.dnd2024.features.combat import martial_arts_profile
 from src.rulesets.dnd2024.features.resources import (
@@ -276,15 +276,17 @@ class CombatViewMixin:
         except FormStateError as exc:
             raise CombatIntentError(f"active form state is invalid: {exc}") from exc
         equipment = character.get("equipment") or {}
-        merged_refs = merged_refs_for(state, equipment.get("item_refs") or [])
+        item_refs = equipment.get("item_refs") or []
+        merged_refs = merged_refs_for(state, item_refs)
+        inactive_refs = inactive_refs_for(state, item_refs)
         character_panel = panel_from_view(view)
-        if merged_refs:
-            # merged 装备在形态内没有任何效果，所以"你自己的 AC"要按**去掉它们**
-            # 重算，而不是把一个含护甲加值的数拿去和形态 AC 比高。
+        if inactive_refs:
+            # merged / dropped 装备在形态内都没有穿戴效果，所以"你自己的 AC"要按
+            # **去掉它们**重算，而不是把一个含护甲加值的数拿去和形态 AC 比高。
             character_panel = StatPanel(
                 **{
                     **character_panel.__dict__,
-                    "armor_class": self._armor_class_without(character, merged_refs),
+                    "armor_class": self._armor_class_without(character, inactive_refs),
                 }
             )
         merged = assume_form(character_panel, entry, state)
@@ -313,11 +315,26 @@ class CombatViewMixin:
             # 熟练的消费者排除它们，而不是从一个已含加值的数里减。
             "merged_item_refs": merged_refs,
         }
-        # 装备与法术是两套独立投影：merged 的装备从装备面消失（不只是加值不算），
-        # 禁止施法时法术面整体清空——否则 UI 仍然列着可点的法术。
+        # 逐件过滤形态内不再穿戴的装备（merge 与 drop 均不可用）：混合模式下
+        # 不能只看全局布尔，否则 merge/drop 的装备仍会残留在 equipment_refs 与
+        # hands 中。
+        inactive_set = set(inactive_refs)
         if not limits["equipment_effects"]:
             view["equipment_refs"] = []
             view["hands"] = {"left": None, "right": None}
+        elif inactive_set:
+            view["equipment_refs"] = [
+                ref for ref in (view.get("equipment_refs") or [])
+                if str(ref) not in inactive_set
+            ]
+            raw_hands = view.get("hands")
+            if isinstance(raw_hands, dict):
+                view["hands"] = {
+                    side: (
+                        held if held is not None and str(held) not in inactive_set else None
+                    )
+                    for side, held in raw_hands.items()
+                }
         if not limits["spellcasting"]:
             view["spell_refs"] = []
             view["class_spell_refs"] = []
