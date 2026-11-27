@@ -248,15 +248,21 @@ def derive_speed(
 _SKILL_CHOICE_KEYS = frozenset({"owner", "feature_id", "choice_id", "selected_refs"})
 
 
-def plan_skill_choices(
+def plan_feature_choices(
     raw_choices: Any,
     features: Dnd2024ClassFeatureResolver,
     proxy: Mapping[str, Any],
     skill_refs: Collection[str],
     *,
     level: int,
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Validate the skill selections a draft commits at character creation.
+) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    """Validate the selections a draft commits, and return the languages gained.
+
+    两类槽共用同一份解析：技能槽（Expertise / 新增熟练）与语言槽。分开写会让
+    同一次 `selected_refs` 被解析两遍，而且"这个角色没有这个槽"的判断会在两处
+    各写一遍、迟早不一致。
+
+    Only a feature the character actually owns *at this level* may hold a slot,
 
     Only a feature the character actually owns *at this level* may hold a slot,
     so a submitted record can neither invent an owner nor pre-fill a future
@@ -294,13 +300,23 @@ def plan_skill_choices(
     slots = [
         definition for definition in features.features_for(dict(proxy))
         if definition.choice is not None
-        and definition.choice.kind == "skill_proficiency"
+        and definition.choice.kind in {"skill_proficiency", "language"}
     ]
+    # 语言槽只能选 Standard：罕见的留给 DM，秘密语言只能由特性固定授予。
+    # 空 `enabled_options` 因此不是"全集"，而是"建卡可选的那一批"。
+    language_rarity = {
+        f"language:{item['id']}": str(item.get("rarity") or "")
+        for item in features.bundle.list("language")
+    }
+    standard_languages = {
+        ref for ref, rarity in language_rarity.items() if rarity == "standard"
+    }
     known_skills = {
         str(entity.get("id")) for entity in features.bundle.list("skill")
     }
     matched: set[int] = set()
     records: list[dict[str, Any]] = []
+    languages: list[str] = []
     taken: dict[str, str] = {}
     proficient = {str(ref) for ref in skill_refs}
     for definition in slots:
@@ -341,23 +357,38 @@ def plan_skill_choices(
             continue
         allowed = set(choice.enabled_options)
         slot_refs: list[str] = []
-        for ref in raw_refs:
-            if allowed and ref not in allowed:
-                errors.append(f"{ref} is not a declared option of {definition.id}")
-                continue
-            skill_id = str(ref).removeprefix("skill:")
-            if not ref.startswith("skill:") or skill_id not in known_skills:
-                errors.append(f"{ref} is not a declared skill")
-                continue
-            if choice.requires_proficiency and ref not in proficient:
-                errors.append(f"{ref} is not a skill proficiency of this character")
-                continue
-            if choice.exclude_expertise and skill_id in taken:
-                errors.append(f"{ref} already has Expertise from {taken[skill_id]}")
-                continue
-            if choice.grants == "expertise":
-                taken[skill_id] = definition.id
-            slot_refs.append(ref)
+        if choice.kind == "language":
+            for ref in raw_refs:
+                # 空清单 = 建卡可选的 Standard 全集；显式列出的按声明来。
+                admissible = allowed or standard_languages
+                if ref not in admissible:
+                    errors.append(
+                        f"{ref} is not a selectable language of {definition.id}"
+                    )
+                    continue
+                if ref in languages:
+                    errors.append(f"{ref} is already known")
+                    continue
+                languages.append(ref)
+                slot_refs.append(ref)
+        else:
+            for ref in raw_refs:
+                if allowed and ref not in allowed:
+                    errors.append(f"{ref} is not a declared option of {definition.id}")
+                    continue
+                skill_id = str(ref).removeprefix("skill:")
+                if not ref.startswith("skill:") or skill_id not in known_skills:
+                    errors.append(f"{ref} is not a declared skill")
+                    continue
+                if choice.requires_proficiency and ref not in proficient:
+                    errors.append(f"{ref} is not a skill proficiency of this character")
+                    continue
+                if choice.exclude_expertise and skill_id in taken:
+                    errors.append(f"{ref} already has Expertise from {taken[skill_id]}")
+                    continue
+                if choice.grants == "expertise":
+                    taken[skill_id] = definition.id
+                slot_refs.append(ref)
         if len(slot_refs) != choice.count:
             continue
         records.append({
@@ -374,7 +405,7 @@ def plan_skill_choices(
             "feature choice references a slot this character does not have: "
             f"{record['owner']}/{record['feature_id']}/{record['choice_id']}"
         )
-    return records, errors
+    return records, languages, errors
 
 
 _ARMOR_CATEGORIES = frozenset({"light", "medium", "heavy"})
@@ -636,7 +667,7 @@ class CharacterDerivationMixin:
         # slot has to be validated before any skill value is derived: honouring an
         # unvalidated slot would pay out a doubled bonus for a selection the
         # level-up path would have rejected.
-        feature_choices, choice_errors = plan_skill_choices(
+        feature_choices, chosen_languages, choice_errors = plan_feature_choices(
             draft.get("feature_choices"),
             features,
             _feature_proxy(draft["class_ref"], level, draft.get("features")),
@@ -753,7 +784,14 @@ class CharacterDerivationMixin:
             initiative += prof
         size_options = list(species.get("size_options") or [])
         selected_size = str(draft.get("species_size") or (size_options[0] if size_options else "medium"))
-        language_refs = list(draft.get("language_refs") or [])
+        # 语言有三个来源：建卡选择、特性选择槽（Deft Explorer / Thieves' Cant）、
+        # 特性固定授予（Druidic）。三者都落到同一个 canonical 字段，并按首次
+        # 出现去重——同一门语言不会被特性与建卡重复记两次。
+        language_refs = list(dict.fromkeys([
+            *list(draft.get("language_refs") or []),
+            *chosen_languages,
+            *features.language_sources(feature_proxy),
+        ]))
         background_tool_refs = list(background.get("tool_proficiency_refs") or [])
         class_tool_refs = [
             *list(class_entity.get("tool_proficiency_refs") or []),

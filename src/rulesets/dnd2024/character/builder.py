@@ -10,7 +10,7 @@ from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 
 
-from .derivation import CharacterDerivationMixin, plan_skill_choices
+from .derivation import CharacterDerivationMixin, plan_feature_choices
 from .primitives import (
     ABILITY_IDS,
     POINT_BUY_COSTS,
@@ -118,6 +118,7 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             draft, class_entity=class_entity, species=species, background=background,
         )
         skill_choices = self._present_skill_choices(draft, background, class_ref)
+        language_choices = self._present_language_choices(draft, class_ref)
         return {
             "ability_methods": [
                 {
@@ -145,7 +146,13 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             "species": [present(item, "species") for item in self.bundle.list("species")],
             "backgrounds": [present(item, "background") for item in self.bundle.list("background")],
             "skills": [present(item, "skill") for item in self.bundle.list("skill")],
-            "languages": [present(item, "language") for item in self.bundle.list("language")],
+            # 建卡只能选 Standard：SRD p20 把罕见语言留在 DM 手里，秘密语言
+            # 更是只能由特性授予。目录里的 rarity 就是为了区分这三类。
+            "languages": [
+                present(item, "language")
+                for item in self.bundle.list("language")
+                if item.get("rarity") == "standard"
+            ],
             "origin_feats": [
                 present(item, "feat")
                 for item in self.bundle.list("feat")
@@ -184,6 +191,7 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             "species_feat_count": int(species_feat_choice.get("count", 0) or 0),
             "feat_choices": feat_choices,
             "skill_choices": skill_choices,
+            "language_choices": language_choices,
             "class_tools": [present(item, "tool") for item in class_tools],
             "class_tool_count": int(class_tool_choice.get("count", 0) or 0),
             "quick_presets": quick_presets,
@@ -334,7 +342,7 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
     def validate(self, draft: dict[str, Any]) -> list[str]:
         """Draft validation plus the skill-choice slots of this slice.
 
-        The slot rules exist exactly once (``plan_skill_choices``).  Leaving them
+        The slot rules exist exactly once (``plan_feature_choices``).  Leaving them
         out of ``validate`` would make the API boundary lie: the caller's
         validation step would pass and ``derive`` would then raise, so the same
         illegal slot would be "fine" or "fatal" depending on which entry point
@@ -356,7 +364,7 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
         background = self.bundle.get(
             "background", str(draft.get("background_ref") or "").split(":", 1)[-1],
         )
-        _records, choice_errors = plan_skill_choices(
+        _records, _languages, choice_errors = plan_feature_choices(
             draft.get("feature_choices"),
             Dnd2024ClassFeatureResolver(self.bundle),
             self._skill_choice_proxy(draft, class_ref),
@@ -364,6 +372,65 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             level=int(draft.get("level", 1) or 1),
         )
         return [*errors, *choice_errors]
+
+    def _present_language_choices(
+        self, draft: dict[str, Any], class_ref: str,
+    ) -> list[dict[str, Any]]:
+        """The language slots a level-1 build still has to answer.
+
+        Options are the Standard languages (the same pool creation accepts) plus
+        whatever the declaration names explicitly; a rare language is listed and
+        marked unavailable rather than hidden, so "you cannot pick that" and
+        "that does not exist" stay distinguishable to the player.
+        """
+
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        if not class_ref:
+            return []
+        proxy = self._skill_choice_proxy(draft, class_ref)
+        known = {
+            str(ref)
+            for record in draft.get("feature_choices") or []
+            if isinstance(record, dict)
+            for ref in record.get("selected_refs") or []
+            if str(ref).startswith("language:")
+        }
+        known.update(
+            str(ref) for ref in draft.get("language_refs") or []
+            if str(ref).startswith("language:")
+        )
+        result: list[dict[str, Any]] = []
+        for definition in features.features_for(proxy):
+            choice = definition.choice
+            if choice is None or choice.kind != "language":
+                continue
+            declared = set(choice.enabled_options)
+            options: list[dict[str, Any]] = []
+            for entity in self.bundle.list("language"):
+                ref = f"language:{entity['id']}"
+                if declared and ref not in declared:
+                    continue
+                reasons: list[str] = []
+                if not declared and entity.get("rarity") != "standard":
+                    reasons.append("not_standard")
+                if ref in known:
+                    reasons.append("already_known")
+                options.append({
+                    "value": ref,
+                    "name": str(entity.get("name") or _humanize_id(str(entity["id"]))),
+                    "source_ref": str(entity.get("source_ref") or ""),
+                    "available": not reasons,
+                    "unavailable_reasons": reasons,
+                })
+            result.append({
+                "owner": definition.owner,
+                "feature_id": definition.id,
+                "choice_id": choice.id,
+                "count": choice.count,
+                "grants": choice.grants,
+                "options": options,
+            })
+        return result
 
     def _present_skill_choices(
         self,

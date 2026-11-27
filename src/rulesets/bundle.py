@@ -13,10 +13,17 @@ from src.engine.language import content_locale_candidates
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 _BUNDLE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]*$")
+_LANGUAGE_RARITIES = frozenset({"standard", "rare", "secret"})
+
 _AUTOMATION_LEVELS = frozenset({"deterministic", "guided", "reference"})
 _FORBIDDEN_EXECUTION_KEYS = frozenset({
     "python", "javascript", "script", "code", "eval", "module", "callable",
 })
+# 有些字段名不带 `_ref(s)` 后缀但语义就是引用表：怪物 stat block 的
+# `languages` 是其一（`language:common`），既有的命名不能被改，
+# 又必须受同一条"引用必须存在"的校验约束。
+_REF_ALIASES = {"languages": "language"}
+
 _LOCALE_FIELDS = frozenset({
     "name", "description", "summary", "hint", "recommendation_reason",
     "tutorial", "labels", "text",
@@ -60,6 +67,19 @@ class LoadedRulesetBundle:
 
     def list(self, kind: str) -> list[dict[str, Any]]:
         return [deepcopy(item) for item in self.entities.get(kind, {}).values()]
+
+
+def _validate_language(entity: dict[str, Any], path: Path) -> None:
+    """A language must declare how it may be acquired.
+
+    Character creation only offers Standard languages, so this field decides
+    what the builder shows.  Letting a typo through here would either hide a
+    Standard language or offer a rare one as a creation pick.
+    """
+
+    rarity = entity.get("rarity")
+    if rarity not in _LANGUAGE_RARITIES:
+        raise RulesetBundleError(f"invalid language rarity {rarity!r}: {path}")
 
 
 def _read_object(path: Path) -> dict[str, Any]:
@@ -214,6 +234,8 @@ class RulesetBundleLoader:
                     raise RulesetBundleError(
                         f"invalid automation_level {automation!r}: {path}"
                     )
+                if kind == "language":
+                    _validate_language(entity, path)
                 _validate_no_executable_content(entity, path)
                 _validate_effects(entity, path)
                 by_kind = entities.setdefault(kind, {})
@@ -236,6 +258,12 @@ class RulesetBundleLoader:
                         if key.endswith("_ref"):
                             refs = [raw]
                         elif key.endswith("_refs"):
+                            if not isinstance(raw, list):
+                                raise RulesetBundleError(
+                                    f"{source_kind}:{source_id} field {key} must be an array"
+                                )
+                            refs = raw
+                        elif key in _REF_ALIASES:
                             if not isinstance(raw, list):
                                 raise RulesetBundleError(
                                     f"{source_kind}:{source_id} field {key} must be an array"

@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "kind": "language",
+  "id": "undercommon",
+  "source_ref": "srd-5.2.1:p20:rare-languages",
+  "automation_level": "deterministic",
+  "rarity": "rare"
+}

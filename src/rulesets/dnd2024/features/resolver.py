@@ -457,6 +457,31 @@ class Dnd2024ClassFeatureResolver:
             for definition in self.features_for(character)
         )
 
+    def language_sources(
+        self, character: Mapping[str, Any] | None,
+    ) -> dict[str, str]:
+        """``{language_ref: feature_id}`` for every feature-granted language.
+
+        A fixed grant, not a choice: ``language_grants`` is a plain list because
+        nothing is being offered.  Choices (Deft Explorer's two languages,
+        Thieves' Cant's one) travel through ``FeatureChoice`` instead, so a
+        parameter and a slot can never be mistaken for one another.
+        """
+
+        sources: dict[str, str] = {}
+        for definition in self.features_for(character):
+            declared = definition.parameters.get("language_grants")
+            if not isinstance(declared, list):
+                continue
+            for ref in declared:
+                if (
+                    isinstance(ref, str)
+                    and ref.startswith("language:")
+                    and ref not in sources
+                ):
+                    sources[ref] = definition.id
+        return sources
+
     def saving_throw_proficiency_sources(
         self, character: Mapping[str, Any] | None,
     ) -> dict[str, str]:

@@ -47,7 +47,7 @@ EQUIPMENT_REQUIREMENT_KEYS = frozenset(
 # "在已有技能熟练里再选几项"的选择：它的候选项来自技能目录而不是专长目录，
 # 且可以一次选多项（Expertise 一次两项）——用 ``advancement_feat`` 表达不了。
 FEATURE_CHOICE_KINDS = frozenset({
-    "advancement_feat", "skill_proficiency", "feature_option",
+    "advancement_feat", "skill_proficiency", "feature_option", "language",
 })
 # 技能选择最终"授予什么"的闭集。目前只有 Expertise；未知值必须加载期拒绝，
 # 否则选中一个技能却在运行时什么都不发生。
@@ -329,9 +329,12 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
         raise ClassFeatureError(
             f"{feature_id}.choice.enabled_options must be a non-empty array"
         )
+    # 语言选择可以留空：空清单 = 建卡可选的 Standard 语言全集，与建卡器
+    # 用的是同一批（罕见的留给 DM，秘密的只能由特性固定授予）。
     prefix = {
         "advancement_feat": "feat:",
         "feature_option": "feature:",
+        "language": "language:",
     }.get(kind, "skill:")
     refs: list[str] = []
     seen: set[str] = set()
@@ -353,9 +356,9 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
         if not isinstance(value, bool):
             raise ClassFeatureError(f"{feature_id}.choice.{key} must be a boolean")
         flags[key] = value
-    if kind in {"advancement_feat", "feature_option"}:
-        # 成长专长与特性选项都不使用技能选择的两个约束；写在它们上面会被
-        # 静默忽略，因此宁可加载期拒绝。
+    if kind in {"advancement_feat", "feature_option", "language"}:
+        # 成长专长、特性选项与语言都不使用技能选择的两个约束；写在它们上面
+        # 会被静默忽略，因此宁可加载期拒绝。
         for key in ("requires_proficiency", "exclude_expertise"):
             if key in raw and raw[key] is not True:
                 raise ClassFeatureError(
@@ -369,6 +372,10 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
     if kind == "feature_option" and category != "feature":
         raise ClassFeatureError(
             f"{feature_id}.choice.category must be 'feature' for a feature option choice"
+        )
+    if kind == "language" and category != "language":
+        raise ClassFeatureError(
+            f"{feature_id}.choice.category must be 'language' for a language choice"
         )
     grants = str(raw.get("grants") or "")
     if kind == "skill_proficiency":
