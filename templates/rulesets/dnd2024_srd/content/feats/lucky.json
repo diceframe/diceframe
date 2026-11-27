@@ -4,5 +4,6 @@
   "id": "lucky",
   "automation_level": "guided",
   "category": "origin",
-  "source_ref": "srd-5.2.1:p87:lucky"
+  "source_ref": "phb-2024:unverified:lucky",
+  "content_pack": "phb-2024"
 }

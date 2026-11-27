@@ -4,6 +4,6 @@
   "id": "alert",
   "automation_level": "guided",
   "category": "origin",
-  "initiative_proficiency": true,
+  "parameters": {"initiative_proficiency_bonus": "proficiency"},
   "source_ref": "srd-5.2.1:p87:alert"
 }

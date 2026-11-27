@@ -1485,3 +1485,118 @@ def test_bootstrap_fills_the_level_count_not_just_the_recommended_four() -> None
         seeded = bootstrap_known_forms(entries, level)
         assert len(seeded) == expected == known_form_count(level)
         assert len(set(seeded)) == expected
+
+
+def test_mixed_equipment_modes_filter_merged_items_from_equipment_hands_and_activations(
+    monkeypatch,
+) -> None:
+    from src.engine.modules import ruleset_runtime
+
+    engine, instance, rng = _druid_combat(2)
+    monkeypatch.setitem(engine.bundle.entities["item"], "potion_of_healing", {
+        "schema_version": 1, "kind": "item", "id": "potion_of_healing",
+        "source_ref": "test:item:potion_of_healing", "automation_level": "deterministic",
+        "item_type": "potion", "consumable": True,
+        "activation": {
+            "cost": "action", "target": "self",
+            "effect": {"mode": "healing", "healing": "2d4+2"},
+        },
+    })
+    sheet = instance.get_character_sheet("gm")
+    character = sheet["ruleset_character"]
+    character["equipment"]["item_refs"] = [
+        "item:leather_armor", "item:shield", "item:potion_of_healing",
+    ]
+    sheet["inventory"] = [
+        {"item_ref": "item:potion_of_healing", "name": "Potion of Healing", "quantity": 1},
+    ]
+    instance.set_character_sheet("gm", sheet)
+
+    # 变形前可激活药水确实出现在面板投影中。
+    combat = ruleset_runtime.state(instance)["combat"]
+    before_view = _view(engine, instance)
+    assert any(
+        row["item_ref"] == "item:potion_of_healing"
+        for row in engine._available_item_activations(instance, combat, before_view, combat["economy"])
+    )
+
+    state = ruleset_runtime.state(instance)
+    shaped = engine.resolve_intent(instance, {
+        "intent_id": "mixed-1", "type": "form.assume",
+        "expected_version": state["version"], "submitted_by": "gm",
+        "actor_id": "player:gm", "form_ref": "wolf",
+        "equipment_modes": {
+            "item:leather_armor": "wear",
+            "item:shield": "merge",
+            "item:potion_of_healing": "merge",
+        },
+    }, rng([]))
+    assert shaped["ok"] is True, shaped.get("error")
+    engine.apply_batch(instance, shaped["event_batch"])
+
+    view = _view(engine, instance)
+    assert view["equipment_refs"] == ["item:leather_armor"]
+    assert "item:shield" not in view["hands"].values()
+    assert "item:shield" in view["merged_item_refs"]
+    combat = ruleset_runtime.state(instance)["combat"]
+    available_items = engine._available_item_activations(
+        instance, combat, view, combat["economy"],
+    )
+    assert all(row["item_ref"] != "item:potion_of_healing" for row in available_items)
+
+
+def test_dropped_equipment_loses_ac_hands_and_activation_while_shaped(monkeypatch) -> None:
+    from src.engine.modules import ruleset_runtime
+
+    engine, instance, rng = _druid_combat(2)
+    monkeypatch.setitem(engine.bundle.entities["item"], "potion_of_healing", {
+        "schema_version": 1, "kind": "item", "id": "potion_of_healing",
+        "source_ref": "test:item:potion_of_healing", "automation_level": "deterministic",
+        "item_type": "potion", "consumable": True,
+        "activation": {
+            "cost": "action", "target": "self",
+            "effect": {"mode": "healing", "healing": "2d4+2"},
+        },
+    })
+    sheet = instance.get_character_sheet("gm")
+    character = sheet["ruleset_character"]
+    character["equipment"]["item_refs"] = [
+        "item:leather_armor", "item:shield", "item:potion_of_healing",
+    ]
+    sheet["inventory"] = [
+        {"item_ref": "item:potion_of_healing", "name": "Potion of Healing", "quantity": 1},
+    ]
+    instance.set_character_sheet("gm", sheet)
+
+    state = ruleset_runtime.state(instance)
+    shaped = engine.resolve_intent(instance, {
+        "intent_id": "drop-1", "type": "form.assume",
+        "expected_version": state["version"], "submitted_by": "gm",
+        "actor_id": "player:gm", "form_ref": "wolf",
+        "equipment_mode": "drop",
+    }, rng([]))
+    assert shaped["ok"] is True, shaped.get("error")
+    engine.apply_batch(instance, shaped["event_batch"])
+
+    view = _view(engine, instance)
+    assert view["equipment_refs"] == []
+    assert view["hands"] == {"left": None, "right": None}
+    # 丢在地上的护甲与盾牌不能计入形态 AC（狼 AC 12 vs 无甲德鲁伊）。
+    unarmored_ac = engine._armor_class_without(
+        character, ["item:leather_armor", "item:shield", "item:potion_of_healing"],
+    )
+    assert view["armor_class"] == max(12, unarmored_ac)
+    combat = ruleset_runtime.state(instance)["combat"]
+    available_items = engine._available_item_activations(
+        instance, combat, view, combat["economy"],
+    )
+    assert all(row["item_ref"] != "item:potion_of_healing" for row in available_items)
+
+    blocked = engine.resolve_intent(instance, {
+        "intent_id": "drop-2", "type": "activate_item",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm",
+        "item_ref": "item:potion_of_healing", "target_id": "player:gm",
+    }, rng([]))
+    assert blocked["ok"] is False
+    assert "dropped" in blocked["error"]

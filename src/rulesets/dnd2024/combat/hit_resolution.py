@@ -95,6 +95,9 @@ class CombatHitResolutionMixin:
             self, instance: Any, combat: dict[str, Any], attacker_id: str,
             target: dict[str, Any], damage_event: dict[str, Any], rng: Any,
         ) -> list[dict[str, Any]]: ...
+        def _multiattack_mark_events(
+            self, actor: dict[str, Any], target: dict[str, Any],
+        ) -> list[dict[str, Any]]: ...
         def _hit_reaction_offer(
             self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
             defender: dict[str, Any], check: dict[str, Any], damage_event: dict[str, Any],
@@ -707,6 +710,11 @@ class CombatHitResolutionMixin:
             instance, combat, attacker_id, target, damage_event, rng,
         )
         events = list(self._submit_hit_damage(damage_event))
+        # Multiattack Defense 只在命中真正落账时立标记（跳过被 Shield/反应
+        # 改判失手的攻击，同时覆盖经由检定窗与伤害窗落地的命中）。
+        events.extend(self._multiattack_mark_events(
+            self._actor_view(instance, combat, attacker_id), target,
+        ))
         events.extend(consequences)
         if damage_event.get("critical"):
             events.extend(

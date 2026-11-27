@@ -1305,7 +1305,7 @@ class CombatResolutionMixin(
                 "before_count": before,
                 "after_count": before + 1,
                 "use_index": before + 1,
-                "feature_kind": "intimidating_presence",
+                "feature_kind": capability.feature_id,
             })
         via_fleet_step = bool(intent.get("via_fleet_step"))
         events.extend(

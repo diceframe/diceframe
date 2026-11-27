@@ -178,7 +178,7 @@ def export_content_pack(
     """
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     plugin_id = (plugin_id or "").strip()
     name = (name or "").strip()
     version = (version or "0.1.0").strip() or "0.1.0"
@@ -198,7 +198,7 @@ def export_content_pack(
         if isinstance(item, dict) and str(item.get("adventure_id") or "").strip()
     ] if isinstance(adventure_refs, list) else []
     if not plugin_id or not name:
-        return {"ok": False, "error": t("webui.services.content_pack_export.id_and_name_required")}
+        return {"ok": False, "error": t("webui.services.content_pack_export.id_and_name_required"), "error_code": "content_pack_export_id_and_name_required"}
 
     files: dict[str, str | bytes] = {}
     has_world = has_rule = has_cards = has_adventures = has_lorebooks = False
@@ -207,7 +207,7 @@ def export_content_pack(
         if canonical_id(plugin_id) != plugin_id:
             raise ValueError
     except ValueError:
-        return {"ok": False, "error": t("webui.services.content_pack_export.pack_id_format")}
+        return {"ok": False, "error": t("webui.services.content_pack_export.pack_id_format"), "error_code": "content_pack_export_pack_id_format"}
     exported_rule_id = _export_resource_id(rule_id, "rule") if rule_id else ""
     exported_world_id = _export_resource_id(world_id, "world") if world_id else ""
     world_default_rule = exported_rule_id
@@ -217,7 +217,7 @@ def export_content_pack(
         lorebook = dependencies.lorebook
         world = lorebook.get_world(world_id) if lorebook else None
         if not world:
-            return {"ok": False, "error": "世界不存在"}
+            return {"ok": False, "error": "世界不存在", "error_code": "world_not_found"}
         if not language:
             pack_locale = normalize_language(str(world.get("language") or "zh-CN"))
 
@@ -243,7 +243,7 @@ def export_content_pack(
                     if packaged:
                         packaged_refs.append(packaged)
                     elif isinstance(rule_scene_image, dict):
-                        return {"ok": False, "error": t("webui.services.content_pack_export.rule_cover_unreadable")}
+                        return {"ok": False, "error": t("webui.services.content_pack_export.rule_cover_unreadable"), "error_code": "content_pack_export_rule_cover_unreadable"}
                 if packaged_refs:
                     # Keep the legacy singular field as the first pool member;
                     # newer readers may use the full list for random defaults.
@@ -296,7 +296,7 @@ def export_content_pack(
                 if packaged:
                     packaged_refs.append(packaged)
                 elif isinstance(world_scene_image, dict):
-                    return {"ok": False, "error": t("webui.services.content_pack_export.world_cover_unreadable")}
+                    return {"ok": False, "error": t("webui.services.content_pack_export.world_cover_unreadable"), "error_code": "content_pack_export_world_cover_unreadable"}
             if packaged_refs:
                 template["scene_image"] = packaged_refs[0]
                 if len(packaged_refs) > 1 or isinstance(template.get("scene_images"), list):
@@ -346,14 +346,14 @@ def export_content_pack(
     if selected_adventures or selected_adventure_refs:
         resolver = dependencies.adventure_resolver
         if resolver is None:
-            return {"ok": False, "error": t("webui.services.content_pack_export.adventure_resolver_disabled")}
+            return {"ok": False, "error": t("webui.services.content_pack_export.adventure_resolver_disabled"), "error_code": "content_pack_export_adventure_resolver_disabled"}
         resolutions = resolver.list_resolutions(pack_locale)
         if selected_adventures and not selected_adventure_refs:
             ambiguous = sorted({adventure_id for adventure_id in selected_adventures if sum(
                 1 for item in resolutions if str(item.bundle.manifest.adventure_id) == adventure_id
             ) > 1})
             if ambiguous:
-                return {"ok": False, "error": t("webui.services.content_pack_export.adventure_source_ambiguous", ambiguous=', '.join(ambiguous))}
+                return {"ok": False, "error": t("webui.services.content_pack_export.adventure_source_ambiguous", ambiguous=', '.join(ambiguous)), "error_code": "content_pack_export_adventure_source_ambiguous"}
         adventure_directories: dict[str, tuple[str, str, str]] = {}
         for resolution in resolutions:
             bundle = resolution.bundle
@@ -372,7 +372,7 @@ def export_content_pack(
             identity = source_ref
             previous = adventure_directories.get(directory)
             if previous is not None and previous != identity:
-                return {"ok": False, "error": t("webui.services.content_pack_export.adventure_directory_conflict", directory=directory)}
+                return {"ok": False, "error": t("webui.services.content_pack_export.adventure_directory_conflict", directory=directory), "error_code": "content_pack_export_adventure_directory_conflict"}
             adventure_directories[directory] = identity
             for path in sorted(bundle.root.rglob("*.json")):
                 relative = path.relative_to(bundle.root).as_posix()
@@ -399,15 +399,15 @@ def export_content_pack(
                 str(item.bundle.manifest.adventure_id) for item in resolutions
             })
         if missing:
-            return {"ok": False, "error": t("webui.services.content_pack_export.adventure_missing", missing=', '.join(missing))}
+            return {"ok": False, "error": t("webui.services.content_pack_export.adventure_missing", missing=', '.join(missing)), "error_code": "content_pack_export_adventure_missing"}
 
     if lorebook_ids:
         if dependencies.lorebook is None:
-            return {"ok": False, "error": t("webui.services.content_pack_export.lorebook_storage_disabled")}
+            return {"ok": False, "error": t("webui.services.content_pack_export.lorebook_storage_disabled"), "error_code": "content_pack_export_lorebook_storage_disabled"}
         books = {str(book.get("id") or ""): book for book in dependencies.lorebook.list_lorebooks()}
         missing = sorted(set(lorebook_ids) - set(books))
         if missing:
-            return {"ok": False, "error": t("webui.services.content_pack_export.lorebook_missing", missing=', '.join(missing))}
+            return {"ok": False, "error": t("webui.services.content_pack_export.lorebook_missing", missing=', '.join(missing)), "error_code": "content_pack_export_lorebook_missing"}
         for book_id in lorebook_ids:
             book = dict(books[book_id])
             book["entries"] = dependencies.lorebook.list_book_entries(book_id)
@@ -420,14 +420,14 @@ def export_content_pack(
             book_path = external_id
             existing = next((path for path in files if path == f"content/lorebooks/{book_path}.json"), None)
             if existing is not None:
-                return {"ok": False, "error": t("webui.services.content_pack_export.lorebook_file_conflict", book_path=book_path)}
+                return {"ok": False, "error": t("webui.services.content_pack_export.lorebook_file_conflict", book_path=book_path), "error_code": "content_pack_export_lorebook_file_conflict"}
             files[f"content/lorebooks/{book_path}.json"] = json.dumps(
                 book, ensure_ascii=False, indent=2,
             )
         has_lorebooks = True
 
     if not (has_world or has_rule or has_cards or has_adventures or has_lorebooks):
-        return {"ok": False, "error": t("webui.services.content_pack_export.nothing_selected")}
+        return {"ok": False, "error": t("webui.services.content_pack_export.nothing_selected"), "error_code": "content_pack_export_nothing_selected"}
 
     has_portraits = any(path.startswith("assets/portraits/") for path in files)
     has_scene_images = any(path.startswith("assets/scenes/") for path in files)

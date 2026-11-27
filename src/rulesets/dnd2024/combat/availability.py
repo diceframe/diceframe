@@ -100,6 +100,9 @@ class CombatAvailabilityMixin:
         def _feature_used_this_turn(
             combat: dict[str, Any], actor_id: str, feature_id: str,
         ) -> bool: ...
+        def _form_item_mode(
+            self, instance: Any, actor_id: str, item_ref: str,
+        ) -> str: ...
         def _hostile_targets(
             self, instance: Any, combat: dict[str, Any], actor_id: str,
         ) -> list[dict[str, Any]]: ...
@@ -694,6 +697,8 @@ class CombatAvailabilityMixin:
         items: list[dict[str, Any]] = []
         for item_ref, count in sorted(owned.items()):
             if count < 1:
+                continue
+            if self._form_item_mode(instance, actor["actor_id"], item_ref) in {"merge", "drop"}:
                 continue
             item = self.bundle.get("item", item_ref.removeprefix("item:"))
             if not isinstance(item, dict):

@@ -220,7 +220,7 @@ def _parse_gm_resource_change(
         raw_delta = match.groupdict().get("delta")
         delta = int(raw_delta) if raw_delta else sign * int(match.group("amount"))
     if delta == 0:
-        return {"error": "修正值不能为 0"}
+        return {"error": "修正值不能为 0", "error_code": "delta_zero"}
 
     target_source = currency_match or match
     user_id, error = _resolve_gm_command_target(
@@ -240,7 +240,7 @@ def _parse_gm_resource_change(
         resource_key not in allowed_resources
         and get_resource(character_sheet, resource_key) is None
     ):
-        return {"error": t("webui.services.game_master.resource_missing_in_rule", resource_alias=resource_alias)}
+        return {"error": t("webui.services.game_master.resource_missing_in_rule", resource_alias=resource_alias), "error_code": "game_master_resource_missing_in_rule"}
     before_resource = (
         None
         if resource_key == "currency"
@@ -410,7 +410,7 @@ class GameMasterService:
     async def rollback_round(self, game_key: str) -> dict[str, Any]:
         instance = self._instance(game_key)
         if not instance:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         async with instance.authoritative_write() as write_entered:
             if not write_entered:
                 return self._rewrite_conflict()
@@ -421,7 +421,7 @@ class GameMasterService:
     async def _rollback_round_authority(self, instance: Any) -> dict[str, Any]:
         round_number = await instance.rollback_last_round()
         if round_number is None:
-            return {"ok": False, "error": t("webui.services.game_master.no_previous_round")}
+            return {"ok": False, "error": t("webui.services.game_master.no_previous_round"), "error_code": "game_master_no_previous_round"}
         record_health_event(
             instance,
             component="gm_control",
@@ -450,9 +450,9 @@ class GameMasterService:
 
         instance = self._instance(game_key)
         if not instance:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         if self._dependencies.generate_recap is None:
-            return {"ok": False, "error": t("webui.services.game_master.system_not_ready")}
+            return {"ok": False, "error": t("webui.services.game_master.system_not_ready"), "error_code": "game_master_system_not_ready"}
         result = await self._dependencies.generate_recap(instance)
         if result.get("ok"):
             await self._dependencies.save_instance(instance)
@@ -463,7 +463,7 @@ class GameMasterService:
     ) -> dict[str, Any]:
         instance = self._instance(game_key)
         if not instance:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         async with instance.authoritative_write() as write_entered:
             if not write_entered:
                 return self._rewrite_conflict()
@@ -478,7 +478,7 @@ class GameMasterService:
         if mode == "rollback":
             return await self._rollback_round_authority(instance)
         if not command:
-            return {"ok": False, "error": "请输入 GM 指令"}
+            return {"ok": False, "error": "请输入 GM 指令", "error_code": "gm_command_empty"}
 
         rule = self._dependencies.load_rule(instance)
         runtime = None
@@ -532,7 +532,7 @@ class GameMasterService:
                 return {"ok": False, "error": revive["error"]}
             character_sheet = instance.get_character_sheet(revive["uid"])
             if not revive_character(character_sheet, revive["method"]):
-                return {"ok": False, "error": "该角色当前并未死亡"}
+                return {"ok": False, "error": "该角色当前并未死亡", "error_code": "character_not_dead"}
             instance.set_character_sheet(revive["uid"], character_sheet)
             self._sync_revived_character(instance, str(revive["uid"]))
             await self._dependencies.save_instance(instance)
@@ -588,7 +588,7 @@ class GameMasterService:
     ) -> dict[str, Any]:
         instance = self._instance(game_key)
         if not instance:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         async with instance.authoritative_write() as write_entered:
             if not write_entered:
                 return self._rewrite_conflict()
@@ -602,9 +602,9 @@ class GameMasterService:
         user_id = (user_id or "").strip()
         text = (text or "").strip()
         if user_id not in instance.players:
-            return {"ok": False, "error": "目标玩家不存在"}
+            return {"ok": False, "error": "目标玩家不存在", "error_code": "player_not_found"}
         if not text:
-            return {"ok": False, "error": t("webui.services.game_master.whisper_required")}
+            return {"ok": False, "error": t("webui.services.game_master.whisper_required"), "error_code": "game_master_whisper_required"}
         instance.append_private_message(user_id, {
             "round": progression_state.round_value(instance),
             "text": text,

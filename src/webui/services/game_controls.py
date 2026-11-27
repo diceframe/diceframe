@@ -89,9 +89,9 @@ class GameControlService:
     ) -> dict[str, Any]:
         instance = self._instance(game_key)
         if not instance:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         if user_id not in instance.players:
-            return {"ok": False, "error": "玩家不存在"}
+            return {"ok": False, "error": "玩家不存在", "error_code": "player_not_found"}
         # 暂离是否把角色交给服务器 AI，由房间设置决定；默认 pause 保持旧行为。
         # 安全边界复核、在场状态与控制权转换由聚合在**一个** transaction 内完成，
         # 因此外部永远观察不到「已暂离但仍由真人控制」这种没人负责的中间态。
@@ -141,9 +141,9 @@ class GameControlService:
 
         instance = self._instance(game_key)
         if not instance:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         if user_id not in instance.players:
-            return {"ok": False, "error": "玩家不存在"}
+            return {"ok": False, "error": "玩家不存在", "error_code": "player_not_found"}
         if mode not in ("ai", "human"):
             return {
                 "ok": False,
@@ -182,7 +182,7 @@ class GameControlService:
 
         instance = self._instance(game_key)
         if not instance:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         try:
             value = set_away_control_policy(instance, policy)
         except PlayerControlError:
@@ -199,7 +199,7 @@ class GameControlService:
     ) -> dict[str, Any]:
         instance = self._instance(game_key)
         if not instance:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         instance.set_player_access(open_access)
         await self._dependencies.save_instance(instance)
         return {
@@ -233,11 +233,11 @@ class GameControlService:
     def roll_for_game(self, game_key: str) -> dict[str, Any]:
         instance = self._instance(game_key)
         if not instance:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         rule = self._dependencies.load_rule(instance)
         dice_system = str(rule.dice_system if rule else "d20").lower()
         if dice_system == "none":
-            return {"ok": False, "error": t("webui.services.game_controls.rule_needs_no_dice")}
+            return {"ok": False, "error": t("webui.services.game_controls.rule_needs_no_dice"), "error_code": "game_controls_rule_needs_no_dice"}
         formula = "d100" if dice_system == "d100" else "d20"
         result = roll(formula)
         if dice_system == "d20":
@@ -263,7 +263,7 @@ class GameControlService:
     ) -> dict[str, Any]:
         instance = self._instance(game_key)
         if not instance:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         async with instance.authoritative_write() as write_entered:
             if not write_entered:
                 return {
@@ -367,7 +367,7 @@ class GameControlService:
     ) -> dict[str, Any]:
         instance = self._instance(game_key)
         if not instance:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         instance.set_solo_mode(solo)
         await self._dependencies.save_instance(instance)
         return {
@@ -381,7 +381,7 @@ class GameControlService:
     ) -> dict[str, Any]:
         instance = self._instance(game_key)
         if not instance:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         try:
             instance.set_narrative_perspective(perspective)
         except ValueError as exc:
@@ -396,9 +396,9 @@ class GameControlService:
         """当前对局 GM 叙事风格覆盖：None=恢复跟随世界，dict=显式覆盖。"""
         instance = self._instance(game_key)
         if not instance:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         if raw is not None and not isinstance(raw, dict):
-            return {"ok": False, "error": t("webui.services.game_controls.gm_style_invalid")}
+            return {"ok": False, "error": t("webui.services.game_controls.gm_style_invalid"), "error_code": "game_controls_gm_style_invalid"}
         try:
             instance.set_gm_style_override(raw)
         except ValueError as exc:

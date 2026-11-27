@@ -85,7 +85,10 @@ def _game(deps: RulesetToolDependencies, args: dict, owner: str) -> tuple[Any, A
 
 
 def _ruleset_state(game: Any) -> dict:
-    return (getattr(game, 'modules', {}) or {}).get('ruleset_runtime') or {}
+    modules = getattr(game, 'modules', {}) or {}
+    slot = modules.get('ruleset_runtime') if isinstance(modules, dict) else None
+    state = slot.get('state') if isinstance(slot, dict) else None
+    return state if isinstance(state, dict) else {}
 
 
 def _cover_targets(game: Any) -> list[dict]:
@@ -134,7 +137,8 @@ def ruleset_tools(
 ) -> tuple[ApplicationAction, ...]:
     """Every agent-facing tool owned by one ruleset."""
 
-    if deps.submit_ruleset_intent is None:
+    submit_ruleset_intent = deps.submit_ruleset_intent
+    if submit_ruleset_intent is None:
         return ()
 
     domain = ruleset_domain(runtime_id)
@@ -151,6 +155,12 @@ def ruleset_tools(
         game, viewer = _game(deps, args, owner)
         if args['run_id'] != game.run_id:
             raise ValueError('Run changed; refresh first')
+        if not bool(getattr(viewer, 'is_gm', False)):
+            return {
+                'ok': False,
+                'error_code': 'FORBIDDEN',
+                'error': 'Only the GM can declare cover',
+            }
         # 兜底：目标或阶段不对时，把"现在能填什么"直接回给模型，而不是让它
         # 对着一条校验错误猜 id 的写法。两条都在提交意图之前判，所以失败的
         # 调用不会留下任何事件。
@@ -158,7 +168,7 @@ def ruleset_tools(
         if str(combat.get('status') or '') != 'active':
             return {
                 'ok': False,
-                'code': 'COMBAT_NOT_ACTIVE',
+                'error_code': 'COMBAT_NOT_ACTIVE',
                 'error': 'Cover can only be declared while combat is active',
             }
         targets = _cover_targets(game)
@@ -166,7 +176,7 @@ def ruleset_tools(
         if target_id not in {row['actor_id'] for row in targets}:
             return {
                 'ok': False,
-                'code': 'UNKNOWN_TARGET',
+                'error_code': 'UNKNOWN_TARGET',
                 'error': f'{target_id!r} is not a player or enemy in this game',
                 'targets': targets,
             }
@@ -179,8 +189,8 @@ def ruleset_tools(
             'level': str(args['level']),
         }
         return await _call(
-            deps.submit_ruleset_intent, args['game_key'],
-            getattr(viewer, 'uid', ''), bool(getattr(viewer, 'is_gm', False)), intent,
+            submit_ruleset_intent, args['game_key'],
+            getattr(viewer, 'uid', ''), True, intent,
         )
 
     return (

@@ -58,17 +58,17 @@ def save_standing_portrait_upload(
     portraits_dir: Path | None, file_data: str, file_name: str = "",
 ) -> dict[str, Any]:
     if not isinstance(file_data, str) or not isinstance(file_name, str):
-        return {"ok": False, "error": t("webui.services.standing_portraits.file_data_invalid")}
+        return {"ok": False, "error": t("webui.services.standing_portraits.file_data_invalid"), "error_code": "standing_portraits_file_data_invalid"}
     if not file_data:
-        return {"ok": False, "error": t("webui.services.standing_portraits.file_missing")}
+        return {"ok": False, "error": t("webui.services.standing_portraits.file_missing"), "error_code": "standing_portraits_file_missing"}
     if len(file_data) > (MAX_UPLOAD_BYTES * 4 // 3) + 32:
-        return {"ok": False, "error": t("webui.services.standing_portraits.file_too_large")}
+        return {"ok": False, "error": t("webui.services.standing_portraits.file_too_large"), "error_code": "standing_portraits_file_too_large"}
     try:
         raw = base64.b64decode(file_data, validate=True)
     except (TypeError, ValueError, binascii.Error):
-        return {"ok": False, "error": t("webui.services.standing_portraits.file_data_invalid")}
+        return {"ok": False, "error": t("webui.services.standing_portraits.file_data_invalid"), "error_code": "standing_portraits_file_data_invalid"}
     if not raw or len(raw) > MAX_UPLOAD_BYTES:
-        return {"ok": False, "error": t("webui.services.standing_portraits.file_too_large")}
+        return {"ok": False, "error": t("webui.services.standing_portraits.file_too_large"), "error_code": "standing_portraits_file_too_large"}
     try:
         payload = _normalized_standing_portrait(raw)
     except ValueError as exc:
@@ -141,14 +141,14 @@ class StandingPortraitService:
 
     def delete(self, asset_id: str) -> dict[str, Any]:
         if not ASSET_ID_RE.fullmatch(str(asset_id or "")):
-            return {"ok": False, "error": t("webui.services.standing_portraits.id_invalid")}
+            return {"ok": False, "error": t("webui.services.standing_portraits.id_invalid"), "error_code": "standing_portraits_id_invalid"}
         path = self._portraits_dir / f"{asset_id}.webp"
         if not path.is_file():
-            return {"ok": False, "error": t("webui.services.standing_portraits.missing")}
+            return {"ok": False, "error": t("webui.services.standing_portraits.missing"), "error_code": "standing_portraits_missing"}
         if self._is_referenced is not None and self._is_referenced(asset_id):
-            return {"ok": False, "error": t("webui.services.standing_portraits.still_referenced")}
+            return {"ok": False, "error": t("webui.services.standing_portraits.still_referenced"), "error_code": "standing_portraits_still_referenced"}
         try:
             path.unlink()
         except OSError:
-            return {"ok": False, "error": t("webui.services.standing_portraits.delete_failed")}
+            return {"ok": False, "error": t("webui.services.standing_portraits.delete_failed"), "error_code": "standing_portraits_delete_failed"}
         return {"ok": True}

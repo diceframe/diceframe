@@ -256,22 +256,29 @@ class CombatValidationFormsMixin:
             return
         raise CombatIntentError("wild_resurgence direction is not supported")
 
-    def _item_is_merged_in_form(
+    def _form_item_mode(
         self, instance: Any, actor_id: str, item_ref: str,
-    ) -> bool:
+    ) -> str:
+        """The active shape's mode for ``item_ref``, or ``""`` when not shaped."""
+
         kind, raw_id = _actor_kind(actor_id)
         if kind != "player":
-            return False
+            return ""
         character = _canonical(instance.get_character_sheet(raw_id))
         forms = character.get("forms")
         active = forms.get("active") if isinstance(forms, dict) else None
         if not isinstance(active, dict):
-            return False
+            return ""
         try:
             state = FormState.from_payload(active)
         except FormStateError:  # pragma: no cover - reducer guarantees the shape
-            return False
-        return mode_for(state, str(item_ref)) == "merge"
+            return ""
+        return mode_for(state, str(item_ref))
+
+    def _item_is_merged_in_form(
+        self, instance: Any, actor_id: str, item_ref: str,
+    ) -> bool:
+        return self._form_item_mode(instance, actor_id, item_ref) == "merge"
 
     def _origin_position(
         self, intent: dict[str, Any], combat: dict[str, Any], actor_id: str, limit: int,

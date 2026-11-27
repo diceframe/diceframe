@@ -17,7 +17,12 @@ from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.primitives import ABILITY_IDS
 from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
 
-from .models import ClassFeatureDefinition, ClassFeatureError, Dnd2024ClassFeatureCatalog
+from .models import (
+    ClassFeatureDefinition,
+    ClassFeatureError,
+    Dnd2024ClassFeatureCatalog,
+    FeatureCapability,
+)
 from .resources import FEATURE_USAGE_SCOPES, Dnd2024ClassResourceCatalog
 
 
@@ -138,6 +143,7 @@ def validate_declarations(
 ) -> None:
     """Fail closed when a declared parameter has no backing bundle table."""
 
+    _validate_capability_ids_are_unique(catalog, bundle)
     if progression_catalog is None:  # pragma: no cover - guarded by ``available``
         return
     # 循环外取一次。``LoadedRulesetBundle.get`` 返回的是 deepcopy，放进按特性
@@ -1375,3 +1381,44 @@ def validate_mark_parameters(definition: ClassFeatureDefinition) -> None:
                 f"{feature_id}.mark_damage_die must be one of "
                 f"{sorted(_MARK_DAMAGE_DICE)}"
             )
+
+
+def _validate_capability_ids_are_unique(
+    catalog: Dnd2024ClassFeatureCatalog, bundle: LoadedRulesetBundle,
+) -> None:
+    """One capability id identifies one (grantor, capability) pair, globally.
+
+    Combat declares a capability by id alone, so two grantors sharing an id would
+    let the forgery gate resolve one declaration while availability priced the
+    other.  Feats made this reachable: until they could grant capabilities, the
+    id space was class features only.
+    """
+
+    from .feat_models import FeatDefinitionError, load_feat_definitions
+
+    try:
+        feat_definitions = load_feat_definitions(bundle)
+    except FeatDefinitionError:
+        # 专长声明本身非法时，报错应由真正消费它的组件给出（升级引擎会把它
+        # 转成 ProgressionCatalogError）。这里只问"能力 id 是否唯一"，不该
+        # 抢在前面用另一种错误类型回答同一个问题。
+        # 但不能直接 return：下面还要查职业特性之间的重名，一条坏专长不该
+        # 让那项检查静默消失。
+        feat_definitions = {}
+
+    seen: dict[str, str] = {}
+
+    def claim(owner_id: str, capabilities: tuple[FeatureCapability, ...]) -> None:
+        for capability in capabilities:
+            previous = seen.get(capability.id)
+            if previous is not None:
+                raise ClassFeatureError(
+                    f"capability id {capability.id!r} is declared by both "
+                    f"{previous} and {owner_id}; combat names it by id alone"
+                )
+            seen[capability.id] = owner_id
+
+    for definition in catalog.features_by_key.values():
+        claim(definition.id, definition.capabilities)
+    for feat_definition in feat_definitions.values():
+        claim(feat_definition.id, feat_definition.capabilities)
