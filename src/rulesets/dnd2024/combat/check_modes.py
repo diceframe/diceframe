@@ -6,6 +6,8 @@ from typing import Any
 
 from src.engine.modules.check_modes import scoped
 
+from .obscurement import SENSE_KINDS
+
 
 def context_id(engine: Any, instance: Any) -> str:
     combat = ruleset_runtime.state(instance).get("combat", {})
@@ -221,13 +223,18 @@ def sense_declarations(engine: Any, observer: dict) -> list[dict[str, Any]]:
                     "code": code, "range_ft": range_ft, "source": "statblock",
                 })
     character = engine._feature_character(observer)
-    range_ft = int(engine.features.feature_value(
-        character, "feral_senses", "blindsight_range_ft", 0,
-    ) or 0)
-    if range_ft > 0:
-        rows.append({
-            "code": "blindsight", "range_ft": range_ft, "source": "feral_senses",
-        })
+    # 特性给的感官按参数名认：``<code>_range_ft``。这样加一条感官（Witch Sight
+    # 之后还会有）只改数据，不用在 combat 里写下这条特性的名字——GAP-43 的
+    # 耦合守卫盯的就是这件事。
+    for definition in engine.features.features_for(character):
+        for code in SENSE_KINDS:
+            range_ft = definition.parameters.get(f"{code}_range_ft")
+            if isinstance(range_ft, bool) or not isinstance(range_ft, int):
+                continue
+            if range_ft > 0:
+                rows.append({
+                    "code": code, "range_ft": range_ft, "source": definition.id,
+                })
     return rows
 
 
