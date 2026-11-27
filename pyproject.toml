@@ -76,6 +76,7 @@ files = [
     "src/plugin_host/contracts.py",
     "src/plugin_host/descriptors.py",
     "src/plugin_host/host.py",
+    "src/plugin_host/install_journal.py",
     "src/plugin_host/manifest_validation.py",
     "src/plugin_host/models.py",
     "src/plugin_host/package_io.py",

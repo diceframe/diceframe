@@ -4986,6 +4986,7 @@ Primary boundary:
 ```text
 src/plugin_host/
 ├─ host.py
+├─ install_journal.py
 ├─ manifest_validation.py
 ├─ package_io.py
 ├─ support.py
@@ -5004,6 +5005,7 @@ loading a runtime or publishing a plugin. `policy.py` still defines and infers p
 `package_io.py` owns ZIP packing and extraction, package-root lookup, and atomic JSON writes.
 `PluginHost.package_files` remains the public entry point; `host.py` still owns installation,
 publication, recovery, and rollback.
+`install_journal.py` owns the install journals and their crash recovery; the publish lock and the install transaction stay in `host.py`.
 
 ---
 
