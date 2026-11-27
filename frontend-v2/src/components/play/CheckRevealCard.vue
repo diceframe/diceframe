@@ -43,7 +43,8 @@ watch(revealed, (value, previous) => {
   if (trayTimer !== undefined) window.clearTimeout(trayTimer)
   recentReveal.value = value && !previous
   // Only live reveals reach the DF Agent avatar; history renders revealed.
-  if (recentReveal.value) reportAssistantReaction(status.value)
+  // An unknown verdict has no outcome to react to.
+  if (recentReveal.value && status.value !== 'unknown') reportAssistantReaction(status.value)
   // Keep the tray expanded after a live reveal.  The old timeout made the
   // result disappear again a few seconds after the animation, which is easy
   // to miss during play.  `trayExpanded` remains a user-controlled opt-out:
