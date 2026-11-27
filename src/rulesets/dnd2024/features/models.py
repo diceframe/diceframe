@@ -318,8 +318,8 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
             f"{feature_id}.choice.count must be 1 for a feature option choice"
         )
     raw_refs = raw.get("enabled_options")
-    if raw_refs is None and kind == "skill_proficiency":
-        # 空清单 = 技能目录全集；Expertise 只按"已有熟练"筛选，不点名具体技能。
+    if raw_refs is None and kind in {"skill_proficiency", "language"}:
+        # 空清单 = 该目录的可选全集：技能按"已有熟练"再筛，语言按 rarity 再筛。
         raw_refs = []
     if not isinstance(raw_refs, list):
         raise ClassFeatureError(
@@ -436,6 +436,10 @@ def _validate_feature_choices(
         str(entity.get("id")) for entity in bundle.list("skill")
         if isinstance(entity, Mapping)
     }
+    language_ids = {
+        str(entity.get("id")) for entity in bundle.list("language")
+        if isinstance(entity, Mapping)
+    }
     for definition in features:
         choice = definition.choice
         if choice is None:
@@ -447,6 +451,21 @@ def _validate_feature_choices(
                         f"{definition.id}.choice references an undeclared skill: {ref}"
                     )
             pool = len(choice.enabled_options) if choice.enabled_options else len(skill_ids)
+            if choice.count > pool:
+                raise ClassFeatureError(
+                    f"{definition.id}.choice.count exceeds the {choice.category} pool"
+                )
+            continue
+        if choice.kind == "language":
+            for ref in choice.enabled_options:
+                if ref[len("language:"):] not in language_ids:
+                    raise ClassFeatureError(
+                        f"{definition.id}.choice references an undeclared language: {ref}"
+                    )
+            pool = (
+                len(choice.enabled_options) if choice.enabled_options
+                else len(language_ids)
+            )
             if choice.count > pool:
                 raise ClassFeatureError(
                     f"{definition.id}.choice.count exceeds the {choice.category} pool"

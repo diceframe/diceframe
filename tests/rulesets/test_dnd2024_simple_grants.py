@@ -8,6 +8,7 @@ once those features land.
 from __future__ import annotations
 
 from src.rulesets.dnd2024.character.builder import Dnd2024CharacterBuilder
+from src.rulesets.dnd2024.features.resolver import Dnd2024ClassFeatureResolver
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 
 
@@ -133,3 +134,124 @@ def test_the_combat_actor_view_does_not_carry_languages() -> None:
 
     source = inspect.getsource(CombatViewMixin._player_view)
     assert "language" not in source
+
+
+# --- Feature-granted languages (Druidic / Thieves' Cant) -------------------
+
+def _draft_for(runtime: Dnd2024Runtime, class_ref: str, skills: list[str], **over) -> dict:
+    draft = {
+        "locale": "en",
+        "name": "Language Test",
+        "level": 1,
+        "ability_method": "standard_array",
+        "base_abilities": {
+            "str": 12, "dex": 14, "con": 13, "int": 10, "wis": 15, "cha": 8,
+        },
+        "class_ref": class_ref,
+        "species_ref": "species:human",
+        "background_ref": "background:acolyte",
+        "class_skill_refs": skills,
+        "alignment": "neutral",
+        "language_refs": ["language:common", "language:dwarvish", "language:elvish"],
+    }
+    choices = runtime.builder_choices(None, draft)
+    ability_refs = choices["background_ability_refs"]
+    draft["background_ability_bonuses"] = {
+        ability_refs[0].split(":", 1)[1]: 2,
+        ability_refs[1].split(":", 1)[1]: 1,
+    }
+    draft["species_size"] = (choices["species_sizes"] or [""])[0]
+    draft["species_skill_refs"] = [
+        item["ref"] for item in choices["species_skills"]
+    ][: choices["species_skill_count"]]
+    draft["species_feat_refs"] = [
+        item["ref"] for item in choices["species_feats"]
+    ][: choices["species_feat_count"]]
+    draft["class_tool_refs"] = [
+        item["ref"] for item in choices["class_tools"]
+    ][: choices["class_tool_count"]]
+    spells = choices.get("class_spells") or {}
+    if spells.get("requirements", {}).get("cantrip_count") or spells.get("requirements"):
+        rec = choices.get("recommended_class_spells") or {}
+        draft["class_spell_choices"] = {
+            "cantrip_ids": list(rec.get("cantrip_ids") or []),
+            "prepared_spell_ids": list(rec.get("prepared_spell_ids") or []),
+        }
+    draft["equipment_package_ref"] = choices["equipment_packages"][0]["ref"]
+    draft["background_equipment_package_ref"] = (
+        choices["background_equipment_packages"][0]["ref"]
+    )
+    draft["feat_choice_answers"] = {
+        feat["feat_ref"]: {
+            spec["id"]: [o["value"] for o in spec["options"]][: int(spec["count"])]
+            for spec in feat["specs"]
+        }
+        for feat in choices["feat_choices"]
+    }
+    draft.update(over)
+    return draft
+
+
+def _canonical(runtime: Dnd2024Runtime, draft: dict) -> dict:
+    return runtime.finalize_character(None, draft)["ruleset_character"]
+
+
+def test_a_druid_knows_druidic_and_always_prepares_speak_with_animals() -> None:
+    runtime = Dnd2024Runtime()
+    draft = _draft_for(runtime, "class:druid", ["skill:nature", "skill:perception"])
+
+    canonical = _canonical(runtime, draft)
+
+    assert "language:druidic" in canonical["proficiencies"]["language_refs"]
+    # 常备法术是特性边界的投影，不是 canonical 的一个子树。
+    rows = Dnd2024ClassFeatureResolver(runtime.load_bundle()).spell_grant_rows(
+        canonical,
+    )
+    prepared = [str(row.get("spell_ref") or "") for row in rows]
+    assert any("speak_with_animals" in ref for ref in prepared), prepared
+
+
+def test_a_rogue_knows_thieves_cant_without_spending_its_three_picks() -> None:
+    runtime = Dnd2024Runtime()
+    draft = _draft_for(
+        runtime, "class:rogue",
+        ["skill:acrobatics", "skill:stealth", "skill:deception", "skill:persuasion"],
+        feature_choices=[{
+            "owner": "class:rogue", "feature_id": "thieves_cant",
+            "choice_id": "thieves_cant_language", "selected_refs": ["language:gnomish"],
+        }],
+    )
+
+    canonical = _canonical(runtime, draft)
+    refs = canonical["proficiencies"]["language_refs"]
+
+    # 固定授予 + 槽内选择都落在同一个 canonical 字段。
+    assert "language:thieves_cant" in refs
+    assert "language:gnomish" in refs
+    assert refs.count("language:gnomish") == 1
+
+
+def test_the_thieves_cant_slot_rejects_a_rare_language() -> None:
+    runtime = Dnd2024Runtime()
+    draft = _draft_for(
+        runtime, "class:rogue",
+        ["skill:acrobatics", "skill:stealth", "skill:deception", "skill:persuasion"],
+        feature_choices=[{
+            "owner": "class:rogue", "feature_id": "thieves_cant",
+            "choice_id": "thieves_cant_language", "selected_refs": ["language:abyssal"],
+        }],
+    )
+
+    errors = runtime.validate_character(None, draft)
+
+    assert any("selectable language" in line for line in errors)
+
+
+def test_a_fighter_learns_neither_secret_language() -> None:
+    runtime = Dnd2024Runtime()
+    draft = _draft_for(runtime, "class:fighter", ["skill:acrobatics", "skill:athletics"])
+
+    refs = _canonical(runtime, draft)["proficiencies"]["language_refs"]
+
+    assert "language:druidic" not in refs
+    assert "language:thieves_cant" not in refs

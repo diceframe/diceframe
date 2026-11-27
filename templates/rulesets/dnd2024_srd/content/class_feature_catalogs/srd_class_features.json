@@ -1512,6 +1512,22 @@
       "source_ref": "srd-5.2.1:p61:rogue-features",
       "features": [
         {
+          "id": "thieves_cant",
+          "owner": "class:rogue",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p62:thieves-cant",
+          "summary": "You know Thieves' Cant and one other language of your choice, which you choose from the language tables in Character Creation.",
+          "parameters": {
+            "language_grants": ["language:thieves_cant"]
+          },
+          "choice": {
+            "id": "thieves_cant_language",
+            "kind": "language",
+            "category": "language",
+            "count": 1
+          }
+        },
+        {
           "id": "expertise",
           "minimum_level": 1,
           "source_ref": "srd-5.2.1:p62:rogue-expertise",
@@ -2845,6 +2861,17 @@
     "druid": {
       "source_ref": "srd-5.2.1:p46:druid-features",
       "features": [
+        {
+          "id": "druidic",
+          "owner": "class:druid",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p42:druidic",
+          "summary": "You know Druidic, the secret language of Druids. You always have the Speak with Animals spell prepared. You can use Druidic to leave hidden messages: creatures that know Druidic automatically spot such a message, and others can tell a message is present with a successful DC 15 Intelligence (Investigation) check but cannot decipher it without magic.",
+          "parameters": {
+            "language_grants": ["language:druidic"],
+            "always_prepared": ["1:spell:speak_with_animals"]
+          }
+        },
         {
           "id": "natural_recovery",
           "owner": "subclass:circle_of_the_land",
