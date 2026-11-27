@@ -81,6 +81,32 @@ describe('CheckRevealCard', () => {
     expect(wrapper.find('details').text()).toContain('d20=14 + 3 = 17 / DC 15')
   })
 
+  it('shows the frozen server label when a check carries no verdict code', () => {
+    // 自定义规则 runtime / 旧存档：没有 code 时不猜成败，原样显示后端文本。
+    const legacy = {
+      check_id: 'legacy', actor_uid: 'p1', actor_name: '阿岚', label: 'Barely',
+      dice: 'runtime', roll: 7, verdict: 'Barely',
+    }
+    const wrapper = mount(CheckRevealCard, { global: { plugins: [i18n] }, props: { check: legacy } })
+    expect(wrapper.get('.check-verdict').text()).toBe('Barely')
+    expect(wrapper.classes()).toContain('unknown')
+    expect(wrapper.classes()).not.toContain('success')
+    expect(wrapper.classes()).not.toContain('failure')
+  })
+
+  it('renders the verdict from its code in the interface language', async () => {
+    const coded = {
+      check_id: 'coded', actor_uid: 'p1', actor_name: 'Aster', label: 'Stealth',
+      dice: 'd20', roll: 3, total: 3, dc: 15, verdict: '失败', verdict_code: 'critical_failure',
+    }
+    const wrapper = mount(CheckRevealCard, { global: { plugins: [i18n] }, props: { check: coded } })
+    expect(wrapper.classes()).toContain('fumble')
+    expect(wrapper.get('.check-verdict').text()).toBe(i18n.global.t('criticalFailure'))
+    i18n.global.locale.value = 'en'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.check-verdict').text()).toBe(i18n.global.t('criticalFailure'))
+  })
+
   it('explains which channel each situational adjustment came from', () => {
     const wrapper = mount(CheckRevealCard, {
       global: { plugins: [i18n] },

@@ -78,23 +78,27 @@ watch(pendingClickReveal, (pending) => {
   else revealed.value = true
 })
 
-const status = computed<'critical' | 'fumble' | 'success' | 'failure'>(() => {
+const status = computed<'critical' | 'fumble' | 'success' | 'failure' | 'unknown'>(() => {
   const code = verdictCodeOf(props.check)
   if (code === 'critical_success') return 'critical'
   if (code === 'critical_failure') return 'fumble'
   if (code) return isSuccessVerdict(code) ? 'success' : 'failure'
-  // No code (custom runtime or a legacy save): fall back to the stored flags,
-  // never to the wording of the label.
+  // No code (custom ruleset runtime or a pre-code save): the stored flags are
+  // the only structure left, and the label itself is shown verbatim below.
+  // Guessing from its wording — or defaulting to "success" — would be a lie.
   if (props.check.is_critical) return 'critical'
   if (props.check.is_fumble) return 'fumble'
-  return 'success'
+  return 'unknown'
 })
-const statusLabel = computed(() => ({
-  critical: t('criticalSuccess'),
-  fumble: t('criticalFailure'),
-  success: t('checkSuccess'),
-  failure: t('checkFailure'),
-})[status.value])
+const statusLabel = computed(() => (status.value === 'unknown'
+  ? String(props.check.verdict || '')
+  : {
+      critical: t('criticalSuccess'),
+      fumble: t('criticalFailure'),
+      success: t('checkSuccess'),
+      failure: t('checkFailure'),
+      unknown: '',
+    }[status.value]))
 const math = computed(() => {
   const check = props.check
   if (typeof check.threshold === 'number') {
