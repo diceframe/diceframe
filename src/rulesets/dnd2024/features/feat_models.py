@@ -10,16 +10,23 @@ This module closes that gap for the fields that have consumers today:
 
 * ``parameters`` -- validated against ``parameter_registry``;
 * ``passive_effects`` -- the closed kinds that derivation reads;
+* ``requires`` -- the printed prerequisite line, evaluated by exactly one
+  function (``feat_requirements.feat_unavailable_reasons``);
 * ``choice`` -- the same ``FeatureChoice`` subclass features use, so a skill
   choice means the same thing whichever side declares it.
 
-Two groups are deliberately *not* unified here, and are carried verbatim in
+Two shapes are deliberately *not* unified here, and are carried verbatim in
 ``legacy`` so nothing silently disappears:
 
-* ``ability_choice`` / ``any_ability_minimum`` / ``requires_feature`` /
-  ``requires_spellcasting`` -- FD2 turns these into a declared ``requires`` list;
+* ``ability_choice`` -- an ability increase is a choice, not a bag entry; it
+  moves to ``choice`` in its own slice;
 * ``choice_specs`` -- the spell-grant shape belongs to P4 (generalising spell
   grants), which is also where Magic Initiate's dedicated module retires.
+
+The three former prerequisite keys (``any_ability_minimum`` /
+``requires_feature`` / ``requires_spellcasting``) are not in the bag at all:
+they are rejected with a message pointing at ``requires``, because accepting
+them would silently strip a feat of its prerequisites.
 
 ``legacy`` is a bounded bag: the loader rejects any key outside a fixed set, so
 it can shrink but not quietly grow into "the model again, with no validation".
@@ -37,6 +44,11 @@ from src.rulesets.dnd2024.features.models import (
     FeatureChoice,
     parse_capability,
     parse_feature_choice,
+)
+from src.rulesets.dnd2024.features.feat_requirements import (
+    FeatRequirement,
+    FeatRequirementError,
+    parse_requirements,
 )
 from src.rulesets.dnd2024.features.parameter_registry import (
     PARAMETERS,
@@ -60,6 +72,8 @@ FEAT_FIELDS = frozenset({
     "passive_effects",
     "capabilities",
     "choice",
+    # 先决：印刷在专长卡上的 Prerequisite 行，语义见 feat_requirements。
+    "requires",
     # Display names live on the entity so a card can render without a locale
     # lookup; origin feats have always carried them.
     "labels",
@@ -68,14 +82,20 @@ FEAT_FIELDS = frozenset({
     "description",
 })
 
-#: Fields still read by their old name.  FD2 empties the first four, P4 empties
-#: ``choice_specs``.  Until then they are carried, not interpreted.
+#: Fields still read by their old name.  P4 empties ``choice_specs``; the
+#: ability increase is a choice and moves to ``choice`` separately.
 LEGACY_FEAT_FIELDS = frozenset({
     "ability_choice",
+    "choice_specs",
+})
+
+#: Prerequisite fields that ``requires`` replaced.  They are not accepted in any
+#: form: a bundle still using them would otherwise lose its prerequisites
+#: silently, and "the feat became freely selectable" is not a loud failure.
+RETIRED_PREREQUISITE_FIELDS = frozenset({
     "any_ability_minimum",
     "requires_feature",
     "requires_spellcasting",
-    "choice_specs",
 })
 
 PASSIVE_EFFECT_KINDS = frozenset({"armor_class_bonus"})
@@ -122,6 +142,8 @@ class FeatDefinition:
     # 主动能力与被动效果是两类东西：一个在回合里花成本做动作，一个常驻
     # 改变数值。共用 ``FeatureCapability`` 让专长与子职走同一条投影/校验链。
     capabilities: tuple[FeatureCapability, ...] = ()
+    #: Printed prerequisites.  Evaluated by ``feat_unavailable_reasons`` only.
+    requires: tuple[FeatRequirement, ...] = ()
     choice: FeatureChoice | None = None
     legacy: Mapping[str, Any] = field(default_factory=dict)
 
@@ -144,6 +166,13 @@ def parse_feat(raw: Mapping[str, Any]) -> FeatDefinition:
     if automation not in {"deterministic", "guided", "reference"}:
         raise FeatDefinitionError(
             f"{feat_id}.automation_level is not a supported level: {automation!r}"
+        )
+
+    retired = sorted(RETIRED_PREREQUISITE_FIELDS & set(raw))
+    if retired:
+        raise FeatDefinitionError(
+            f"{feat_id} still declares {retired[0]!r}; prerequisites are now "
+            "expressed in `requires` (see feat_requirements)"
         )
 
     unknown = sorted(set(raw) - FEAT_FIELDS - LEGACY_FEAT_FIELDS)
@@ -189,11 +218,19 @@ def parse_feat(raw: Mapping[str, Any]) -> FeatDefinition:
         parameters=parameters,
         passive_effects=_parse_passive_effects(feat_id, raw.get("passive_effects")),
         capabilities=_parse_capabilities(feat_id, raw.get("capabilities")),
+        requires=_parse_requirements(feat_id, raw.get("requires")),
         choice=choice,
         legacy=legacy,
     )
     check_declaration_completeness(definition)
     return definition
+
+
+def _parse_requirements(feat_id: str, raw: Any) -> tuple[FeatRequirement, ...]:
+    try:
+        return parse_requirements(feat_id, raw)
+    except FeatRequirementError as exc:
+        raise FeatDefinitionError(str(exc)) from exc
 
 
 def _parse_labels(raw: Any) -> dict[str, str]:

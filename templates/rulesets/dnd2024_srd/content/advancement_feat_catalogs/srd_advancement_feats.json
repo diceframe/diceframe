@@ -17,20 +17,20 @@
       "source_ref": "srd-5.2.1:p87:grappler",
       "minimum_level": 4,
       "repeatable": false,
-      "any_ability_minimum": {"str": 13, "dex": 13},
+      "requires": [{"kind": "ability_minimum", "any_of": {"str": 13, "dex": 13}}],
       "ability_choice": {"allowed": ["str", "dex"], "points": 1, "pattern": "1", "maximum": 20}
     },
     "archery": {
       "category": "fighting_style",
       "source_ref": "srd-5.2.1:p87:archery",
-      "requires_feature": "fighting_style",
+      "requires": [{"kind": "feature", "id": "fighting_style"}],
       "repeatable": false,
       "parameters": {"ranged_attack_bonus": 2}
     },
     "defense": {
       "category": "fighting_style",
       "source_ref": "srd-5.2.1:p88:defense",
-      "requires_feature": "fighting_style",
+      "requires": [{"kind": "feature", "id": "fighting_style"}],
       "repeatable": false,
       "passive_effects": [
         {"kind": "armor_class_bonus", "value": 1, "requires_armor": true}
@@ -39,13 +39,13 @@
     "great_weapon_fighting": {
       "category": "fighting_style",
       "source_ref": "srd-5.2.1:p88:great-weapon-fighting",
-      "requires_feature": "fighting_style",
+      "requires": [{"kind": "feature", "id": "fighting_style"}],
       "repeatable": false
     },
     "two_weapon_fighting": {
       "category": "fighting_style",
       "source_ref": "srd-5.2.1:p88:two-weapon-fighting",
-      "requires_feature": "fighting_style",
+      "requires": [{"kind": "feature", "id": "fighting_style"}],
       "repeatable": false,
       "parameters": {
         "light_extra_attack_ability_damage": true
@@ -83,7 +83,7 @@
       "category": "epic_boon",
       "source_ref": "srd-5.2.1:p88:boon-of-spell-recall",
       "minimum_level": 19,
-      "requires_spellcasting": true,
+      "requires": [{"kind": "spellcasting"}],
       "repeatable": false,
       "ability_choice": {"allowed": ["int", "wis", "cha"], "points": 1, "pattern": "1", "maximum": 30}
     },

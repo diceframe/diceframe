@@ -10,7 +10,7 @@ runs them once each time it is built.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any
 
 from src.rulesets.bundle import LoadedRulesetBundle
@@ -143,7 +143,11 @@ def validate_declarations(
 ) -> None:
     """Fail closed when a declared parameter has no backing bundle table."""
 
-    _validate_capability_ids_are_unique(catalog, bundle)
+    feat_definitions = _feat_declarations_for_validation(bundle)
+    _validate_capability_ids_are_unique(catalog, feat_definitions)
+    _validate_feat_requirement_references(
+        feat_definitions, _known_feature_ids(catalog, bundle, progression_catalog),
+    )
     if progression_catalog is None:  # pragma: no cover - guarded by ``available``
         return
     # 循环外取一次。``LoadedRulesetBundle.get`` 返回的是 deepcopy，放进按特性
@@ -1351,8 +1355,26 @@ def validate_mark_parameters(definition: ClassFeatureDefinition) -> None:
             )
 
 
+def _feat_declarations_for_validation(bundle: LoadedRulesetBundle) -> dict[str, Any]:
+    """Parsed feats, or ``{}`` when one declaration cannot be parsed.
+
+    A broken feat is reported by whoever consumes it -- the advancement engine
+    turns ``FeatDefinitionError`` into ``ProgressionCatalogError`` -- so this
+    pass must not answer the same question with a different error type.  It must
+    also not stop: the checks below ask about the *set* of declarations, and the
+    class-feature half has to keep running even when a feat is bad.
+    """
+
+    from .feat_models import FeatDefinitionError, load_feat_definitions
+
+    try:
+        return load_feat_definitions(bundle)
+    except FeatDefinitionError:
+        return {}
+
+
 def _validate_capability_ids_are_unique(
-    catalog: Dnd2024ClassFeatureCatalog, bundle: LoadedRulesetBundle,
+    catalog: Dnd2024ClassFeatureCatalog, feat_definitions: Mapping[str, Any],
 ) -> None:
     """One capability id identifies one (grantor, capability) pair, globally.
 
@@ -1361,18 +1383,6 @@ def _validate_capability_ids_are_unique(
     other.  Feats made this reachable: until they could grant capabilities, the
     id space was class features only.
     """
-
-    from .feat_models import FeatDefinitionError, load_feat_definitions
-
-    try:
-        feat_definitions = load_feat_definitions(bundle)
-    except FeatDefinitionError:
-        # 专长声明本身非法时，报错应由真正消费它的组件给出（升级引擎会把它
-        # 转成 ProgressionCatalogError）。这里只问"能力 id 是否唯一"，不该
-        # 抢在前面用另一种错误类型回答同一个问题。
-        # 但不能直接 return：下面还要查职业特性之间的重名，一条坏专长不该
-        # 让那项检查静默消失。
-        feat_definitions = {}
 
     seen: dict[str, str] = {}
 
@@ -1390,3 +1400,50 @@ def _validate_capability_ids_are_unique(
         claim(definition.id, definition.capabilities)
     for feat_definition in feat_definitions.values():
         claim(feat_definition.id, feat_definition.capabilities)
+
+
+def _known_feature_ids(
+    catalog: Dnd2024ClassFeatureCatalog,
+    bundle: LoadedRulesetBundle,
+    progression_catalog: Dnd2024ProgressionCatalog | None,
+) -> frozenset[str]:
+    """Every id a ``feature`` prerequisite may name.
+
+    Two sources, because the content has two: a feature with behaviour has a
+    definition in the class feature catalog, while a pure *choice slot* like
+    ``fighting_style`` is declared only on the class / progression table.  A
+    predicate that only knew the first would reject a perfectly valid
+    prerequisite -- which is exactly what happened when this check was written.
+    """
+
+    known = {definition.id for definition in catalog.features_by_key.values()}
+    known.update(
+        str(feature_id)
+        for entity in bundle.list("class")
+        for feature_id in entity.get("level_1_feature_ids") or []
+    )
+    if progression_catalog is not None:
+        for klass in progression_catalog.classes.values():
+            for level_ids in klass.get("features_by_level") or []:
+                known.update(str(feature_id) for feature_id in level_ids)
+    return frozenset(known)
+
+
+def _validate_feat_requirement_references(
+    feat_definitions: Mapping[str, Any], known: Collection[str],
+) -> None:
+    """A prerequisite may not name a feature the bundle does not declare.
+
+    Shape validation happens when the feat is parsed; this is referential
+    integrity, which needs the catalogues and therefore cannot live in
+    ``parse_feat``.  A typo here would make a feat permanently unavailable for
+    every character, with nothing pointing at the declaration.
+    """
+
+    for definition in feat_definitions.values():
+        for requirement in definition.requires:
+            if requirement.kind == "feature" and requirement.feature_id not in known:
+                raise ClassFeatureError(
+                    f"{definition.id}.requires names an undeclared feature: "
+                    f"{requirement.feature_id}"
+                )

@@ -10,11 +10,17 @@ reach these methods through ``self``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
 from src.rulesets.dnd2024.character.builder import ABILITY_IDS, ability_modifier
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.features.feat_requirements import (
+    FeatContext,
+    feat_unavailable_reasons,
+    proficiencies_from,
+)
 from src.rulesets.dnd2024.progression.catalog import ProgressionCatalogError
 
 if TYPE_CHECKING:
@@ -22,6 +28,17 @@ if TYPE_CHECKING:
     from src.rulesets.dnd2024.features.feat_models import FeatDefinition
     from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
 
+
+# 前置理由码的文案。判定只有一处（``feat_unavailable_reasons``），措辞留在
+# 这个通道：列表页给理由码，提交校验给句子，两者本来就不该共用同一个字符串。
+_FEAT_REASON_MESSAGES = {
+    "level": "level prerequisite is not met",
+    "already_owned": "cannot be selected more than once",
+    "ability_prerequisite": "ability prerequisite is not met",
+    "feature": "feature prerequisite is not met",
+    "proficiency": "proficiency prerequisite is not met",
+    "spellcasting": "requires Spellcasting",
+}
 
 # 一个特性选项槽的规范化输入只接受这四个字段，多余字段一律拒绝。
 FEATURE_CHOICE_KEYS = frozenset({"owner", "feature_id", "choice_id", "selected_refs"})
@@ -335,20 +352,10 @@ class AdvancementChoicesMixin:
             errors.append(f"{selected_ref} is not an eligible {expected_category} feat")
             return {}, "", errors
         target_level = int(snapshot["level"])
-        if target_level < feat.minimum_level:
-            errors.append(f"{selected_ref} level prerequisite is not met")
-        owned = list(character.get("features", {}).get("feat_refs") or [])
-        if selected_ref in owned and not feat.repeatable:
-            errors.append(f"{selected_ref} cannot be selected more than once")
-        minimums = feat.legacy.get("any_ability_minimum")
         abilities = character.get("abilities") or {}
-        if isinstance(minimums, dict) and not any(
-            int(abilities.get(ability, 0) or 0) >= int(minimum)
-            for ability, minimum in minimums.items()
-        ):
-            errors.append(f"{selected_ref} ability prerequisite is not met")
-        if feat.legacy.get("requires_spellcasting") and not snapshot.get("slot_profile"):
-            errors.append(f"{selected_ref} requires Spellcasting")
+        context = self._feat_context(character, target_level, snapshot)
+        for reason in feat_unavailable_reasons(feat, context):
+            errors.append(f"{selected_ref} {_FEAT_REASON_MESSAGES[reason]}")
 
         ability_choice = feat.legacy.get("ability_choice")
         if not isinstance(ability_choice, dict):
@@ -780,6 +787,44 @@ class AdvancementChoicesMixin:
             "granted_level": target_level,
         }]
 
+    def _feat_context(
+        self,
+        character: dict[str, Any],
+        level: int,
+        snapshot: Mapping[str, Any],
+    ) -> FeatContext:
+        """The facts a prerequisite may read, as this engine sees the character.
+
+        ``feature_ids`` comes from the resolver rather than from the level table:
+        the table says what this level grants, while the prerequisite asks what
+        the character owns -- subclass features and re-chosen options included.
+        """
+
+        features = character.get("features")
+        owned = (
+            list(features.get("feat_refs") or [])
+            if isinstance(features, Mapping) else []
+        )
+        # 有些特性只有槽位没有定义（``fighting_style`` 就是：它是职业表上的
+        # 一个选择槽，class feature 目录里没有这一条）。只问 resolver 会漏掉
+        # 它们，于是"战士有战斗风格特性"这个事实在升级路径上不成立。
+        feature_ids = {
+            definition.id
+            for definition in self._feature_resolver.features_for(character)
+        }
+        class_ref = str(snapshot.get("class_ref") or "")
+        if class_ref:
+            for row in self.catalog.range(class_ref, 1, level):
+                feature_ids.update(str(item) for item in row["gained_feature_ids"])
+        return FeatContext(
+            level=level,
+            abilities=character.get("abilities") or {},
+            owned_refs=owned,
+            slot_profile=str(snapshot.get("slot_profile") or ""),
+            feature_ids=frozenset(feature_ids),
+            proficiency_refs=proficiencies_from(character),
+        )
+
     def _feat_options(
         self,
         category: str,
@@ -787,27 +832,12 @@ class AdvancementChoicesMixin:
         target_level: int,
         snapshot: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        abilities = character.get("abilities") or {}
-        owned = list(character.get("features", {}).get("feat_refs") or [])
+        context = self._feat_context(character, target_level, snapshot)
         result: list[dict[str, Any]] = []
         for feat_id, feat in self.advancement_feats.items():
             if feat.category != category:
                 continue
-            unavailable_reasons: list[str] = []
-            if target_level < feat.minimum_level:
-                unavailable_reasons.append("level")
-            if f"feat:{feat_id}" in owned and not feat.repeatable:
-                unavailable_reasons.append("already_owned")
-            # 这两条前置仍以旧字段声明（FD2 迁进 ``requires``），只有**位置**
-            # 从顶层换到了 ``legacy``，判据语义一字未改。
-            minimums = feat.legacy.get("any_ability_minimum")
-            if isinstance(minimums, dict) and not any(
-                int(abilities.get(ability, 0) or 0) >= int(minimum)
-                for ability, minimum in minimums.items()
-            ):
-                unavailable_reasons.append("ability_prerequisite")
-            if feat.legacy.get("requires_spellcasting") and not snapshot.get("slot_profile"):
-                unavailable_reasons.append("spellcasting")
+            unavailable_reasons = list(feat_unavailable_reasons(feat, context))
             result.append({
                 "value": f"feat:{feat_id}",
                 "name": self.advancement_feat_labels[feat_id],

@@ -148,8 +148,8 @@ def test_an_unknown_top_level_field_fails_at_load() -> None:
 
 
 def test_legacy_fields_are_carried_verbatim() -> None:
-    definition = parse_feat(_feat(requires_spellcasting=True))
-    assert definition.legacy == {"requires_spellcasting": True}
+    definition = parse_feat(_feat(choice_specs=[{"id": "cantrips", "count": 2}]))
+    assert definition.legacy == {"choice_specs": [{"id": "cantrips", "count": 2}]}
 
 
 # ---------------------------------------------------------------------------
@@ -297,13 +297,16 @@ def test_magic_initiate_declares_its_list_as_a_parameter(bundle) -> None:
 
 
 def test_legacy_fields_stay_a_bounded_set() -> None:
-    assert LEGACY_FEAT_FIELDS == frozenset({
-        "ability_choice",
-        "any_ability_minimum",
-        "requires_feature",
-        "requires_spellcasting",
-        "choice_specs",
-    })
+    # 三个前置键已迁进 ``requires``；剩下的两个各自有明确的归属（FD5/P4）。
+    assert LEGACY_FEAT_FIELDS == frozenset({"ability_choice", "choice_specs"})
+
+
+def test_a_retired_prerequisite_field_is_rejected_with_guidance() -> None:
+    # 静默接受等于让先决凭空消失——"这条专长突然人人可选"不是响亮的失败。
+    for retired in ("any_ability_minimum", "requires_feature", "requires_spellcasting"):
+        with pytest.raises(FeatDefinitionError) as captured:
+            parse_feat(_feat(**{retired: True}))
+        assert "requires" in str(captured.value)
 
 
 def test_unread_registry_is_empty_today() -> None:
@@ -335,6 +338,7 @@ def test_a_broken_feat_does_not_hide_a_class_feature_clash(bundle) -> None:
         Dnd2024ClassFeatureCatalog,
     )
     from src.rulesets.dnd2024.features.validation import (
+        _feat_declarations_for_validation,
         _validate_capability_ids_are_unique,
     )
 
@@ -361,6 +365,8 @@ def test_a_broken_feat_does_not_hide_a_class_feature_clash(bundle) -> None:
         def get(self, kind, ident=None):
             return None
 
+    # 坏专长让解析层退化成空集，而不是让整项检查消失。
+    assert _feat_declarations_for_validation(_UnparseableFeats()) == {}
     with pytest.raises(ClassFeatureError) as captured:
-        _validate_capability_ids_are_unique(clashing, _UnparseableFeats())
+        _validate_capability_ids_are_unique(clashing, {})
     assert source.capabilities[0].id in str(captured.value)
