@@ -28,6 +28,7 @@ from src.rulesets.dnd2024.items.charges import (
     charges_of,
     validate_charges_declaration,
 )
+from .weapon_masteries import WEAPON_MASTERY_FEATURE_ID, cleave_grant, nick_active
 from .check_modes import (
     HUNTERS_MARK_REF,
     condition_flags,
@@ -374,6 +375,14 @@ class CombatAvailabilityMixin:
         economy = combat.get("economy", {})
         actions: list[dict[str, Any]] = []  # type: ignore[no-redef]
         actions.extend(self._available_form_intents(instance, actor, combat.get("economy", {}), version))
+        # Light 追加攻击花的是附赠动作，所以它**不**受"动作是否已花"影响；
+        # 放进下面的动作门禁里会让它永远不出现（动作先被普通攻击用掉）。
+        actions.extend(
+            self._light_extra_attack_rows(instance, actor, combat, economy, version)
+        )
+        cleave_row = self._cleave_row(instance, actor, combat, version)
+        if cleave_row:
+            actions.append(cleave_row)
         if int(economy.get("action", 0) or 0) > 0 or int(
             economy.get("attacks_remaining", 0) or 0
         ) > 0 or int(economy.get("surge_action", 0) or 0) > 0:
@@ -735,6 +744,141 @@ class CombatAvailabilityMixin:
                 "target": declaration["target"],
             })
         return items
+
+    def _light_extra_attack_rows(
+        self, instance: Any, actor: dict[str, Any], combat: dict[str, Any],
+        economy: dict[str, Any], version: int,
+    ) -> list[dict[str, Any]]:
+        """The Light property's extra attack, as its own player action.
+
+        Two rows at most, because the cost depends on the weapon picked in the
+        dock: weapons without Nick spend the Bonus Action, and a Nick weapon
+        spends nothing but is once per turn.  Merging them into one row would
+        make the tile lie about its cost for one of the two cases.
+        """
+
+        if actor["kind"] not in {"player", "companion"}:
+            return []
+        record = (combat.get("light_attacks") or {}).get(str(actor["actor_id"]))
+        if not isinstance(record, dict):
+            return []
+        if (
+            int(record.get("round", -1)) != int(combat.get("round", 0) or 0)
+            or int(record.get("turn_index", -1))
+            != int(combat.get("turn_index", 0) or 0)
+        ):
+            return []
+        light_refs = [
+            str(used) for used in record.get("weapon_refs") or []
+            if (self.catalog.weapons.get(str(used).removeprefix("item:")) or {}).get("light")
+        ]
+        if not light_refs:
+            return []
+        offhand = [
+            weapon for weapon in self._available_attacks(actor)
+            if weapon.get("light")
+            # 与校验同一条判据：至少要有一把"用过且不同"的 Light 武器当参照。
+            and any(ref != str(weapon.get("weapon_ref") or "") for ref in light_refs)
+        ]
+        if not offhand:
+            return []
+        character = self._feature_character(actor)
+        free = [w for w in offhand if nick_active(self.features, character, w)]
+        paid = [w for w in offhand if w not in free]
+        targets = self._hostile_targets(instance, combat, str(actor["actor_id"]))
+        rows: list[dict[str, Any]] = []
+        for group, cost, available, reason in (
+            (paid, "bonus_action", int(economy.get("bonus_action", 0) or 0) > 0,
+             "Bonus Action is already spent"),
+            (free, "", not bool(record.get("nick_used")),
+             "Nick already gave its extra attack this turn"),
+        ):
+            if not group:
+                continue
+            rows.append({
+                "type": "light_attack",
+                "label": "Light extra attack",
+                "actor_id": str(actor["actor_id"]),
+                "expected_version": version,
+                "weapons": group,
+                "targets": targets,
+                "cost": cost,
+                "nick": cost == "",
+                "available": available,
+                "unavailable_reason": "" if available else reason,
+            })
+        return rows
+
+    def _cleave_row(
+        self, instance: Any, actor: dict[str, Any], combat: dict[str, Any],
+        version: int,
+    ) -> dict[str, Any] | None:
+        """Cleave, offered only when the prerequisite is already true.
+
+        The row carries ``cleave_from``: the panel posts an ordinary attack with
+        that field, so the engine has one attack path instead of a second one
+        for granted attacks.
+        """
+
+        if actor["kind"] not in {"player", "companion"}:
+            return None
+        if not self.features.has_feature(
+            self._feature_character(actor), WEAPON_MASTERY_FEATURE_ID,
+        ):
+            return None
+        actor_id = str(actor["actor_id"])
+        round_index = int(combat.get("round", 0) or 0)
+        turn_index = int(combat.get("turn_index", 0) or 0)
+        granted = (combat.get("granted_attacks") or {}).get(actor_id) or {}
+        if (
+            granted.get("cleave")
+            and int(granted.get("round", -1)) == round_index
+            and int(granted.get("turn_index", -1)) == turn_index
+        ):
+            return None
+        weapons = [w for w in self._available_attacks(actor) if cleave_grant(w)]
+        if not weapons:
+            return None
+        hits = [
+            row for row in combat.get("attack_history") or []
+            if str(row.get("actor_id") or "") == actor_id
+            and int(row.get("round", 0) or 0) == round_index
+            and int(row.get("turn_index", 0) or 0) == turn_index
+            and bool(row.get("hit"))
+            and any(
+                str(w.get("weapon_ref") or "") == str(row.get("weapon_ref") or "")
+                for w in weapons
+            )
+        ]
+        if not hits:
+            return None
+        original_id = str(hits[-1].get("target_id") or "")
+        hit_weapon_ref = str(hits[-1].get("weapon_ref") or "")
+        hit_weapon = next(
+            (w for w in weapons if str(w.get("weapon_ref") or "") == hit_weapon_ref),
+            weapons[0],
+        )
+        limit = int((cleave_grant(hit_weapon) or {}).get("target_within_ft") or 0)
+        reach = int(hit_weapon.get("long_range") or hit_weapon.get("range", 5) or 5)
+        targets = [
+            target for target in self._hostile_targets(instance, combat, actor_id)
+            if int(target["hp"]) > 0
+            and str(target["actor_id"]) != original_id
+            and self._distance(combat, str(target["actor_id"]), original_id) <= limit
+            and self._distance(combat, actor_id, str(target["actor_id"])) <= reach
+        ]
+        if not targets:
+            return None
+        return {
+            "type": "cleave",
+            "label": "Cleave",
+            "actor_id": actor_id,
+            "expected_version": version,
+            "weapons": weapons,
+            "targets": targets,
+            "cleave_from": original_id,
+            "cost": "",
+        }
 
     def _party_targets(
         self, instance: Any, combat: dict[str, Any],

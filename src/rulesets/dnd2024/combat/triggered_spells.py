@@ -115,8 +115,11 @@ class CombatTriggeredSpellsMixin:
             events.extend(self._spell_end_trigger_events(
                 self._actor_view(instance, combat, decision["actor_id"]), "spell_cast",
             ))
-        events.extend(self._submit_hit_damage(decision["damage_event"]))
-        attacker_id = str(decision["actor_id"])
+        attacker_id = str(decision.get("actor_id") or "")
+        events.extend(self._commit_hit_damage(
+            instance, combat, decision["damage_event"], rng,
+            attacker_id=attacker_id,
+        ))
         events.extend(self._multiattack_mark_events(
             self._actor_view(instance, combat, attacker_id), target,
         ))

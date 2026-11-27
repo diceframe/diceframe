@@ -59,6 +59,19 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/availability.py", "feature_literal", "has_feature:wild_shape"),
     DependencyDebt("src/rulesets/dnd2024/combat/check_modes.py", "feature_literal", "feature_value:feral_senses"),
     DependencyDebt("src/rulesets/dnd2024/combat/check_modes.py", "feature_literal", "feature_value:precise_hunter"),
+    # S0-F7R: the mastery registry names its own effect kinds, and the commit
+    # step branches on them.  Both are data about a *declaration*, not a
+    # feature name, so they belong to the mastery module rather than to
+    # combat at large -- registered here so the debt is visible.
+    DependencyDebt("src/rulesets/dnd2024/combat/hit_resolution.py", "kind_branch", "save_condition"),
+    DependencyDebt("src/rulesets/dnd2024/combat/weapon_masteries.py", "kind_branch", "light_extra_as_action"),
+    # S0-F7C: Cleave is a granted attack, declared on the follow-up attack
+    # itself.  Three files read that declaration and the registry names its
+    # kind; all of it is data about a declaration, not a feature name.
+    DependencyDebt("src/rulesets/dnd2024/combat/attack_resolution.py", "intent_switch", "cleave_from"),
+    DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "cleave_from"),
+    DependencyDebt("src/rulesets/dnd2024/combat/validation_attack.py", "intent_switch", "cleave_from"),
+    DependencyDebt("src/rulesets/dnd2024/combat/weapon_masteries.py", "kind_branch", "granted_attack"),
     DependencyDebt("src/rulesets/dnd2024/combat/check_windows.py", "feature_literal", "feature_value:bardic_inspiration"),
     DependencyDebt("src/rulesets/dnd2024/combat/check_windows.py", "feature_literal", "feature_value:cutting_words"),
     DependencyDebt("src/rulesets/dnd2024/combat/check_windows.py", "feature_literal", "feature_value:peerless_skill"),

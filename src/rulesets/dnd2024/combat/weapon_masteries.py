@@ -39,9 +39,64 @@ WEAPON_MASTERY_EFFECTS: dict[str, dict[str, Any]] = {
         "condition": "slowed_10",
         "duration": "attacker_next_turn_start",
     },
-    # Catalog slots that this slice deliberately does not implement.
-    "cleave": {"kind": "unimplemented"},
-    "nick": {"kind": "unimplemented"},
-    "push": {"kind": "unimplemented"},
-    "topple": {"kind": "unimplemented"},
+    # Hit face: 10 feet straight away from the attacker, Large or smaller only.
+    # The event carries the distance and *who* pushed, not a signed number: the
+    # direction is geometry, and geometry belongs to whoever owns positions.
+    "push": {
+        "kind": "push",
+        "on": "hit",
+        "feet": 10,
+        "size_at_most": "large",
+    },
+    # Hit face: Constitution save (DC 8 + the ability modifier used for the
+    # attack + Proficiency Bonus) or Prone.  Both the save and the condition are
+    # held until the hit is committed, so a Shield that turns the hit into a
+    # miss rolls nothing.
+    "topple": {
+        "kind": "save_condition",
+        "on": "hit",
+        "ability": "con",
+        "condition": "prone",
+        "duration": "until_stand",
+    },
+    # Not a hit face at all: the Light property's extra attack may be made as
+    # part of the Attack action instead of a Bonus Action, once per turn.  The
+    # economy change lives in the attack flow; this entry only declares it.
+    "nick": {"kind": "light_extra_as_action"},
+    # Hit face: one more attack against a *different* creature within 5 feet of
+    # the first, once per turn.  The second attack is its own intent (own roll,
+    # own target); this entry only says the weapon grants it and how far.
+    "cleave": {
+        "kind": "granted_attack",
+        "on": "hit",
+        "target_within_ft": 5,
+        "once_per_turn": True,
+    },
 }
+
+
+def nick_active(features: Any, character: Any, weapon: dict[str, Any]) -> bool:
+    """Whether this weapon's Nick mastery lets the Light extra attack be free.
+
+    Both the validator and the cost event ask this question, and both must ask
+    it the same way: the mastery has to be *this* weapon's, and the character
+    has to be someone the mastery is unlocked for.  ``weapon_mastery`` is the
+    gate for every property, so it is the gate here too.
+    """
+
+    mastery = str(weapon.get("mastery") or "")
+    if WEAPON_MASTERY_EFFECTS.get(mastery, {}).get("kind") != "light_extra_as_action":
+        return False
+    return bool(features.has_feature(character, WEAPON_MASTERY_FEATURE_ID))
+
+
+def cleave_grant(weapon: dict[str, Any]) -> dict[str, Any] | None:
+    """The Cleave grant this weapon carries, if any.
+
+    Does not ask whether the character may use masteries: the follow-up
+    validator gates on ``weapon_mastery`` once, and asking twice would let the
+    two answers drift.
+    """
+
+    effect = WEAPON_MASTERY_EFFECTS.get(str(weapon.get("mastery") or ""), {})
+    return effect if effect.get("kind") == "granted_attack" else None
