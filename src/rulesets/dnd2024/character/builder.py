@@ -551,6 +551,18 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             "ruleset_character": canonical,
         }
 
+    @property
+    def _creation_choice_kinds(self) -> dict[str, str]:
+        """``{feature id: choice kind}`` for the choices creation can answer."""
+
+        kinds: dict[str, str] = {}
+        for definition in Dnd2024ClassFeatureResolver(
+            self.bundle,
+        ).catalog.features_by_key.values():
+            if definition.choice is not None:
+                kinds.setdefault(definition.id, definition.choice.kind)
+        return kinds
+
     def normalize_submission(self, character: dict[str, Any]) -> dict[str, Any]:
         """Rebuild a submitted sheet from canonical choices, never derived client values."""
 
@@ -610,6 +622,13 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             "class_spell_choices": deepcopy(build.get("class_spell_choices")),
             # 选择槽必须一起搬回来，否则重建会静默丢掉玩家答过的槽：Expertise、
             # 二选一（Divine Order）与语言选择都不在 draft 的其它字段里。
+            # 子职也要搬：子职自己的槽（Champion 的额外战斗风格）按 owner
+            # 匹配，`features_for` 不知道子职就会把它们判成"这个角色没有的槽"。
+            "features": {
+                "subclass_ref": str(
+                    (canonical.get("features") or {}).get("subclass_ref") or ""
+                ),
+            },
             # 只搬提交格式的四个字段——canonical 的记录还带 `granted_level`
             # 与 `grants`，那是落地信息，提交契约不接受。
             "feature_choices": [
@@ -623,6 +642,12 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
                     "feature_choices",
                 ) or []
                 if isinstance(record, dict)
+                # 只搬建卡路径能校验的三类槽（技能 / 语言 / 二选一）。
+                # `advancement_feat` 的槽由 `feat_refs` 承载，重建时从那里
+                # 重新发放；一起搬进来只会被当成"这个角色没有的槽"。
+                and self._creation_choice_kinds.get(
+                    str(record.get("feature_id")), "",
+                ) in {"skill_proficiency", "language", "feature_option"}
             ],
         }
         return self.finalize(draft)
