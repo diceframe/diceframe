@@ -716,8 +716,9 @@ class RoundProcessor:
 
         # 昏迷角色的死亡豁免先于战斗/叙事结算，文本并入行动块供 GM 遵循。
         # 权威战斗引擎拥有死亡豁免权威；sheet-only 跟踪器再结算会造成并行权威分叉。
+        authoritative_combat = combat_model == "authoritative_event_batch"
         death_text = (
-            "" if combat_model == "authoritative_event_batch"
+            "" if authoritative_combat
             else resolve_round_death_saves(instance, rule)
         )
         if death_text:
@@ -733,7 +734,6 @@ class RoundProcessor:
             for action in instance.action_queue
             if action.get("user_id") in instance.players
         )
-        authoritative_combat = combat_model == "authoritative_event_batch"
         if not authoritative_combat and (module_hooks.combat_view(instance)["combat_state"] != "none" or explicit_attack):
             combat_text = self._combat.resolve_combat(instance, actions_text, combat_model, rule)
             if combat_text:

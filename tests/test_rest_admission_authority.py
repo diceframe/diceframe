@@ -157,7 +157,7 @@ async def test_party_settlement_fails_closed_with_localized_message_when_hp_drop
 async def test_canonical_bool_hp_is_not_treated_as_a_number(professional_context) -> None:
     api, instance, _character = professional_context
     game_config.replace_solo_mode(instance, True)
-    _diverge(instance.get_character_sheet("gm"), canonical=True, top_level=0)
+    _diverge(instance.get_character_sheet("gm"), canonical=True, top_level=12)
 
     result = await ruleset_rest.submit_live(
         api._live_ruleset_rest_dependencies, KEY, "gm", _rest_body("solo-bool"),
@@ -165,6 +165,42 @@ async def test_canonical_bool_hp_is_not_treated_as_a_number(professional_context
 
     assert result["ok"] is False
     assert result["code"] == "REST_NOT_AVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_canonical_none_hp_fails_closed_even_when_legacy_hp_positive(professional_context) -> None:
+    api, instance, _character = professional_context
+    game_config.replace_solo_mode(instance, True)
+    _diverge(instance.get_character_sheet("gm"), canonical=None, top_level=12)
+
+    result = await ruleset_rest.submit_live(
+        api._live_ruleset_rest_dependencies, KEY, "gm", _rest_body("solo-none"),
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "REST_NOT_AVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_rest_idempotency_replay_succeeds_even_after_dropping_to_zero_hp(professional_context) -> None:
+    api, instance, _character = professional_context
+    game_config.replace_solo_mode(instance, True)
+    sheet = instance.get_character_sheet("gm")
+    sheet["ruleset_character"]["resources"]["hp"] = 5
+    sheet["resources"] = {"hp": {"label": "HP", "current": 5, "max": sheet["max_hp"]}}
+
+    first = await ruleset_rest.submit_live(
+        api._live_ruleset_rest_dependencies, KEY, "gm", _rest_body("solo-replay", rest="long"),
+    )
+    assert first["ok"] is True
+    assert first["character"]["resources"]["hp"]["current"] == first["character"]["max_hp"]
+
+    _diverge(instance.get_character_sheet("gm"), canonical=0, top_level=0)
+    replay = await ruleset_rest.submit_live(
+        api._live_ruleset_rest_dependencies, KEY, "gm", _rest_body("solo-replay", rest="long"),
+    )
+    assert replay["ok"] is True
+    assert replay["duplicate"] is True
 
 
 def test_party_eligibility_keeps_legacy_sheet_hp_when_canonical_is_absent() -> None:

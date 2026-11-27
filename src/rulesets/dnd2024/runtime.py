@@ -36,6 +36,7 @@ import src.rulesets.dnd2024.advancement_access as advancement_access
 from src.rulesets.dnd2024.binding import rule_binding
 from src.rulesets.dnd2024.character.attunement import attunement_state_for_projection
 from src.rulesets.dnd2024.character.builder import Dnd2024CharacterBuilder
+from src.rulesets.dnd2024.character.health_display import sync_health_display
 from src.rulesets.dnd2024.character.primitives import ABILITY_IDS, ability_modifier
 from src.rulesets.dnd2024.character.reconciliation import (
     Dnd2024CharacterStateReconciler,
@@ -1876,6 +1877,11 @@ class Dnd2024Runtime:
             "attunement": attunement,
         }
         merged = merge_live_character_projection(current, projected)
+        resources = current.get("resources")
+        if isinstance(resources, dict):
+            merged["resources"] = deepcopy(resources)
+            if "hp" in merged["resources"] and not isinstance(merged["resources"]["hp"], dict):
+                merged["resources"].pop("hp", None)
         # 带上既有的 revision / operation log，让随后的 reconcile 是在真实历史上
         # 继续推进，而不是从零重新计数。
         for field in ("ruleset_revision", "ruleset_operation_log"):
@@ -1886,6 +1892,7 @@ class Dnd2024Runtime:
         self._reconciler(bundle).reconcile(
             merged, frozenset({"equipment", "inventory"}),
         )
+        sync_health_display(merged, canonical)
         return merged
 
     def _reconcile_party_before_combat(self, instance: Any, bundle: Any) -> None:

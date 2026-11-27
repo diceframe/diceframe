@@ -100,6 +100,16 @@ def test_repair_ignores_bool_canonical_hp() -> None:
         assert sheet == original
 
 
+def test_repair_ignores_malformed_canonical_max_hp() -> None:
+    for bad_max_hp in ("bad", True, False, {"max": 10}):
+        sheet = _diverged_sheet({"resources": {"hp": 4, "max_hp": bad_max_hp}, "conditions": {}})
+        original = deepcopy(sheet)
+
+        repair_ruleset_health_display(sheet)
+
+        assert sheet == original
+
+
 def test_repair_marks_negative_canonical_hp_downed() -> None:
     canonical = _canonical(-3)
     sheet = _diverged_sheet(canonical)

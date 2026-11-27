@@ -161,10 +161,18 @@ def repair_ruleset_health_display(character_sheet: dict[str, Any]) -> dict[str, 
     if not isinstance(canonical, dict):
         return character_sheet
     canonical_resources = canonical.get("resources")
-    hp = canonical_resources.get("hp") if isinstance(canonical_resources, dict) else None
+    if not isinstance(canonical_resources, dict):
+        return character_sheet
+    hp = canonical_resources.get("hp")
     if isinstance(hp, bool) or not isinstance(hp, int):
         return character_sheet
-    max_hp = int(canonical_resources.get("max_hp", 0) or 0)
+    raw_max_hp = canonical_resources.get("max_hp")
+    if raw_max_hp is None:
+        max_hp = 0
+    elif isinstance(raw_max_hp, bool) or not isinstance(raw_max_hp, int):
+        return character_sheet
+    else:
+        max_hp = raw_max_hp
 
     character_sheet["hp"] = hp
     character_sheet["max_hp"] = max_hp

@@ -171,8 +171,7 @@ def _rest_hp(character: dict[str, Any]) -> int:
     if isinstance(canonical, dict):
         resources = canonical.get("resources")
         hp = resources.get("hp") if isinstance(resources, dict) else None
-        if isinstance(hp, int) and not isinstance(hp, bool):
-            return hp
+        return hp if isinstance(hp, int) and not isinstance(hp, bool) else 0
     return int(character.get("hp", 0) or 0)
 
 
@@ -415,8 +414,6 @@ async def _resolve_live_authority(
             return _failure("REST_NOT_AVAILABLE", str(exc))
 
     character = instance.get_character_sheet(user_id)
-    if _rest_hp(character) < 1:
-        return _failure("REST_NOT_AVAILABLE", t("webui.services.ruleset_rest.hp_required"))
     revision = int(character.get("ruleset_revision", 0) or 0)
     raw_log = character.get("ruleset_operation_log")
     operation_log = deepcopy(raw_log) if isinstance(raw_log, list) else []
@@ -450,6 +447,8 @@ async def _resolve_live_authority(
             "STALE_CHARACTER_REVISION", t("webui.services.ruleset_rest.character_updated_elsewhere"),
             revision=revision,
         )
+    if _rest_hp(character) < 1:
+        return _failure("REST_NOT_AVAILABLE", t("webui.services.ruleset_rest.hp_required"))
     try:
         hit_die_rolls = _server_hit_die_rolls(
             character, parsed.get("hit_dice") if rest == "short" else None,

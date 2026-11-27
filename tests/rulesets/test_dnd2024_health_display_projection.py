@@ -195,3 +195,28 @@ def test_exploration_revive_refreshes_the_sheet_health_display() -> None:
     assert revived["status"] == "active"
     assert revived["deceased"] is False
     assert "death_saves" not in revived
+
+
+def test_complete_rest_and_advancement_refresh_resources_hp_display() -> None:
+    runtime = Dnd2024Runtime()
+    sheet = _character(runtime, "stalwart_guardian", "Hero")
+    max_hp = sheet["ruleset_character"]["resources"]["max_hp"]
+    sheet["ruleset_character"]["resources"]["hp"] = 3
+    sheet["hp"] = 3
+    sheet["resources"] = {
+        "hp": {"label": "???", "current": 3, "max": max_hp},
+        "stamina": {"label": "??", "current": 2, "max": 2},
+    }
+
+    rested = runtime.complete_rest(None, sheet, "long")
+    rested_sheet = rested["character"]
+    assert rested_sheet["hp"] == max_hp
+    assert rested_sheet["resources"]["hp"] == {"label": "???", "current": max_hp, "max": max_hp, "min": 0}
+    assert rested_sheet["resources"]["stamina"] == {"label": "??", "current": 2, "max": 2}
+
+    advanced = runtime.apply_advancement(None, rested_sheet, {"hp_mode": "average"})
+    new_max = advanced["ruleset_character"]["resources"]["max_hp"]
+    assert new_max > max_hp
+    assert advanced["hp"] == new_max
+    assert advanced["resources"]["hp"] == {"label": "???", "current": new_max, "max": new_max, "min": 0}
+    assert advanced["resources"]["stamina"] == {"label": "??", "current": 2, "max": 2}
