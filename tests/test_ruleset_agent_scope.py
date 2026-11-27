@@ -224,8 +224,13 @@ def _battle_game(status: str = "active"):
         run_id="run-1",
         players={"p1": {"character_name": "Alice"}},
         modules={"ruleset_runtime": {
-            "version": 7,
-            "combat": {"status": status, "enemies": {"goblin": {"name": "Goblin"}}},
+            "schema_version": 1,
+            "binding": {"id": "core:dnd2024"},
+            "state": {
+                "version": 7,
+                "combat": {"status": status, "enemies": {"goblin": {"name": "Goblin"}}},
+            },
+            "event_ledger": [],
         }},
     )
 

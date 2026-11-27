@@ -85,7 +85,10 @@ def _game(deps: RulesetToolDependencies, args: dict, owner: str) -> tuple[Any, A
 
 
 def _ruleset_state(game: Any) -> dict:
-    return (getattr(game, 'modules', {}) or {}).get('ruleset_runtime') or {}
+    modules = getattr(game, 'modules', {}) or {}
+    slot = modules.get('ruleset_runtime') if isinstance(modules, dict) else None
+    state = slot.get('state') if isinstance(slot, dict) else None
+    return state if isinstance(state, dict) else {}
 
 
 def _cover_targets(game: Any) -> list[dict]:
