@@ -248,6 +248,8 @@ Deflect Energy 不是独立实现，它是 `deflect_attacks` 的**类型门控�
 | `mypy` | 125 files, no issues |
 | PR | #881 |
 
+首轮 CI 的 `Frontend checks` 红在 `tests/mapLayout.test.ts:76` 的一条**计时断言**（`forceLayout` 300 节点 200 迭代要求 < 800ms，runner 上量到 844ms）。本片没有改前端；同一棵树上本地全量 238 个测试文件 / 1756 条用例全过，`locales:check`、`typecheck`、`lint` 也都是 exit 0。这是受 runner 负载影响的阈值波动，不是本片引入的回归。
+
 ### 12.5 用例
 
 `tests/rulesets/test_dnd2024_damage_reactions.py`（14 条）：等级授予（3 级有 / 2 级无）、B/P/S 门控与 13 级扩展、纯 Fire 在 12 级被拒、无 Reaction 不提供、减伤公式（骰值 + Dex + Monk 级）、减到 0 不下血也不治疗、部分减伤只落差额、减到 0 且 Focus 够时开重定向、重定向扣 1 Focus 并让目标掷 Dex 豁免、豁免失败吃 2 × 武艺骰 + Dex、豁免成功零伤害、Focus 为 0 时不开窗口、放弃重定向不扣 Focus（且不补打伤害）、玩家视角能看到重定向的目标与 DC。
