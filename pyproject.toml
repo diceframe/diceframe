@@ -115,6 +115,7 @@ files = [
     "src/rulesets/dnd2024/features/resolver.py",
     "src/rulesets/dnd2024/features/validation.py",
     "src/rulesets/dnd2024/features/resources.py",
+    "src/rulesets/dnd2024/progression/choices.py",
     "src/rulesets/registry.py",
     "src/rulesets/legacy_adapter.py",
     "src/webui/config_update.py",

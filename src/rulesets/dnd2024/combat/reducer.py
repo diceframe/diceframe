@@ -108,6 +108,9 @@ class CombatReducerMixin:
             # 诡诈打击的选择在结算时可能落不了地（偷袭不成立 / 预算不足）：
             # 事件说明为什么没扣骰、没发效果，状态不变。
             "dnd2024.cunning_strike.skipped",
+            # 拨挡攻击把这一次伤害压小了：明细（骰值、原值、减后值）在事件里，
+            # 真正的 HP 变化仍由随后的 resource.changed 承担。
+            "dnd2024.damage.reduced",
             # Multiattack 提前收尾的回执：剩余几击没打出去，原因写在事件里。
             "dnd2024.multiattack.truncated",
         }:
