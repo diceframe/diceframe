@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.rulesets.bundle import LoadedRulesetBundle
-from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.features import (
+    Dnd2024ClassFeatureResolver,
+    FeatureChoice,
+)
+from src.rulesets.dnd2024.features.feat_models import load_feat_definitions
 
 
 from .derivation import CharacterDerivationMixin, plan_skill_choices
@@ -221,13 +225,24 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
     ) -> dict[str, list[dict[str, Any]]]:
         del species
         result: dict[str, list[dict[str, Any]]] = {}
+        # 专长的声明现在和子职共用 ``FeatureChoice``：名称、数量、从哪些目录
+        # 取候选都由 ``choice`` 决定，不再有一个只为 Skilled 存在的字段。
+        definitions = load_feat_definitions(self.bundle)
         for feat_ref in self._acquired_feat_refs(draft, background):
-            feat = self.bundle.get("feat", _ref_id(feat_ref, "feat"))
-            if feat is None:
+            feat_id = _ref_id(feat_ref, "feat")
+            feat = self.bundle.get("feat", feat_id)
+            if feat is None and feat_id not in definitions:
                 continue
-            specs = deepcopy(feat.get("choice_specs") or [])
-            proficiency_choice = feat.get("proficiency_choice") or {}
-            if proficiency_choice:
+            definition = definitions.get(feat_id)
+            # ``choice_specs`` 仍是 Magic Initiate 的形状（P4 迁进 grants）。
+            # 从 ``definition.legacy`` 取，而不是从实体再读一次：同一个字段有
+            # 两个来源时，P4 删除会漏掉一处，那一处会静默变空。
+            specs = (
+                deepcopy(definition.legacy.get("choice_specs") or [])
+                if definition is not None else []
+            )
+            choice = definition.choice if definition is not None else None
+            if choice is not None and choice.kind == "skill_proficiency":
                 occupied = {
                     *list((background or {}).get("skill_refs") or []),
                     *list(draft.get("class_skill_refs") or []),
@@ -236,22 +251,37 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
                     *list((class_entity or {}).get("tool_proficiency_refs") or []),
                     *list(draft.get("class_tool_refs") or []),
                 }
-                allowed_kinds = set(proficiency_choice.get("allowed_kinds") or [])
-                allowed_refs = [
-                    f"{kind}:{item['id']}"
-                    for kind in ("skill", "tool")
-                    if kind in allowed_kinds
-                    for item in self.bundle.list(kind)
-                    if f"{kind}:{item['id']}" not in occupied
-                ]
                 specs.append({
-                    "id": "proficiencies",
-                    "count": int(proficiency_choice.get("count", 0) or 0),
-                    "option_refs": allowed_refs,
+                    "id": choice.id,
+                    "count": choice.count,
+                    "option_refs": self._choice_pool(choice, occupied),
                 })
             if specs:
                 result[feat_ref] = specs
         return result
+
+    def _choice_pool(
+        self, choice: FeatureChoice, occupied: set[str],
+    ) -> list[str]:
+        """Every ref a declared choice may still take.
+
+        ``enabled_options`` empty means "the whole catalog(s)", which is how a
+        feat says "any three skills or tools"; a named list is filtered the same
+        way so an occupied ref never reappears.
+        """
+
+        if choice.enabled_options:
+            candidates = list(choice.enabled_options)
+        else:
+            kinds = (
+                ("skill", "tool") if choice.category == "skill_or_tool" else ("skill",)
+            )
+            candidates = [
+                f"{kind}:{item['id']}"
+                for kind in kinds
+                for item in self.bundle.list(kind)
+            ]
+        return [ref for ref in candidates if ref not in occupied]
 
     def _present_feat_choices(
         self,

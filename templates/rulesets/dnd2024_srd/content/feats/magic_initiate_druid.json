@@ -5,7 +5,7 @@
   "source_ref": "srd-5.2.1:p87:magic-initiate",
   "automation_level": "guided",
   "category": "origin",
-  "spell_list": "druid",
+  "parameters": {"spell_list": "druid"},
   "choice_specs": [
     {"id": "spellcasting_ability", "count": 1, "option_ids": ["int", "wis", "cha"]},
     {

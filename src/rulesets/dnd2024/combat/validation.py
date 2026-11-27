@@ -1221,6 +1221,19 @@ class CombatValidationMixin(
 
     _WILD_SHAPE_CR_BY_LEVEL = ((4, "1/4"), (8, "1/2"), (99, "1"))
 
+    def _relaxed_capability_ids(self, actor: dict[str, Any]) -> frozenset[str]:
+        """Every capability id a declared relaxation covers, for this actor."""
+
+        character = self._feature_character(actor)
+        owned = self.features.capability_owners_for(character)
+        relaxed = self.features.relaxed_bonus_action_targets_for(character)
+        return frozenset(
+            capability.id
+            for definition in owned
+            if definition.id in relaxed
+            for capability in definition.capabilities
+        )
+
     def _validate_class_capability(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
         actor: dict[str, Any], economy: dict[str, Any],
@@ -1242,9 +1255,12 @@ class CombatValidationMixin(
         if via_fleet_step is not None and not isinstance(via_fleet_step, bool):
             raise CombatIntentError("via_fleet_step must be a boolean")
         if via_fleet_step:
-            if capability_id != "step_of_the_wind":
+            # 放宽关系写在授予者（Fleet Step）身上，所以这里读声明：只有它
+            # 点名的那个能力的各个使用选项才能走"免槽"路径。按能力名判会把
+            # 同一特性的另一个使用选项（花气档）漏掉。
+            if capability_id not in self._relaxed_capability_ids(actor):
                 raise CombatIntentError(
-                    "Fleet Step can only grant Step of the Wind"
+                    "Fleet Step can only grant the step it declares"
                 )
             if not bool(economy.get("fleet_step_available")):
                 raise CombatIntentError("Fleet Step is not available this turn")
@@ -1344,13 +1360,19 @@ class CombatValidationMixin(
                 raise CombatIntentError(
                     "the declared open hand technique choice is not available"
                 )
+        # 按 (授予者, 能力) 建索引，不按能力 id 单独索引：专长与子职可能声明
+        # 同名能力，只按 id 取会让"校验用的 capability"和"定价用的 view"来自
+        # 不同的授予者。
         views = {
-            view.id: view
+            (view.feature_id, view.id): view
             for view in self._available_class_capabilities(
                 actor, economy, include_unavailable=True,
             )
         }
-        view = views.get(capability_id)
+        view = (
+            views.get((capability.feature_id, capability_id))
+            if capability is not None else None
+        )
         if view is None:
             raise CombatIntentError("class capability is not available to this actor")
         if not view.available:
