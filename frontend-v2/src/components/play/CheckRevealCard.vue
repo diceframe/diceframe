@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { CheckResult, CheckRevealRecord } from '@/api/types'
 import { useLocale } from '@/composables/useLocale'
+import { isSuccessVerdict, verdictCodeOf, verdictLabel } from '@/utils/checkVerdict'
 import CocDiceFaces from '@/features/play/dice/CocDiceFaces.vue'
 import { cocCopy } from '@/features/play/dice/cocCopy'
 import PushDecisionPanel from '@/features/play/check-decisions/PushDecisionPanel.vue'
@@ -78,10 +79,15 @@ watch(pendingClickReveal, (pending) => {
 })
 
 const status = computed<'critical' | 'fumble' | 'success' | 'failure'>(() => {
+  const code = verdictCodeOf(props.check)
+  if (code === 'critical_success') return 'critical'
+  if (code === 'critical_failure') return 'fumble'
+  if (code) return isSuccessVerdict(code) ? 'success' : 'failure'
+  // No code (custom runtime or a legacy save): fall back to the stored flags,
+  // never to the wording of the label.
   if (props.check.is_critical) return 'critical'
   if (props.check.is_fumble) return 'fumble'
-  const verdict = String(props.check.verdict || '').toLowerCase()
-  return verdict.includes('成功') || verdict.includes('success') ? 'success' : 'failure'
+  return 'success'
 })
 const statusLabel = computed(() => ({
   critical: t('criticalSuccess'),
@@ -189,9 +195,9 @@ onUnmounted(() => { stopRevealAnimation(); if (trayTimer !== undefined) window.c
           {{ t(check.difficulty === 'hard' ? 'checkRequiredHard' : 'checkRequiredExtreme', { max: check.required_threshold ?? 0 }) }}
         </span>
         <span v-if="check.opposed?.opponent_verdict">
-          {{ t('checkOpposedDetail', { name: check.opponent_name || t('checkOpponent'), verdict: check.opposed.opponent_verdict }) }}
+          {{ t('checkOpposedDetail', { name: check.opponent_name || t('checkOpponent'), verdict: verdictLabel(check.opposed.opponent_verdict) || check.opposed.opponent_verdict }) }}
         </span>
-        <span v-if="check.achieved_verdict">{{ t('checkAchievedVerdict', { verdict: check.achieved_verdict }) }}</span>
+        <span v-if="check.achieved_verdict">{{ t('checkAchievedVerdict', { verdict: verdictLabel(check.achieved_verdict) || check.achieved_verdict }) }}</span>
         <span v-if="check.modifier_breakdown">{{ t('checkModifierBreakdown', { detail: check.modifier_breakdown }) }}</span>
         <span v-if="check.advantage_note">{{ t('checkAdvantageNote', { detail: check.advantage_note }) }}</span>
         <span v-if="plannerSources">{{ t('checkPlannerSources', { detail: plannerSources }) }}</span>

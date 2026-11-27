@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from src.engine import check_verdict
 from src.engine.language import localized_text
 
 
@@ -56,34 +57,8 @@ def format_check_result(check: dict[str, Any], language: str = "zh-CN") -> str:
     ))
     dice = str(check.get("dice") or "d20")
     roll = check.get("roll")
-    verdict_raw = str(check.get("verdict") or "")
-    verdict_map = {
-        "大成功": "Critical Success",
-        "极难成功": "Extreme Success",
-        "困难成功": "Hard Success",
-        "普通成功": "Regular Success",
-        "成功": "Success",
-        "失败": "Failure",
-        "大失败": "Critical Failure",
-    }
-    verdict_map_de = {
-        "大成功": "Kritischer Erfolg",
-        "极难成功": "Extremer Erfolg",
-        "困难成功": "Schwerer Erfolg",
-        "普通成功": "Normaler Erfolg",
-        "成功": "Erfolg",
-        "失败": "Fehlschlag",
-        "大失败": "Kritischer Fehlschlag",
-    }
-    verdict = localized_text(
-        language,
-        {
-            "en": verdict_map.get(verdict_raw, verdict_raw),
-            "zh-CN": verdict_raw,
-            "ja": verdict_raw,
-            "de": verdict_map_de.get(verdict_raw, verdict_raw),
-        },
-    )
+    # 成功等级由 code 渲染；自定义 runtime 的无 code 文本原样保留。
+    verdict = check_verdict.render(check_verdict.code_of(check), language) or str(check.get("verdict") or "")
     if dice == "d100":
         math = f"d100={roll} vs {check.get('threshold')}%"
     else:

@@ -233,9 +233,13 @@ export interface CheckResult {
     opponent_skill?: string
     opponent_threshold?: number
     opponent_roll?: number
+    /** 稳定成功等级 code（check_verdict），不是显示文本。 */
     opponent_verdict?: string
     outcome?: 'win' | 'lose' | 'tie' | string
   }
+  /** 稳定成功等级 code（critical_success / failure / …）。缺省表示未知，见 verdict。 */
+  verdict_code?: string
+  /** 解析时按对局语言冻结的显示文本；不参与任何判断。 */
   verdict?: string
   luck_spend_available?: boolean
   luck_cost?: number | null

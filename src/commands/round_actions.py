@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from src.commands.dice_resolver import DiceResolver
+from src.engine import check_verdict
 from src.engine import progression
 from src.engine.checks import build_check_request, roll_check_request
 from src.engine.character_utils import is_conscious
@@ -92,6 +93,15 @@ def collect_gm_directives_text(instance: GameInstance) -> tuple[str, list[str]]:
     return f"\n\n{heading}\n{requirement}\n{body}", [str(entry.get("id") or "") for entry in entries]
 
 
+def _verdict_text(instance: GameInstance, check: dict) -> str:
+    """Verdict display text for GM constraints: code first, stored text as fallback."""
+
+    return (
+        check_verdict.render(check_verdict.code_of(check), instance.language)
+        or str(check.get("verdict") or "")
+    )
+
+
 def format_check_results_constraint(instance: GameInstance, checks: list[dict]) -> str:
     """把已结算 CheckResult 重新格式化为 GM 私有硬约束，供 swipe 等重生成复用。"""
     if not checks:
@@ -105,6 +115,8 @@ def format_check_results_constraint(instance: GameInstance, checks: list[dict]) 
         ):
             blocks.append(DiceResolver.format_runtime_constraint(instance, check))
             continue
+        # 成功等级来自 code，不把存盘文本直接拼进另一种语言的句式（ADR-0015）。
+        verdict_text = _verdict_text(instance, check)
         dice = str(check.get("dice") or "")
         roll_value = check.get("roll")
         if dice == "d100":
@@ -118,16 +130,20 @@ def format_check_results_constraint(instance: GameInstance, checks: list[dict]) 
                 })
             opposed = check.get("opposed") if isinstance(check.get("opposed"), dict) else None
             if opposed:
+                opponent_verdict = (
+                    check_verdict.render(opposed.get("opponent_verdict"), instance.language)
+                    or str(opposed.get("opponent_verdict") or "")
+                )
                 math_text += localized_text(instance.language, {
                     "en": (f"; opposed by {check.get('opponent_name')} {opposed.get('opponent_skill')} "
                            f"d100={opposed.get('opponent_roll')} vs {opposed.get('opponent_threshold')} "
-                           f"({opposed.get('opponent_verdict')})"),
+                           f"({opponent_verdict})"),
                     "zh-CN": (f"；对抗 {check.get('opponent_name')} 的{opposed.get('opponent_skill')} "
                               f"d100={opposed.get('opponent_roll')} vs {opposed.get('opponent_threshold')}"
-                              f"（{opposed.get('opponent_verdict')}）"),
+                              f"（{opponent_verdict}）"),
                     "ja": (f"；対抗 {check.get('opponent_name')} の{opposed.get('opponent_skill')} "
                            f"d100={opposed.get('opponent_roll')} vs {opposed.get('opponent_threshold')}"
-                           f"（{opposed.get('opponent_verdict')}）"),
+                           f"（{opponent_verdict}）"),
                 })
         else:
             modifier = int(check.get("modifier", 0) or 0)
@@ -146,28 +162,28 @@ def format_check_results_constraint(instance: GameInstance, checks: list[dict]) 
                 "[System Check - Must Follow]\n"
                 f"Actor: {check.get('actor_name') or check.get('actor_uid')}\n"
                 f"Check: {check.get('label') or dice}: {math_text}\n"
-                f"Result: {check.get('verdict')}\n"
+                f"Result: {verdict_text}\n"
                 "Requirement: keep this server-resolved outcome unchanged."
             ),
             "zh-CN": (
                 "【系统检定·必须遵循】\n"
                 f"角色: {check.get('actor_name') or check.get('actor_uid')}\n"
                 f"检定: {check.get('label') or dice}：{math_text}\n"
-                f"结果: {check.get('verdict')}\n"
+                f"结果: {verdict_text}\n"
                 "要求: 这是服务端已结算结果，不得重掷或改判。"
             ),
             "ja": (
                 "【システム判定・厳守】\n"
                 f"キャラクター: {check.get('actor_name') or check.get('actor_uid')}\n"
                 f"判定: {check.get('label') or dice}：{math_text}\n"
-                f"結果: {check.get('verdict')}\n"
+                f"結果: {verdict_text}\n"
                 "要件: これはサーバーで確定済みの結果であり、再ロールや改変をしてはならない。"
             ),
             "de": (
                 "[Systemseitige Probe - Muss befolgt werden]\n"
                 f"Akteur: {check.get('actor_name') or check.get('actor_uid')}\n"
                 f"Probe: {check.get('label') or dice}: {math_text}\n"
-                f"Ergebnis: {check.get('verdict')}\n"
+                f"Ergebnis: {verdict_text}\n"
                 "Anforderung: Dieses vom Server ermittelte Ergebnis bleibt unverändert."
             ),
         }))

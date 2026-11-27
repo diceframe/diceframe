@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from src.engine import check_verdict
 from src.engine.game_instance import GameInstance
 from src.engine.language import localized_text, normalize_language
 
@@ -104,14 +105,28 @@ def quest_status_label(status: str, language: str = "zh-CN") -> str:
 
 _SANITY_VERDICT_LABELS = {
     "en": {
-        "大成功": "critical success", "极难成功": "extreme success", "困难成功": "hard success",
-        "普通成功": "regular success", "失败": "failure", "大失败": "fumble",
+        "critical_failure": "fumble", "failure": "failure",
+        "regular_success": "regular success", "hard_success": "hard success",
+        "extreme_success": "extreme success", "critical_success": "critical success",
     },
     "ja": {
-        "大成功": "クリティカル", "极难成功": "イクストリーム成功", "困难成功": "ハード成功",
-        "普通成功": "レギュラー成功", "失败": "失敗", "大失败": "ファンブル",
+        "critical_failure": "ファンブル", "failure": "失敗",
+        "regular_success": "レギュラー成功", "hard_success": "ハード成功",
+        "extreme_success": "イクストリーム成功", "critical_success": "クリティカル",
     },
 }
+
+
+def _sanity_verdict_label(language: str, outcome: dict) -> str:
+    """Sanity verdict text from the code; legacy saves keep their stored text."""
+
+    from src.compat.verdict_labels import legacy_code
+
+    code = check_verdict.normalize(outcome.get("verdict_code")) or legacy_code(outcome.get("verdict"))
+    if code:
+        table = _SANITY_VERDICT_LABELS.get(normalize_language(language)) or {}
+        return table.get(code) or check_verdict.render(code, language)
+    return str(outcome.get("verdict") or "")
 
 
 def sanity_check_message(language: str, name: str, outcome: dict) -> str:
@@ -123,17 +138,16 @@ def sanity_check_message(language: str, name: str, outcome: dict) -> str:
             "zh-CN": f"【理智检定】{name}：损失写法无法识别，未结算",
             "ja": f"【正気度ロール】{name}：喪失の表記を認識できないため、処理しませんでした",
         })
-    verdict = str(outcome.get("verdict") or "")
+    verdict = _sanity_verdict_label(language, outcome)
     roll_value = int(outcome.get("roll") or 0)
     threshold = int(outcome.get("threshold") or 0)
     loss = int(outcome.get("loss") or 0)
-    labels = _SANITY_VERDICT_LABELS.get(normalize_language(language), {})
     return localized_text(language, {
         "en": f"[Sanity Check] {name}: d100={roll_value} vs SAN {threshold} → "
-              f"{_SANITY_VERDICT_LABELS['en'].get(verdict, verdict)}, lost {loss} ({spec})",
+              f"{verdict}, lost {loss} ({spec})",
         "zh-CN": f"【理智检定】{name}：d100={roll_value} / 理智 {threshold} → {verdict}，损失 {loss}（{spec}）",
         "ja": f"【正気度ロール】{name}：d100={roll_value} / 正気度 {threshold} → "
-              f"{labels.get(verdict, verdict)}、喪失 {loss}（{spec}）",
+              f"{verdict}、喪失 {loss}（{spec}）",
     })
 
 

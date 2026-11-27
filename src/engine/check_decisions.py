@@ -10,6 +10,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+from src.engine import check_verdict
 from src.engine.dice_rules_coc import (
     apply_required_level,
     check_d100_bonus,
@@ -59,7 +60,10 @@ def prepare(inst: Any, rule: Any) -> None:
         return
     checks.require_writable(inst)
     # 规则声明大失败不可孤注一掷时（CoC 7e 通行做法），只给普通失败提供推骰。
-    pushable_verdicts = {"失败"} if rule.pushed_roll_excludes_fumble else {"失败", "大失败"}
+    pushable_codes = (
+        {check_verdict.FAILURE} if rule.pushed_roll_excludes_fumble
+        else {check_verdict.FAILURE, check_verdict.CRITICAL_FAILURE}
+    )
     for check in checks.last_checks(inst):
         if check.get("push") is not None:
             _state(check)
@@ -72,7 +76,7 @@ def prepare(inst: Any, rule: Any) -> None:
                 or check.get("kind") != "check" or not ordinary
                 or check.get("opponent") or legacy_combat.combat_state(inst) != "none"
                 or check.get("dice") != "d100" or check.get("dice_mechanic") != "coc_bonus_penalty"
-                or check.get("verdict") not in pushable_verdicts
+                or check_verdict.code_of(check) not in pushable_codes
                 or check.get("luck_decision") in {"spent", "declined"}):
             continue
         check["push"] = {"schema_version": 1, "revision": 0, "status": "pending",
@@ -147,6 +151,12 @@ def _text(value: Any) -> str:
     return value.strip()
 
 
+def _language(inst: Any) -> str:
+    """Game language for text frozen into the check record."""
+
+    return str(getattr(inst, "language", "") or "")
+
+
 def change(inst: Any, check_id: str, uid: str, operation: str, *, run_id: str,
            round_number: int, expected_revision: int, reason: Any = None,
            consequence: Any = None, rng: Any = None) -> dict:
@@ -201,9 +211,12 @@ def change(inst: Any, check_id: str, uid: str, operation: str, *, run_id: str,
         check.pop("achieved_verdict", None)
         if verdict != achieved:
             check["achieved_verdict"] = achieved
-        push.update(status="resolved", original=original, failed=verdict in {"失败", "大失败"})
-        check.update(roll=value, rolls=rolls, verdict=verdict, percentile_dice=project_percentile_dice(rolls, value, mode),
-                     is_critical=verdict == "大成功", is_fumble=verdict == "大失败", luck_cost=None)
+        push.update(status="resolved", original=original,
+                    failed=verdict in {check_verdict.FAILURE, check_verdict.CRITICAL_FAILURE})
+        check.update(roll=value, rolls=rolls, verdict=check_verdict.render(verdict, _language(inst)),
+                     verdict_code=verdict, percentile_dice=project_percentile_dice(rolls, value, mode),
+                     is_critical=check_verdict.is_critical(verdict),
+                     is_fumble=check_verdict.is_fumble(verdict), luck_cost=None)
     else:
         raise ValueError("invalid Push transition")
     # Requesting Push irrevocably chooses it over Luck; declining accepts failure.

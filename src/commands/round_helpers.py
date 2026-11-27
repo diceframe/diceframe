@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from src.engine.modules import game_config
@@ -10,8 +11,10 @@ from src.engine import module_hooks
 
 import re
 
+from src.engine import check_verdict
 from src.engine.constants import COMBAT_INTENT_KEYWORDS
 from src.engine.game_instance import GameInstance
+from src.engine.intent.lexicon import narration_patterns
 
 
 _DECISION_KEYWORDS = ("是否", "选择", "赌上", "决定", "要么")
@@ -74,48 +77,84 @@ def _current_scene_has_multiple_npcs(instance: GameInstance) -> bool:
     return False
 
 
-def validate_dice_constraint(dice_block: str, narration: str) -> bool:
-    """校验 LLM 叙事是否与骰子结果矛盾。返回 True=合规, False=矛盾。
+def validate_dice_constraint(
+    check_results: Sequence[Mapping[str, Any]],
+    narration: str,
+    *,
+    language: str = "zh-CN",
+) -> bool:
+    """Check that the narration does not contradict a critical outcome.
 
-    只在骰子为大成功/大失败时校验，且仅检测以玩家为主语的描述，
-    避免 NPC 的失败/成功被误判为矛盾。
+    Returns ``True`` when the narration is acceptable, when nothing has to be
+    checked, or when the game language ships no narration patterns: this is a
+    soft quality gate, so an unsupported language degrades to "no opinion"
+    instead of blocking the round.
+
+    Attribution is structural. A sentence belongs to an actor when it names the
+    character; pronouns are only used when a single player acted this round,
+    because in a party the same "you" would otherwise validate every seat
+    against one outcome. Verdicts come from :mod:`src.engine.check_verdict`
+    codes, never from rendered text, so the check behaves the same in every
+    language.
     """
-    if not dice_block or not narration:
+
+    if not narration:
         return True
-    is_critical = "大成功" in dice_block
-    is_fumble = "大失败" in dice_block
-    if not is_critical and not is_fumble:
+    patterns = narration_patterns(language)
+    if not patterns:
+        return True
+    critical: list[tuple[str, str, str]] = []
+    player_checks = 0
+    for check in check_results or ():
+        if not isinstance(check, Mapping):
+            continue
+        if str(check.get("actor_ref") or "").startswith("player:"):
+            player_checks += 1
+        code = check_verdict.code_of(check)
+        if not (check_verdict.is_critical(code) or check_verdict.is_fumble(code)):
+            continue
+        actor = str(check.get("actor_name") or "").strip()
+        if not actor:
+            continue
+        critical.append((actor, code, str(check.get("actor_uid") or "")))
+    if not critical:
         return True
 
-    player_prefixes = ("你", "你们")
-    failure_words = ("失败", "没能", "无法", "落空", "失误", "错过", "打偏")
-    success_words = ("成功", "做到", "完成", "命中", "击倒", "漂亮")
+    pronouns = patterns.get("second_person", ())
+    failure_words = patterns.get("failure_words", ())
+    success_words = patterns.get("success_words", ())
+    sentences = [part.strip() for part in re.split(r"[。！？!?\n]|(?<=\.)\s+", narration)]
 
-    sentences = re.split(r'[。！？\n]', narration)
-
-    if is_critical:
+    for actor, code, _uid in critical:
+        words = failure_words if check_verdict.is_critical(code) else success_words
+        use_pronoun = player_checks <= 1
         for sentence in sentences:
-            sentence = sentence.strip()
             if not sentence:
                 continue
-            is_player_subject = any(sentence.startswith(p) for p in player_prefixes) or "你" in sentence[:8]
-            if not is_player_subject:
+            addressed = actor in sentence
+            if not addressed and use_pronoun:
+                addressed = any(_mentions(sentence, token) for token in pronouns)
+            if not addressed:
                 continue
-            if any(word in sentence for word in failure_words):
+            if any(_mentions(sentence, word) for word in words):
                 return False
-
-    if is_fumble:
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if not sentence:
-                continue
-            is_player_subject = any(sentence.startswith(p) for p in player_prefixes) or "你" in sentence[:8]
-            if not is_player_subject:
-                continue
-            if any(word in sentence for word in success_words):
-                return False
-
     return True
+
+
+def _mentions(text: str, token: str) -> bool:
+    """Literal match for scripts without spaces; word match for Latin/Cyrillic.
+
+    A substring test would let "miss" match "mission"; an always-bounded test
+    would never match inside Chinese or Japanese prose.
+    """
+
+    needle = token.casefold()
+    if not needle:
+        return False
+    haystack = text.casefold()
+    if needle.isascii():
+        return re.search(rf"(?<![0-9a-z]){re.escape(needle)}(?![0-9a-z])", haystack) is not None
+    return needle in haystack
 
 
 def default_quick_actions_by_class(class_name: str) -> list[str]:

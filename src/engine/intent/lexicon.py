@@ -112,3 +112,43 @@ def instance_language(instance: Any) -> str:
     """Game language of an instance, normalized for the lexicon."""
 
     return normalize_language(getattr(instance, "language", "") or "")
+
+
+#: narration.json 的稳定键。叙事一致性校验只读这些模式，不写死任何一种语言。
+_NARRATION_KEYS = ("second_person", "failure_words", "success_words")
+
+
+@lru_cache(maxsize=None)
+def _load_narration(language: str) -> dict[str, tuple[str, ...]]:
+    path = _RESOURCE_DIR / language / "narration.json"
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) or {}
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {
+        key: tuple(str(pattern) for pattern in (data.get(key) or []) if str(pattern))
+        for key in _NARRATION_KEYS
+        if isinstance(data.get(key), list)
+    }
+
+
+def narration_patterns(language: str) -> dict[str, tuple[str, ...]]:
+    """Per-language narration-consistency patterns (chain, not union).
+
+    A narration is written in exactly one language, so unlike intent matching
+    this must not union every resource: foreign words inside quoted dialogue
+    would attribute sentences to the wrong actor. Resolution is the requested
+    language, then English. A language without a resource yields empty
+    patterns, and the caller skips the heuristic instead of guessing.
+    """
+
+    normalized = normalize_language(language or "")
+    for candidate in (normalized, "en"):
+        patterns = _load_narration(candidate)
+        if patterns:
+            return patterns
+    return {}
