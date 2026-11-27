@@ -513,7 +513,7 @@ const referenceLabels: Record<string, [string, string]> = {
   small: ['小型', 'Small'], medium: ['中型', 'Medium'],
   barbarian: ['野蛮人', 'Barbarian'], bard: ['吟游诗人', 'Bard'], cleric: ['牧师', 'Cleric'], druid: ['德鲁伊', 'Druid'],
   fighter: ['战士', 'Fighter'], monk: ['武僧', 'Monk'], paladin: ['圣武士', 'Paladin'], ranger: ['游侠', 'Ranger'],
-  rogue: ['游荡者', 'Rogue'], sorcerer: ['术士', 'Sorcerer'], warlock: ['邪术师', 'Warlock'], wizard: ['法师', 'Wizard'],
+  rogue: ['游荡者', 'Rogue'], sorcerer: ['术士', 'Sorcerer'], warlock: ['魔契师', 'Warlock'], wizard: ['法师', 'Wizard'],
   single_class: ['单职业', 'Single class'], multiclass: ['多职业', 'Multiclass'],
   acrobatics: ['体操', 'Acrobatics'], animal_handling: ['驯兽', 'Animal Handling'], arcana: ['奥秘', 'Arcana'], athletics: ['运动', 'Athletics'],
   deception: ['欺瞒', 'Deception'], history: ['历史', 'History'], insight: ['洞悉', 'Insight'], intimidation: ['威吓', 'Intimidation'],

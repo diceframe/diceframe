@@ -358,10 +358,13 @@ def test_matrix_01_every_carrier_appears_at_its_own_level(
         (17, "mystic_arcanum_9"),
     }
     for level in (1, 8, 9, 10, 11, 12, 13, 15, 17):
-        owned = {row["slot_id"] for row in resolver.free_cast_slots(
-            _warlock(runtime, level)
-        )}
+        character = _warlock(runtime, level)
+        owned = {row["slot_id"] for row in resolver.free_cast_slots(character)}
         want = {slot for unlock, slot in expected if level >= unlock}
+        # S0-F32 的 Fiendish Vigor 也是一个免槽施法载体（False Life）。它属于
+        # 祈唤，不由本切片的等级表授予，所以只在角色真的选了它时才算进来。
+        if "fiendish_vigor" in {row.id for row in resolver.features_for(character)}:
+            want.add("fiendish_vigor")
         assert owned == want, level
     wizard = {
         17: set(),
@@ -627,7 +630,7 @@ def test_matrix_08_an_arcanum_never_touches_the_pact_slots(
     runtime: Dnd2024Runtime, resolver: Dnd2024ClassFeatureResolver,
 ) -> None:
     seventeen = _warlock(runtime, 17)
-    # 邪术师最高只有 5 环契约槽，6 环法术除了免费施放没有第二条路：
+    # 魔契师最高只有 5 环契约槽，6 环法术除了免费施放没有第二条路：
     # 免费槽的环阶就是法术环阶，不存在"免费上调"。
     row = _slot(resolver, seventeen, "mystic_arcanum_9")
     assert row["spell_level"] == 9

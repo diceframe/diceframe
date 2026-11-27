@@ -28,6 +28,7 @@ from .combat import (
     relaxed_bonus_action_targets,
 )
 from .equipment import Dnd2024EquipmentCatalog
+from . import option_pool
 from .feat_capabilities import capability_labels, owned_capability_feats
 from .feat_models import FeatDefinition, load_feat_definitions
 from .models import (
@@ -1070,40 +1071,9 @@ class Dnd2024ClassFeatureResolver:
         contract.
         """
 
-        choice = definition.choice
-        if choice is None:
-            return None
-        matches = [
-            record
-            for record in self._feature_choice_records(character)
-            if record.get("owner") == definition.owner
-            and record.get("feature_id") == definition.id
-            and record.get("choice_id") == choice.id
-        ]
-        # 同一个三元组可以合法地出现多次：Bard 的 Expertise 在 2 级与 9 级各选
-        # 两项，两级共用一个 (owner, feature_id, choice_id)。区分它们的是
-        # ``granted_level``，所以按等级分组：组内重复仍然是"写了两次"的歧义，
-        # 不同等级则是先后两次合法选择，合并成一份选择集。
-        groups: dict[Any, list[Mapping[str, Any]]] = {}
-        for record in matches:
-            groups.setdefault(record.get("granted_level"), []).append(record)
-        if any(len(group) > 1 for group in groups.values()):
-            return {"choice_id": choice.id, "selected_refs": []}
-        allowed = set(choice.enabled_options)
-        selected: list[str] = []
-        for group in groups.values():
-            raw_refs = group[0].get("selected_refs")
-            if not isinstance(raw_refs, list):
-                continue
-            for ref in raw_refs:
-                if not isinstance(ref, str):
-                    continue
-                if not self._choice_ref_is_valid(choice, ref, allowed):
-                    continue
-                if ref not in selected:
-                    selected.append(ref)
-        return {"choice_id": choice.id, "selected_refs": selected}
-
+        return option_pool.project_feature_selection(
+            definition, self._feature_choice_records(character), self._choice_ref_is_valid,
+        )
     def _choice_ref_is_valid(
         self, choice: Any, ref: str, allowed: set[str],
     ) -> bool:
@@ -1115,6 +1085,10 @@ class Dnd2024ClassFeatureResolver:
             if ref[6:] not in self._skill_ids():
                 return False
             return ref in allowed if allowed else True
+        if choice.kind == "feature_option":
+            # 选项池的选择指回同一份特性目录里的声明，不是成长专长：拿专长
+            # 目录去校验会一律判假，角色卡的 selection 就整片消失。
+            return ref in allowed
         categories = self._advancement_feat_categories()
         if categories.get(ref.removeprefix("feat:")) != choice.category:
             return False
@@ -1300,11 +1274,25 @@ class Dnd2024ClassFeatureResolver:
             refs = record.get("selected_refs")
             if not isinstance(refs, list):
                 continue
-            for ref in refs:
-                local = str(ref).removeprefix("feature:")
+            for raw in refs:
+                # 可重复选项的每次选择是 {"ref", "object_ref"}：绑定属于"哪一次
+                # 选择"，不属于"拥有哪一项"。所有权只回答后者，所以这里只读
+                # ref；把 dict 直接 str() 会得到一个什么都对不上的字符串。
+                ref = raw.get("ref") if isinstance(raw, Mapping) else raw
+                local = str(ref or "").removeprefix("feature:")
                 if local in choice.enabled_options or f"feature:{local}" in choice.enabled_options:
                     selected.add(local)
         return frozenset(selected)
+
+    def bound_objects(
+        self, character: Mapping[str, Any] | None, feature_id: str, *, owner: str = "",
+    ) -> tuple[str, ...]:
+        return option_pool.bound_objects(character, feature_id, owner)
+
+    def owns_binding(
+        self, character: Mapping[str, Any] | None, feature_id: str, object_ref: str, *, owner: str = "",
+    ) -> bool:
+        return option_pool.owns_binding(character, feature_id, object_ref, owner)
 
     def feature_option_choice(
         self,

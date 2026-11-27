@@ -22,4 +22,10 @@ export interface Dnd2024Draft extends JsonObject {
   background_equipment_package_ref: string
   language_refs: string[]
   class_spell_choices: RulesetSelectedClassSpells
+  feature_choices?: {
+    owner: string
+    feature_id: string
+    choice_id: string
+    selected_refs: (string | { ref: string; object_ref?: string })[]
+  }[]
 }

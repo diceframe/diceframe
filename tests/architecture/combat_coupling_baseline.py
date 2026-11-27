@@ -42,6 +42,17 @@ from scripts.architecture_fitness import DependencyDebt
 #: same debt sitting on both sides of a new boundary.  Those keys leave with the rest
 #: of the intent switches in GAP-43 C.
 #:
+#: Registered with S0-F32 (2026-11-27): ``spell_push_ft`` is the player's choice
+#: of how far Repelling Blast pushes (0-10).  The distance cannot be derived from
+#: the declaration alone -- the option says "up to 10", the player says how many
+#: -- so the field has to exist.  Everything else about the option (which cantrip
+#: it is bound to, the cap) is discovered from the declaration, which is why no
+#: ``feature_literal`` entry was added with it.
+#:
+#: The ``feature_value:feral_senses`` entry left in the same change: the sense
+#: scan reads ``<code>_range_ft`` off any owned feature, so combat no longer
+#: names that feature.
+#:
 #: One entry per (file, category, symbol), generated from the current package.
 #: Categories: kind_branch, feature_branch, feature_literal, intent_switch.
 #:
@@ -57,8 +68,9 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/availability.py", "feature_literal", "has_feature:lands_aid"),
     DependencyDebt("src/rulesets/dnd2024/combat/availability.py", "feature_literal", "has_feature:natures_sanctuary"),
     DependencyDebt("src/rulesets/dnd2024/combat/availability.py", "feature_literal", "has_feature:wild_shape"),
-    DependencyDebt("src/rulesets/dnd2024/combat/check_modes.py", "feature_literal", "feature_value:feral_senses"),
     DependencyDebt("src/rulesets/dnd2024/combat/check_modes.py", "feature_literal", "feature_value:precise_hunter"),
+    DependencyDebt("src/rulesets/dnd2024/combat/spell_resolution.py", "intent_switch", "spell_push_ft"),
+    DependencyDebt("src/rulesets/dnd2024/combat/validation_spells.py", "intent_switch", "spell_push_ft"),
     # S0-F7R: the mastery registry names its own effect kinds, and the commit
     # step branches on them.  Both are data about a *declaration*, not a
     # feature name, so they belong to the mastery module rather than to

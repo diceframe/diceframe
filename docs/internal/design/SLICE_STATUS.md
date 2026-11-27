@@ -5,6 +5,9 @@
 > **规格文档在哪**：32 份 `S0*.md` 只在 `docs/dnd2024-s0-specs` 分支上，**main 里没有**；
 > 权威索引是同一分支的 `S0_TASK_INDEX_2026-11-07.md`。本表状态取自该索引 + 已合并 PR + 代码探测。
 >
+> **本次刷新**：2026-11-27，按 main `0b12b0ea` 的代码与 PR 状态逐行核对（#828/#881 已合并，
+> F25 由 #830/#836/#838 交付，F32 开 PR #892）。之前标 🔵 的三行是"PR 已开"的旧记录，合并后未回填。
+>
 > **更新规则**
 >
 > 1. 状态变了就改本表，**同一次提交里改**。
@@ -87,12 +90,12 @@
 | F8 | 三职业战斗风格与戏法替代选项 | ⬜ | 有任务书；代码里只有选项管道（B），**风格机制本身没有** |
 | F9 | 被动防御与移动派生 | ✅ | #757；索引：可自动化部分交付，环境面按停止条件记录 |
 | **F10** | Bonus Action 路由与移动附带效果 | **已拆分** | `S0F10_ACTION_ROUTING_STOP_NOTE` §5，原任务书作废 |
-| F10A | Pounce / Tactical Shift / Steady Aim / Fleet Step / Heightened Focus | 🔵 | #828；16 条矩阵 15 条，Step 携带生物未做 → **缺口 GAP-19** |
-| F10B | 战斗内 Hide：默认拒绝 + 三前提 + 检定收口 | 🔵 | #828；「被敌人发现」未做 → **缺口 GAP-16** |
+| F10A | Pounce / Tactical Shift / Steady Aim / Fleet Step / Heightened Focus | 🟡 | #828 已合并（2026-11-22）；16 条矩阵 15 条，Step 携带生物未做 → **缺口 GAP-19** |
+| F10B | 战斗内 Hide：默认拒绝 + 三前提 + 检定收口 | 🟡 | #828 已合并（2026-11-22）；「被敌人发现」未做 → **缺口 GAP-16** |
 | F10C | 战前潜行（遭遇前） | ⏸ | **缺口 GAP-5**：Surprised 机制不存在，产物无消费者 |
 | F10D | Fast Hands ①③（工具存在性 + 借用 + 动作降级） | ⬜ | `S0F10D_..._TASK_SPEC`；等 F10B 合入后复用其检定函数 |
 | F10E | Fast Hands ②（Utilize） | ⏸ | **缺口 GAP-6 / GAP-16 / GAP-18**：数据齐（35 个工具的 utilize 表），缺 GM 施加后果与区域触发 |
-| F11 | 伤害反应与远程重定向 | 🔵 | PR #881 待合并；Retaliation 早已落地，本片完成 Deflect Attacks / Deflect Energy（`test_dnd2024_damage_reactions.py` 14 条）；**Slow Fall 按 §7 停工**（无 fall trigger，GAP-50） |
+| F11 | 伤害反应与远程重定向 | 🟡 | #881 已合并（2026-11-27）；Retaliation 早已落地，本片完成 Deflect Attacks / Deflect Energy（`test_dnd2024_damage_reactions.py` 14 条）；**Slow Fall 按 §7 停工**（无 fall trigger，GAP-50） |
 | F12 | 豁免优势、Evasion、邪魔韧性、无情狂怒 | ✅ | #763 + 执行报告（35 条） |
 | F13 | 条件免疫、抑制与移除 | ✅ | #763 + 报告（30 条） |
 | F14 | 命中附加效果、命中后条件、施法侧加值 | ✅ | #763 + 报告（52 条） |
@@ -113,7 +116,7 @@
 | F29 | Divine Words 类 | ⬜ | 有任务书；未开工 |
 | F30 | 长时效应 | ✅ | #841 + 执行报告（44 条）；角色级 long_effect 存储 + 世界时钟到期 |
 | F31 | 法术书与物品 | ✅ | #869 + 执行报告；Use Magic Device / 仪式 / Evocation Savant |
-| F32 | 祈唤主干 | ⬜ | 有任务书；引擎无 `eldritch_invocation` 实现 |
+| F32 | 祈唤主干 | 🔵 | **#892 待合并**（基座 `0b12b0ea`，35 文件 +3566/−78）；42 条用例、六项效果、两项 `guided`（Devil's Sight / Lessons）；多束场景被 **GAP-44** 挡住。逐项状态见 `S0_INVOCATION_STATUS_2026-11-26.md`，执行报告 `S0F32_INVOCATION_CORE_EXECUTION_REPORT_2026-11-27.md` |
 | F33 | 祈唤施法 | ⬜ | 有任务书；未开工 |
 | F34 | 祈唤刃 | ⬜ | 有任务书；未开工 |
 | F35 | 祈唤契约 | ⬜ | 有任务书；未开工 |
