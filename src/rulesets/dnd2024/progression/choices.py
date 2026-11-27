@@ -459,6 +459,79 @@ class AdvancementChoicesMixin:
         }
         for definition in declared:
             choice = definition.choice
+            if choice is not None and choice.kind == "language":
+                # 语言槽与技能槽分开处理：语言不参与任何机械化判定，它只是
+                # "这个角色懂什么语言"的权威记录。因此**未作答不阻塞升级**——
+                # 强制每个既有游侠在 2 级补两个语言会让他们全部升级失败，而
+                # 漏选两个语言不会导致任何错误结算。
+                options = [
+                    {
+                        "value": f"language:{entity['id']}",
+                        "available": entity.get("rarity") == "standard",
+                        "unavailable_reasons": (
+                            [] if entity.get("rarity") == "standard" else ["not_standard"]
+                        ),
+                    }
+                    for entity in self.bundle.list("language")
+                ]
+                requirements.append({
+                    "id": f"feature_choice:{definition.owner}:{definition.id}:{choice.id}",
+                    "kind": "feature_choice",
+                    "enforced": False,
+                    "required": False,
+                    "owner": definition.owner,
+                    "feature_id": definition.id,
+                    "choice_id": choice.id,
+                    "count": choice.count,
+                    "options": options,
+                })
+                slot = [
+                    index for index, record in enumerate(submitted)
+                    if record["owner"] == definition.owner
+                    and record["feature_id"] == definition.id
+                    and record["choice_id"] == choice.id
+                ]
+                if not slot:
+                    continue
+                matched.add(slot[0])
+                record = submitted[slot[0]]
+                raw_refs = record["selected_refs"]
+                if not isinstance(raw_refs, list) or not all(
+                    isinstance(ref, str) for ref in raw_refs
+                ):
+                    errors.append(
+                        f"feature choice {definition.id} selected_refs must be strings"
+                    )
+                    continue
+                if len(raw_refs) != choice.count:
+                    errors.append(
+                        f"feature choice {definition.id} must select exactly "
+                        f"{choice.count} option"
+                    )
+                    continue
+                if len(set(raw_refs)) != len(raw_refs):
+                    errors.append(
+                        f"feature choice {definition.id} selected_refs repeats an option"
+                    )
+                    continue
+                allowed_languages = {
+                    f"language:{entity['id']}" for entity in self.bundle.list("language")
+                    if entity.get("rarity") == "standard"
+                }
+                if any(ref not in allowed_languages for ref in raw_refs):
+                    errors.append(
+                        f"feature choice {definition.id} selected a non-Standard language"
+                    )
+                    continue
+                records.append({
+                    "owner": definition.owner,
+                    "feature_id": definition.id,
+                    "choice_id": choice.id,
+                    "selected_refs": list(raw_refs),
+                    "granted_level": target_level,
+                    "grants": "",
+                })
+                continue
             if choice is not None and choice.kind == "skill_proficiency":
                 options = self._skill_options(choice, proficient, expertise)
                 requirements.append({

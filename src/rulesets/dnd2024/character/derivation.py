@@ -397,6 +397,8 @@ def plan_feature_choices(
             "choice_id": choice.id,
             "selected_refs": slot_refs,
             "granted_level": int(level),
+            # 调用点要区分"加倍"与"新增熟练"：只看 selected_refs 分不出来。
+            "grants": choice.grants,
         })
     for index, record in enumerate(submitted):
         if index in matched:
@@ -676,6 +678,18 @@ class CharacterDerivationMixin:
         )
         if choice_errors:
             raise ValueError("; ".join(choice_errors))
+        # grants == "proficiency" 的槽真的把技能加进熟练表：Bonus Proficiencies
+        # 与 Primal Knowledge 选中的技能必须计入 skill_values，否则只是记录了
+        # 一个名字，玩家拿到的加值是 0。
+        granted_skills = [
+            str(ref)
+            for record in feature_choices
+            if record.get("grants") == "proficiency"
+            for ref in record.get("selected_refs") or []
+            if str(ref).startswith("skill:")
+        ]
+        if granted_skills:
+            skill_refs = list(dict.fromkeys([*skill_refs, *granted_skills]))
         expertise = {
             row["skill_ref"] for row in features.expertise_skills(
                 _feature_proxy(
@@ -691,17 +705,26 @@ class CharacterDerivationMixin:
             )
         )
         skill_values: dict[str, int] = {}
+        # 分解与总量一起存：检定侧要"换一个属性重算"时必须知道多少是属性、
+        # 多少是熟练部分，不能从总量反推——反推在出现非线性项时会静默算错。
+        skill_parts: dict[str, dict[str, int]] = {}
         all_skills = self.bundle.list("skill")
         for skill in all_skills:
             ref = f"skill:{skill['id']}"
             ability_id = _ref_id(str(skill["ability_ref"]), "ability")
-            skill_values[str(skill["id"])] = derive_skill_check(
+            derived = derive_skill_check(
                 int(abilities[ability_id]),
                 proficiency_bonus=prof,
                 proficient=ref in skill_refs,
                 expertise=ref in expertise,
                 half_proficiency=half_proficiency,
-            )["total"]
+            )
+            skill_values[str(skill["id"])] = derived["total"]
+            skill_parts[str(skill["id"])] = {
+                "ability": ability_id,
+                "ability_modifier": int(derived["ability_modifier"]),
+                "contribution": int(derived["contribution"]),
+            }
 
         save_refs = list(class_entity.get("saving_throw_refs") or [])
         selected_packages = [package, *([background_package] if background_package else [])]
@@ -743,10 +766,24 @@ class CharacterDerivationMixin:
             + (prof if f"ability:{ability_id}" in save_refs else 0)
             for ability_id in ABILITY_IDS
         }
-        armor_category_refs = [
-            f"armor_category:{item}"
-            for item in class_entity.get("armor_proficiencies", [])
-        ]
+        saving_throw_parts = {
+            ability_id: {
+                "ability": ability_id,
+                "ability_modifier": ability_modifier(abilities[ability_id]),
+                "contribution": prof if f"ability:{ability_id}" in save_refs else 0,
+            }
+            for ability_id in ABILITY_IDS
+        }
+        # 职业表之外还有特性授予的训练（Divine Order: Protector 的重甲、
+        # Primal Order: Warden 的中甲）。不并进来的话，这两个选项只是把
+        # "Heavy" 写进内容，穿甲时仍然算未受训。
+        armor_category_refs = list(dict.fromkeys([
+            *[f"armor_category:{item}" for item in class_entity.get("armor_proficiencies", [])],
+            *[
+                f"armor_category:{category}"
+                for category in features.category_sources(feature_proxy, "armor_category_grants")
+            ],
+        ]))
         armor_class = derive_armor_class(
             abilities, item_refs, self.bundle,
             armor_category_refs=armor_category_refs,
@@ -899,13 +936,21 @@ class CharacterDerivationMixin:
             "abilities": abilities,
             "proficiencies": {
                 "saving_throw_refs": save_refs,
+                "saving_throw_parts": saving_throw_parts,
                 "armor_category_refs": armor_category_refs,
-                "weapon_category_refs": [
-                    f"weapon_category:{item}"
-                    for item in class_entity.get("weapon_proficiencies", [])
-                ],
+                "weapon_category_refs": list(dict.fromkeys([
+                    *[
+                        f"weapon_category:{item}"
+                        for item in class_entity.get("weapon_proficiencies", [])
+                    ],
+                    *[
+                        f"weapon_category:{category}"
+                        for category in features.category_sources(feature_proxy, "weapon_category_grants")
+                    ],
+                ])),
                 "skill_refs": skill_refs,
                 "skill_values": skill_values,
+                "skill_parts": skill_parts,
                 "tool_refs": tool_refs,
                 "language_refs": language_refs,
             },

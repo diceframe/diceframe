@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from src.rulesets.dnd2024.character.builder import ability_modifier
 from ..features.resources import long_effect_active
 from .primitives import world_minutes, CombatIntentError, LEGENDARY_RESISTANCE_DEFAULT_PER_DAY, trait_ids, trait_params
+from .check_modifiers import active_modifiers, check_total
 from .check_modes import condition_check_bonus_rolls, condition_flags, mode_from_sources
 
 INDOMITABLE_MIGHT = "indomitable_might"
@@ -278,6 +279,37 @@ class CombatSavingThrowsMixin:
         })
         return events
 
+    def _skill_check_bonus(
+        self, actor: dict[str, Any], skill: str, base: int,
+    ) -> tuple[int, str, list[str]]:
+        """The skill's bonus after content-declared replacements and adds.
+
+        No declaration means no work: the fast path returns the derived value
+        unchanged, so every existing skill check keeps exactly what it had.
+        """
+
+        character = self._feature_character(actor)
+        parts = (character.get("proficiencies") or {}).get("skill_parts") or {}
+        part = parts.get(skill) if isinstance(parts, dict) else None
+        default_ability = str((part or {}).get("ability") or "")
+        rows = active_modifiers(
+            self.features.check_modifiers(character, "skill_check"),
+            skill=skill,
+            ability=default_ability,
+            conditions=actor.get("conditions") or {},
+        )
+        if not rows and isinstance(part, dict):
+            return base, default_ability, []
+        total, effective, _modifier, bonus_sources = check_total(
+            part,
+            actor.get("abilities") or {},
+            default_ability=default_ability or "int",
+            fallback_total=base,
+            rows=rows,
+            proficiency_bonus=int(actor.get("proficiency_bonus", 0) or 0),
+        )
+        return total, effective, bonus_sources
+
     def _skill_check_events(
         self, instance: Any, combat: dict[str, Any], actor: dict[str, Any], rng: Any,
         *, skill: str, dc: int, kind: str, events: list[dict[str, Any]],
@@ -296,7 +328,10 @@ class CombatSavingThrowsMixin:
         """
 
         actor_id = str(actor["actor_id"])
-        bonus = int(actor["skill_values"].get(skill, 0) or 0)
+        base_bonus = int(actor["skill_values"].get(skill, 0) or 0)
+        bonus, check_ability, bonus_sources = self._skill_check_bonus(
+            actor, skill, base_bonus,
+        )
         declared = list(sources or ())
         mode = mode_from_sources(declared)
         first = int(rng.randint(1, 20))
@@ -309,10 +344,17 @@ class CombatSavingThrowsMixin:
         success = total >= dc
         event: dict[str, Any] = {
             "type": "check.resolved", "kind": kind, "actor_id": actor_id,
+            # ``ability`` 历史上装的是技能名（大量消费者按现状读它），所以
+            # 有效属性单独一个字段，不改变既有含义。
             "ability": skill, "rolls": rolls, "natural": effective,
             "modifier": bonus, "total": total, "target": dc, "success": success,
             "roll_id": self._roll_id(events, kind, actor_id),
         }
+        if check_ability:
+            event["skill"] = skill
+            event["effective_ability"] = check_ability
+        if bonus_sources:
+            event["check_modifier_sources"] = bonus_sources
         if floor:
             event["raw_d20"] = natural
             event["effective_d20"] = effective

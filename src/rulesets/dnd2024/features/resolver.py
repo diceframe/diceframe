@@ -15,6 +15,7 @@ from copy import deepcopy
 from typing import Any, Mapping
 
 from src.rulesets.bundle import LoadedRulesetBundle
+from .grants import check_modifiers, fixed_sources
 from src.rulesets.dnd2024.character.primitives import ABILITY_IDS
 from src.rulesets.dnd2024.progression.catalog import (
     Dnd2024ProgressionCatalog,
@@ -457,30 +458,49 @@ class Dnd2024ClassFeatureResolver:
             for definition in self.features_for(character)
         )
 
+    def owns_definition(
+        self, character: Mapping[str, Any] | None, definition: Any,
+    ) -> bool:
+        """Whether a feature is in force, not merely owned by level."""
+
+        parent = definition.option_of
+        if not parent:
+            return True
+        chosen = self.feature_option_choice(character, parent, owner=definition.owner)
+        return chosen == definition.id
+
     def language_sources(
         self, character: Mapping[str, Any] | None,
     ) -> dict[str, str]:
-        """``{language_ref: feature_id}`` for every feature-granted language.
+        """``{language_ref: feature_id}`` for every feature-granted language."""
 
-        A fixed grant, not a choice: ``language_grants`` is a plain list because
-        nothing is being offered.  Choices (Deft Explorer's two languages,
-        Thieves' Cant's one) travel through ``FeatureChoice`` instead, so a
-        parameter and a slot can never be mistaken for one another.
-        """
+        return fixed_sources(self.features_for(character), "language_grants")
 
-        sources: dict[str, str] = {}
-        for definition in self.features_for(character):
-            declared = definition.parameters.get("language_grants")
-            if not isinstance(declared, list):
-                continue
-            for ref in declared:
-                if (
-                    isinstance(ref, str)
-                    and ref.startswith("language:")
-                    and ref not in sources
-                ):
-                    sources[ref] = definition.id
-        return sources
+    def category_sources(
+        self, character: Mapping[str, Any] | None, key: str,
+    ) -> dict[str, str]:
+        """``{category: feature_id}`` for feature-granted armor/weapon training."""
+
+        return fixed_sources(
+            (
+                definition for definition in self.features_for(character)
+                if self.owns_definition(character, definition)
+            ),
+            key,
+        )
+
+    def check_modifiers(
+        self, character: Mapping[str, Any] | None, surface: str,
+    ) -> list[dict[str, Any]]:
+        """Declared check modifiers for one surface."""
+
+        return check_modifiers(
+            (
+                definition for definition in self.features_for(character)
+                if self.owns_definition(character, definition)
+            ),
+            surface,
+        )
 
     def saving_throw_proficiency_sources(
         self, character: Mapping[str, Any] | None,
