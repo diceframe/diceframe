@@ -61,6 +61,7 @@ CORE_FLOW_FILES = frozenset({
     "src/commands/game_lifecycle.py",
     "src/commands/prompt_composer.py",
     "src/commands/round_actions.py",
+    "src/commands/round_checks.py",
     "src/commands/round_effects.py",
     "src/commands/round_helpers.py",
     "src/commands/round_media.py",

@@ -422,7 +422,7 @@ async def _advance_time_through_round_processor(
 
     instance.state = instance.state.ACTIVE_JUDGMENT
     instance.reset_round_checks()
-    with patch("src.commands.round_processor.plan_round_checks", planned):
+    with patch("src.commands.round_checks.plan_round_checks", planned):
         await golden.api._handler.prepare_round_checks_ai(instance)
     return list(world_reports.last_world_events(instance))
 

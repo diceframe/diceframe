@@ -2677,7 +2677,7 @@ async def test_in_flight_check_plan_is_discarded_after_economy_decision(
             },
         )], {"available": True, "skipped": False, "total_tokens": 7}
 
-    monkeypatch.setattr("src.commands.round_processor.plan_round_checks", delayed_plan)
+    monkeypatch.setattr("src.commands.round_checks.plan_round_checks", delayed_plan)
     planning = asyncio.create_task(api._handler.prepare_round_checks_ai(instance))
     await asyncio.wait_for(entered.wait(), timeout=10)
     declined = await api.resolve_payment(

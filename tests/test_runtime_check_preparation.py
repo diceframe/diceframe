@@ -87,6 +87,8 @@ def setup(resolver):
     current = {"instance": instance}
     processor.registry = SimpleNamespace(get=lambda _key: current["instance"])
     processor.check_model_enabled = False
+    processor.check_llm_client = None
+    processor._advance_adventure_world = None
     processor.llm_client = PlannerClient()
     processor._prompt = SimpleNamespace(load_rule_context=lambda *_: SimpleNamespace(
         rule=rule, dice_system="none",
