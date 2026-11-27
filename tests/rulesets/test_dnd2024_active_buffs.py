@@ -244,7 +244,33 @@ def _enemy_attack(engine, instance) -> dict:
     }
     # 1d6+2 with the die showing 4 is 6 damage whatever the attack roll did; the
     # second d20 is only consumed when the target is prone to grant advantage.
-    return _apply(engine, instance, engine.resolve_intent(instance, intent, SequenceRng([15, 4, 4])))
+    events = _apply(
+        engine, instance, engine.resolve_intent(instance, intent, SequenceRng([15, 4, 4])),
+    )
+    # 18 级武僧现在会在被命中时得到拨挡攻击的反应窗口（S0-F11）。这些用例
+    # 关心的是抗性/回避，不是反应，所以在这里放弃它，让伤害走原来的路径落地。
+    events.extend(_decline_hit_reaction(engine, instance))
+    return events
+
+
+def _decline_hit_reaction(engine, instance) -> list:
+    pending = _combat(instance).get("pending_decisions") or []
+    if not pending or pending[0].get("kind") != "hit_reaction_spell":
+        return []
+    # 只放弃**拨挡**这一条：别的受击特性（例如狂战士的 Retaliation、
+    # 盗贼的 Uncanny Dodge）由各自的用例自己决定，不在这里代为处理。
+    if not any(
+        row.get("feature_id") == "deflect_attacks"
+        for row in pending[0].get("features") or []
+    ):
+        return []
+    state = ruleset_runtime.state(instance)
+    return _apply(engine, instance, engine.resolve_intent(instance, {
+        "intent_id": f"decline-reaction-{state['version']}", "type": "decision.resolve",
+        "expected_version": int(state.get("version", 0) or 0),
+        "submitted_by": "gm", "decision_id": pending[0]["decision_id"],
+        "option": "decline",
+    }, SequenceRng([])))
 
 
 def _pool(instance, resource_id: str) -> dict:
