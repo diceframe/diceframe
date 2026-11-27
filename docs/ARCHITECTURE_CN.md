@@ -4890,6 +4890,7 @@ World locale 只能修改：
 ```text
 src/plugin_host/
 ├─ host.py
+├─ install_journal.py
 ├─ manifest_validation.py
 ├─ package_io.py
 ├─ support.py
@@ -4906,6 +4907,7 @@ src/plugin_host/
 和权限声明的校验，不加载运行时、不发布插件。权限定义与推导仍由 `policy.py` 负责。
 `package_io.py` 负责 ZIP 打包与解压、定位包根目录和原子写入 JSON；`PluginHost.package_files`
 仍是对外入口，安装事务及其发布、恢复和回滚仍由 `host.py` 负责。
+`install_journal.py` 负责安装日志的读写与崩溃恢复；发布锁与安装事务仍由 `host.py` 持有和编排。
 
 ---
 
