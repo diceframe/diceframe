@@ -30,6 +30,30 @@ def cr_value(label: str) -> float:
     return float(text)
 
 
+def _gap_table(raw: Any) -> dict[str, list[str]]:
+    """``{id: [reasons]}`` as a plain table; anything malformed is empty.
+
+    A gap table is an audit trail, not a rule input: a hand-edited catalog with
+    a typo must not stop combat from loading.
+    """
+
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        # 表在、形状不对 → fail closed 而不是"当作没有"：这份账本是唯一的
+        # 缺口记录，被手改坏时静默消失比加载失败更糟。
+        raise MonsterCatalogError("gap table must be an object")
+    table: dict[str, list[str]] = {}
+    for key, value in raw.items():
+        if not isinstance(value, list):
+            raise MonsterCatalogError(f"gap list for {key} must be an array")
+        names = [str(item) for item in value if str(item or "").strip()]
+        if not names:
+            raise MonsterCatalogError(f"gap list for {key} is empty")
+        table[str(key)] = names
+    return table
+
+
 class MonsterCatalog:
     """Validated stat blocks, indexed by id."""
 
@@ -57,6 +81,11 @@ class MonsterCatalog:
                 raise MonsterCatalogError(
                     f"monster {entry['id']} has no source_ref"
                 )
+        # 目录级的"这只不完整"账本。放在这里而不是条目里：条目要过
+        # `validate_enemy_profiles`，而那是 `combat.start` 的同一个闭集边界，
+        # 加字段会把内容缺口带上 wire。旧目录没有这两个键，缺省即空表。
+        self._incomplete = _gap_table(payload.get("incomplete"))
+        self._skipped = _gap_table(payload.get("skipped"))
         self._entries = indexed
 
     def __len__(self) -> int:
@@ -65,6 +94,16 @@ class MonsterCatalog:
     def get(self, monster_id: str) -> dict[str, Any] | None:
         entry = self._entries.get(str(monster_id))
         return dict(entry) if entry is not None else None
+
+    def incomplete(self) -> dict[str, list[str]]:
+        """Entry ids that shipped without one of their printed abilities."""
+
+        return {key: list(value) for key, value in self._incomplete.items()}
+
+    def skipped(self) -> dict[str, list[str]]:
+        """Creature ids that were left out because something would be lost."""
+
+        return {key: list(value) for key, value in self._skipped.items()}
 
     def all(self) -> Iterable[dict[str, Any]]:
         return (dict(entry) for entry in self._entries.values())

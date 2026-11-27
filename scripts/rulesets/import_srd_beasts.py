@@ -31,6 +31,7 @@ Run:
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import sys
@@ -38,6 +39,11 @@ import urllib.request
 from pathlib import Path
 
 BASE = "https://api.open5e.com/v2/creatures/"
+#: 收进来的最高 CR。默认是当前交付档位（S0-MM4）。
+CR_MAX = 4.0
+#: 已经交付过的那一档：这一档的条目即使有缺口也留在 ``entries`` 里
+#: （删既有内容是独立决定），缺口记进 ``incomplete``。
+DELIVERED_CR = 1.0
 QUERY = "?document__key=srd-2024&limit=100"
 OUTPUT = Path(
     "templates/rulesets/dnd2024_srd/content/monster_catalogs/srd_monsters.json"
@@ -74,9 +80,12 @@ def fetch_all(opener: urllib.request.OpenerDirector) -> list[dict]:
         url = payload.get("next")
     # API 的 ``cr__lte`` 没有生效（实测返回 CR 0–8），所以过滤放在本地，
     # 与 equipment 导入踩到的"查询参数不生效"是同一类问题。
-    # 收的是 **CR 0–1 的全部生物**，不只是 Beast：玩家会遇到的敌人绝大多数在
-    # 这一段，而目录按类型可筛，不必靠"只导野兽"来自我限制。
-    return [record for record in records if float(record.get("challenge_rating") or 0) <= 1]
+    # 收的是 **CR 上限以内的全部生物**，不只是 Beast：目录按类型可筛，不必靠
+    # "只导野兽"来自我限制。上限是 ``CR_MAX``，默认 4（S0-MM4）。
+    return [
+        record for record in records
+        if float(record.get("challenge_rating") or 0) <= CR_MAX
+    ]
 
 
 _DESC_ATTACK_RE = re.compile(
@@ -533,6 +542,11 @@ _TRAIT_IDS = {
     "amorphous": "amorphous",
 }
 _LEGENDARY_USES_RE = re.compile(r"\((?P<count>\d)/(?:Day|day)")
+#: 描述里"还有一个效果没被读出来"的线索。只用于判定缺口，不参与映射。
+_CLAIMS_A_RIDER = re.compile(
+    r"the target is |the target has |and the target |knocked |grappled |restrained |prone",
+    re.IGNORECASE,
+)
 
 
 def map_traits(record_traits: list[dict]) -> list[dict]:
@@ -635,28 +649,102 @@ def map_record(record: dict) -> dict:
     }
 
 
+def unmapped(record: dict) -> list[str]:
+    """这个条目里**真的**被丢掉了的动作/特质名。
+
+    与映射函数逐条对齐，而不是"再解析一遍"——两者一旦分叉，就会出现
+    "标记为完整、实际丢了能力"。四条对齐点：
+
+    * ``map_attacks`` / ``map_actions`` 只处理 ``ACTION``：Bonus/Reaction 动作
+      会被整条跳过，所以它们一律是缺口；
+    * 攻击上的 ``RECHARGE_ON_ROLL`` 不在攻击档案里（``map_attacks`` 不读
+      ``usage_limits``），限次丢失；
+    * 描述里有条件/推倒一类的 rider、而 ``parse_riders`` 什么都没读出来；
+    * 已经由``attacks`` 结构化产出、只是 prose 解析不出来的动作**不算**缺口。
+    """
+
+    actions = record.get("actions") or []
+    attacks = map_attacks(actions)
+    produced = {str(attack.get("id") or "") for attack in attacks}
+    dropped: list[str] = []
+    for action in actions:
+        name = str(action.get("name") or "")
+        kind = str(action.get("action_type") or "ACTION").upper()
+        if kind != "ACTION":
+            # Bonus/Reaction 动作没有任何消费者：整条丢掉，必须记下来。
+            dropped.append(f"{name} ({kind.replace(chr(95), chr(32)).title()})")
+            continue
+        if name.strip().lower() == "multiattack":
+            if parse_multiattack(action, attacks) is None:
+                dropped.append(name)
+            continue
+        parsed = parse_prose_attack(action, 0)
+        if parsed is None and parse_save_action(action) is None:
+            # 结构化攻击已产出时，prose 解析失败不是缺口。
+            if not any(str(attack.get("name") or "") == name for attack in attacks):
+                dropped.append(name)
+            continue
+        if parsed is not None:
+            limits = action.get("usage_limits") or {}
+            if str(limits.get("type") or "").upper() == "RECHARGE_ON_ROLL":
+                dropped.append(f"{name} (Recharge)")
+            desc = str(action.get("desc") or "")
+            if not parse_riders(desc) and _CLAIMS_A_RIDER.search(desc):
+                dropped.append(f"{name} (rider)")
+    for trait in record.get("traits") or []:
+        if not map_traits([trait]):
+            dropped.append(str(trait.get("name") or ""))
+    return sorted({name for name in dropped if name})
+
+
 def main() -> int:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     # open5e 拒绝没有 User-Agent 的请求（403），与内容无关。
     opener.addheaders = [("User-Agent", "diceframe-srd-import/1.0")]
+    global CR_MAX
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--max-cr", type=float, default=CR_MAX,
+                        help="highest challenge rating to import (default 4)")
+    CR_MAX = parser.parse_args().max_cr
     records = fetch_all(opener)
-    monsters = [map_record(record) for record in records]
+    monsters: list[dict] = []
+    skipped: dict[str, list[str]] = {}
+    incomplete: dict[str, list[str]] = {}
+    for record in records:
+        gaps = unmapped(record)
+        entry = map_record(record)
+        if gaps:
+            # CR 0–1 是已交付档位：条目保留（删条目是独立决定），但缺口如实列出。
+            # 更高的档位只收完整的，避免"库里有这只、它的招牌能力是空气"。
+            if float(record.get("challenge_rating") or 0) <= DELIVERED_CR:
+                incomplete[entry["id"]] = gaps
+            else:
+                skipped[entry["id"]] = gaps
+                continue
+        monsters.append(entry)
     monsters.sort(key=lambda row: (row["cr"], row["name"]))
     missing_attacks = [row["id"] for row in monsters if not row["attacks"]]
     payload = {
         "schema_version": 1,
         "kind": "monster_catalog",
         "id": "srd_monsters",
-        "source_ref": "srd-5.2.1:p344-364:animals",
+        "source_ref": "srd-5.2.1:p344-364:stat-blocks",
         # 目录是 bundle 实体，头字段缺失会让整个 ruleset 加载失败。
         "automation_level": "deterministic",
         "entries": monsters,
+        # 目录级、不是条目级：条目要过 `validate_enemy_profiles`，而那是
+        # `combat.start` 的同一个闭集边界。这两张表只给内容方查账用。
+        "incomplete": dict(sorted(incomplete.items())),
+        "skipped": dict(sorted(skipped.items())),
     }
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    print(f"{len(monsters)} beasts -> {OUTPUT}")
+    print(
+        f"{len(monsters)} creatures (CR <= {CR_MAX:g}) -> {OUTPUT}\n"
+        f"  incomplete: {len(incomplete)}  skipped: {len(skipped)}"
+    )
     if missing_attacks:
         print(f"no attacks parsed: {', '.join(missing_attacks)}")
     return 0

@@ -11,7 +11,7 @@ import pytest
 from src.engine.game_instance import GameInstance
 from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
-from src.rulesets.dnd2024.monsters.catalog import MonsterCatalog
+from src.rulesets.dnd2024.monsters.catalog import MonsterCatalog, cr_value
 from src.rulesets.dnd2024.play import EncounterAccess
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 
@@ -379,7 +379,8 @@ def test_the_catalog_multiattacks_all_resolve() -> None:
 
     repeats = 0
     combos = 0
-    for entry in catalog.all():
+    # 同 `test_dnd2024_attack_riders`：这批数字描述 CR 0–1 档，目录已扩到 CR 4。
+    for entry in [row for row in catalog.all() if float(cr_value(row["cr"])) <= 1]:
         attack_ids = {attack["id"] for attack in entry["attacks"]}
         for action in entry.get("actions") or []:
             parts = [action["repeat"]] if "repeat" in action else action.get("combo") or []
