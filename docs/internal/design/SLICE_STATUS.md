@@ -86,7 +86,7 @@
 | F4 | 授予从内容读 | ✅ | #760；`@745baaee` |
 | F5 | 免费施放 | ✅ | #760；`@910733c0` |
 | F6 | 休息与资源转换，**拆三段** | ✅ | F6a 短休恢复预算、F6b Magical Cunning 仪式、F6c Font of Magic 双向转换，三段全交付（索引 §13–§15） |
-| F7 | 武器词条（Weapon Mastery） | 🟡 | 部分交付（`feat/dnd2024-s0f7-weapon-mastery@872e165a`）：数量轨道、`tactical_master`、Push、Tactical Master 替换已做；**Cleave / Topple 未做**；Nick 移交 S0-G2，已随 #785 交付 |
+| F7 | 武器词条（Weapon Mastery） | 🟡 | 数量轨道与 `weapon_mastery` 解锁已合入；`combat/weapon_masteries.py` 目前只实现 **graze / sap / vex / slow**，**push / cleave / nick / topple 仍是 `{"kind": "unimplemented"}`**，`hit_resolution._weapon_mastery_effect` 对它们 fail closed 返回 `None`（不发事件也不报错）；`tactical_master` 只有内容声明，src 零消费。旧证据写"Push 词条、Tactical Master 替换已做"，与 `0b12b0ea` 的代码不符，2026-11-27 订正 |
 | F8 | 三职业战斗风格与戏法替代选项 | ⬜ | 有任务书；代码里只有选项管道（B），**风格机制本身没有** |
 | F9 | 被动防御与移动派生 | ✅ | #757；索引：可自动化部分交付，环境面按停止条件记录 |
 | **F10** | Bonus Action 路由与移动附带效果 | **已拆分** | `S0F10_ACTION_ROUTING_STOP_NOTE` §5，原任务书作废 |
