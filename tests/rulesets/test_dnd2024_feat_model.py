@@ -297,8 +297,9 @@ def test_magic_initiate_declares_its_list_as_a_parameter(bundle) -> None:
 
 
 def test_legacy_fields_stay_a_bounded_set() -> None:
-    # 三个前置键已迁进 ``requires``；剩下的两个各自有明确的归属（FD5/P4）。
-    assert LEGACY_FEAT_FIELDS == frozenset({"ability_choice", "choice_specs"})
+    # 前置进了 ``requires``，属性提升进了 ``ability_increase``；只剩 P4 的
+    # ``choice_specs``。
+    assert LEGACY_FEAT_FIELDS == frozenset({"choice_specs"})
 
 
 def test_a_retired_prerequisite_field_is_rejected_with_guidance() -> None:

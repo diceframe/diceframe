@@ -45,6 +45,7 @@ from src.rulesets.dnd2024.features.models import (
     parse_capability,
     parse_feature_choice,
 )
+from src.rulesets.dnd2024.character.primitives import ABILITY_IDS
 from src.rulesets.dnd2024.features.feat_requirements import (
     FeatRequirement,
     FeatRequirementError,
@@ -74,6 +75,8 @@ FEAT_FIELDS = frozenset({
     "choice",
     # 先决：印刷在专长卡上的 Prerequisite 行，语义见 feat_requirements。
     "requires",
+    # 属性提升的档位（点数、可选属性、上限、是否可拆）。
+    "ability_increase",
     # Display names live on the entity so a card can render without a locale
     # lookup; origin feats have always carried them.
     "labels",
@@ -85,7 +88,6 @@ FEAT_FIELDS = frozenset({
 #: Fields still read by their old name.  P4 empties ``choice_specs``; the
 #: ability increase is a choice and moves to ``choice`` separately.
 LEGACY_FEAT_FIELDS = frozenset({
-    "ability_choice",
     "choice_specs",
 })
 
@@ -98,7 +100,34 @@ RETIRED_PREREQUISITE_FIELDS = frozenset({
     "requires_spellcasting",
 })
 
+#: Fields that were renamed.  Accepting the old name would leave two spellings of
+#: one rule in the content, and the readers would have to check both.
+RETIRED_RENAMED_FIELDS = {"ability_choice": "ability_increase"}
+
 PASSIVE_EFFECT_KINDS = frozenset({"armor_class_bonus"})
+
+
+@dataclass(frozen=True, slots=True)
+class AbilityIncrease:
+    """How a feat raises ability scores.
+
+    One shape covers both cases the catalogue has.  Eight feats say "one point,
+    from these abilities"; Ability Score Improvement says "two points, as +2 or
+    as +1/+1".  Only ``points`` and ``pattern`` differ -- the ability set and the
+    score cap are the same vocabulary, so they are one declaration rather than
+    two, and the caller never has to ask which kind of feat this is.
+    """
+
+    points: int
+    #: Empty means every ability (the content says ``"any"``).
+    allowed: tuple[str, ...]
+    maximum: int
+    pattern: str
+
+    def allows(self, ability: str) -> bool:
+        """Whether this increase may be spent on ``ability``."""
+
+        return not self.allowed or ability in self.allowed
 
 
 class FeatDefinitionError(ValueError):
@@ -142,6 +171,9 @@ class FeatDefinition:
     # 主动能力与被动效果是两类东西：一个在回合里花成本做动作，一个常驻
     # 改变数值。共用 ``FeatureCapability`` 让专长与子职走同一条投影/校验链。
     capabilities: tuple[FeatureCapability, ...] = ()
+    #: 属性提升的档位。八条专长的形状是"一点、从这几项里选"，ASI 是"两点、
+    #: 可拆成 +1/+1"；差别只在 points 与 pattern，其余是同一套词汇。
+    ability_increase: AbilityIncrease | None = None
     #: Printed prerequisites.  Evaluated by ``feat_unavailable_reasons`` only.
     requires: tuple[FeatRequirement, ...] = ()
     choice: FeatureChoice | None = None
@@ -173,6 +205,12 @@ def parse_feat(raw: Mapping[str, Any]) -> FeatDefinition:
         raise FeatDefinitionError(
             f"{feat_id} still declares {retired[0]!r}; prerequisites are now "
             "expressed in `requires` (see feat_requirements)"
+        )
+    renamed = sorted(RETIRED_RENAMED_FIELDS.keys() & set(raw))
+    if renamed:
+        raise FeatDefinitionError(
+            f"{feat_id} still declares {renamed[0]!r}; it is now "
+            f"{RETIRED_RENAMED_FIELDS[renamed[0]]!r}"
         )
 
     unknown = sorted(set(raw) - FEAT_FIELDS - LEGACY_FEAT_FIELDS)
@@ -219,11 +257,62 @@ def parse_feat(raw: Mapping[str, Any]) -> FeatDefinition:
         passive_effects=_parse_passive_effects(feat_id, raw.get("passive_effects")),
         capabilities=_parse_capabilities(feat_id, raw.get("capabilities")),
         requires=_parse_requirements(feat_id, raw.get("requires")),
+        ability_increase=_parse_ability_increase(feat_id, raw.get("ability_increase")),
         choice=choice,
         legacy=legacy,
     )
     check_declaration_completeness(definition)
     return definition
+
+
+def _parse_ability_increase(feat_id: str, raw: Any) -> AbilityIncrease | None:
+    """Validate an ability-increase declaration, failing closed on anything odd."""
+
+    if raw is None:
+        return None
+    where = f"{feat_id}.ability_increase"
+    if not isinstance(raw, Mapping):
+        raise FeatDefinitionError(f"{where} must be an object")
+    unknown = sorted({str(key) for key in raw} - {"allowed", "points", "pattern", "maximum"})
+    if unknown:
+        raise FeatDefinitionError(f"{where} has an unknown field: {unknown[0]}")
+
+    points = raw.get("points")
+    if isinstance(points, bool) or not isinstance(points, int) or points not in (1, 2):
+        raise FeatDefinitionError(f"{where}.points must be 1 or 2")
+    pattern = str(raw.get("pattern") or "1")
+    if pattern not in {"1", "2_or_1_1"}:
+        raise FeatDefinitionError(f"{where}.pattern is not supported: {pattern!r}")
+    # 两点才可能拆成 +1/+1；一对不上，声明就是自相矛盾的。
+    if (pattern == "1") != (points == 1):
+        raise FeatDefinitionError(
+            f"{where}.pattern {pattern!r} does not match {points} point(s)"
+        )
+    maximum = raw.get("maximum", 20)
+    if isinstance(maximum, bool) or not isinstance(maximum, int) or not 1 <= maximum <= 30:
+        raise FeatDefinitionError(f"{where}.maximum must be an integer from 1 to 30")
+
+    raw_allowed = raw.get("allowed", "any")
+    if raw_allowed == "any":
+        allowed: tuple[str, ...] = ()
+    elif isinstance(raw_allowed, list) and raw_allowed:
+        if any(
+            not isinstance(item, str) or item not in ABILITY_IDS
+            for item in raw_allowed
+        ):
+            raise FeatDefinitionError(
+                f"{where}.allowed must list ability ids"
+            )
+        if len(set(raw_allowed)) != len(raw_allowed):
+            raise FeatDefinitionError(f"{where}.allowed must not repeat an ability")
+        allowed = tuple(str(item) for item in raw_allowed)
+    else:
+        raise FeatDefinitionError(
+            f"{where}.allowed must be 'any' or a non-empty array"
+        )
+    return AbilityIncrease(
+        points=points, allowed=allowed, maximum=maximum, pattern=pattern,
+    )
 
 
 def _parse_requirements(feat_id: str, raw: Any) -> tuple[FeatRequirement, ...]:

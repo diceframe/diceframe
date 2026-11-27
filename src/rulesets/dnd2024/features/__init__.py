@@ -8,6 +8,7 @@ what a character owns and what it may declare, and nothing else.
 from .combat import CombatContext
 from .equipment import Dnd2024EquipmentCatalog, weapon_matches_kind
 from .feat_models import (
+    AbilityIncrease,
     FeatDefinition,
     FeatDefinitionError,
     load_feat_definitions,
@@ -49,6 +50,7 @@ __all__ = [
     "Dnd2024ClassFeatureResolver",
     "Dnd2024ClassResourceCatalog",
     "Dnd2024EquipmentCatalog",
+    "AbilityIncrease",
     "EquipmentRequirement",
     "FeatDefinition",
     "FeatDefinitionError",

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.rulesets.dnd2024.character.builder import ABILITY_IDS, ability_modifier
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.features.feat_models import AbilityIncrease
 from src.rulesets.dnd2024.features.feat_requirements import (
     FeatContext,
     feat_unavailable_reasons,
@@ -39,6 +40,29 @@ _FEAT_REASON_MESSAGES = {
     "proficiency": "proficiency prerequisite is not met",
     "spellcasting": "requires Spellcasting",
 }
+
+def _increase_projection(profile: AbilityIncrease | None) -> dict[str, Any] | None:
+    """One option's ability-increase profile, in the shape the UI reads.
+
+    The option carries it so the form can switch profiles when the player picks a
+    feat (Grappler is one point of Strength or Dexterity, not two of anything)
+    instead of trusting a slot-level default for every choice.
+    """
+
+    if profile is None:
+        return None
+    return {
+        "points": profile.points,
+        "allowed": "any" if not profile.allowed else list(profile.allowed),
+        "maximum": profile.maximum,
+        "pattern": profile.pattern,
+        "auto": (
+            {"ability": profile.allowed[0], "points": profile.points}
+            if profile.points == 1 and len(profile.allowed) == 1
+            else None
+        ),
+    }
+
 
 # 一个特性选项槽的规范化输入只接受这四个字段，多余字段一律拒绝。
 FEATURE_CHOICE_KEYS = frozenset({"owner", "feature_id", "choice_id", "selected_refs"})
@@ -357,8 +381,8 @@ class AdvancementChoicesMixin:
         for reason in feat_unavailable_reasons(feat, context):
             errors.append(f"{selected_ref} {_FEAT_REASON_MESSAGES[reason]}")
 
-        ability_choice = feat.legacy.get("ability_choice")
-        if not isinstance(ability_choice, dict):
+        increase = feat.ability_increase
+        if increase is None:
             if raw not in (None, {}):
                 errors.append(f"{selected_ref} does not grant an ability increase")
             return {}, selected_ref, errors
@@ -366,30 +390,29 @@ class AdvancementChoicesMixin:
             errors.append("ability_score_increases is required at this level")
             return {}, selected_ref, errors
         parsed: dict[str, int] = {}
-        allowed = ability_choice.get("allowed")
-        allowed_abilities = set(ABILITY_IDS if allowed == "any" else allowed or [])
-        points = int(ability_choice.get("points", 0) or 0)
-        maximum = int(ability_choice.get("maximum", 20) or 20)
-        pattern = str(ability_choice.get("pattern") or "")
-        for ability, increase in raw.items():
+        allowed_abilities = set(ABILITY_IDS) if not increase.allowed else set(increase.allowed)
+        for ability, amount in raw.items():
             if (
                 ability not in allowed_abilities
-                or isinstance(increase, bool)
-                or not isinstance(increase, int)
-                or increase not in ({1, 2} if pattern == "2_or_1_1" else {1})
+                or isinstance(amount, bool)
+                or not isinstance(amount, int)
+                or amount not in ({1, 2} if increase.pattern == "2_or_1_1" else {1})
             ):
                 errors.append(
                     f"ability_score_increases are not valid for {selected_ref}"
                 )
                 continue
-            if int(abilities.get(ability, 0) or 0) + int(increase) > maximum:
+            if int(abilities.get(ability, 0) or 0) + int(amount) > increase.maximum:
                 errors.append(
-                    f"ability_score_increases would raise {ability} above {maximum}"
+                    f"ability_score_increases would raise {ability} above "
+                    f"{increase.maximum}"
                 )
-            parsed[ability] = int(increase)
-        expected_lengths = {1, 2} if pattern == "2_or_1_1" else {1}
-        if sum(parsed.values()) != points or len(parsed) not in expected_lengths:
-            errors.append(f"ability_score_increases must total exactly {points}")
+            parsed[ability] = int(amount)
+        expected_lengths = {1, 2} if increase.pattern == "2_or_1_1" else {1}
+        if sum(parsed.values()) != increase.points or len(parsed) not in expected_lengths:
+            errors.append(
+                f"ability_score_increases must total exactly {increase.points}"
+            )
         return parsed, selected_ref, errors
 
     def _plan_feature_choices(
@@ -844,7 +867,8 @@ class AdvancementChoicesMixin:
                 "source_ref": feat.source_ref,
                 "available": not unavailable_reasons,
                 "unavailable_reasons": unavailable_reasons,
-                # 对外投影保持原形：前端读这个键，内部声明改了它也不变。
-                "ability_choice": deepcopy(feat.legacy.get("ability_choice") or {}),
+                # 每个选项自己的档位：选 Grappler 是"1 点、力或敏"，选 ASI 是
+                # "2 点、可拆"。前端按所选专长取，而不是用槽级的默认档位。
+                "ability_increase": _increase_projection(feat.ability_increase),
             })
         return result

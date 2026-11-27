@@ -22,6 +22,7 @@ from src.rulesets.dnd2024.character.derivation import (
     derive_speed,
 )
 from src.rulesets.dnd2024.features import (
+    AbilityIncrease,
     Dnd2024ClassFeatureResolver,
     FeatDefinition,
     FeatDefinitionError,
@@ -318,6 +319,17 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
                 f"{'an Epic Boon' if epic else 'an ability score improvement'} "
                 "and no choice was recorded"
             )
+            # 档位来自"这一格实际会选的专长"：已记录的选择优先，否则用槽的默认
+            # （通用槽 = ASI，恩惠槽 = 已声明里最宽的一条）。这里不再有第二份
+            # 字面量——表单与提交校验读的是同一份声明。
+            category = "epic_boon" if epic else "general"
+            recorded_ref = str(
+                (record or {}).get("epic_boon_ref" if epic else "feat_ref") or ""
+            )
+            profile = (
+                self._ability_increase_for(recorded_ref)
+                or self._slot_increase_default(category)
+            )
             if epic:
                 missing.append({
                     "id": "epic_boon_ref",
@@ -329,31 +341,19 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
                     ),
                     "reason": reason,
                 })
-                missing.append({
-                    "id": "ability_score_increases",
-                    "kind": "ability_increase",
-                    "enforced": True,
-                    "required": True,
-                    "level": row_level,
-                    "total": 1,
-                    "maximum_score": 30,
-                    "allowed": "any",
-                    "pattern": "1",
-                    "reason": reason,
-                })
+                if profile is not None:
+                    missing.append({
+                        **self._ability_increase_requirement(profile),
+                        "level": row_level,
+                        "reason": reason,
+                    })
             else:
-                missing.append({
-                    "id": "ability_score_increases",
-                    "kind": "ability_increase",
-                    "enforced": True,
-                    "required": True,
-                    "level": row_level,
-                    "total": 2,
-                    "maximum_score": 20,
-                    "allowed": "any",
-                    "pattern": "2_or_1_1",
-                    "reason": reason,
-                })
+                if profile is not None:
+                    missing.append({
+                        **self._ability_increase_requirement(profile),
+                        "level": row_level,
+                        "reason": reason,
+                    })
                 missing.append({
                     "id": "feat_ref",
                     "kind": "single",
@@ -536,17 +536,12 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         )
         errors.extend(ability_errors)
         if "ability_score_improvement" in after["gained_feature_ids"]:
-            ability_spec = self._ability_choice_for(advancement_feat_ref)
-            requirements.append({
-                "id": "ability_score_increases",
-                "kind": "ability_increase",
-                "enforced": True,
-                "required": True,
-                "total": int(ability_spec.get("points", 2) or 2),
-                "maximum_score": int(ability_spec.get("maximum", 20) or 20),
-                "allowed": deepcopy(ability_spec.get("allowed", "any")),
-                "pattern": str(ability_spec.get("pattern") or "2_or_1_1"),
-            })
+            profile = (
+                self._ability_increase_for(advancement_feat_ref)
+                or self._slot_increase_default("general")
+            )
+            if profile is not None:
+                requirements.append(self._ability_increase_requirement(profile))
             requirements.append({
                 "id": "feat_ref",
                 "kind": "single",
@@ -554,24 +549,22 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
                 "options": self._feat_options("general", character, target_level, after),
             })
         if "epic_boon" in after["gained_feature_ids"]:
-            requirements.extend([
-                {
-                    "id": "epic_boon_ref",
-                    "kind": "single",
-                    "required": True,
-                    "options": self._feat_options(
-                        "epic_boon", character, target_level, after
-                    ),
-                },
-                {
-                    "id": "ability_score_increases",
-                    "kind": "ability_increase",
-                    "enforced": True,
-                    "required": True,
-                    "total": 1,
-                    "maximum_score": 30,
-                },
-            ])
+            requirements.append({
+                "id": "epic_boon_ref",
+                "kind": "single",
+                "required": True,
+                "options": self._feat_options(
+                    "epic_boon", character, target_level, after
+                ),
+            })
+            # 恩惠槽没有默认专长：还没选时给"最宽"的已声明档位，选了就用那一条
+            # 自己的（Spell Recall 只允许 int/wis/cha）。
+            epic_profile = (
+                self._ability_increase_for(str(choices.get("epic_boon_ref") or ""))
+                or self._slot_increase_default("epic_boon")
+            )
+            if epic_profile is not None:
+                requirements.append(self._ability_increase_requirement(epic_profile))
 
         spell_choices: dict[str, list[str]] = {}
         if after["slot_profile"]:
@@ -1082,11 +1075,70 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         self.catalog.snapshot(class_ref, level)
         return class_ref, level
 
-    def _ability_choice_for(self, feat_ref: str) -> dict[str, Any]:
+    def _ability_increase_for(self, feat_ref: str) -> AbilityIncrease | None:
+        """The declared increase of one feat, or ``None`` when it grants none."""
+
         feat_id = str(feat_ref or "").removeprefix("feat:")
+        if not feat_id:
+            return None
         feat = self.advancement_feats.get(feat_id)
-        choice = feat.legacy.get("ability_choice") if feat is not None else None
-        return choice if isinstance(choice, dict) else {}
+        return feat.ability_increase if feat is not None else None
+
+    def _slot_increase_default(self, category: str) -> AbilityIncrease | None:
+        """What the form shows before a feat is chosen.
+
+        A general slot defaults to Ability Score Improvement -- that *is* the
+        default choice, and its profile is a declaration like any other.  An epic
+        slot has no default feat, so the widest declared profile stands in until
+        a boon is picked; that is a computed value, not a third copy of the rule.
+        """
+
+        if category == "general":
+            asi = self.advancement_feats.get("ability_score_improvement")
+            return asi.ability_increase if asi is not None else None
+        profiles = [
+            feat.ability_increase
+            for feat in self.advancement_feats.values()
+            if feat.category == category and feat.ability_increase is not None
+        ]
+        if not profiles:
+            return None
+        points = max(profile.points for profile in profiles)
+        allowed: tuple[str, ...] = ()
+        if all(profile.allowed for profile in profiles):
+            union: list[str] = []
+            for profile in profiles:
+                for ability in profile.allowed:
+                    if ability not in union:
+                        union.append(ability)
+            allowed = tuple(union)
+        return AbilityIncrease(
+            points=points,
+            allowed=allowed,
+            maximum=max(profile.maximum for profile in profiles),
+            pattern="2_or_1_1" if points > 1 else "1",
+        )
+
+    @staticmethod
+    def _ability_increase_requirement(profile: AbilityIncrease) -> dict[str, Any]:
+        """The one shape both requirement producers emit."""
+
+        return {
+            "id": "ability_score_increases",
+            "kind": "ability_increase",
+            "enforced": True,
+            "required": True,
+            "total": profile.points,
+            "maximum_score": profile.maximum,
+            "allowed": "any" if not profile.allowed else list(profile.allowed),
+            "pattern": profile.pattern,
+            # 只有一项可选时不该再问一次：提交路径直接填，界面不渲染。
+            "auto": (
+                {"ability": profile.allowed[0], "points": profile.points}
+                if profile.points == 1 and len(profile.allowed) == 1
+                else None
+            ),
+        }
 
     def _subclass_name(self, subclass_id: str) -> str:
         catalog = self.bundle.get("subclass_catalog", "srd_subclasses") or {}
