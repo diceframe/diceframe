@@ -17,6 +17,7 @@ from ..character.attunement import (
     owned_ref_counts,
 )
 from .action_adapter import is_supported_damage_formula
+from ..features.combat import relaxed_bonus_action_targets
 from ..features.attack_declarations import (
     BRUTAL_STRIKE, CUNNING_STRIKE_EFFECTS_KEY, LIGHT_EXTRA_ATTACK, SELECTION_KEY,
     STUNNING_STRIKE, declaration_value, selection_error, validate_cunning_strike,
@@ -1242,9 +1243,12 @@ class CombatValidationMixin(
         if via_fleet_step is not None and not isinstance(via_fleet_step, bool):
             raise CombatIntentError("via_fleet_step must be a boolean")
         if via_fleet_step:
-            if capability_id != "step_of_the_wind":
+            # 放宽关系写在授予者（Fleet Step）身上，所以这里读声明：只有它
+            # 点名的那个能力的各个使用选项才能走"免槽"路径。按能力名判会把
+            # 同一特性的另一个使用选项（花气档）漏掉。
+            if capability_id not in self._relaxed_capability_ids(actor):
                 raise CombatIntentError(
-                    "Fleet Step can only grant Step of the Wind"
+                    "Fleet Step can only grant the step it declares"
                 )
             if not bool(economy.get("fleet_step_available")):
                 raise CombatIntentError("Fleet Step is not available this turn")

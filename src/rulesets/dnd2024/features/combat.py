@@ -166,10 +166,26 @@ def _cost_views(
     return tuple(views)
 
 
-def _is_step_of_the_wind(capability: FeatureCapability) -> bool:
-    """Whether this capability *is* Step of the Wind (paid or free)."""
+def relaxed_bonus_action_targets(
+    owned: Iterable[Any],
+) -> dict[str, str]:
+    """Feature id -> the feature that lets it be used after its slot is spent.
 
-    return capability.feature_id == "step_of_the_wind"
+    Fleet Step's rule is "when you take a Bonus Action other than Step of the
+    Wind, you can also use Step of the Wind".  The relaxation belongs to the
+    *granting* feature, so it is declared there
+    (``free_step_after_bonus_action_for``) and read here; the relaxed feature
+    does not know Fleet Step exists, which is why the field is not on it.
+    """
+
+    relaxed: dict[str, str] = {}
+    for definition in owned:
+        target = str(
+            definition.parameters.get("free_step_after_bonus_action_for") or ""
+        )
+        if target:
+            relaxed[target] = str(definition.id)
+    return relaxed
 
 
 def _blocked_reason(
@@ -178,6 +194,7 @@ def _blocked_reason(
     context: CombatContext,
     definitions: Mapping[str, ResourceDefinition],
     owned_ids: frozenset[str] = frozenset(),
+    relaxed_slots: Mapping[str, str] | None = None,
 ) -> str:
     if (
         capability.requires_feature_id
@@ -224,8 +241,9 @@ def _blocked_reason(
             return f"{name} is not exhausted yet"
     action = capability.cost.slot
     if action and context.remaining(action) < 1:
+        relaxed_for = relaxed_slots or {}
         if not (action == "bonus_action" and context.fleet_step
-                and _is_step_of_the_wind(capability)):
+                and capability.feature_id in relaxed_for):
             return f"the {action.replace('_', ' ')} has already been spent"
     if capability.cost.timing == TURN_START_TIMING and not context.turn_start:
         # 窗口一旦被动作或跳过关掉，就不能回头再激活：这就是"at the start of
@@ -260,10 +278,11 @@ def combat_capabilities(
 
     result: list[CombatCapabilityView] = []
     owned_ids = frozenset(definition.id for definition in owned)
+    relaxed_slots = relaxed_bonus_action_targets(owned)
     for definition in owned:
         for capability in definition.capabilities:
             blocked = _blocked_reason(
-                catalog, capability, context, definitions, owned_ids,
+                catalog, capability, context, definitions, owned_ids, relaxed_slots,
             )
             if blocked and not include_unavailable:
                 continue

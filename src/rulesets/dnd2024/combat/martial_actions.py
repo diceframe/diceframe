@@ -12,6 +12,7 @@ from ..character.builder import ability_modifier
 from ..features.attack_declarations import (
     STUNNING_STRIKE, HitConditionContext, granted_strike_selection, plan_hit_conditions,
 )
+from ..features.combat import relaxed_bonus_action_targets
 from ..features.models import FeatureCapability, ResourceCost
 from .action_adapter import formula_node_from_dice_formula, roll_damage_node
 from .check_modes import effective_speed
@@ -642,12 +643,18 @@ class CombatMartialActionsMixin:
         所以判断的是"这个能力是不是 Step of the Wind"而不是"花了附赠动作没有"。
         """
 
-        if capability.feature_id == "step_of_the_wind":
+        character = self._feature_character(actor)
+        # 谁被放宽由声明说了算：``free_step_after_bonus_action_for`` 写在
+        # 放宽者（Fleet Step）身上，被放宽的能力不需要知道它存在。
+        relaxed = relaxed_bonus_action_targets(
+            self.features.active_features_for(character)
+        )
+        if not relaxed:
+            return []
+        if capability.feature_id in relaxed:
+            # 用被放宽的能力自己付 bonus action 时不再授予，否则链式无限。
             return []
         if capability.cost.slot != "bonus_action":
-            return []
-        character = self._feature_character(actor)
-        if not self.features.has_feature(character, "fleet_step"):
             return []
         return [{
             "type": "dnd2024.economy.granted", "actor_id": str(actor["actor_id"]),
