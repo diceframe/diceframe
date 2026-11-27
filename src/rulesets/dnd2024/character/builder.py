@@ -10,6 +10,7 @@ from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
 
 
+from src.rulesets.dnd2024.features import option_pool
 from .derivation import CharacterDerivationMixin, plan_skill_choices
 from .primitives import (
     ABILITY_IDS,
@@ -118,6 +119,7 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             draft, class_entity=class_entity, species=species, background=background,
         )
         skill_choices = self._present_skill_choices(draft, background, class_ref)
+        invocation_choices = self._present_invocation_choices(draft, class_ref)
         return {
             "ability_methods": [
                 {
@@ -184,6 +186,7 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             "species_feat_count": int(species_feat_choice.get("count", 0) or 0),
             "feat_choices": feat_choices,
             "skill_choices": skill_choices,
+            "invocation_choices": invocation_choices,
             "class_tools": [present(item, "tool") for item in class_tools],
             "class_tool_count": int(class_tool_choice.get("count", 0) or 0),
             "quick_presets": quick_presets,
@@ -356,14 +359,185 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
         background = self.bundle.get(
             "background", str(draft.get("background_ref") or "").split(":", 1)[-1],
         )
+        features = Dnd2024ClassFeatureResolver(self.bundle)
         _records, choice_errors = plan_skill_choices(
-            draft.get("feature_choices"),
-            Dnd2024ClassFeatureResolver(self.bundle),
+            self._skill_only_submissions(draft),
+            features,
             self._skill_choice_proxy(draft, class_ref),
             self._skill_proficiency_refs(draft, background),
             level=int(draft.get("level", 1) or 1),
         )
-        return [*errors, *choice_errors]
+        return [
+            *errors, *choice_errors,
+            *self._invocation_choice_errors(draft, class_ref, features),
+        ]
+
+    def _skill_only_submissions(self, draft: dict[str, Any]) -> list[Any]:
+        """Drop pool records before the skill-slot planner sees them.
+
+        ``plan_skill_choices`` rejects any record it cannot match, so a pool
+        submission would be reported as "a slot this character does not have".
+        """
+
+        pool_keys = self._pool_keys(draft, str(draft.get("class_ref") or ""))
+        return [
+            record for record in draft.get("feature_choices") or []
+            if not (
+                isinstance(record, dict)
+                and (
+                    str(record.get("owner") or ""),
+                    str(record.get("feature_id") or ""),
+                    str(record.get("choice_id") or ""),
+                ) in pool_keys
+            )
+        ]
+
+    def _pool_keys(
+        self, draft: dict[str, Any], class_ref: str,
+    ) -> set[tuple[str, str, str]]:
+        if not class_ref:
+            return set()
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        return {
+            (definition.owner, definition.id, definition.choice.id)
+            for definition in features.features_for(
+                self._skill_choice_proxy(draft, class_ref)
+            )
+            if definition.choice is not None and definition.choice.count_track
+        }
+
+    def _invocation_choice_errors(
+        self, draft: dict[str, Any], class_ref: str,
+        features: Dnd2024ClassFeatureResolver,
+    ) -> list[str]:
+        """Validate the pool records a draft commits at creation."""
+
+        if not class_ref:
+            return []
+        level = int(draft.get("level", 1) or 1)
+        cantrips = [
+            str(ref) for ref in (
+                (draft.get("class_spell_choices") or {}).get("cantrip_refs") or []
+            )
+        ]
+        submitted = self._pool_submissions(draft)
+        errors: list[str] = []
+        for definition in features.features_for(
+            self._skill_choice_proxy(draft, class_ref)
+        ):
+            choice = definition.choice
+            if choice is None or not choice.count_track:
+                continue
+            _record, slot_errors = option_pool.plan_creation_pool(
+                resolver=features,
+                definition=definition,
+                cantrips=cantrips,
+                submitted=submitted.get(
+                    (definition.owner, definition.id, choice.id),
+                ),
+                level=level,
+                track_total=self._track_total(choice.count_track, class_ref, level),
+                spells=self._spell_entities(),
+                spell_effects=self._spell_effects(),
+            )
+            errors.extend(slot_errors)
+        return errors
+
+    def _present_invocation_choices(
+        self, draft: dict[str, Any], class_ref: str,
+    ) -> list[dict[str, Any]]:
+        """The track-counted pools a level-1 build can answer right now.
+
+        Same contract as ``skill_choices``: every option is listed with the
+        reason it is unavailable, and nothing here is authoritative -- the
+        derive stage re-validates with the level-up rules.
+        """
+
+        if not class_ref:
+            return []
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        proxy = self._skill_choice_proxy(draft, class_ref)
+        level = int(draft.get("level", 1) or 1)
+        cantrips = [
+            str(ref) for ref in (
+                (draft.get("class_spell_choices") or {}).get("cantrip_refs") or []
+            )
+        ]
+        submitted = self._pool_submissions(draft)
+        slots: list[dict[str, Any]] = []
+        for definition in features.features_for(proxy):
+            choice = definition.choice
+            if choice is None or not choice.count_track:
+                continue
+            slot_id = f"feature_choice:{definition.owner}:{definition.id}:{choice.id}"
+            plan = option_pool.plan_pool(
+                resolver=features,
+                definition=definition,
+                character={
+                    "build": {"level": level, "class_levels": []},
+                    "features": {},
+                    "spellcasting": {"class": {"cantrip_refs": cantrips}},
+                },
+                target_level=level,
+                track_total=self._track_total(choice.count_track, class_ref, level),
+                submitted=None,
+                replacement=None,
+                spells=self._spell_entities(),
+                spell_effects=self._spell_effects(),
+            )
+            requirement = plan.requirement
+            if requirement is None:
+                continue
+            slots.append({
+                "id": slot_id,
+                "owner": requirement["owner"],
+                "feature_id": requirement["feature_id"],
+                "choice_id": requirement["choice_id"],
+                "count": requirement["count"],
+                "total": requirement["total"],
+                "selected_refs": submitted.get(
+                    (definition.owner, definition.id, choice.id), [],
+                ),
+                "options": requirement["options"],
+            })
+        return slots
+
+    def _pool_submissions(
+        self, draft: dict[str, Any],
+    ) -> dict[tuple[str, str, str], list[Any]]:
+        result: dict[tuple[str, str, str], list[Any]] = {}
+        for record in draft.get("feature_choices") or []:
+            if not isinstance(record, dict):
+                continue
+            refs = record.get("selected_refs")
+            if not isinstance(refs, list):
+                continue
+            key = (
+                str(record.get("owner") or ""),
+                str(record.get("feature_id") or ""),
+                str(record.get("choice_id") or ""),
+            )
+            result.setdefault(key, []).extend(refs)
+        return result
+
+    def _track_total(self, track: str, class_ref: str, level: int) -> int:
+        return option_pool.track_value(
+            self.bundle.get("progression_catalog", "srd_classes") or {},
+            track, class_ref, level,
+        )
+
+    def _spell_entities(self) -> dict[str, dict[str, Any]]:
+        catalog = self.bundle.get("spell_catalog", "srd_spells") or {}
+        return {
+            str(row.get("id")): row
+            for row in (catalog.get("spells") or [])
+            if isinstance(row, dict)
+        }
+
+    def _spell_effects(self) -> dict[str, Any]:
+        combat = self.bundle.get("combat_catalog", "srd_combat_core") or {}
+        effects = combat.get("spell_effects")
+        return dict(effects) if isinstance(effects, dict) else {}
 
     def _present_skill_choices(
         self,

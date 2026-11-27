@@ -424,6 +424,10 @@ class AdvancementChoicesMixin:
                 definition = resolver.catalog.features_by_key.get(key)
                 if definition is None or definition.choice is None:
                     continue
+                if definition.choice.count_track:
+                    # 按职业表计数的池由 `plan_pools` 负责，包括"本级刚获得
+                    # 这个特性"的情形；留在这里会被当成普通互斥槽再要求一次。
+                    continue
                 seen.add(key)
                 declared.append(definition)
 
@@ -434,6 +438,13 @@ class AdvancementChoicesMixin:
             errors.append("feature_choices must be an array")
             raw_choices = []
 
+        # 池子的提交由 `plan_pools` 消费：它不是"本级新获得特性"的槽，留在这里
+        # 会被下面那条"does not belong to a feature gained at this level"判非法。
+        pool_keys = {
+            (item.owner, item.id, item.choice.id)
+            for item in resolver.features_for(character)
+            if item.choice is not None and item.choice.count_track
+        }
         submitted: list[dict[str, Any]] = []
         for raw in raw_choices:
             if not isinstance(raw, dict):
@@ -442,6 +453,13 @@ class AdvancementChoicesMixin:
             unknown = sorted(set(raw) - FEATURE_CHOICE_KEYS)
             if unknown:
                 errors.append(f"feature choice has an unknown field: {unknown[0]}")
+                continue
+            submitted_key = (
+                str(raw.get("owner") or ""),
+                str(raw.get("feature_id") or ""),
+                str(raw.get("choice_id") or ""),
+            )
+            if submitted_key in pool_keys:
                 continue
             submitted.append({
                 "owner": str(raw.get("owner") or ""),

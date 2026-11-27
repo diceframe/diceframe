@@ -2594,6 +2594,144 @@
               ]
             }
           ]
+        },
+        {
+          "id": "eldritch_invocations",
+          "owner": "class:warlock",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p70:eldritch-invocations",
+          "summary": "You have learned eldritch invocations, fragments of forbidden knowledge. You gain one invocation of your choice, and you gain more as you reach higher levels, as shown in the Invocations column of the Warlock Features table. You can replace one invocation with another one for which you qualify whenever you gain a Warlock level.",
+          "choice": {
+            "id": "invocations",
+            "kind": "feature_option",
+            "category": "feature",
+            "count": 1,
+            "count_track": "eldritch_invocations",
+            "replace_per_level": 1,
+            "enabled_options": [
+              "feature:agonizing_blast",
+              "feature:devil_s_sight",
+              "feature:eldritch_mind",
+              "feature:eldritch_spear",
+              "feature:fiendish_vigor",
+              "feature:lessons_of_the_first_ones",
+              "feature:repelling_blast",
+              "feature:witch_sight"
+            ]
+          }
+        },
+        {
+          "id": "agonizing_blast",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p72:agonizing-blast",
+          "summary": "Prerequisite: Level 2+ Warlock, a Warlock Cantrip That Deals Damage. Choose one of your known Warlock cantrips that deals damage. You can add your Charisma modifier to that spell's damage rolls. Repeatable: choose a different eligible cantrip each time.",
+          "parameters": {
+            "invocation_effect_status": "complete",
+            "invocation_repeatable": true,
+            "invocation_binds": "known_cantrip",
+            "invocation_cantrip_deals_damage": true,
+            "invocation_damage_bonus_ability": "cha"
+          }
+        },
+        {
+          "id": "devil_s_sight",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p72:devils-sight",
+          "summary": "Prerequisite: Level 2+ Warlock. You can see normally in Dim Light and Darkness, both magical and nonmagical, within 120 feet of yourself.",
+          "parameters": {
+            "invocation_effect_status": "guided",
+            "invocation_unautomated_reason": "light_model"
+          }
+        },
+        {
+          "id": "eldritch_mind",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p72:eldritch-mind",
+          "summary": "You have Advantage on Constitution saving throws that you make to maintain Concentration.",
+          "parameters": {
+            "invocation_effect_status": "complete",
+            "invocation_concentration_advantage": true
+          }
+        },
+        {
+          "id": "eldritch_spear",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p72:eldritch-spear",
+          "summary": "Prerequisite: Level 2+ Warlock, a Warlock Cantrip That Deals Damage. Choose one of your known Warlock cantrips that deals damage and has a range of 10+ feet. When you cast that spell, its range increases by a number of feet equal to 30 times your Warlock level. Repeatable: choose a different eligible cantrip each time.",
+          "parameters": {
+            "invocation_effect_status": "complete",
+            "invocation_repeatable": true,
+            "invocation_binds": "known_cantrip",
+            "invocation_cantrip_deals_damage": true,
+            "invocation_cantrip_min_range_ft": 10,
+            "invocation_range_bonus_per_level_ft": 30
+          }
+        },
+        {
+          "id": "fiendish_vigor",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p72:fiendish-vigor",
+          "summary": "Prerequisite: Level 2+ Warlock. You can cast False Life on yourself without expending a spell slot. When you cast the spell with this feature, you don't roll the die for the Temporary Hit Points; you automatically get the highest number on the die.",
+          "parameters": {
+            "invocation_effect_status": "complete",
+            "free_cast_slots": [
+              "fiendish_vigor:1:unlimited:0:spell:false_life"
+            ],
+            "invocation_free_cast_maximized": true
+          }
+        },
+        {
+          "id": "lessons_of_the_first_ones",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p72:lessons-of-the-first-ones",
+          "summary": "Prerequisite: Level 2+ Warlock. You have received knowledge from an elder entity of the multiverse, allowing you to gain one Origin feat of your choice. Repeatable: choose a different Origin feat each time.",
+          "parameters": {
+            "invocation_effect_status": "guided",
+            "invocation_unautomated_reason": "origin_feat_pool",
+            "invocation_repeatable": true,
+            "invocation_binds": "origin_feat"
+          }
+        },
+        {
+          "id": "repelling_blast",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p72:repelling-blast",
+          "summary": "Prerequisite: Level 2+ Warlock, a Warlock Cantrip That Deals Damage via an Attack Roll. Choose one of your known Warlock cantrips that requires an attack roll. When you hit a Large or smaller creature with that cantrip, you can push the creature up to 10 feet straight away from you. Repeatable: choose a different eligible cantrip each time.",
+          "parameters": {
+            "invocation_effect_status": "complete",
+            "invocation_repeatable": true,
+            "invocation_binds": "known_cantrip",
+            "invocation_cantrip_deals_damage": true,
+            "invocation_cantrip_attack_roll": true,
+            "invocation_push_distance_ft": 10,
+            "invocation_push_size_limit": "large"
+          }
+        },
+        {
+          "id": "witch_sight",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 15,
+          "source_ref": "srd-5.2.1:p74:witch-sight",
+          "summary": "Prerequisite: Level 15+ Warlock. You have Truesight with a range of 30 feet.",
+          "parameters": {
+            "invocation_effect_status": "complete",
+            "truesight_range_ft": 30
+          }
         }
       ]
     },

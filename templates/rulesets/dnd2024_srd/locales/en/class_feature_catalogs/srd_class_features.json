@@ -247,7 +247,15 @@
       "cunning_strike.withdraw": "Withdraw",
       "cunning_strike.daze": "Daze",
       "cunning_strike.knock_out": "Knock Out",
-      "cunning_strike.obscure": "Obscure"
+      "cunning_strike.obscure": "Obscure",
+      "agonizing_blast": "Agonizing Blast",
+      "devil_s_sight": "Devil's Sight",
+      "eldritch_mind": "Eldritch Mind",
+      "eldritch_spear": "Eldritch Spear",
+      "fiendish_vigor": "Fiendish Vigor",
+      "lessons_of_the_first_ones": "Lessons of the First Ones",
+      "repelling_blast": "Repelling Blast",
+      "witch_sight": "Witch Sight"
     }
   }
 }

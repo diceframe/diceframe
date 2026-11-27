@@ -290,6 +290,68 @@ class FeatureChoice:
     grants: str = ""
     requires_proficiency: bool = True
     exclude_expertise: bool = True
+    #: Name of the progression track that decides how many of these the
+    #: character owns *in total* at a level (Warlock invocations are 1/3/3/…).
+    #: Empty means "``count`` is the whole story".  Declaring the track here is
+    #: what keeps the number out of Python: changing the table is a data edit.
+    count_track: str = ""
+    #: How many already-owned picks may be swapped whenever this choice's
+    #: feature is gained at a level.  ``0`` means selections are permanent.
+    replace_per_level: int = 0
+
+
+#: Fields a ``choice`` block may declare.  A closed set for the same reason
+#: every other declaration has one: a typo (``count_trak``) would otherwise be
+#: ignored and silently mean "count is 1".
+FEATURE_CHOICE_KEYS = frozenset({
+    "id", "kind", "category", "count", "enabled_options", "grants",
+    "requires_proficiency", "exclude_expertise", "count_track",
+    "replace_per_level",
+})
+
+#: What an option of a track-counted choice may say about its own readiness.
+#: Only ``complete`` is selectable: an option whose effect has no home yet must
+#: stay visible with a reason instead of granting nothing.
+INVOCATION_EFFECT_STATUS = frozenset({"complete", "guided", "not_automated"})
+
+#: The closed parameter vocabulary of a pool option.  ``parameters`` is the one
+#: place where a typo would be silent: the option still loads, still shows as
+#: ``complete``, and simply grants nothing because no consumer reads the
+#: misspelled key.  ``choice`` has a closed key set for the same reason; this is
+#: the half that actually drives behaviour, so it gets one too.
+INVOCATION_PARAMETER_KINDS: dict[str, tuple[str, ...]] = {
+    "invocation_effect_status": ("str",),
+    "invocation_unautomated_reason": ("str",),
+    "invocation_repeatable": ("bool",),
+    "invocation_binds": ("str",),
+    "invocation_cantrip_deals_damage": ("bool",),
+    "invocation_cantrip_attack_roll": ("bool",),
+    "invocation_cantrip_min_range_ft": ("int",),
+    "invocation_damage_bonus_ability": ("str",),
+    "invocation_range_bonus_per_level_ft": ("int",),
+    "invocation_push_distance_ft": ("int",),
+    "invocation_push_size_limit": ("str",),
+    "invocation_requires_invocations": ("str_list",),
+    "invocation_concentration_advantage": ("bool",),
+    "invocation_free_cast_maximized": ("bool",),
+    # 感官参数跟 Feral Senses 同一个契约：``<code>_range_ft`` 必须是正数。
+    "truesight_range_ft": ("int",),
+    # 免槽施法表是通用机制，不是祈唤专属；池的选项允许声明它。
+    "free_cast_slots": ("str_list",),
+}
+
+#: Parameter keys that stand for "this option *is* the effect".  Combat finds the
+#: carrier by key, so two options in one pool may not declare the same one.
+INVOCATION_EFFECT_KEYS = (
+    "invocation_damage_bonus_ability",
+    "invocation_range_bonus_per_level_ft",
+    "invocation_concentration_advantage",
+    "invocation_push_distance_ft",
+)
+
+#: Bindings an option may declare; anything else means the pick stores an
+#: object no validation knows how to check.
+INVOCATION_BINDINGS = frozenset({"known_cantrip", "origin_feat"})
 
 
 def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
@@ -299,6 +361,11 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
         return None
     if not isinstance(raw, dict):
         raise ClassFeatureError(f"{feature_id}.choice must be an object")
+    unknown = {str(key) for key in raw}.difference(FEATURE_CHOICE_KEYS)
+    if unknown:
+        raise ClassFeatureError(
+            f"{feature_id}.choice has an unknown field: {sorted(unknown)[0]}"
+        )
     choice_id = _require_id(raw.get("id"), f"{feature_id}.choice.id")
     kind = str(raw.get("kind") or "")
     if kind not in FEATURE_CHOICE_KINDS:
@@ -309,14 +376,18 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
     count = raw.get("count")
     if isinstance(count, bool) or not isinstance(count, int) or count < 1:
         raise ClassFeatureError(f"{feature_id}.choice.count must be a positive integer")
+
     if kind == "advancement_feat" and count != 1:
         raise ClassFeatureError(f"{feature_id}.choice.count must be 1")
     if kind == "feature_option" and count != 1:
         # 互斥选项（Divine Strike / Potent Spellcasting）只能选一个：选两个
         # 会让同一个 hit 同时拿到 1d8 与 Wis 加值，而它们在规则上是替代关系。
-        raise ClassFeatureError(
-            f"{feature_id}.choice.count must be 1 for a feature option choice"
-        )
+        # 按职业表成长的池（祈唤）例外：它的人数是逐级累加的，`count` 只是
+        # 基础值，真正的数量由 `count_track` 在每级求值。
+        if raw.get("count_track") is None:
+            raise ClassFeatureError(
+                f"{feature_id}.choice.count must be 1 for a feature option choice"
+            )
     raw_refs = raw.get("enabled_options")
     if raw_refs is None and kind == "skill_proficiency":
         # 空清单 = 技能目录全集；Expertise 只按"已有熟练"筛选，不点名具体技能。
@@ -383,6 +454,30 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
             f"{feature_id}.choice.grants is only meaningful for a "
             "skill_proficiency choice"
         )
+    count_track = raw.get("count_track")
+    if count_track is None:
+        count_track = ""
+    elif not isinstance(count_track, str) or not count_track:
+        raise ClassFeatureError(f"{feature_id}.choice.count_track must be a track name")
+    if count_track and kind != "feature_option":
+        raise ClassFeatureError(
+            f"{feature_id}.choice.count_track is only supported for a "
+            "feature option choice"
+        )
+    replace_per_level = raw.get("replace_per_level", 0)
+    if (
+        isinstance(replace_per_level, bool)
+        or not isinstance(replace_per_level, int)
+        or replace_per_level < 0
+    ):
+        raise ClassFeatureError(
+            f"{feature_id}.choice.replace_per_level must be a non-negative integer"
+        )
+    if replace_per_level and not count_track:
+        # 没有累计人数的选择没有"哪一个是旧的"可言，替换只会变成覆盖。
+        raise ClassFeatureError(
+            f"{feature_id}.choice.replace_per_level requires count_track"
+        )
     return FeatureChoice(
         id=choice_id,
         kind=kind,
@@ -392,6 +487,8 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
         grants=grants,
         requires_proficiency=flags["requires_proficiency"],
         exclude_expertise=flags["exclude_expertise"],
+        count_track=count_track,
+        replace_per_level=replace_per_level,
     )
 
 
@@ -407,6 +504,101 @@ def _advancement_feat_categories(bundle: LoadedRulesetBundle) -> dict[str, str]:
         for feat_id, feat in feats.items()
         if isinstance(feat, Mapping)
     }
+
+
+def _validate_option_parameters(option: ClassFeatureDefinition) -> None:
+    """Reject a pool option whose parameters are unknown or mistyped.
+
+    Fail closed at load: a misspelled ``invocation_push_distance_ft`` would load
+    cleanly, keep the option selectable, and produce an effect that never fires
+    -- indistinguishable from "this character has no such option".
+    """
+
+    for key, value in option.parameters.items():
+        kinds = INVOCATION_PARAMETER_KINDS.get(str(key))
+        if kinds is None:
+            raise ClassFeatureError(
+                f"{option.id}.parameters has an unknown invocation key: {key}"
+            )
+        if "bool" in kinds and isinstance(value, bool):
+            continue
+        if "int" in kinds and isinstance(value, int) and not isinstance(value, bool):
+            if value < 0:
+                raise ClassFeatureError(f"{option.id}.parameters.{key} must be >= 0")
+            continue
+        if "str" in kinds and isinstance(value, str):
+            continue
+        if "str_list" in kinds and isinstance(value, list) and all(
+            isinstance(item, str) for item in value
+        ):
+            continue
+        raise ClassFeatureError(
+            f"{option.id}.parameters.{key} must be {kinds[0]}"
+        )
+    binding = str(option.parameters.get("invocation_binds") or "")
+    if binding and binding not in INVOCATION_BINDINGS:
+        raise ClassFeatureError(
+            f"{option.id}.invocation_binds must be one of "
+            f"{sorted(INVOCATION_BINDINGS)}, not {binding!r}"
+        )
+
+
+def _validate_option_pool(
+    definition: ClassFeatureDefinition,
+    choice: FeatureChoice,
+    features: list[ClassFeatureDefinition],
+    bundle: LoadedRulesetBundle,
+) -> None:
+    """Cross-check a track-counted pool against the table and its options.
+
+    Three things can be wrong and all of them are invisible at play time: the
+    named track may not exist (the number would then be 0 and the slot would
+    never appear), an option may not declare the parent it belongs to (the
+    ownership filter would drop it), or an option may say nothing about whether
+    its effect exists (the pool would offer it and grant nothing).
+    """
+
+    catalog = bundle.get("progression_catalog", "srd_classes") or {}
+    classes = catalog.get("classes") if isinstance(catalog, Mapping) else None
+    row = classes.get(definition.class_id) if isinstance(classes, Mapping) else None
+    tracks = row.get("tracks") if isinstance(row, Mapping) else None
+    if not isinstance(tracks, Mapping) or choice.count_track not in tracks:
+        raise ClassFeatureError(
+            f"{definition.id}.choice.count_track names no track of "
+            f"class:{definition.class_id}: {choice.count_track}"
+        )
+    by_key = {(other.owner, other.id): other for other in features}
+    # 效果键在一个池子里只能有一个载体：combat 侧按"哪个已拥有选项声明了这个
+    # 键"找载体，两个都声明时第二个会被静默忽略。
+    carriers: dict[str, int] = {}
+    for ref in choice.enabled_options:
+        candidate = by_key.get((definition.owner, ref[len("feature:"):]))
+        if candidate is None:
+            continue
+        for key in INVOCATION_EFFECT_KEYS:
+            if key in candidate.parameters:
+                carriers[key] = carriers.get(key, 0) + 1
+    duplicated = sorted(key for key, count in carriers.items() if count > 1)
+    if duplicated:
+        raise ClassFeatureError(
+            f"{definition.id} has more than one option declaring {duplicated[0]}"
+        )
+    for ref in choice.enabled_options:
+        option = by_key.get((definition.owner, ref[len("feature:"):]))
+        if option is None:  # pragma: no cover - the caller already proved it
+            continue
+        if option.option_of != definition.id:
+            raise ClassFeatureError(
+                f"{option.id}.option_of must be {definition.id!r} to be one of "
+                f"its choices"
+            )
+        status = option.parameters.get("invocation_effect_status")
+        if status not in INVOCATION_EFFECT_STATUS:
+            raise ClassFeatureError(
+                f"{option.id}.invocation_effect_status must be one of "
+                f"{sorted(INVOCATION_EFFECT_STATUS)}, not {status!r}"
+            )
+        _validate_option_parameters(option)
 
 
 def _validate_feature_choices(
@@ -457,6 +649,8 @@ def _validate_feature_choices(
                     raise ClassFeatureError(
                         f"{definition.id}.choice references an undeclared feature: {ref}"
                     )
+            if choice.count_track:
+                _validate_option_pool(definition, choice, features, bundle)
             continue
         if choice.category not in known:
             raise ClassFeatureError(

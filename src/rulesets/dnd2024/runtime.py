@@ -837,7 +837,11 @@ class Dnd2024Runtime:
             if not isinstance(choices, dict):
                 raise ValueError("professional character advancement choices are invalid")
             try:
-                rebuilt = engine.apply_next_level(rebuilt, choices)
+                # 老卡是逐级重放出来的：这一路径允许"本切片之前没有池记录"
+                # 的卡跳过必填槽，否则任何 2 级以上的旧魔契师卡都打不开。
+                rebuilt = engine.apply_next_level(
+                    rebuilt, choices, allow_legacy_pool=True,
+                )
             except ProgressionCatalogError as exc:
                 raise ValueError(f"professional character advancement is invalid: {exc}") from exc
         rebuilt = self._sync_class_resources(bundle, rebuilt)

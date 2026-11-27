@@ -27,6 +27,7 @@ from .combat import (
     martial_arts_profile as _martial_arts_profile,
 )
 from .equipment import Dnd2024EquipmentCatalog
+from . import option_pool
 from .models import (
     ClassFeatureDefinition,
     ClassFeatureError,
@@ -1073,13 +1074,17 @@ class Dnd2024ClassFeatureResolver:
             raw_refs = group[0].get("selected_refs")
             if not isinstance(raw_refs, list):
                 continue
-            for ref in raw_refs:
-                if not isinstance(ref, str):
+            for raw in raw_refs:
+                # 与 `_selected_feature_options` 同一套解析：一次选择可以是
+                # `{ref, object_ref}`，只认字符串会让角色卡的 selection 丢掉
+                # 所有带绑定的选择，而所有权那边认得它们。
+                pick = option_pool.parse_ref(raw)
+                if pick is None:
                     continue
-                if not self._choice_ref_is_valid(choice, ref, allowed):
+                if not self._choice_ref_is_valid(choice, pick.ref, allowed):
                     continue
-                if ref not in selected:
-                    selected.append(ref)
+                if pick.ref not in selected:
+                    selected.append(pick.ref)
         return {"choice_id": choice.id, "selected_refs": selected}
 
     def _choice_ref_is_valid(
@@ -1093,6 +1098,10 @@ class Dnd2024ClassFeatureResolver:
             if ref[6:] not in self._skill_ids():
                 return False
             return ref in allowed if allowed else True
+        if choice.kind == "feature_option":
+            # 选项池的选择指回同一份特性目录里的声明，不是成长专长：拿专长
+            # 目录去校验会一律判假，角色卡的 selection 就整片消失。
+            return ref in allowed
         categories = self._advancement_feat_categories()
         if categories.get(ref.removeprefix("feat:")) != choice.category:
             return False
@@ -1278,11 +1287,44 @@ class Dnd2024ClassFeatureResolver:
             refs = record.get("selected_refs")
             if not isinstance(refs, list):
                 continue
-            for ref in refs:
-                local = str(ref).removeprefix("feature:")
+            for raw in refs:
+                # 可重复选项的每次选择是 {"ref", "object_ref"}：绑定属于"哪一次
+                # 选择"，不属于"拥有哪一项"。所有权只回答后者，所以这里只读
+                # ref；把 dict 直接 str() 会得到一个什么都对不上的字符串。
+                ref = raw.get("ref") if isinstance(raw, Mapping) else raw
+                local = str(ref or "").removeprefix("feature:")
                 if local in choice.enabled_options or f"feature:{local}" in choice.enabled_options:
                     selected.add(local)
         return frozenset(selected)
+
+    def bound_objects(
+        self,
+        character: Mapping[str, Any] | None,
+        feature_id: str,
+        *,
+        owner: str = "",
+    ) -> tuple[str, ...]:
+        """Objects a repeatable option is bound to (one pick may name one).
+
+        Eldritch Invocations bind each pick to a cantrip: "Agonizing Blast on
+        Eldritch Blast" is not the same fact as "Agonizing Blast".  The effect
+        side must ask this, not re-walk ``selected_refs`` itself -- a second
+        reader is how "the bonus landed on the wrong cantrip" happens.
+        """
+
+        return option_pool.bound_objects(character, feature_id, owner)
+
+    def owns_binding(
+        self,
+        character: Mapping[str, Any] | None,
+        feature_id: str,
+        object_ref: str,
+        *,
+        owner: str = "",
+    ) -> bool:
+        """Whether one pick of ``feature_id`` is bound to ``object_ref``."""
+
+        return option_pool.owns_binding(character, feature_id, object_ref, owner)
 
     def feature_option_choice(
         self,

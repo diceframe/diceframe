@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
@@ -21,6 +22,7 @@ from src.rulesets.dnd2024.character.derivation import (
     derive_speed,
 )
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.features import option_pool
 from src.rulesets.dnd2024.progression.catalog import (
     Dnd2024ProgressionCatalog,
     ProgressionCatalogError,
@@ -563,8 +565,15 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         self,
         payload: dict[str, Any],
         choices: dict[str, Any] | None = None,
+        *,
+        allow_legacy_pool: bool = False,
     ) -> dict[str, Any]:
-        """Validate one next-level choice set and return an exact, non-mutating diff."""
+        """Validate one next-level choice set and return an exact, non-mutating diff.
+
+        ``allow_legacy_pool`` is only for replaying a card written before
+        track-counted pools existed; the normal path never sets it, so an
+        unanswered slot stays an error there.
+        """
 
         character = _canonical(payload)
         choices = deepcopy(choices or {})
@@ -834,6 +843,21 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         )
         errors.extend(choice_errors)
         requirements.extend(choice_requirements)
+        # 按职业表累加名额的选项池（邪术祈唤）：它不在 `_plan_feature_choices`
+        # 里，因为那条路径只处理"本级新获得的特性"，而池子每一级都可能再给
+        # 一个新名额。
+        pool_requirements, pool_records, pool_errors = option_pool.plan_pools(
+            resolver=self._feature_resolver,
+            character=character,
+            target_level=target_level,
+            tracks=after.get("tracks") or {},
+            choices=choices,
+            spells=self._spell_entities(),
+            spell_effects=self._spell_effects(),
+            allow_legacy=allow_legacy_pool,
+        )
+        errors.extend(pool_errors)
+        requirements.extend(pool_requirements)
         # S0-F25：Wild Shape 在 2 级开始，同一级必须选满已知形态。选择本身走
         # 通用 `choices`，不新开一条升级通道。
         form_requirements: dict[str, Any] = {}
@@ -990,6 +1014,7 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
                 "feature_choice_refs": [
                     ref for record in choice_records for ref in record["selected_refs"]
                 ],
+                "feature_pool_records": pool_records,
                 "abilities": new_abilities,
                 "ability_bonus_applied": ability_bonus_applied,
                 "class_spell_choices": spell_choices,
@@ -1013,11 +1038,15 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         self,
         payload: dict[str, Any],
         choices: dict[str, Any] | None = None,
+        *,
+        allow_legacy_pool: bool = False,
     ) -> dict[str, Any]:
         """Apply a ready preview to a copied canonical character."""
 
         original = _canonical(payload)
-        preview = self.preview_next_level(original, choices)
+        preview = self.preview_next_level(
+            original, choices, allow_legacy_pool=allow_legacy_pool,
+        )
         if not preview["ok"]:
             raise ProgressionCatalogError("; ".join(preview["errors"]))
         character = deepcopy(original)
@@ -1091,6 +1120,10 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
                         continue
                     if ref not in owned_refs:
                         owned_refs.append(ref)
+        # 池子写的是"当前持有的那一组"，不是"这一级新加了什么"：替换要能把
+        # 旧的取下来，而追加记录只能表达加法。逐级提交内容留在 history 里。
+        for record in preview["diff"].get("feature_pool_records") or []:
+            option_pool.write_record(features, record)
         grants = features.setdefault("class_feature_grants", [])
         if not grants:
             level_one = self.catalog.snapshot(preview["class_ref"], 1)
@@ -1140,6 +1173,23 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         self._update_spellcasting(character, preview)
         self._update_derived(character)
         return character
+
+    def _spell_entities(self) -> dict[str, dict[str, Any]]:
+        """The spell catalog as ``id -> row``; options bind cantrips from it."""
+
+        catalog = self.bundle.get("spell_catalog", "srd_spells") or {}
+        return {
+            str(row.get("id")): row
+            for row in (catalog.get("spells") or [])
+            if isinstance(row, dict)
+        }
+
+    def _spell_effects(self) -> dict[str, Any]:
+        """The combat catalog's spell effects: what a spell actually does."""
+
+        combat = self.bundle.get("combat_catalog", "srd_combat_core") or {}
+        effects = combat.get("spell_effects") if isinstance(combat, Mapping) else None
+        return dict(effects) if isinstance(effects, Mapping) else {}
 
     def _single_class_state(self, character: dict[str, Any]) -> tuple[str, int]:
         binding = character.get("rule_binding")
