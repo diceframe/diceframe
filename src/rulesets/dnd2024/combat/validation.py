@@ -1348,13 +1348,19 @@ class CombatValidationMixin(
                 raise CombatIntentError(
                     "the declared open hand technique choice is not available"
                 )
+        # 按 (授予者, 能力) 建索引，不按能力 id 单独索引：专长与子职可能声明
+        # 同名能力，只按 id 取会让"校验用的 capability"和"定价用的 view"来自
+        # 不同的授予者。
         views = {
-            view.id: view
+            (view.feature_id, view.id): view
             for view in self._available_class_capabilities(
                 actor, economy, include_unavailable=True,
             )
         }
-        view = views.get(capability_id)
+        view = (
+            views.get((capability.feature_id, capability_id))
+            if capability is not None else None
+        )
         if view is None:
             raise CombatIntentError("class capability is not available to this actor")
         if not view.available:

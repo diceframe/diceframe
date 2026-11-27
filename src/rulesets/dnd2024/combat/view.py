@@ -554,6 +554,9 @@ class CombatViewMixin:
                 # the counter read and fail closed there, never look like zero.
                 "usage": deepcopy(feature_state["usage"])
                 if feature_state.get("usage") is not None else [],
+                # 专长同样是能力的授予者：不带这一项，战斗里的特性边界就
+                # 看不见角色拥有的任何专长，专长的主动能力永远不可用。
+                "feat_refs": deepcopy(feature_state.get("feat_refs") or []),
                 # Character-scoped feature state (a re-chosen resistance, the
                 # next survival DC) outlives the combat, so the view has to
                 # carry it or combat would silently read "never chosen".
@@ -982,6 +985,9 @@ class CombatViewMixin:
         raw_usage = (actor.get("features") or {}).get("usage")
         if raw_usage is not None:
             features["usage"] = deepcopy(raw_usage)
+        raw_feat_refs = (actor.get("features") or {}).get("feat_refs")
+        if raw_feat_refs is not None:
+            features["feat_refs"] = deepcopy(raw_feat_refs)
         for feature_id in FEATURE_STATE_KEYS:
             stored = (actor.get("features") or {}).get(feature_id)
             if isinstance(stored, dict):

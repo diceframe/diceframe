@@ -33,7 +33,9 @@ from typing import Any, Mapping
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.features.models import (
     ClassFeatureError,
+    FeatureCapability,
     FeatureChoice,
+    parse_capability,
     parse_feature_choice,
 )
 from src.rulesets.dnd2024.features.parameter_registry import (
@@ -56,6 +58,7 @@ FEAT_FIELDS = frozenset({
     "repeatable",
     "parameters",
     "passive_effects",
+    "capabilities",
     "choice",
     # Display names live on the entity so a card can render without a locale
     # lookup; origin feats have always carried them.
@@ -109,10 +112,16 @@ class FeatDefinition:
     # 这条内容属于哪个内容包（``srd-5.2.1`` / ``phb-2024`` / …）。空值表示
     # 所属 bundle 没有声明来源体系（极简测试夹具就是这样）。
     content_pack: str = ""
+    # 能力/选项的显示名。实体布局写在自己的文件里，catalog 布局写在行内；
+    # 投影需要它，而 class feature 的 labels 不在同一张表里。
+    labels: Mapping[str, str] = field(default_factory=dict)
     minimum_level: int = 1
     repeatable: bool = False
     parameters: Mapping[str, Any] = field(default_factory=dict)
     passive_effects: tuple[PassiveEffect, ...] = ()
+    # 主动能力与被动效果是两类东西：一个在回合里花成本做动作，一个常驻
+    # 改变数值。共用 ``FeatureCapability`` 让专长与子职走同一条投影/校验链。
+    capabilities: tuple[FeatureCapability, ...] = ()
     choice: FeatureChoice | None = None
     legacy: Mapping[str, Any] = field(default_factory=dict)
 
@@ -174,15 +183,52 @@ def parse_feat(raw: Mapping[str, Any]) -> FeatDefinition:
         source_ref=source_ref,
         automation_level=automation,
         content_pack=str(raw.get("content_pack") or ""),
+        labels=_parse_labels(raw.get("labels")),
         minimum_level=minimum_level,
         repeatable=repeatable,
         parameters=parameters,
         passive_effects=_parse_passive_effects(feat_id, raw.get("passive_effects")),
+        capabilities=_parse_capabilities(feat_id, raw.get("capabilities")),
         choice=choice,
         legacy=legacy,
     )
     check_declaration_completeness(definition)
     return definition
+
+
+def _parse_labels(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, Mapping):
+        return {}
+    return {str(key): str(value) for key, value in raw.items()}
+
+
+def _parse_capabilities(feat_id: str, raw: Any) -> tuple[FeatureCapability, ...]:
+    """Validate the active capabilities a feat grants.
+
+    The capability's ``feature_id`` is filled from the feat's own id rather than
+    from the payload: a declaration that could name another grantor would make
+    "which feature owns this capability" depend on a field nobody validates.
+    """
+
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise FeatDefinitionError(f"{feat_id}.capabilities must be an array")
+    capabilities: list[FeatureCapability] = []
+    for entry in raw:
+        if isinstance(entry, Mapping) and "feature_id" in entry:
+            # 授予者由"这条能力写在哪条专长里"决定。允许载荷自己声明，就等于
+            # 让一个没人校验的字段决定归属——写错时 uses_per_long_rest 会记到
+            # 一条不存在的特性上。
+            raise FeatDefinitionError(
+                f"{feat_id}.capabilities must not declare feature_id; "
+                "the grantor is the feat that declares the capability"
+            )
+        try:
+            capabilities.append(parse_capability(feat_id, entry))
+        except ClassFeatureError as exc:
+            raise FeatDefinitionError(str(exc)) from exc
+    return tuple(capabilities)
 
 
 def check_declaration_completeness(definition: FeatDefinition) -> None:

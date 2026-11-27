@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Protocol
 
 from .kinds import KIND_HANDLERS
 from .models import (
@@ -259,13 +259,37 @@ def _blocked_reason(
     return ""
 
 
+class CapabilityOwner(Protocol):
+    """What the projection needs from whoever grants a capability.
+
+    Structural rather than a base class: class features and feats both grant
+    capabilities, and neither should have to inherit from the other.  Only these
+    three attributes are read -- ``class_id``, ``option_of`` and
+    ``equipment_requirement`` are deliberately absent, which is what makes a
+    feat usable here without pretending to be a class feature.
+    """
+
+    # 只读属性而不是可变字段：两个实现都是 frozen dataclass，把 Protocol 的
+    # 属性声明成可写会让它们结构上不兼容（mypy 对可变属性的要求是不变型）。
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def parameters(self) -> Mapping[str, Any]: ...
+
+    @property
+    def capabilities(self) -> tuple[FeatureCapability, ...]: ...
+
+
 def combat_capabilities(
     catalog: Dnd2024ClassFeatureCatalog,
-    owned: tuple[ClassFeatureDefinition, ...],
+    owned: Iterable[CapabilityOwner],
     context: CombatContext,
     definitions: Mapping[str, ResourceDefinition],
     *,
     include_unavailable: bool = False,
+    extra_labels: Mapping[str, str] | None = None,
+    feature_owner_ids: frozenset[str] | None = None,
 ) -> tuple[CombatCapabilityView, ...]:
     """Project the capabilities the character may declare right now.
 
@@ -277,9 +301,17 @@ def combat_capabilities(
     """
 
     result: list[CombatCapabilityView] = []
-    owned_ids = frozenset(definition.id for definition in owned)
-    relaxed_slots = relaxed_bonus_action_targets(owned)
-    for definition in owned:
+    owners = tuple(owned)
+    labels = extra_labels or {}
+    # ``requires_feature_id`` 问的是"角色拥不拥有那条**特性**"。专长也是授予者，
+    # 但把专长 id 混进这个集合，会让一条声明了 ``requires_feature_id`` 的能力
+    # 被同名的专长意外满足——两个命名空间不能共用一个集合。
+    owned_ids = (
+        feature_owner_ids if feature_owner_ids is not None
+        else frozenset(definition.id for definition in owners)
+    )
+    relaxed_slots = relaxed_bonus_action_targets(owners)
+    for definition in owners:
         for capability in definition.capabilities:
             blocked = _blocked_reason(
                 catalog, capability, context, definitions, owned_ids, relaxed_slots,
@@ -289,7 +321,9 @@ def combat_capabilities(
             view = CombatCapabilityView(
                 id=capability.id,
                 feature_id=definition.id,
-                name=catalog.label(capability.id, capability.id),
+                # 子职的 capability 名在 class feature labels 里；专长的在它自己的
+                # 实体 labels 里，由调用方经 ``extra_labels`` 递进来。
+                name=catalog.label(capability.id, labels.get(capability.id, "")),
                 available=not blocked,
                 blocked_reason=blocked,
                 requires_hostile_target=capability.requires_hostile_target,

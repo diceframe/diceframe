@@ -17,7 +17,12 @@ from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.primitives import ABILITY_IDS
 from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
 
-from .models import ClassFeatureDefinition, ClassFeatureError, Dnd2024ClassFeatureCatalog
+from .models import (
+    ClassFeatureDefinition,
+    ClassFeatureError,
+    Dnd2024ClassFeatureCatalog,
+    FeatureCapability,
+)
 from .resources import FEATURE_USAGE_SCOPES, Dnd2024ClassResourceCatalog
 
 
@@ -138,6 +143,7 @@ def validate_declarations(
 ) -> None:
     """Fail closed when a declared parameter has no backing bundle table."""
 
+    _validate_capability_ids_are_unique(catalog, bundle)
     if progression_catalog is None:  # pragma: no cover - guarded by ``available``
         return
     # 循环外取一次。``LoadedRulesetBundle.get`` 返回的是 deepcopy，放进按特性
@@ -1343,3 +1349,34 @@ def validate_mark_parameters(definition: ClassFeatureDefinition) -> None:
                 f"{feature_id}.mark_damage_die must be one of "
                 f"{sorted(_MARK_DAMAGE_DICE)}"
             )
+
+
+def _validate_capability_ids_are_unique(
+    catalog: Dnd2024ClassFeatureCatalog, bundle: LoadedRulesetBundle,
+) -> None:
+    """One capability id identifies one (grantor, capability) pair, globally.
+
+    Combat declares a capability by id alone, so two grantors sharing an id would
+    let the forgery gate resolve one declaration while availability priced the
+    other.  Feats made this reachable: until they could grant capabilities, the
+    id space was class features only.
+    """
+
+    from .feat_models import load_feat_definitions
+
+    seen: dict[str, str] = {}
+
+    def claim(owner_id: str, capabilities: tuple[FeatureCapability, ...]) -> None:
+        for capability in capabilities:
+            previous = seen.get(capability.id)
+            if previous is not None:
+                raise ClassFeatureError(
+                    f"capability id {capability.id!r} is declared by both "
+                    f"{previous} and {owner_id}; combat names it by id alone"
+                )
+            seen[capability.id] = owner_id
+
+    for definition in catalog.features_by_key.values():
+        claim(definition.id, definition.capabilities)
+    for feat_definition in load_feat_definitions(bundle).values():
+        claim(feat_definition.id, feat_definition.capabilities)

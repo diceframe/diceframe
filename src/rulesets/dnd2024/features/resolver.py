@@ -27,6 +27,8 @@ from .combat import (
     martial_arts_profile as _martial_arts_profile,
 )
 from .equipment import Dnd2024EquipmentCatalog
+from .feat_capabilities import capability_labels, owned_capability_feats
+from .feat_models import FeatDefinition, load_feat_definitions
 from .models import (
     ClassFeatureDefinition,
     ClassFeatureError,
@@ -157,6 +159,8 @@ class Dnd2024ClassFeatureResolver:
         self._feat_categories: dict[str, str] | None = None
         # 技能目录同样惰性：只有声明了技能选择的特性才需要它。
         self._skill_id_set: set[str] | None = None
+        # 专长声明同样惰性：只有角色拥有带 capability 的专长时才需要解析。
+        self._feat_definitions: dict[str, FeatDefinition] | None = None
         # 与 ``Dnd2024Runtime._sync_class_resources`` 相同的边界：bundle 没有
         # 声明这套可选内容时，职业特性整体降级为「不存在」，而不是让每一个
         # 角色投影都失败。声明存在但格式非法时仍然 fail closed。
@@ -194,6 +198,23 @@ class Dnd2024ClassFeatureResolver:
         if self._equipment is None:
             self._equipment = Dnd2024EquipmentCatalog.from_bundle(self.bundle)
         return self._equipment
+
+    @property
+    def feat_definitions(self) -> dict[str, FeatDefinition]:
+        """Every feat declaration, parsed once per resolver."""
+
+        if self._feat_definitions is None:
+            self._feat_definitions = load_feat_definitions(self.bundle)
+        return self._feat_definitions
+
+    def _owned_feat_capability_owners(
+        self, character: Mapping[str, Any] | None,
+    ) -> tuple[FeatDefinition, ...]:
+        """Feats the character owns that actually grant an active capability."""
+
+        features = (character or {}).get("features")
+        refs = features.get("feat_refs") if isinstance(features, Mapping) else None
+        return owned_capability_feats(refs, self.feat_definitions)
 
     # ------------------------------------------------------------------
     # identity
@@ -1618,6 +1639,7 @@ class Dnd2024ClassFeatureResolver:
         """
 
         active = self.active_features_for(character)
+        feat_owners = self._owned_feat_capability_owners(character)
         definitions = {
             definition.id: definition for definition in self.resource_definitions(character)
         }
@@ -1625,7 +1647,7 @@ class Dnd2024ClassFeatureResolver:
         class_magic = spellcasting.get("class") if isinstance(spellcasting, Mapping) else None
         return _project_capabilities(
             self.catalog,
-            active,
+            (*active, *feat_owners),
             CombatContext.from_economy(
                 combat_context, actor_id,
                 class_magic=class_magic if isinstance(class_magic, Mapping) else None,
@@ -1633,6 +1655,8 @@ class Dnd2024ClassFeatureResolver:
             ),
             definitions,
             include_unavailable=include_unavailable,
+            extra_labels=capability_labels(feat_owners),
+            feature_owner_ids=frozenset(definition.id for definition in active),
         )
 
     def declared_capability(
@@ -1643,6 +1667,12 @@ class Dnd2024ClassFeatureResolver:
         wanted = str(capability_id or "")
         for definition in self.active_features_for(character):
             for capability in definition.capabilities:
+                if capability.id == wanted:
+                    return capability
+        # 专长的 capability 不在特性目录里，但申报端必须认得出——否则伪造防护
+        # 会把合法申报当成"未知能力"拒掉。
+        for feat_definition in self._owned_feat_capability_owners(character):
+            for capability in feat_definition.capabilities:
                 if capability.id == wanted:
                     return capability
         return None

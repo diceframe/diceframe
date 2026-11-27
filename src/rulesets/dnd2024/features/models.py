@@ -1139,3 +1139,14 @@ class CombatCapabilityView:
             "target_kind": self.target_kind,
             "costs": [cost.to_dict() for cost in self.costs],
         }
+
+
+def parse_capability(feature_id: str, raw: Any) -> FeatureCapability:
+    """Validate one declared capability; the grantor id comes from the caller.
+
+    A capability always names the declaration that grants it, so the payload
+    never carries ``feature_id`` -- passing it in is what keeps a feat's
+    capability from accidentally claiming a class feature as its owner.
+    """
+
+    return Dnd2024ClassFeatureCatalog._parse_capability(feature_id, raw)
