@@ -34,6 +34,22 @@ _CARRYING_TAIL_KEYS = frozenset({
     "hit_riders", "extra_damage_parts", "brutal_strike_effects",
 })
 
+
+def attack_is_ranged(weapon: dict[str, Any]) -> bool:
+    """Whether this profile counts as a ranged attack for reaction ranges.
+
+    Stat-block attacks are deep-copied as-is by ``_available_attacks`` and
+    carry ``range`` / ``long_range`` but no ``ranged`` flag, so keying the
+    redirect's 60-foot range off ``weapon["ranged"]`` alone would make every
+    monster bow a melee attack.  A thrown melee weapon is not included: the
+    engine cannot tell "stabbed with it" from "threw it", and guessing ranged
+    would hand the monk a 60-foot redirect for a dagger fight.
+    """
+
+    if bool(weapon.get("ranged")):
+        return True
+    return int(weapon.get("long_range", 0) or 0) > 0
+
 # 受击反应特性效果注册表：条目 = 参数名 + 声明的效果种类。
 # 注册表之外不存在硬编码特性分支；新受击反应特性 = 注册表行 + 目录声明。
 REACTION_FEATURE_EFFECTS: dict[str, dict[str, Any]] = {
@@ -584,6 +600,17 @@ class CombatReactionSpellsMixin:
             "ability": ability, "ability_modifier": modifier,
             "class_level_bonus": level_bonus,
         })
+        next_decision = decision.get("next_decision")
+        if isinstance(next_decision, dict):
+            # 命中之后的触发窗口（诗人的语出惊人、至圣斩之类）持有同一份伤害：
+            # 不减伤就发出去，等于把它们从流程里吞掉。先把减后的值写回去。
+            forwarded = deepcopy(next_decision)
+            held = forwarded.get("damage_event")
+            if isinstance(held, dict):
+                held["amount"] = final
+                held["delta"] = -final
+            events.append({"type": "dnd2024.decision.pending", **forwarded})
+            return events
         redirect = choice.get("redirect") or {}
         if final == 0 and not _CARRYING_TAIL_KEYS.intersection(damage_event):
             window = self._redirect_window(
@@ -594,11 +621,8 @@ class CombatReactionSpellsMixin:
                 return events
         damage_event["amount"] = final
         damage_event["delta"] = -final
-        if final == 0:
-            # 减到 0 且没有可重定向的目标：这次攻击什么都不造成，也不进入
-            # 命中 rider —— 与"命中但伤害归零"同一口径。
-            return events
-        events.extend(self._submit_hit_damage(damage_event))
+        if final > 0:
+            events.extend(self._submit_hit_damage(damage_event))
         defender = self._actor_view(instance, combat, defender_id)
         tail_events, tail_damage = self._hit_tail_events(
             instance, combat, attacker_id, defender, damage_event, rng,
@@ -625,6 +649,8 @@ class CombatReactionSpellsMixin:
             return None
         ranged = bool(decision.get("attack_ranged"))
         span = int(redirect.get("range") or 0)
+        if span <= 0:
+            return None
         targets: list[dict[str, Any]] = []
         for row in self._all_targets(instance, combat):
             target_id = str(row["actor_id"])
@@ -673,6 +699,10 @@ class CombatReactionSpellsMixin:
                 "save_ability": str(redirect.get("ability") or "dex"),
                 "save_dc": dc,
                 "damage_type": str(redirect.get("damage_type") or ""),
+                # 结算时要按同一口径复核：窗口建立后目标可能移动，也可能
+                # 因为掩蔽变化而不再可被指定。
+                "range_ft": span,
+                "requires_total_cover": bool(redirect.get("requires_total_cover")),
                 "targets": targets,
             },
         }
@@ -697,6 +727,13 @@ class CombatReactionSpellsMixin:
         target = self._actor_view(instance, combat, target_id)
         if int(target.get("hp", 0) or 0) <= 0:
             raise CombatIntentError("the redirect target is no longer standing")
+        defender_id = str(decision["actor_id"])
+        if self._distance(combat, defender_id, target_id) > int(window.get("range_ft") or 0):
+            raise CombatIntentError("the redirect target is out of range")
+        if window.get("requires_total_cover") and self.cover_level(
+            instance, combat, target_id,
+        ) == "total":
+            raise CombatIntentError("the redirect target is behind Total Cover")
 
     def _finish_redirect(
         self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
@@ -720,19 +757,17 @@ class CombatReactionSpellsMixin:
         }]
         ability = str(window.get("save_ability") or "dex")
         dc = int(window["save_dc"])
-        roll = int(rng.randint(1, 20))
-        modifier = int((target.get("saving_throws") or {}).get(ability, 0) or 0)
-        total = roll + modifier
-        success = total >= dc
-        events.append({
-            "type": "check.resolved", "kind": "saving_throw",
-            "actor_id": target_id, "target_id": target_id,
-            "ability": ability, "roll": roll, "modifier": modifier,
-            "total": total, "dc": dc, "success": success,
-            "feature_id": str(window.get("feature_id") or ""),
-            "source_actor_id": defender_id,
-        })
-        if success:
+        # 走既有的豁免入口，而不是手搓一个 check.resolved：传说抗性、豁免加值
+        # 来源与"重试投掷"这些规则都写在它里面，绕过去等于让重定向成为一条
+        # 不受同一套豁免规则约束的旁路。
+        # ``_saving_throw_check`` 返回的就是那条 check.resolved 事件，它不自己
+        # 入列（调用方的 events 用于 roll_id 去重）。
+        check = self._saving_throw_check(
+            instance, combat, target, target_id, ability, dc, defender_id,
+            events, rng,
+        )
+        events.append(check)
+        if bool(check.get("success")):
             return events
         segments = _DEFLECT_DICE_RE.match(str(window.get("dice") or ""))
         count = int(segments.group(1)) if segments else int(window.get("dice_count") or 0)
@@ -756,6 +791,13 @@ class CombatReactionSpellsMixin:
             event["resisted"] = True
             event["resistance"] = resistance
         events.append(event)
+        # 重定向造成的伤害同样是"伤害来源是武僧"的一次结算：被重定向的目标
+        # 要掷专注，把它打到 0 HP 也要触发击杀类特性。少这两步会让一条规则
+        # 只在攻击路径上成立。
+        events.extend(self._concentration_events(instance, combat, target, amount, rng))
+        events.extend(self._enemy_zero_hp_feature_events(
+            instance, combat, defender_id, target, amount,
+        ))
         return events
 
     def _counterattack_events(
