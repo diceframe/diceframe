@@ -478,6 +478,106 @@ class AdvancementChoicesMixin:
         }
         for definition in declared:
             choice = definition.choice
+            if choice is not None and choice.kind == "language":
+                # 语言槽与技能槽分开处理：语言不参与任何机械化判定，它只是
+                # "这个角色懂什么语言"的权威记录。因此**未作答不阻塞升级**——
+                # 强制每个既有游侠在 2 级补两个语言会让他们全部升级失败，而
+                # 漏选两个语言不会导致任何错误结算。
+                allowed_languages = set(choice.enabled_options) or {
+                    f"language:{entity['id']}" for entity in self.bundle.list("language")
+                    if entity.get("rarity") == "standard"
+                }
+                known_languages = {
+                    *(str(ref) for ref in ((character.get("proficiencies") or {}).get("language_refs") or [])),
+                    *resolver.language_sources(character),
+                    *(str(ref) for prior in records for ref in prior["selected_refs"] if str(ref).startswith("language:")),
+                }
+                options = []
+                for entity in self.bundle.list("language"):
+                    lang_ref = f"language:{entity['id']}"
+                    reasons: list[str] = []
+                    if lang_ref not in allowed_languages:
+                        reasons.append("not_standard")
+                    if lang_ref in known_languages:
+                        reasons.append("already_known")
+                    options.append({
+                        "value": lang_ref,
+                        "available": not reasons,
+                        "unavailable_reasons": reasons,
+                    })
+                requirements.append({
+                    "id": f"feature_choice:{definition.owner}:{definition.id}:{choice.id}",
+                    "kind": "feature_choice",
+                    "enforced": False,
+                    "required": False,
+                    "owner": definition.owner,
+                    "feature_id": definition.id,
+                    "choice_id": choice.id,
+                    "count": choice.count,
+                    "options": options,
+                })
+                slot = [
+                    index for index, record in enumerate(submitted)
+                    if record["owner"] == definition.owner
+                    and record["feature_id"] == definition.id
+                    and record["choice_id"] == choice.id
+                ]
+                if len(slot) > 1:
+                    errors.append(
+                        f"feature choice {definition.id} was submitted more than once"
+                    )
+                    matched.update(slot)
+                    continue
+                if not slot:
+                    continue
+                matched.add(slot[0])
+                record = submitted[slot[0]]
+                raw_refs = record["selected_refs"]
+                if not isinstance(raw_refs, list) or not all(
+                    isinstance(ref, str) for ref in raw_refs
+                ):
+                    errors.append(
+                        f"feature choice {definition.id} selected_refs must be strings"
+                    )
+                    continue
+                if len(raw_refs) != choice.count:
+                    errors.append(
+                        f"feature choice {definition.id} must select exactly "
+                        f"{choice.count} option"
+                    )
+                    continue
+                if len(set(raw_refs)) != len(raw_refs):
+                    errors.append(
+                        f"feature choice {definition.id} selected_refs repeats an option"
+                    )
+                    continue
+                allowed_languages = set(choice.enabled_options) or {
+                    f"language:{entity['id']}" for entity in self.bundle.list("language")
+                    if entity.get("rarity") == "standard"
+                }
+                if any(ref not in allowed_languages for ref in raw_refs):
+                    errors.append(
+                        f"feature choice {definition.id} selected a non-Standard language"
+                    )
+                    continue
+                known_languages = {
+                    *(str(ref) for ref in ((character.get("proficiencies") or {}).get("language_refs") or [])),
+                    *resolver.language_sources(character),
+                    *(str(ref) for prior in records for ref in prior["selected_refs"] if str(ref).startswith("language:")),
+                }
+                duplicate_lang = next((ref for ref in raw_refs if ref in known_languages), "")
+                if duplicate_lang:
+                    errors.append(f"{duplicate_lang} is already known")
+                    continue
+                records.append({
+                    "owner": definition.owner,
+                    "feature_id": definition.id,
+                    "choice_id": choice.id,
+                    "selected_refs": list(raw_refs),
+                    "granted_level": target_level,
+                    "grants": "",
+                })
+                continue
             if choice is not None and choice.kind == "skill_proficiency":
                 options = self._skill_options(choice, proficient, expertise)
                 requirements.append({
@@ -497,9 +597,14 @@ class AdvancementChoicesMixin:
                     expertise=expertise,
                 )
                 records.extend(chosen)
-                expertise.update(
-                    str(ref) for record in chosen for ref in record["selected_refs"]
-                )
+                if choice.grants == "expertise":
+                    expertise.update(
+                        str(ref) for record in chosen for ref in record["selected_refs"]
+                    )
+                elif choice.grants == "proficiency":
+                    proficient.update(
+                        str(ref) for record in chosen for ref in record["selected_refs"]
+                    )
                 continue
             if choice is not None and choice.kind == "feature_option":
                 # 互斥特性选项（Divine Strike / Potent Spellcasting、Primal
@@ -796,6 +901,8 @@ class AdvancementChoicesMixin:
             "choice_id": choice.id,
             "selected_refs": list(raw_refs),
             "granted_level": target_level,
+            # 落地时要区分"加倍"与"新增熟练"：只看 ref 分不出来。
+            "grants": choice.grants,
         }]
 
     def _feat_options(

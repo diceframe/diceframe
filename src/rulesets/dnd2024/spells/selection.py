@@ -83,7 +83,10 @@ class Dnd2024SpellSelection:
         return {
             "class_ref": class_ref,
             "level": level,
-            "cantrip_count": int(tracks.get("cantrips", 0) or 0),
+            # 特性可以加一个戏法位（Divine Order: Thaumaturge / Primal Order:
+            # Magician）。它计入"已知戏法数"，但不改变准备法术数、也不发法术位。
+            "cantrip_count": int(tracks.get("cantrips", 0) or 0)
+            + self.cantrip_count_bonus(character),
             "prepared_spell_count": int(tracks.get("prepared_spells", 0) or 0),
             "spellbook_minimum": policy.spellbook_minimum(level) if policy else 0,
             "maximum_spell_level": maximum_spell_level,
@@ -93,6 +96,26 @@ class Dnd2024SpellSelection:
             # 是为了让客户端与校验读同一个闭集，而不是各自推断。
             "prepared_list_expansion": list(expansion),
         }
+
+    def cantrip_count_bonus(self, character: Mapping[str, Any] | None) -> int:
+        """Extra cantrips a feature grants.
+
+        Only features that are actually *in force* count: an ``option_of``
+        branch is available from its level, not active until chosen, so an
+        either/or feature cannot hand out both halves' cantrips.
+        """
+
+        if character is None:
+            return 0
+        bonus = 0
+        for definition in self.features.features_for(character):
+            if not self.features.owns_definition(character, definition):
+                continue
+            value = definition.parameters.get("cantrip_count_bonus")
+            if isinstance(value, bool) or not isinstance(value, int):
+                continue
+            bonus += value
+        return bonus
 
     def options(
         self, class_ref: str, level: int, character: Mapping[str, Any] | None = None,
@@ -395,13 +418,13 @@ class Dnd2024SpellSelection:
         }
         if not class_ref:
             return empty
-        requirements = self.requirements(class_ref, level)
+        requirements = self.requirements(class_ref, level, character)
         if not requirements["slot_profile"]:
             return empty
         policy = PreparationPolicy.for_class(self.bundle, class_ref)
         if policy is None:
             return empty
-        options = self.options(class_ref, level)
+        options = self.options(class_ref, level, character)
         leveled = options["leveled_spells"]
         if policy.source == "spellbook":
             known = {

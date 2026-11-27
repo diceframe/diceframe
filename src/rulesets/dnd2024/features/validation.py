@@ -152,6 +152,9 @@ def validate_declarations(
     combat_conditions = (
         bundle.get("combat_catalog", "srd_combat_core") or {}
     ).get("conditions", {})
+    known_skill_ids = frozenset(
+        str(entity.get("id")) for entity in bundle.list("skill")
+    )
     known_feature_ids = frozenset(
         definition.id for definition in catalog.features_by_key.values()
     )
@@ -220,6 +223,7 @@ def validate_declarations(
         validate_hit_rider_parameters(definition)
         validate_cunning_strike_parameters(definition, combat_conditions)
         validate_deflect_parameters(definition, known_feature_ids)
+        validate_check_modifier_parameters(definition, known_skill_ids)
         validate_attack_state_parameters(definition)
         validate_mark_parameters(definition)
         if definition.resource_id:
@@ -1111,6 +1115,34 @@ _DEFLECT_KEYS = frozenset({
     "redirect_requires_total_cover",
 })
 _DEFLECT_ENERGY_KEYS = frozenset({"extends_feature", "deflect_all_damage_types"})
+
+#: 修正能作用的三类掷骰。攻击与伤害**故意不在**这里：枚举值一旦存在，
+#: 内容写了就会静默无效，那是"声明了但没人读"的假契约。刃契锁那类
+#: 需求进来时，加的是 surface 值 + 一个默认属性选择函数。
+_CHECK_MODIFIER_SURFACES = frozenset({"ability_check", "skill_check", "saving_throw"})
+_CHECK_MODIFIER_KEYS = frozenset({
+    "surface", "skills", "abilities", "when_condition",
+    "replace_ability", "add",
+})
+_CHECK_ADD_KEYS = frozenset({"source", "ability", "value", "minimum", "maximum", "multiplier"})
+_CHECK_ADD_SOURCES = frozenset({"constant", "ability_modifier", "proficiency_bonus"})
+
+
+def validate_check_modifier_parameters(
+    definition: ClassFeatureDefinition, known_skill_ids: frozenset[str],
+) -> None:
+    """Shape is the model's job (``_parse_check_modifiers``); this checks refs.
+
+    技能引用必须真实存在：写错的技能名不会报错，只会让那条修正在一次也
+    匹配不上的检定上静默失效——玩家以为拿了能力，日志里却什么都没有。
+    """
+
+    for index, entry in enumerate(definition.check_modifiers):
+        for ref in entry.get("skills") or ():
+            if str(ref)[len("skill:"):] not in known_skill_ids:
+                raise ClassFeatureError(
+                    f"{definition.id}.check_modifiers[{index}] names an unknown skill: {ref}"
+                )
 
 
 def validate_deflect_parameters(

@@ -373,7 +373,7 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         snapshot = self.catalog.snapshot(class_ref, level)
         if not snapshot["slot_profile"]:
             return []
-        required = Dnd2024SpellSelection(self.bundle).requirements(class_ref, level)
+        required = Dnd2024SpellSelection(self.bundle).requirements(class_ref, level, character)
         spellcasting = character.get("spellcasting")
         spell_class = (
             spellcasting.get("class") if isinstance(spellcasting, dict) else None
@@ -1276,12 +1276,36 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
                 # 来源单独记一笔：集合本身只说明"有这个熟练"，看不出谁给的。
                 derived["saving_throw_proficiency_sources"] = dict(specific_saves)
         skill_refs = set(proficiencies.get("skill_refs") or [])
+        # `grants: "proficiency"` 的槽选中的技能必须真的变成熟练，否则只是
+        # 一个记下来的名字、加值是 0。（建卡路径在 derivation 里做同一件事。）
+        ordered_skill_refs = list(dict.fromkeys(
+            str(ref) for ref in (proficiencies.get("skill_refs") or [])
+        ))
+        ordered_language_refs = list(dict.fromkeys([
+            *(str(ref) for ref in (proficiencies.get("language_refs") or [])),
+            *(str(ref) for ref in self._feature_resolver.language_sources(character)),
+        ]))
+        for record in (character.get("features") or {}).get("feature_choices") or []:
+            if not isinstance(record, dict):
+                continue
+            for ref in record.get("selected_refs") or []:
+                ref_text = str(ref)
+                if record.get("grants") == "proficiency" and ref_text.startswith("skill:"):
+                    skill_refs.add(ref_text)
+                    if ref_text not in ordered_skill_refs:
+                        ordered_skill_refs.append(ref_text)
+                elif ref_text.startswith("language:"):
+                    if ref_text not in ordered_language_refs:
+                        ordered_language_refs.append(ref_text)
+        proficiencies["skill_refs"] = ordered_skill_refs
+        proficiencies["language_refs"] = ordered_language_refs
         saving_throws = {
             ability: ability_modifier(abilities[ability])
             + (proficiency if f"ability:{ability}" in saving_refs else 0)
             for ability in ABILITY_IDS
         }
         skill_values: dict[str, int] = {}
+        skill_parts: dict[str, dict[str, Any]] = {}
         # 技能加值只有一个聚合入口：升级、建卡与 live 重算都走它。Expertise
         # 与半熟练若在这里另写一套，同一张卡在升级前后会出现两种加值。
         expertise = {
@@ -1291,13 +1315,19 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         for skill in self.bundle.list("skill"):
             ability = str(skill.get("ability_ref") or "").removeprefix("ability:")
             ref = f"skill:{skill['id']}"
-            skill_values[str(skill["id"])] = derive_skill_check(
+            derived_skill = derive_skill_check(
                 int(abilities[ability]),
                 proficiency_bonus=proficiency,
                 proficient=ref in skill_refs,
                 expertise=ref in expertise,
                 half_proficiency=half_proficiency,
-            )["total"]
+            )
+            skill_values[str(skill["id"])] = derived_skill["total"]
+            skill_parts[str(skill["id"])] = {
+                "ability": ability,
+                "ability_modifier": int(derived_skill["ability_modifier"]),
+                "contribution": int(derived_skill["contribution"]),
+            }
         perception = skill_values.get("perception", ability_modifier(abilities["wis"]))
         derived = character.setdefault("derived", {})
         derived.update({
@@ -1315,6 +1345,7 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
             "saving_throws": saving_throws,
         })
         proficiencies["skill_values"] = skill_values
+        proficiencies["skill_parts"] = skill_parts
         # 升级当次就要生效：Defense 这类被动 AC 加值不能等下一次换装。
         # 复用建卡与 live 协调共用的唯一公式，装备取 canonical 已装备列表。
         equipment = character.get("equipment")

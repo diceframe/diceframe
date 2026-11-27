@@ -348,15 +348,20 @@ def _plan_creation_pools(
     return records, errors
 
 
-def plan_skill_choices(
+def plan_feature_choices(
     raw_choices: Any,
     features: Dnd2024ClassFeatureResolver,
     proxy: Mapping[str, Any],
     skill_refs: Collection[str],
     *,
     level: int,
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Validate the skill selections a draft commits at character creation.
+    known_languages: Collection[str] = (),
+) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    """Validate the selections a draft commits, and return the languages gained.
+
+    两类槽共用同一份解析：技能槽（Expertise / 新增熟练）与语言槽。分开写会让
+    同一次 `selected_refs` 被解析两遍，而且"这个角色没有这个槽"的判断会在两处
+    各写一遍、迟早不一致。
 
     Only a feature the character actually owns *at this level* may hold a slot,
     so a submitted record can neither invent an owner nor pre-fill a future
@@ -394,13 +399,30 @@ def plan_skill_choices(
     slots = [
         definition for definition in features.features_for(dict(proxy))
         if definition.choice is not None
-        and definition.choice.kind == "skill_proficiency"
+        and not definition.choice.count_track
+        and definition.choice.kind in {
+            "skill_proficiency", "language", "feature_option",
+        }
     ]
+    # 语言槽只能选 Standard：罕见的留给 DM，秘密语言只能由特性固定授予。
+    # 空 `enabled_options` 因此不是"全集"，而是"建卡可选的那一批"。
+    language_rarity = {
+        f"language:{item['id']}": str(item.get("rarity") or "")
+        for item in features.bundle.list("language")
+    }
+    standard_languages = {
+        ref for ref, rarity in language_rarity.items() if rarity == "standard"
+    }
     known_skills = {
         str(entity.get("id")) for entity in features.bundle.list("skill")
     }
     matched: set[int] = set()
     records: list[dict[str, Any]] = []
+    languages: list[str] = []
+    existing_languages = {
+        *(str(ref) for ref in known_languages if ref),
+        *features.language_sources(dict(proxy)),
+    }
     taken: dict[str, str] = {}
     proficient = {str(ref) for ref in skill_refs}
     for definition in slots:
@@ -441,23 +463,46 @@ def plan_skill_choices(
             continue
         allowed = set(choice.enabled_options)
         slot_refs: list[str] = []
-        for ref in raw_refs:
-            if allowed and ref not in allowed:
-                errors.append(f"{ref} is not a declared option of {definition.id}")
-                continue
-            skill_id = str(ref).removeprefix("skill:")
-            if not ref.startswith("skill:") or skill_id not in known_skills:
-                errors.append(f"{ref} is not a declared skill")
-                continue
-            if choice.requires_proficiency and ref not in proficient:
-                errors.append(f"{ref} is not a skill proficiency of this character")
-                continue
-            if choice.exclude_expertise and skill_id in taken:
-                errors.append(f"{ref} already has Expertise from {taken[skill_id]}")
-                continue
-            if choice.grants == "expertise":
-                taken[skill_id] = definition.id
-            slot_refs.append(ref)
+        if choice.kind == "feature_option":
+            # 二选一（Divine Order / Primal Order）：建卡时就可能答，必须收，
+            # 否则玩家在建卡界面选了却在提交时被判"没有这个槽"。
+            for ref in raw_refs:
+                if ref not in allowed:
+                    errors.append(f"{ref} is not a declared option of {definition.id}")
+                    continue
+                slot_refs.append(ref)
+        elif choice.kind == "language":
+            for ref in raw_refs:
+                # 空清单 = 建卡可选的 Standard 全集；显式列出的按声明来。
+                admissible = allowed or standard_languages
+                if ref not in admissible:
+                    errors.append(
+                        f"{ref} is not a selectable language of {definition.id}"
+                    )
+                    continue
+                if ref in existing_languages or ref in languages:
+                    errors.append(f"{ref} is already known")
+                    continue
+                languages.append(ref)
+                slot_refs.append(ref)
+        else:
+            for ref in raw_refs:
+                if allowed and ref not in allowed:
+                    errors.append(f"{ref} is not a declared option of {definition.id}")
+                    continue
+                skill_id = str(ref).removeprefix("skill:")
+                if not ref.startswith("skill:") or skill_id not in known_skills:
+                    errors.append(f"{ref} is not a declared skill")
+                    continue
+                if choice.requires_proficiency and ref not in proficient:
+                    errors.append(f"{ref} is not a skill proficiency of this character")
+                    continue
+                if choice.exclude_expertise and skill_id in taken:
+                    errors.append(f"{ref} already has Expertise from {taken[skill_id]}")
+                    continue
+                if choice.grants == "expertise":
+                    taken[skill_id] = definition.id
+                slot_refs.append(ref)
         if len(slot_refs) != choice.count:
             continue
         records.append({
@@ -466,6 +511,8 @@ def plan_skill_choices(
             "choice_id": choice.id,
             "selected_refs": slot_refs,
             "granted_level": int(level),
+            # 调用点要区分"加倍"与"新增熟练"：只看 selected_refs 分不出来。
+            "grants": choice.grants,
         })
     for index, record in enumerate(submitted):
         if index in matched:
@@ -474,7 +521,7 @@ def plan_skill_choices(
             "feature choice references a slot this character does not have: "
             f"{record['owner']}/{record['feature_id']}/{record['choice_id']}"
         )
-    return records, errors
+    return records, languages, errors
 
 
 _ARMOR_CATEGORIES = frozenset({"light", "medium", "heavy"})
@@ -760,12 +807,13 @@ class CharacterDerivationMixin:
                 ) in pool_keys
             )
         ]
-        feature_choices, choice_errors = plan_skill_choices(
+        feature_choices, chosen_languages, choice_errors = plan_feature_choices(
             skill_submissions,
             features,
             creation_proxy,
             skill_refs,
             level=level,
+            known_languages=draft.get("language_refs") or (),
         )
         pool_records, pool_errors = _plan_creation_pools(
             self.bundle, features, creation_proxy, draft, level,
@@ -773,6 +821,20 @@ class CharacterDerivationMixin:
         if choice_errors or pool_errors:
             raise ValueError("; ".join([*choice_errors, *pool_errors]))
         feature_choices = [*feature_choices, *pool_records]
+
+        # grants == "proficiency" 的槽真的把技能加进熟练表：Bonus Proficiencies
+        # 与 Primal Knowledge 选中的技能必须计入 skill_values，否则只是记录了
+        # 一个名字，玩家拿到的加值是 0。
+        granted_skills = [
+            str(ref)
+            for record in feature_choices
+            if record.get("grants") == "proficiency"
+            for ref in record.get("selected_refs") or []
+            if str(ref).startswith("skill:")
+        ]
+        if granted_skills:
+            skill_refs = list(dict.fromkeys([*skill_refs, *granted_skills]))
+
         expertise = {
             row["skill_ref"] for row in features.expertise_skills(
                 _feature_proxy(
@@ -788,17 +850,26 @@ class CharacterDerivationMixin:
             )
         )
         skill_values: dict[str, int] = {}
+        # 分解与总量一起存：检定侧要"换一个属性重算"时必须知道多少是属性、
+        # 多少是熟练部分，不能从总量反推——反推在出现非线性项时会静默算错。
+        skill_parts: dict[str, dict[str, int]] = {}
         all_skills = self.bundle.list("skill")
         for skill in all_skills:
             ref = f"skill:{skill['id']}"
             ability_id = _ref_id(str(skill["ability_ref"]), "ability")
-            skill_values[str(skill["id"])] = derive_skill_check(
+            derived = derive_skill_check(
                 int(abilities[ability_id]),
                 proficiency_bonus=prof,
                 proficient=ref in skill_refs,
                 expertise=ref in expertise,
                 half_proficiency=half_proficiency,
-            )["total"]
+            )
+            skill_values[str(skill["id"])] = derived["total"]
+            skill_parts[str(skill["id"])] = {
+                "ability": ability_id,
+                "ability_modifier": int(derived["ability_modifier"]),
+                "contribution": int(derived["contribution"]),
+            }
 
         save_refs = list(class_entity.get("saving_throw_refs") or [])
         selected_packages = [package, *([background_package] if background_package else [])]
@@ -840,10 +911,16 @@ class CharacterDerivationMixin:
             + (prof if f"ability:{ability_id}" in save_refs else 0)
             for ability_id in ABILITY_IDS
         }
-        armor_category_refs = [
-            f"armor_category:{item}"
-            for item in class_entity.get("armor_proficiencies", [])
-        ]
+        # 职业表之外还有特性授予的训练（Divine Order: Protector 的重甲、
+        # Primal Order: Warden 的中甲）。不并进来的话，这两个选项只是把
+        # "Heavy" 写进内容，穿甲时仍然算未受训。
+        armor_category_refs = list(dict.fromkeys([
+            *[f"armor_category:{item}" for item in class_entity.get("armor_proficiencies", [])],
+            *[
+                f"armor_category:{category}"
+                for category in features.category_sources(feature_proxy, "armor_category_grants")
+            ],
+        ]))
         armor_class = derive_armor_class(
             abilities, item_refs, self.bundle,
             armor_category_refs=armor_category_refs,
@@ -883,7 +960,14 @@ class CharacterDerivationMixin:
         )
         size_options = list(species.get("size_options") or [])
         selected_size = str(draft.get("species_size") or (size_options[0] if size_options else "medium"))
-        language_refs = list(draft.get("language_refs") or [])
+        # 语言有三个来源：建卡选择、特性选择槽（Deft Explorer / Thieves' Cant）、
+        # 特性固定授予（Druidic）。三者都落到同一个 canonical 字段，并按首次
+        # 出现去重——同一门语言不会被特性与建卡重复记两次。
+        language_refs = list(dict.fromkeys([
+            *list(draft.get("language_refs") or []),
+            *chosen_languages,
+            *features.language_sources(feature_proxy),
+        ]))
         background_tool_refs = list(background.get("tool_proficiency_refs") or [])
         class_tool_refs = [
             *list(class_entity.get("tool_proficiency_refs") or []),
@@ -988,19 +1072,29 @@ class CharacterDerivationMixin:
                 "class_feature_feat_choices": class_feature_feat_choices,
                 "feat_choice_answers": feat_choice_answers,
                 "class_tool_refs": list(draft.get("class_tool_refs") or []),
-                "language_refs": language_refs,
+                # **建卡原件**，不是推导结果：这一份是三选那三个，供
+                # ``normalize_submission`` 重建；合并后的语言在
+                # ``proficiencies.language_refs``。
+                "language_refs": list(draft.get("language_refs") or []),
                 "grants_with_sources": grants_with_sources,
             },
             "abilities": abilities,
             "proficiencies": {
                 "saving_throw_refs": save_refs,
                 "armor_category_refs": armor_category_refs,
-                "weapon_category_refs": [
-                    f"weapon_category:{item}"
-                    for item in class_entity.get("weapon_proficiencies", [])
-                ],
+                "weapon_category_refs": list(dict.fromkeys([
+                    *[
+                        f"weapon_category:{item}"
+                        for item in class_entity.get("weapon_proficiencies", [])
+                    ],
+                    *[
+                        f"weapon_category:{category}"
+                        for category in features.category_sources(feature_proxy, "weapon_category_grants")
+                    ],
+                ])),
                 "skill_refs": skill_refs,
                 "skill_values": skill_values,
+                "skill_parts": skill_parts,
                 "tool_refs": tool_refs,
                 "language_refs": language_refs,
             },

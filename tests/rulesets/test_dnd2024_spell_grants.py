@@ -459,8 +459,14 @@ def test_matrix_6_land_tables_match_each_terrain(
 ) -> None:
     for level in (3, 5, 7, 9):
         canonical = _druid(runtime, level, terrain)
+        # Druidic 让 Speak with Animals 始终准备着（SRD p42），它不进土地表，
+        # 所以在期望里单独加一次，排在最前（声明顺序）。
         expected = [
-            ref for row, refs in LAND[terrain].items() if row <= level for ref in refs
+            "spell:speak_with_animals",
+            *[
+                ref for row, refs in LAND[terrain].items() if row <= level
+                for ref in refs
+            ],
         ]
         assert _grant_refs(canonical) == expected, (terrain, level)
 
@@ -570,7 +576,8 @@ def test_matrix_11_each_terrain_switch_revokes_the_previous_list(
         result = rest.complete_long_rest(deepcopy(canonical), land_terrain=terrain)
         canonical = result["character"]
         assert _grant_refs(canonical) == [
-            ref for row, refs in LAND[terrain].items() for ref in refs
+            "spell:speak_with_animals",
+            *[ref for row, refs in LAND[terrain].items() for ref in refs],
         ]
         event = next(
             row for row in result["events"] if row["type"] == "spell_grant_terrain"
@@ -596,7 +603,8 @@ def test_matrix_12_keeping_the_terrain_is_idempotent_and_missing_never_switches(
 
     unset = _druid(runtime, 5)
     missing = rest.complete_long_rest(deepcopy(unset))
-    assert _grant_refs(missing["character"]) == []
+    # 没选地形就没有土地法术，但 Druidic 的 Speak with Animals 始终在。
+    assert _grant_refs(missing["character"]) == ["spell:speak_with_animals"]
     assert [row["type"] for row in missing["events"]].count(
         "spell_grant_terrain_missing"
     ) == 1
@@ -981,7 +989,8 @@ def test_matrix_22_rebuild_and_round_trip_keep_sources_and_terrain(
         "circle_of_the_land_spells": {"terrain": "tropical"}
     }
     assert _grant_refs(advanced) == [
-        ref for row, refs in LAND["tropical"].items() for ref in refs
+        "spell:speak_with_animals",
+        *[ref for row, refs in LAND["tropical"].items() for ref in refs],
     ]
 
     block = restored["spellcasting"]["class"]
@@ -1107,7 +1116,10 @@ def test_matrix_25_the_runtime_forwards_the_long_rest_terrain(
     """
 
     sheet = _sheet(runtime, "class:druid", 3)
-    assert _grant_rows(_canonical(sheet)) == []
+    # 还没选地形，所以没有土地法术；Druidic 的 Speak with Animals 始终在。
+    assert [row["spell_ref"] for row in _grant_rows(_canonical(sheet))] == [
+        "spell:speak_with_animals"
+    ]
     assert "land_terrain" in runtime.rest_option_names
 
     result = runtime.complete_rest(None, deepcopy(sheet), "long", land_terrain="polar")
@@ -1116,7 +1128,10 @@ def test_matrix_25_the_runtime_forwards_the_long_rest_terrain(
         "circle_of_the_land_spells"
     ]["terrain"]
     assert stored == "polar"
-    assert {row["terrain"] for row in _grant_rows(rested)} == {"polar"}
+    # Druidic 的常备法术不属于任何地形，它的 terrain 是空的。
+    assert {
+        row["terrain"] for row in _grant_rows(rested) if row["terrain"]
+    } == {"polar"}
     assert [event["type"] for event in result["events"]].count(
         "spell_grant_terrain"
     ) == 1

@@ -678,7 +678,7 @@ def test_rogue_sneak_attack_declaration_loads_as_a_passive_feature() -> None:
     character = _rogue(1)
 
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "expertise", "sneak_attack", "weapon_mastery",
+        "thieves_cant", "expertise", "sneak_attack", "weapon_mastery",
     ]
     feature = resolver.features_for(character)[0]
     assert feature.capabilities == ()
@@ -710,7 +710,7 @@ def test_rogue_uncanny_dodge_declares_no_capability_and_keeps_parameters() -> No
     character = _rogue(5)
 
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "expertise", "sneak_attack", "steady_aim", "cunning_action", "fast_hands",
+        "thieves_cant", "expertise", "sneak_attack", "steady_aim", "cunning_action", "fast_hands",
         "second_story_work", "uncanny_dodge", "cunning_strike", "weapon_mastery",
     ]
     assert resolver.declared_capability(character, "uncanny_dodge") is None
@@ -723,7 +723,7 @@ def test_uncanny_dodge_is_not_owned_below_level_five() -> None:
 
     # S0-F10A 把 Steady Aim 兑现成三级特性，清单随之变化。
     assert [feature.id for feature in resolver.features_for(_rogue(4))] == [
-        "expertise", "sneak_attack", "steady_aim", "cunning_action", "fast_hands",
+        "thieves_cant", "expertise", "sneak_attack", "steady_aim", "cunning_action", "fast_hands",
         "second_story_work", "weapon_mastery",
     ]
     assert resolver.declared_capability(_rogue(4), "uncanny_dodge") is None

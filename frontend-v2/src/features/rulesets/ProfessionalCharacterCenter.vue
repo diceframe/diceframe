@@ -760,6 +760,13 @@ async function completeRest(): Promise<void> {
       </dl>
       <h3>{{ text('熟练项', 'Proficiencies') }}</h3>
       <div class="tag-list"><span v-for="skill in ((canonical.proficiencies as JsonObject)?.skill_refs as string[]) || []" :key="skill">{{ refName(skill) }}</span></div>
+      <h3>{{ text('语言', 'Languages') }}</h3>
+      <!-- 语言不参与任何判定，它是给玩家与 GM 的权威参考：这个角色懂什么语言、
+           怪物说的是什么语言。所以它只出现在角色卡这一处，不进战斗 actor 视图。 -->
+      <div v-if="((canonical.proficiencies as JsonObject)?.language_refs as string[])?.length" class="tag-list">
+        <span v-for="language in ((canonical.proficiencies as JsonObject)?.language_refs as string[])" :key="language">{{ refName(language) }}</span>
+      </div>
+      <p v-else class="locked-note">{{ text('尚未记录语言。', 'No languages recorded yet.') }}</p>
       <h3>{{ text('规则来源', 'Rules source') }}</h3>
       <code>{{ (canonical.rule_binding as JsonObject)?.content_version || '—' }}</code>
       </div>

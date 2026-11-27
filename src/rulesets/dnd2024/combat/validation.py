@@ -759,7 +759,14 @@ def _validate_statblock_extras(enemy: dict[str, Any], label: str) -> None:
             raise CombatIntentError(f"{label} languages must be a list")
         seen: set[str] = set()
         for item in languages:
-            if not isinstance(item, str) or not item.strip() or len(item) > 40:
+            # 语言是内容引用（`language:common`），不是显示名：显示名走 locale，
+            # 两边用同一个 id 才能和玩家的 language_refs 对上。
+            if (
+                not isinstance(item, str)
+                or not item.startswith("language:")
+                or not item[len("language:"):].strip()
+                or len(item) > 60
+            ):
                 raise CombatIntentError(f"{label} language entry is invalid")
             if item in seen:
                 raise CombatIntentError(f"{label} language entry is duplicated")

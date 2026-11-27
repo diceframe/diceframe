@@ -20,6 +20,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from src.rulesets.bundle import LoadedRulesetBundle
+from src.rulesets.dnd2024.character.primitives import ABILITY_IDS
 
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
@@ -47,13 +48,26 @@ EQUIPMENT_REQUIREMENT_KEYS = frozenset(
 # "在已有技能熟练里再选几项"的选择：它的候选项来自技能目录而不是专长目录，
 # 且可以一次选多项（Expertise 一次两项）——用 ``advancement_feat`` 表达不了。
 FEATURE_CHOICE_KINDS = frozenset({
-    "advancement_feat", "skill_proficiency", "feature_option",
+    "advancement_feat", "skill_proficiency", "feature_option", "language",
 })
 # 技能选择最终"授予什么"的闭集。``expertise`` 是子职侧的加值翻倍，
 # ``proficiency`` 是专长侧（Skilled）的"直接获得熟练"——两者都写在这张表里，
 # 因为玩家看到的是同一个"选技能"动作，只有结果不同。未知值必须加载期拒绝，
 # 否则选中一个技能却在运行时什么都不发生。
+#: 选中的技能"得到什么"：Expertise 是加倍，proficiency 是新增熟练本身
+#: （Primal Knowledge / Bonus Proficiencies 那种"再选一个技能"）。
 SKILL_CHOICE_GRANTS = frozenset({"expertise", "proficiency"})
+
+#: 修正能作用的掷骰。**只有 skill_check**：这是本片唯一有消费者的面。
+#: 攻击、伤害、裸属性检定与豁免都还没有声明用到它们，而一个没有消费者的
+#: 枚举值等于"内容能写、引擎静默丢弃"的假契约——等真有特性要用时再加。
+CHECK_MODIFIER_SURFACES = frozenset({"skill_check"})
+_CHECK_MODIFIER_KEYS = frozenset({
+    "surface", "skills", "abilities", "when_condition",
+    "replace_ability", "add",
+})
+_CHECK_ADD_KEYS = frozenset({"source", "ability", "value", "minimum", "maximum", "multiplier"})
+_CHECK_ADD_SOURCES = frozenset({"constant", "ability_modifier", "proficiency_bonus"})
 # 特性参数的射程键统一以英尺计。``range_ft`` 是"该特性对目标生效的射程"，
 # 与前缀式 ``aura_range_ft``/``defeat_share_range_ft`` 并列：后者是"一个特性有
 # 多条射程"时才需要的消歧前缀，单条射程用裸键即可。
@@ -356,6 +370,107 @@ INVOCATION_EFFECT_KEYS = (
 INVOCATION_BINDINGS = frozenset({"known_cantrip", "origin_feat"})
 
 
+def _parse_check_modifiers(feature_id: str, raw: Any) -> tuple[dict[str, Any], ...]:
+    """Parse the ``check_modifiers`` array, failing closed on every shape.
+
+    修正声明放在特性顶层而不是 ``parameters``：后者只接受标量，嵌套结构放
+    不进去，而放宽那条约束会让所有参数失去形状保证。
+    """
+
+    if raw is None:
+        return ()
+    if not isinstance(raw, list) or not raw:
+        raise ClassFeatureError(f"{feature_id}.check_modifiers must be a non-empty array")
+    parsed: list[dict[str, Any]] = []
+    for index, entry in enumerate(raw):
+        label = f"{feature_id}.check_modifiers[{index}]"
+        if not isinstance(entry, dict):
+            raise ClassFeatureError(f"{label} must be an object")
+        unknown = sorted(set(entry) - _CHECK_MODIFIER_KEYS)
+        if unknown:
+            raise ClassFeatureError(f"{label} has an unknown field: {unknown[0]}")
+        surface = str(entry.get("surface") or "")
+        if surface not in CHECK_MODIFIER_SURFACES:
+            raise ClassFeatureError(
+                f"{label}.surface must be one of {sorted(CHECK_MODIFIER_SURFACES)}"
+            )
+        skills = entry.get("skills") or []
+        abilities = entry.get("abilities") or []
+        if not isinstance(skills, list) or not all(isinstance(r, str) for r in skills):
+            raise ClassFeatureError(f"{label}.skills must be an array of refs")
+        if not isinstance(abilities, list) or not all(isinstance(a, str) for a in abilities):
+            raise ClassFeatureError(f"{label}.abilities must be an array of abilities")
+        if not skills and not abilities:
+            # 没有作用域的修正会加到每一次检定上，规则里没有这样的特性。
+            raise ClassFeatureError(f"{label} must scope itself to skills or abilities")
+        for ref in skills:
+            _require_id(str(ref).removeprefix("skill:"), f"{label}.skills")
+            if not str(ref).startswith("skill:"):
+                raise ClassFeatureError(f"{label}.skills must hold skill: refs")
+        for ability in abilities:
+            if ability not in ABILITY_IDS:
+                raise ClassFeatureError(f"{label} names an unknown ability: {ability}")
+        when = entry.get("when_condition")
+        if when is not None and (not isinstance(when, str) or not when):
+            raise ClassFeatureError(f"{label}.when_condition must be a condition id")
+        replace = entry.get("replace_ability")
+        if replace is not None and replace not in ABILITY_IDS:
+            raise ClassFeatureError(f"{label}.replace_ability is not an ability")
+        add = entry.get("add")
+        if add is None and replace is None:
+            raise ClassFeatureError(f"{label} must declare replace_ability or add")
+        if add is not None:
+            add = _parse_check_add(add, f"{label}.add")
+        parsed.append({
+            "surface": surface,
+            "skills": list(skills),
+            "abilities": list(abilities),
+            "when_condition": when,
+            "replace_ability": replace,
+            "add": add,
+        })
+    return tuple(parsed)
+
+
+def _parse_check_add(add: Any, label: str) -> dict[str, Any]:
+    if not isinstance(add, dict):
+        raise ClassFeatureError(f"{label} must be an object")
+    unknown = sorted(set(add) - _CHECK_ADD_KEYS)
+    if unknown:
+        raise ClassFeatureError(f"{label} has an unknown field: {unknown[0]}")
+    source = str(add.get("source") or "")
+    if source not in _CHECK_ADD_SOURCES:
+        raise ClassFeatureError(f"{label}.source must be one of {sorted(_CHECK_ADD_SOURCES)}")
+    for key in ("minimum", "maximum"):
+        value = add.get(key)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+            raise ClassFeatureError(f"{label}.{key} must be an integer")
+    low, high = add.get("minimum"), add.get("maximum")
+    if isinstance(low, int) and isinstance(high, int) and low > high:
+        raise ClassFeatureError(f"{label}.minimum must not exceed maximum")
+    result: dict[str, Any] = {"source": source}
+    if low is not None:
+        result["minimum"] = low
+    if high is not None:
+        result["maximum"] = high
+    if source == "constant":
+        value = add.get("value")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ClassFeatureError(f"{label}.value must be an integer")
+        result["value"] = value
+    elif source == "ability_modifier":
+        ability = add.get("ability")
+        if ability not in ABILITY_IDS:
+            raise ClassFeatureError(f"{label}.ability is not an ability")
+        result["ability"] = ability
+    else:
+        multiplier = add.get("multiplier", 1)
+        if multiplier not in (1, 2):
+            raise ClassFeatureError(f"{label}.multiplier must be 1 or 2")
+        result["multiplier"] = multiplier
+    return result
+
+
 def _parse_feature_choice(
     feature_id: str,
     raw: Any,
@@ -404,8 +519,8 @@ def _parse_feature_choice(
                 f"{feature_id}.choice.count must be 1 for a feature option choice"
             )
     raw_refs = raw.get("enabled_options")
-    if raw_refs is None and kind == "skill_proficiency":
-        # 空清单 = 技能目录全集；Expertise 只按"已有熟练"筛选，不点名具体技能。
+    if raw_refs is None and kind in {"skill_proficiency", "language"}:
+        # 空清单 = 该目录的可选全集：技能按"已有熟练"再筛，语言按 rarity 再筛。
         raw_refs = []
     if not isinstance(raw_refs, list):
         raise ClassFeatureError(
@@ -415,9 +530,12 @@ def _parse_feature_choice(
         raise ClassFeatureError(
             f"{feature_id}.choice.enabled_options must be a non-empty array"
         )
+    # 语言选择可以留空：空清单 = 建卡可选的 Standard 语言全集，与建卡器
+    # 用的是同一批（罕见的留给 DM，秘密的只能由特性固定授予）。
     prefix = {
         "advancement_feat": "feat:",
         "feature_option": "feature:",
+        "language": "language:",
     }.get(kind, "skill:")
     # ``skill_or_tool`` 的候选是"技能或工具"的并集，一个前缀表达不了：Skilled
     # 的三个名额可以在两类里任意分配。子职侧只用 ``skill``，因此这条分支不
@@ -453,9 +571,9 @@ def _parse_feature_choice(
         if not isinstance(value, bool):
             raise ClassFeatureError(f"{feature_id}.choice.{key} must be a boolean")
         flags[key] = value
-    if kind in {"advancement_feat", "feature_option"}:
-        # 成长专长与特性选项都不使用技能选择的两个约束；写在它们上面会被
-        # 静默忽略，因此宁可加载期拒绝。
+    if kind in {"advancement_feat", "feature_option", "language"}:
+        # 成长专长、特性选项与语言都不使用技能选择的两个约束；写在它们上面
+        # 会被静默忽略，因此宁可加载期拒绝。
         for key in ("requires_proficiency", "exclude_expertise"):
             if key in raw and raw[key] is not True:
                 raise ClassFeatureError(
@@ -473,6 +591,10 @@ def _parse_feature_choice(
     if kind == "feature_option" and category != "feature":
         raise ClassFeatureError(
             f"{feature_id}.choice.category must be 'feature' for a feature option choice"
+        )
+    if kind == "language" and category != "language":
+        raise ClassFeatureError(
+            f"{feature_id}.choice.category must be 'language' for a language choice"
         )
     grants = str(raw.get("grants") or "")
     if kind == "skill_proficiency":
@@ -679,6 +801,10 @@ def _validate_feature_choices(
         str(entity.get("id")) for entity in bundle.list("skill")
         if isinstance(entity, Mapping)
     }
+    language_ids = {
+        str(entity.get("id")) for entity in bundle.list("language")
+        if isinstance(entity, Mapping)
+    }
     tool_ids = {
         str(entity.get("id")) for entity in bundle.list("tool")
         if isinstance(entity, Mapping)
@@ -702,6 +828,21 @@ def _validate_feature_choices(
                         f"{definition.id}.choice references an undeclared {prefix}: {ref}"
                     )
             pool = len(choice.enabled_options) or sum(len(ids) for ids in pools.values())
+            if choice.count > pool:
+                raise ClassFeatureError(
+                    f"{definition.id}.choice.count exceeds the {choice.category} pool"
+                )
+            continue
+        if choice.kind == "language":
+            for ref in choice.enabled_options:
+                if ref[len("language:"):] not in language_ids:
+                    raise ClassFeatureError(
+                        f"{definition.id}.choice references an undeclared language: {ref}"
+                    )
+            pool = (
+                len(choice.enabled_options) if choice.enabled_options
+                else len(language_ids)
+            )
             if choice.count > pool:
                 raise ClassFeatureError(
                     f"{definition.id}.choice.count exceeds the {choice.category} pool"
@@ -755,6 +896,8 @@ class ClassFeatureDefinition:
     owner: str
     equipment_requirement: EquipmentRequirement | None = None
     choice: FeatureChoice | None = None
+    #: 检定修正声明，与 `choice` 并列（`parameters` 只收标量）。
+    check_modifiers: tuple[dict[str, Any], ...] = ()
 
     @property
     def key(self) -> tuple[str, str]:
@@ -1040,7 +1183,10 @@ class Dnd2024ClassFeatureCatalog:
             equipment_requirement=_parse_equipment_requirement(
                 feature_id, raw.get("equipment_requirement"),
             ),
-            choice=_parse_feature_choice(feature_id, raw.get("choice")),
+            choice=_parse_feature_choice(feature_id, raw.get("choice"), allow_proficiency_grant=True),
+            check_modifiers=_parse_check_modifiers(
+                feature_id, raw.get("check_modifiers"),
+            ),
         )
 
     @classmethod

@@ -81,7 +81,8 @@
       "source_ref": "srd-5.2.1:p36:cleric-features",
       "slot_profile": "full",
       "features_by_level": [
-        ["spellcasting", "divine_order"], ["channel_divinity"], ["cleric_subclass"],
+        ["spellcasting", "divine_order", "divine_order_protector", "divine_order_thaumaturge"],
+        ["channel_divinity"], ["cleric_subclass"],
         ["ability_score_improvement"], ["sear_undead"], ["subclass_feature"],
         ["blessed_strikes"], ["ability_score_improvement"], [], ["divine_intervention"], [],
         ["ability_score_improvement"], [], ["improved_blessed_strikes"], [],
@@ -98,7 +99,7 @@
       "source_ref": "srd-5.2.1:p41:druid-features",
       "slot_profile": "full",
       "features_by_level": [
-        ["spellcasting", "druidic", "primal_order"], ["wild_shape", "wild_companion"],
+        ["spellcasting", "druidic", "primal_order", "primal_order_magician", "primal_order_warden"], ["wild_shape", "wild_companion"],
         ["druid_subclass"], ["ability_score_improvement"], ["wild_resurgence"],
         ["subclass_feature"], ["elemental_fury"], ["ability_score_improvement"], [],
         ["subclass_feature"], [], ["ability_score_improvement"], [], ["subclass_feature"],
@@ -171,7 +172,8 @@
       "source_ref": "srd-5.2.1:p57:ranger-features",
       "slot_profile": "half",
       "features_by_level": [
-        ["spellcasting", "favored_enemy", "weapon_mastery"], ["deft_explorer", "fighting_style"],
+        ["spellcasting", "favored_enemy", "weapon_mastery"],
+        ["deft_explorer", "deft_explorer_languages", "fighting_style"],
         ["ranger_subclass"], ["ability_score_improvement"], ["extra_attack"], ["roving"],
         ["subclass_feature"], ["ability_score_improvement"], ["expertise"], ["tireless"],
         ["subclass_feature"], ["ability_score_improvement"], ["relentless_hunter"],

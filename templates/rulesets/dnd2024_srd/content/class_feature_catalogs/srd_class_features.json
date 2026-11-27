@@ -1222,6 +1222,44 @@
       "source_ref": "srd-5.2.1:p28:barbarian-features",
       "features": [
         {
+          "id": "primal_knowledge",
+          "owner": "class:barbarian",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p29:primal-knowledge",
+          "summary": "You gain proficiency in another skill of your choice from the skill list available to Barbarians at level 1. In addition, while your Rage is active, whenever you make an ability check using Acrobatics, Intimidation, Perception, Stealth, or Survival, you can make it as a Strength check even if it normally uses a different ability.",
+          "check_modifiers": [
+            {
+              "surface": "skill_check",
+              "skills": [
+                "skill:acrobatics",
+                "skill:intimidation",
+                "skill:perception",
+                "skill:stealth",
+                "skill:survival"
+              ],
+              "when_condition": "rage",
+              "replace_ability": "str"
+            }
+          ],
+          "choice": {
+            "id": "primal_knowledge_skill",
+            "kind": "skill_proficiency",
+            "category": "skill",
+            "grants": "proficiency",
+            "count": 1,
+            "requires_proficiency": false,
+            "exclude_expertise": true,
+            "enabled_options": [
+              "skill:animal_handling",
+              "skill:athletics",
+              "skill:intimidation",
+              "skill:nature",
+              "skill:perception",
+              "skill:survival"
+            ]
+          }
+        },
+        {
           "id": "unarmored_defense",
           "minimum_level": 1,
           "source_ref": "srd-5.2.1:p29:unarmored-defense",
@@ -1512,6 +1550,22 @@
       "source_ref": "srd-5.2.1:p61:rogue-features",
       "features": [
         {
+          "id": "thieves_cant",
+          "owner": "class:rogue",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p62:thieves-cant",
+          "summary": "You know Thieves' Cant and one other language of your choice, which you choose from the language tables in Character Creation.",
+          "parameters": {
+            "language_grants": ["language:thieves_cant"]
+          },
+          "choice": {
+            "id": "thieves_cant_language",
+            "kind": "language",
+            "category": "language",
+            "count": 1
+          }
+        },
+        {
           "id": "expertise",
           "minimum_level": 1,
           "source_ref": "srd-5.2.1:p62:rogue-expertise",
@@ -1752,6 +1806,35 @@
     "ranger": {
       "source_ref": "srd-5.2.1:p59:ranger-features",
       "features": [
+        {
+          "id": "deft_explorer",
+          "owner": "class:ranger",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p59:deft-explorer",
+          "summary": "Expertise. Choose one of your skill proficiencies with which you lack Expertise. You gain Expertise in that skill.",
+          "choice": {
+            "id": "deft_explorer_skill",
+            "kind": "skill_proficiency",
+            "category": "skill",
+            "grants": "expertise",
+            "count": 1,
+            "requires_proficiency": true,
+            "exclude_expertise": true
+          }
+        },
+        {
+          "id": "deft_explorer_languages",
+          "owner": "class:ranger",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p59:deft-explorer",
+          "summary": "Languages. You know two languages of your choice from the language tables in Character Creation. (The other half of Deft Explorer is declared separately because a feature carries one choice slot.)",
+          "choice": {
+            "id": "deft_explorer_language",
+            "kind": "language",
+            "category": "language",
+            "count": 2
+          }
+        },
         {
           "id": "favored_enemy",
           "minimum_level": 1,
@@ -2089,6 +2172,22 @@
             "grants": "expertise",
             "count": 2,
             "requires_proficiency": true,
+            "exclude_expertise": true
+          }
+        },
+        {
+          "id": "bonus_proficiencies",
+          "owner": "subclass:college_of_lore",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p35:bonus-proficiencies",
+          "summary": "You gain proficiency with three skills of your choice.",
+          "choice": {
+            "id": "bonus_proficiency_skills",
+            "kind": "skill_proficiency",
+            "category": "skill",
+            "grants": "proficiency",
+            "count": 3,
+            "requires_proficiency": false,
             "exclude_expertise": true
           }
         },
@@ -2739,6 +2838,58 @@
       "source_ref": "srd-5.2.1:p40:cleric-features",
       "features": [
         {
+          "id": "divine_order",
+          "owner": "class:cleric",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p37:divine-order",
+          "summary": "Choose one of the following roles. Protector: proficiency with Martial weapons and training with Heavy armor. Thaumaturge: you know one extra cantrip from the Cleric spell list, and a bonus to your Intelligence (Arcana or Religion) checks equal to your Wisdom modifier (minimum of +1).",
+          "choice": {
+            "id": "divine_order_option",
+            "kind": "feature_option",
+            "category": "feature",
+            "count": 1,
+            "enabled_options": [
+              "feature:divine_order_protector",
+              "feature:divine_order_thaumaturge"
+            ]
+          }
+        },
+        {
+          "id": "divine_order_protector",
+          "owner": "class:cleric",
+          "minimum_level": 1,
+          "option_of": "divine_order",
+          "source_ref": "srd-5.2.1:p37:divine-order",
+          "summary": "Protector. You gain proficiency with Martial weapons and training with Heavy armor.",
+          "parameters": {
+            "armor_category_grants": ["heavy"],
+            "weapon_category_grants": ["martial"]
+          }
+        },
+        {
+          "id": "divine_order_thaumaturge",
+          "owner": "class:cleric",
+          "minimum_level": 1,
+          "option_of": "divine_order",
+          "source_ref": "srd-5.2.1:p37:divine-order",
+          "summary": "Thaumaturge. You know one extra cantrip from the Cleric spell list. In addition, you gain a bonus to your Intelligence (Arcana or Religion) checks equal to your Wisdom modifier (minimum of +1).",
+          "parameters": {
+            "cantrip_count_bonus": 1
+          },
+          "check_modifiers": [
+            {
+              "surface": "skill_check",
+              "skills": ["skill:arcana", "skill:religion"],
+              "abilities": ["int"],
+              "add": {
+                "source": "ability_modifier",
+                "ability": "wis",
+                "minimum": 1
+              }
+            }
+          ]
+        },
+        {
           "id": "channel_divinity",
           "minimum_level": 2,
           "resource_id": "channel_divinity",
@@ -2983,6 +3134,69 @@
     "druid": {
       "source_ref": "srd-5.2.1:p46:druid-features",
       "features": [
+        {
+          "id": "druidic",
+          "owner": "class:druid",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p42:druidic",
+          "summary": "You know Druidic, the secret language of Druids. You always have the Speak with Animals spell prepared. You can use Druidic to leave hidden messages: creatures that know Druidic automatically spot such a message, and others can tell a message is present with a successful DC 15 Intelligence (Investigation) check but cannot decipher it without magic.",
+          "parameters": {
+            "language_grants": ["language:druidic"],
+            "always_prepared": ["1:spell:speak_with_animals"]
+          }
+        },
+        {
+          "id": "primal_order",
+          "owner": "class:druid",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p42:primal-order",
+          "summary": "Choose one of the following roles. Magician: you know one extra cantrip from the Druid spell list, and a bonus to your Intelligence (Arcana or Nature) checks equal to your Wisdom modifier (minimum of +1). Warden: proficiency with Martial weapons and training with Medium armor.",
+          "choice": {
+            "id": "primal_order_option",
+            "kind": "feature_option",
+            "category": "feature",
+            "count": 1,
+            "enabled_options": [
+              "feature:primal_order_magician",
+              "feature:primal_order_warden"
+            ]
+          }
+        },
+        {
+          "id": "primal_order_magician",
+          "owner": "class:druid",
+          "minimum_level": 1,
+          "option_of": "primal_order",
+          "source_ref": "srd-5.2.1:p42:primal-order",
+          "summary": "Magician. You know one extra cantrip from the Druid spell list. In addition, you gain a bonus to your Intelligence (Arcana or Nature) checks equal to your Wisdom modifier (minimum of +1).",
+          "parameters": {
+            "cantrip_count_bonus": 1
+          },
+          "check_modifiers": [
+            {
+              "surface": "skill_check",
+              "skills": ["skill:arcana", "skill:nature"],
+              "abilities": ["int"],
+              "add": {
+                "source": "ability_modifier",
+                "ability": "wis",
+                "minimum": 1
+              }
+            }
+          ]
+        },
+        {
+          "id": "primal_order_warden",
+          "owner": "class:druid",
+          "minimum_level": 1,
+          "option_of": "primal_order",
+          "source_ref": "srd-5.2.1:p42:primal-order",
+          "summary": "Warden. You gain proficiency with Martial weapons and training with Medium armor.",
+          "parameters": {
+            "armor_category_grants": ["medium"],
+            "weapon_category_grants": ["martial"]
+          }
+        },
         {
           "id": "natural_recovery",
           "owner": "subclass:circle_of_the_land",
