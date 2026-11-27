@@ -15,7 +15,7 @@ from copy import deepcopy
 from typing import Any, Mapping
 
 from src.rulesets.bundle import LoadedRulesetBundle
-from .grants import check_modifiers, fixed_sources
+from .grants import check_modifiers, fixed_sources, saving_throw_sources
 from src.rulesets.dnd2024.character.primitives import ABILITY_IDS
 from src.rulesets.dnd2024.progression.catalog import (
     Dnd2024ProgressionCatalog,
@@ -480,76 +480,24 @@ class Dnd2024ClassFeatureResolver:
             for definition in self.features_for(character)
         )
 
-    def owns_definition(
-        self, character: Mapping[str, Any] | None, definition: Any,
-    ) -> bool:
-        """Whether a feature is in force, not merely owned by level."""
-
+    def owns_definition(self, character: Mapping[str, Any] | None, definition: Any) -> bool:
         parent = definition.option_of
-        if not parent:
-            return True
-        chosen = self.feature_option_choice(character, parent, owner=definition.owner)
-        return chosen == definition.id
+        return True if not parent else self.feature_option_choice(character, parent, owner=definition.owner) == definition.id
 
-    def language_sources(
-        self, character: Mapping[str, Any] | None,
-    ) -> dict[str, str]:
-        """``{language_ref: feature_id}`` for every feature-granted language."""
+    def _owned_definitions(self, character: Mapping[str, Any] | None) -> list[Any]:
+        return [d for d in self.features_for(character) if self.owns_definition(character, d)]
 
-        return fixed_sources(
-            (
-                definition for definition in self.features_for(character)
-                if self.owns_definition(character, definition)
-            ),
-            "language_grants",
-        )
+    def language_sources(self, character: Mapping[str, Any] | None) -> dict[str, str]:
+        return fixed_sources(self._owned_definitions(character), "language_grants")
 
-    def category_sources(
-        self, character: Mapping[str, Any] | None, key: str,
-    ) -> dict[str, str]:
-        """``{category: feature_id}`` for feature-granted armor/weapon training."""
+    def category_sources(self, character: Mapping[str, Any] | None, key: str) -> dict[str, str]:
+        return fixed_sources(self._owned_definitions(character), key)
 
-        return fixed_sources(
-            (
-                definition for definition in self.features_for(character)
-                if self.owns_definition(character, definition)
-            ),
-            key,
-        )
+    def check_modifiers(self, character: Mapping[str, Any] | None, surface: str) -> list[dict[str, Any]]:
+        return check_modifiers(self._owned_definitions(character), surface)
 
-    def check_modifiers(
-        self, character: Mapping[str, Any] | None, surface: str,
-    ) -> list[dict[str, Any]]:
-        """Declared check modifiers for one surface."""
-
-        return check_modifiers(
-            (
-                definition for definition in self.features_for(character)
-                if self.owns_definition(character, definition)
-            ),
-            surface,
-        )
-
-    def saving_throw_proficiency_sources(
-        self, character: Mapping[str, Any] | None,
-    ) -> dict[str, str]:
-        """``{ability: feature_id}`` for every feature-granted saving throw.
-
-        The source travels with the grant because the ref set cannot say who
-        put an ``ability:wis`` there: the class table and a feature look
-        identical once merged, and an audit that cannot tell them apart cannot
-        explain the bonus either.
-        """
-
-        sources: dict[str, str] = {}
-        for definition in self.features_for(character):
-            declared = definition.parameters.get("saving_throw_proficiencies")
-            if not isinstance(declared, list):
-                continue
-            for ability in declared:
-                if isinstance(ability, str) and ability and ability not in sources:
-                    sources[ability] = definition.id
-        return sources
+    def saving_throw_proficiency_sources(self, character: Mapping[str, Any] | None) -> dict[str, str]:
+        return saving_throw_sources(self.features_for(character))
 
     def ability_bonuses(
         self, character: Mapping[str, Any] | None,

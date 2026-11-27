@@ -68,3 +68,18 @@ def in_force(
     if not parent:
         return True
     return chosen_option.get(parent, "") == definition.id
+
+
+def saving_throw_sources(definitions: Iterable[Any]) -> dict[str, str]:
+    """``{ability_id: feature_id}`` for feature-granted specific saving throw proficiencies."""
+
+    sources: dict[str, str] = {}
+    for definition in definitions:
+        raw = definition.parameters.get("saving_throw_proficiencies")
+        if not isinstance(raw, list):
+            continue
+        for ability in raw:
+            key = str(ability or "").strip().lower()
+            if key and key not in sources:
+                sources[key] = definition.id
+    return sources
