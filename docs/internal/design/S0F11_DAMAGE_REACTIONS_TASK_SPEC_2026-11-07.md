@@ -238,7 +238,17 @@ Deflect Energy 不是独立实现，它是 `deflect_attacks` 的**类型门控�
   一条规则只在攻击路径上成立。
 - **`public_pending_decision` 是白名单，`redirect` 不在上面**：真实玩家会收到一个只有两个选项、却看不到任何目标的窗口。它只对 GM 视角（原样返回）不可见，所以用 GM 视角跑用例永远发现不了。
 
-### 12.4 用例
+### 12.4 门禁
+
+| 项 | 结果 |
+|---|---|
+| `tests/rulesets` 全量 | **3136 passed / 0 failed** |
+| `tests/architecture` | 165 passed（耦合基线 +1 条，理由写在条目旁） |
+| `ruff check src/ tests/` | 通过 |
+| `mypy` | 125 files, no issues |
+| PR | #881 |
+
+### 12.5 用例
 
 `tests/rulesets/test_dnd2024_damage_reactions.py`（14 条）：等级授予（3 级有 / 2 级无）、B/P/S 门控与 13 级扩展、纯 Fire 在 12 级被拒、无 Reaction 不提供、减伤公式（骰值 + Dex + Monk 级）、减到 0 不下血也不治疗、部分减伤只落差额、减到 0 且 Focus 够时开重定向、重定向扣 1 Focus 并让目标掷 Dex 豁免、豁免失败吃 2 × 武艺骰 + Dex、豁免成功零伤害、Focus 为 0 时不开窗口、放弃重定向不扣 Focus（且不补打伤害）、玩家视角能看到重定向的目标与 DC。
 
