@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from src.rules.rule_system import RuleSystem
 
+_DEFAULT_HP_LABEL = "生命"
+
 __all__ = [
     "migrate_legacy_character_sheet",
     "normalize_character_sheet",
@@ -73,7 +75,7 @@ def migrate_legacy_character_sheet(
 
     resources = character_sheet.setdefault("resources", {})
     hp = resources.setdefault("hp", {})
-    hp.setdefault("label", "生命")
+    hp.setdefault("label", _DEFAULT_HP_LABEL)
     hp.setdefault("current", int(character_sheet.get("hp", 0) or 0))
     hp.setdefault("max", int(character_sheet.get("max_hp", hp.get("current", 0)) or 0))
     hp.setdefault("min", 0)
@@ -184,7 +186,7 @@ def repair_ruleset_health_display(character_sheet: dict[str, Any]) -> dict[str, 
     if not isinstance(display_hp, dict):
         display_hp = {}
         resources["hp"] = display_hp
-    display_hp.setdefault("label", "生命")
+    display_hp.setdefault("label", _DEFAULT_HP_LABEL)
     display_hp.setdefault("min", 0)
     display_hp["current"] = hp
     display_hp["max"] = max_hp
