@@ -145,24 +145,30 @@ git diff --check
 
 原文写于 2026-11-07，基座是 `integration/dnd2024-srd@35653f81`。本节记录开工前的重新核对、范围裁剪与代码形状决定；**与正文冲突时以本节为准**，正文其余部分仍是契约。
 
-### 10.1 范围裁剪：语言部分整体跳出本片
+### 10.1 语言：留在本片，它是四层而不是一件
 
-原 §4.2.4 / §4.2.5 / §4.4.1 / §4.4.3 的语言与秘密信息部分**不在本片实现**，登记为 **GAP-51**。受影响的验收项：
+**推翻初稿的裁剪决定。** 初稿曾把语言整体移出、登记为"缺口"，理由是它要动 `FeatureChoice`。那不是缺口——没人规定不能动，只是要按层做。语言回到本片范围内。
 
-| 原编号 | 处理 |
+核实到的现状（2026-11-27）：
+
+| 层 | 现状 |
 |---|---|
-| §6.9「Deft Explorer …另选两个合法不同语言」 | 只保留 Expertise 半 |
-| §6.10「Thieves' Cant 固定秘密语言+另一个语言」 | 整体移出 |
-| §6.12「Druidic 固定语言」 | Speak with Animals 常备保留，语言移出 |
-| §6.13「Druidic 阅读者自动发现/解读」 | 整体移出（与 GAP-51 同一条） |
+| 内容 | 只有 **10 条标准语言**（common / common_sign_language / draconic / dwarvish / elvish / giant / gnomish / goblin / halfling / orc），**缺 7 条罕见语言与 2 条秘密语言** |
+| `rarity` | 每条都写了 `rarity: "standard"`，但**代码从不读它**（`grep rarity` 在 `src/` 零命中）；`validation.py:249` 把**全部**语言条目当 Standard（`standard_refs` 不看 rarity） |
+| 玩家侧 | canonical 存了 `proficiencies.language_refs`（`derivation.py:872`，与技能/工具并列），但 `_player_view` 不投影、角色卡不显示、无任何消费者 |
+| 怪物侧 | `languages` 是**自由字符串**（`["Common", "Goblin"]`），`validation.py:758` 只校验"非空字符串、不重复、≤20 条、≤40 字"——**不校验它是不是已知语言**；与玩家的 `language:common` 无共同标识符，也不随 locale 翻译 |
+| GM 侧 | 非战斗时拿不到 stat block（GAP-52，本片不做） |
 
-裁剪理由：语言在引擎里**不参与任何机械化判定**，而且是条**断头的链路**——建卡能选（`validation.py:244-256` 强制 3 个、必须含 `language:common`，前端建卡界面有 3 个槽），canonical 也存了（`derivation.py:872` 写进 `proficiencies.language_refs`），然后**没有任何消费者**：不判定、`_player_view` 不投影、角色卡不显示、GM/GMAgent 的 actor 视图里没有玩家语言。对照敌人侧——stat block 的 `languages` 是活的（`view.py:172` 带出，forms 面板读写）。
+本片做四层，顺序有依赖——**L2 不做，L3 做完也不能互通**（一边 ref 一边字符串）：
 
-所以 GAP-51 其实是两件事：**授予通道**（`FeatureChoice` 加 `language` kind + 固定授予查询）与**投影**（actor view / 角色卡 / GM 面板）。第二件才是语言唯一的消费者；只做第一件等于给一个看不见的列表加条目。两件都留到单独一片。
+- **L1 语言表扩充 + `rarity` 生效**：补 7 条罕见语言（Abyssal / Celestial / Deep Speech / Infernal / Primordial / Sylvan / Undercommon）与 2 条秘密语言（Druidic / Thieves' Cant）；`standard_refs` 与建卡候选列表都按 `rarity == "standard"` 过滤；`rarity` 值域加装载期校验（`standard` / `rare` / `secret`）。
+- **L2 标识符统一**：46 条带语言的怪物改成 `language:xxx`；`validation.py` 的语言校验从"非空字符串"改成"必须是已知语言 ref"；显示走 locale。
+- **L3 授予通道**：`FeatureChoice` 加 `kind: "language"` / `category: "language"`；固定授予走 `language_sources(character) → {ref: feature_id}`（形状照 `saving_throw_proficiency_sources`）；两者并入 `proficiencies.language_refs` 并保留来源。
+- **L4 展示**：`ProfessionalCharacterCenter.vue:762` 已经在渲染 `proficiencies.skill_refs`，语言是兄弟字段，加一行同样的标签（`refName()` 现成）。**战斗 actor view 不加**：语言没有战斗判定，且同属熟练的 `tool_refs` 也不在 actor view 里（`_player_view` 只带 `skill_refs` / `skill_values` / `weapon_category_refs`）。
 
-而**授予通道**之所以不在本片：它要动 `FeatureChoice` 的 kind，而那是 builder / advancement / 存档重建三条路共用的选择基础设施。按"一次只动一层"的原则，把它单独留成一片比夹在本片里安全。
+**本片不做**：Druidic 的隐藏信息实体（原 §4.4.3，标 `guided`）、GM 非战斗查阅 stat block（GAP-52）、"玩家懂不懂这门外语"的判定函数——语言不导向机械化判定，GM 需要的是权威参考条目，不是结算。
 
-**本片仍然要为它留形状**：`language_refs` 保持 canonical 字段不动；固定授予走 §10.3 的"固定授予查询"形态（与豁免熟练同形），可选语言走 choice。两者都是"接上就有"的位置，不是空接口。
+原 §4.2.4（Thieves' Cant 的语言选择）、§4.2.5（Deft Explorer 的两个语言）、§4.4.1（Druidic 的固定语言 + 常备 Speak with Animals）因此**重新生效**，按上面的 L1–L4 落地；§4.4.3 保持移出。
 
 ### 10.2 语义分类：七项只是四类载体的实例
 
@@ -174,6 +180,7 @@ git diff --check
 | **B. 固定授予** | `saving_throw_proficiency_sources`（`resolver.py:460`） | Protector/Warden 的武器与护甲训练、Druidic 的常备法术 | **范式已有**，照抄一个同形查询 |
 | **C. 技能/豁免检定修正** | 半熟练（`half_proficiency_bonus`）、d20 保底（`_skill_check_floor`） | Primal Knowledge 的 Rage 换属性、两个 Order 的 Int 加值 | **需要新建**，见 §10.3 |
 | **D. 法术容量与常备** | `spells/selection.py` 的 `cantrip_count`、F4 的 spell_refs | Thaumaturge/Magician 的额外戏法 | 容量增量是唯一要加的点 |
+| **E. 语言** | `language_refs` 字段已有、语言目录已有、`saving_throw_proficiency_sources` 是同形范式 | Druidic、Thieves' Cant（固定）、Deft Explorer（两选） | 见 §10.1：四层，L1/L2 是新增的地基 |
 
 **A 的唯一决策是"选项分支放哪"**：Divine Order 的两个选项分别落在装备训练（character）、戏法容量（spells）、检定加值（combat），收不进一个模块。做法是载体共享、消费分别落在 owning module，但把"这个 option 授予什么"收进一处声明表（`{feature_id: {option_id: {...}}}`），不允许多个包各写一遍 `if option == "protector"`。
 
@@ -238,7 +245,15 @@ check_modifier:
 3. `combat/check_modes.py` 或等价的修正解析模块（新增）。
 4. `combat/resolution.py` 的 `_ability_check_events`、`_skill_check_events`、`_saving_throw_check` 三处消费点。
 
-**仍然不允许**：新增 `FeatureChoice` 的 kind（语言留给 GAP-51）、改 `reducer` 伪造静态熟练、改前端、改索引。
+追加语言相关（§10.1）：
+
+5. `templates/rulesets/dnd2024_srd/content/languages/` 新增 9 条（7 罕见 + 2 秘密）与其 en / zh-CN locale。
+6. `templates/rulesets/dnd2024_srd/content/monster_catalogs/srd_monsters.json`：46 条 `languages` 改为 ref。
+7. `character/validation.py`（rarity 过滤、语言 ref 校验）、`combat/validation.py`（怪物语言校验）、`content/catalog.py`（语言查询与 rarity）。
+8. `features/models.py` 的语言 kind、`features/resolver.py` 的 `language_sources`、`character/derivation.py` 的合并。
+9. **前端**：`frontend-v2/src/features/rulesets/ProfessionalCharacterCenter.vue` 的熟练区加语言标签（仅此一处）。
+
+**仍然不允许**：改 `reducer` 伪造静态熟练、改索引/旧 SP、把语言做成判定入口。
 
 ### 10.5 测试矩阵修订
 
@@ -251,7 +266,19 @@ check_modifier:
 20. 同一技能同时命中"替换"与"加值"两条修正时，顺序为"先替换属性、再加值"，且结果与分开算一致。
 21. 修正的作用域隔离：`surface` 不串（技能修正不影响豁免，反之亦然）；Rage 未激活时 Primal Knowledge 的替换不生效。
 
+语言相关（§10.1）：
+
+22. `rarity` 生效：建卡三选**只能**选 standard；罕见语言即使存在于目录也不出现在候选里；`rarity` 非法值在装载期被拒。
+23. 9 条新语言有 en / zh-CN 显示名，且 ref 不随 locale 变化。
+24. 46 条怪物语言全部是已知 ref；写一个不存在的 ref（如 `language:klingon`）在装载期被拒。
+25. 怪物语言的显示走 locale：同一份内容在 en / zh-CN 下显示不同文字、ref 相同。
+26. 固定授予：Druidic / Thieves' Cant 让 `language_refs` 真的多出对应 ref，且**不出现在建卡三选**里（秘密语言不能被当标准选）。
+27. 可选授予：Deft Explorer 的两个语言必须是合法 ref、互不重复、不被固定项占用；数量不足/过多/重复/未知 ref 全部拒绝。
+28. 玩家投影：`_player_view` **不**带语言（有断言防止它被顺手加进去），角色中心按 `proficiencies.language_refs` 渲染。
+29. 来源保留：同一语言由特性与建卡同时给出时不重复出现，来源仍可追溯。
+
 ### 10.6 停止条件补充
 
 7. 若"分解输出"需要改 `ruleset_character` 的存档形状且没有向后兼容读取路径 → 停止，先与维护者确认迁移口径。
 8. 若实现 `scope.abilities` 必须改动 `skill_values` 的静态语义（把运行时修正烧进推导产物）→ 停止，那说明形状选错了。
+9. 若怪物语言 ref 化需要改动 stat block 的既有字段名或存档形状（而不只是值的形式）→ 停止并先与维护者确认。
