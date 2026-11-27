@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.attunement import attuned_refs
@@ -15,12 +15,18 @@ from src.rulesets.dnd2024.forms import (
 from src.rulesets.dnd2024.character.derivation import (
     apply_feature_ability_bonuses,
     derive_armor_class,
+    feat_initiative_bonus,
     derive_armor_training_state,
     derive_movement_profile,
     derive_skill_check,
     derive_speed,
 )
-from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.features import (
+    Dnd2024ClassFeatureResolver,
+    FeatDefinition,
+    FeatDefinitionError,
+    load_feat_definitions,
+)
 from src.rulesets.dnd2024.progression.catalog import (
     Dnd2024ProgressionCatalog,
     ProgressionCatalogError,
@@ -39,18 +45,9 @@ from .choices import (
     _class_id as _class_id,
 )
 
-# 专长机械参数的封闭键集：新参数随其归属切片一起扩这里，未知键 fail closed。
-ADVANCEMENT_FEAT_PARAMETER_KEYS = frozenset({
-    "ranged_attack_bonus",
-    "light_extra_attack_ability_damage",
-})
-# 数值型参数与开关型参数必须分开校验：把布尔当成 1 来接受，会让
-# "5" 和 "true" 在同一个字段里都能通过，语义就没法审了。
-ADVANCEMENT_FEAT_BOOLEAN_PARAMETERS = frozenset({
-    "light_extra_attack_ability_damage",
-})
-# 被动效果的封闭 kind 集：本切片只消费 armor_class_bonus，其余必须加载期拒绝。
-ADVANCEMENT_FEAT_PASSIVE_EFFECT_KINDS = frozenset({"armor_class_bonus"})
+# 专长参数与被动效果的封闭词表已迁到 ``features/parameter_registry.py`` 与
+# ``features/feat_models.py``：这两处不再是"某个切片顺手扩一下"的地方，而是
+# 每条声明都必须登记读者的注册表。
 
 # 成长账本：每级一条，记录该级实际做出的选择。缺失项检测只读它，不从
 # 数值反推选择（`abilities` 已经把来源合并掉了，反推不出「这一级选了什么」）。
@@ -163,7 +160,7 @@ def metamagic_choices_at(class_ref: str, target_level: int) -> int:
 class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
     bundle: LoadedRulesetBundle
     catalog: Dnd2024ProgressionCatalog = field(init=False)
-    advancement_feats: dict[str, dict[str, Any]] = field(init=False)
+    advancement_feats: dict[str, FeatDefinition] = field(init=False)
     advancement_feat_labels: dict[str, str] = field(init=False)
     # 同一次升级里特性解析被问多次（选项槽、生命值增量、AC 重算），共用一份。
     _feature_resolver: Dnd2024ClassFeatureResolver = field(init=False)
@@ -171,59 +168,33 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
     def __post_init__(self) -> None:
         self._feature_resolver = Dnd2024ClassFeatureResolver(self.bundle)
         self.catalog = Dnd2024ProgressionCatalog.from_bundle(self.bundle)
+        try:
+            definitions = load_feat_definitions(self.bundle)
+        except FeatDefinitionError as exc:
+            raise ProgressionCatalogError(str(exc)) from exc
         feat_catalog = self.bundle.get("advancement_feat_catalog", "srd_advancement_feats")
-        if feat_catalog is None or not isinstance(feat_catalog.get("feats"), dict):
+        entries = feat_catalog.get("feats") if isinstance(feat_catalog, Mapping) else None
+        if not isinstance(entries, Mapping) or not entries:
             raise ProgressionCatalogError("D&D 2024 advancement feat catalog is missing")
-        labels = feat_catalog.get("labels")
-        if not isinstance(labels, dict) or set(labels) != set(feat_catalog["feats"]):
+        # 池由 catalog 的键定义，而不是由 ``category != "origin"`` 反推：一条忘写
+        # category 的成长专长会因此从池里静默消失，而一条 category 写错的起源
+        # 专长会混进成长池。键就是"成长专长有哪些"的唯一权威。
+        self.advancement_feats = {
+            str(feat_id): definitions[str(feat_id)]
+            for feat_id in entries
+            if str(feat_id) in definitions
+        }
+        missing = sorted(set(str(feat_id) for feat_id in entries) - set(self.advancement_feats))
+        if missing:
+            raise ProgressionCatalogError(
+                "advancement feat catalog names an undeclared feat: " + ", ".join(missing)
+            )
+        labels = feat_catalog.get("labels") if isinstance(feat_catalog, Mapping) else None
+        if not isinstance(labels, dict) or set(labels) != set(self.advancement_feats):
             raise ProgressionCatalogError("advancement feat labels must cover the catalog")
-        for feat_id, feat in feat_catalog["feats"].items():
-            self._validate_feat_parameters(str(feat_id), feat)
-            self._validate_feat_passive_effects(str(feat_id), feat)
-        self.advancement_feats = deepcopy(feat_catalog["feats"])
         self.advancement_feat_labels = {
             str(feat_id): str(label) for feat_id, label in labels.items()
         }
-
-    @staticmethod
-    def _validate_feat_parameters(feat_id: str, feat: Any) -> None:
-        """Validate the closed parameter vocabulary an advancement feat declares.
-
-        Feat parameters are consumption contracts read by feature projections
-        (e.g. Archery's flat ranged attack bonus), so the catalog is the only
-        writer and every unknown key fails closed here instead of being
-        silently ignored downstream.
-        """
-
-        if not isinstance(feat, dict):
-            return
-        parameters = feat.get("parameters")
-        if parameters is None:
-            return
-        if not isinstance(parameters, dict):
-            raise ProgressionCatalogError(
-                f"advancement feat parameters must be an object: {feat_id}"
-            )
-        unknown = sorted(set(parameters) - ADVANCEMENT_FEAT_PARAMETER_KEYS)
-        if unknown:
-            raise ProgressionCatalogError(
-                f"advancement feat {feat_id} has an unknown parameter: {unknown[0]}"
-            )
-        for key, value in parameters.items():
-            if key in ADVANCEMENT_FEAT_BOOLEAN_PARAMETERS:
-                if not isinstance(value, bool):
-                    raise ProgressionCatalogError(
-                        f"advancement feat {feat_id} parameter {key} must be a boolean"
-                    )
-                continue
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, int)
-                or not 1 <= value <= 10
-            ):
-                raise ProgressionCatalogError(
-                    f"advancement feat {feat_id} parameter {key} must be an integer from 1 to 10"
-                )
 
     def missing_choices(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         """Choices this character still owes, in level order.
@@ -509,56 +480,6 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
     def _recorded_a_choice(record: dict[str, Any], epic: bool) -> bool:
         key = "epic_boon_ref" if epic else "feat_ref"
         return bool(record.get("ability_score_increase") or record.get(key))
-    @staticmethod
-    def _validate_feat_passive_effects(feat_id: str, feat: Any) -> None:
-        """Validate a feat's closed passive-effect declarations.
-
-        The armor class formula reads these declarations instead of embedding
-        the numbers, so an unknown kind or a non-integer value has to fail at
-        load -- silently contributing nothing would look like a working feat.
-        """
-
-        if not isinstance(feat, dict):
-            return
-        effects = feat.get("passive_effects")
-        if effects is None:
-            return
-        if not isinstance(effects, list) or not effects:
-            raise ProgressionCatalogError(
-                f"advancement feat {feat_id} passive_effects must be a non-empty array"
-            )
-        for effect in effects:
-            if not isinstance(effect, dict):
-                raise ProgressionCatalogError(
-                    f"advancement feat {feat_id} passive effect must be an object"
-                )
-            kind = str(effect.get("kind") or "")
-            if kind not in ADVANCEMENT_FEAT_PASSIVE_EFFECT_KINDS:
-                raise ProgressionCatalogError(
-                    f"advancement feat {feat_id} has an unknown passive effect: {kind!r}"
-                )
-            unknown = sorted(set(effect) - {"kind", "value", "requires_armor"})
-            if unknown:
-                raise ProgressionCatalogError(
-                    f"advancement feat {feat_id} passive effect has an unknown "
-                    f"field: {unknown[0]}"
-                )
-            value = effect.get("value")
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, int)
-                or not 1 <= value <= 10
-            ):
-                raise ProgressionCatalogError(
-                    f"advancement feat {feat_id} passive effect value must be an "
-                    "integer from 1 to 10"
-                )
-            if not isinstance(effect.get("requires_armor"), bool):
-                raise ProgressionCatalogError(
-                    f"advancement feat {feat_id} passive effect requires_armor "
-                    "must be a boolean"
-                )
-
     def preview_next_level(
         self,
         payload: dict[str, Any],
@@ -1163,8 +1084,8 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
 
     def _ability_choice_for(self, feat_ref: str) -> dict[str, Any]:
         feat_id = str(feat_ref or "").removeprefix("feat:")
-        feat = self.advancement_feats.get(feat_id) or {}
-        choice = feat.get("ability_choice")
+        feat = self.advancement_feats.get(feat_id)
+        choice = feat.legacy.get("ability_choice") if feat is not None else None
         return choice if isinstance(choice, dict) else {}
 
     def _subclass_name(self, subclass_id: str) -> str:
@@ -1315,8 +1236,15 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         derived = character.setdefault("derived", {})
         derived.update({
             "proficiency_bonus": proficiency,
+            # 与建卡期共用同一个读取：Alert 的加值来自参数声明，不是名字。
+            # 两处各判一次，就会出现"升级后先攻掉了 2 点"这种分叉。
             "initiative": ability_modifier(abilities["dex"])
-            + (proficiency if "feat:alert" in set(character.get("features", {}).get("feat_refs") or []) else 0),
+            + feat_initiative_bonus(
+                self.bundle,
+                set(character.get("features", {}).get("feat_refs") or []),
+                proficiency,
+                self._feature_resolver.feat_definitions,
+            ),
             "passive_perception": 10 + perception,
             "saving_throws": saving_throws,
         })
@@ -1340,6 +1268,7 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
             ),
             attuned_refs=attuned_refs(character),
             feat_refs=owned_refs if isinstance(owned_refs, list) else (),
+            feat_definitions=self._feature_resolver.feat_definitions,
         )
         # 速度与 AC 同源：升级当次就按当前装备与等级重算，不等下一次换装。
         # 力量不足的 -10 也在这里重新判，因为 abilities 可能刚被 ASI 改过。

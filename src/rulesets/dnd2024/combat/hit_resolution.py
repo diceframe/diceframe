@@ -97,6 +97,9 @@ class CombatHitResolutionMixin:
             self, instance: Any, combat: dict[str, Any], attacker_id: str,
             target: dict[str, Any], damage_event: dict[str, Any], rng: Any,
         ) -> list[dict[str, Any]]: ...
+        def _multiattack_mark_events(
+            self, actor: dict[str, Any], target: dict[str, Any],
+        ) -> list[dict[str, Any]]: ...
         def _hit_reaction_offer(
             self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
             defender: dict[str, Any], check: dict[str, Any], damage_event: dict[str, Any],
@@ -755,6 +758,9 @@ class CombatHitResolutionMixin:
             damage_event,
             instance=instance, combat=combat, attacker_id=attacker_id,
             target=target, rng=rng,
+        ))
+        events.extend(self._multiattack_mark_events(
+            self._actor_view(instance, combat, attacker_id), target,
         ))
         events.extend(consequences)
         if damage_event.get("critical"):

@@ -429,3 +429,24 @@ def test_the_redirect_range_follows_whether_the_attack_was_ranged(
     window = _pending(instance)
     assert window is not None
     assert window["redirect"]["range_ft"] == (60 if ranged else 5)
+
+
+def test_redirect_damage_clamps_at_zero_for_negative_dex_modifier() -> None:
+    engine, instance, _sheet = _instance(
+        level=3, focus=3, enemy=[goblin(), _second_goblin()],
+    )
+    sheet = instance.get_character_sheet("gm")
+    sheet["ruleset_character"]["abilities"]["dex"] = 4  # -3 modifier
+    instance.set_character_sheet("gm", sheet)
+
+    _hit(engine, instance, [15, 1])
+    _resolve(engine, instance, {
+        "option": "feature", "feature_id": "deflect_attacks",
+    }, SequenceRng([10]))
+    resolved = _resolve(engine, instance, {
+        "option": "redirect", "redirect_target_id": "enemy:goblin-2",
+    }, SequenceRng([2, 1, 1]))
+
+    landed = _event(resolved, "resource.changed")
+    assert landed["amount"] == 0
+    assert landed["delta"] == 0

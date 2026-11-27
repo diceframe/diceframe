@@ -50,6 +50,8 @@ purchase_balance
 
 来源指纹覆盖集中式前端目录，包括嵌套 API 错误。共享后端文案、字段 helper 和内容 overlay 遵守暂停状态并回退英文。其他功能内和后端的译文暂不自动检测语义过时；停止维护时以明确暂停控制回退。这是显示策略，不承诺所有规则内容都有完整译本。
 
+接口错误使用稳定 `error_code`：后端在抛出点用 `error_payload("webui.services.<module>.<key>")` 声明，code 由目录键派生、与文案无关；前端 `apiErrors.<code>` 是社区译文的唯一入口，后端 `webui/errors.<语言>.yml` 只服务没有前端目录的客户端。`ERROR_CODE_MAP`（中文文案到 error_code）已冻结，只减不增；新 code 必须 snake_case。
+
 检定成功等级不使用显示文本做身份。后端 `src/engine/check_verdict.py` 定义稳定 code，显示文本在 `src/localization/locales/engine/check_verdict.<语言>.yml`；前端对应键为 `verdict.<code>`。新增语言只需加资源文件，不得修改机制判断；缺失时回退英文。自定义规则 runtime 可选声明 `verdict_code`（或 `success` 布尔），否则核心只能靠已落盘骰值与精确历史标签识别，识别不了就不启用推骰、幸运抵扣等可选分支，不猜译文。见 [ADR-0015](../adr/0015-backend-localization-contract.md)。
 
 ## 贡献流程

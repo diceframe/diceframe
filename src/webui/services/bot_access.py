@@ -28,7 +28,7 @@ class BotAccessDependencies:
 async def get_bind_token(dependencies: BotAccessDependencies, game_key: str, rotate: bool = False) -> dict[str, Any]:
     inst = dependencies.registry.get(dependencies.parse_game_key(game_key))
     if not inst:
-        return {"ok": False, "error": "游戏不存在"}
+        return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
     if rotate or not room_access.bot_bind_token(inst):
         inst.set_bot_bind_token(secrets.token_urlsafe(18))
         await dependencies.registry.save(inst)
@@ -38,13 +38,13 @@ async def get_bind_token(dependencies: BotAccessDependencies, game_key: str, rot
 async def verify_bind_game(dependencies: BotAccessDependencies, game_key: str, bind_token: str) -> dict[str, Any]:
     inst = dependencies.registry.get(dependencies.parse_game_key(game_key))
     if not inst:
-        return {"ok": False, "error": "游戏不存在"}
+        return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
     expected = str(room_access.bot_bind_token(inst) or "")
     if not expected or not secrets.compare_digest(expected, str(bind_token or "")):
-        return {"ok": False, "error": t("webui.services.bot_access.bind_token_invalid")}
+        return {"ok": False, "error": t("webui.services.bot_access.bind_token_invalid"), "error_code": "bot_access_bind_token_invalid"}
     surface = adventure_runtime_state.effective_bot_surface(inst)
     if surface == gameplay_contracts.BOT_SURFACE_NONE:
-        return {"ok": False, "error": t("webui.services.bot_access.play_mode_no_group_binding")}
+        return {"ok": False, "error": t("webui.services.bot_access.play_mode_no_group_binding"), "error_code": "bot_access_play_mode_no_group_binding"}
     result = {
         "ok": True,
         "game_key": game_key,

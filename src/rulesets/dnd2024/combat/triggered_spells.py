@@ -115,14 +115,17 @@ class CombatTriggeredSpellsMixin:
             events.extend(self._spell_end_trigger_events(
                 self._actor_view(instance, combat, decision["actor_id"]), "spell_cast",
             ))
+        attacker_id = str(decision.get("actor_id") or "")
         events.extend(self._commit_hit_damage(
             instance, combat, decision["damage_event"], rng,
-            attacker_id=str(decision.get("actor_id") or ""),
+            attacker_id=attacker_id,
+        ))
+        events.extend(self._multiattack_mark_events(
+            self._actor_view(instance, combat, attacker_id), target,
         ))
         # 这条路径同样是"命中落地"：rider（光耀/神圣/原始打击）与命中后条件
         # （震慑击、散手技巧）在直通路径由 ``_resolve_committed_hit`` 结算，
         # 决策路径若漏掉它们，会变成"有至圣斩窗口的角色悄悄少了半个特性"。
-        attacker_id = str(decision["actor_id"])
         # 第二段伤害与 stat block rider 也在这一层结算：这条路径同样是"命中
         # 落地"，它若漏掉，有至圣斩窗口的攻击就会少打一段、也少了击倒。
         tail_events, tail_damage = self._hit_tail_events(
