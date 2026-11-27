@@ -223,8 +223,23 @@ Deflect Energy 不是独立实现，它是 `deflect_attacks` 的**类型门控�
 - **结算时重建选项必须拿到同一个 `ranged`**：`_validate_hit_reaction` 会用 `_reaction_feature_choices` 重建一遍。第一版没传 `decision["attack_ranged"]`，远程攻击的重定向范围会在建立窗口与结算之间从 60 尺变成 5 尺。
 - **减伤骰属于 resolve 的 RNG**：它不在攻击那批骰里。测试第一版把 `4` 放进攻击的 `SequenceRng`，`randint` 耗尽后返回最小值 1，断言 `rolls == [4]` 才暴露出这一点。
 - **放弃重定向会把伤害重新打一次**。`_finish_hit_reaction` 的收尾是「命中成立，提交暂存伤害」——那是每个被放弃的窗口都走的路。对重定向窗口，伤害在第一段已经减到 0、反应也已经花掉，走到那里等于把原始伤害再打一遍。第一版的 decline 用例只断言了 Focus 与 pending 清空，没断言 HP，所以它活过了自查。
+- **减到 0 会把这一击剩下的东西一起吞掉**。`final == 0` 当时直接 return，于是
+  `hit_riders`、两段伤害的第二段、stat block 的 rider 都不再执行——"我拨开了这一击"
+  变成了"毒刃也不毒了"。修法是落回同一条 tail，只在主伤害为 0 时跳过主伤害提交。
+- **命中后的触发窗口被丢掉**。`decision["next_decision"]`（诗人语出惊人、至圣斩）
+  被忽略，防守者是武僧时整条链消失。改成把减后的值写回再转发，并且此时不开放重定向。
+- **重定向自己手搓豁免**。手写 `check.resolved` 绕过了魔法抗性、传说抗性与所有写在
+  `_saving_throw_check` 里的规则；改用该入口（它返回事件、由调用方入列）。
+- **怪物的弓被当成近战**。stat block 的攻击 profile 只有 `range` / `long_range`、
+  没有 `ranged` 标记，于是 60 尺重定向对所有敌人射手都不可达。`attack_is_ranged`
+  同时读两者，并且**故意不读 `thrown_range`**：引擎分不清"拿匕首捅"和"把匕首扔出去"，
+  猜成远程会让一场匕首近战白送 60 尺重定向。
+- **重定向伤害不掷专注、不触发击败判定**。把专注中的施法者打到 0 HP 却不掷专注豁免，
+  一条规则只在攻击路径上成立。
 - **`public_pending_decision` 是白名单，`redirect` 不在上面**：真实玩家会收到一个只有两个选项、却看不到任何目标的窗口。它只对 GM 视角（原样返回）不可见，所以用 GM 视角跑用例永远发现不了。
 
 ### 12.4 用例
 
-`tests/rulesets/test_dnd2024_damage_reactions.py`（14 条）：等级授予（3 级有 / 2 级无）、B/P/S 门控与 13 级扩展、纯 Fire 在 12 级被拒、无 Reaction 不提供、减伤公式（骰值 + Dex + Monk 级）、减到 0 不下血也不治疗、部分减伤只落差额、减到 0 且 Focus 够时开重定向、重定向扣 1 Focus 并让目标掷 Dex 豁免、豁免失败吃 2 × 武艺骰 + Dex、豁免成功零伤害、Focus 为 0 时不开窗口、放弃重定向不扣 Focus、玩家视角能看到重定向的目标与 DC。
+`tests/rulesets/test_dnd2024_damage_reactions.py`（14 条）：等级授予（3 级有 / 2 级无）、B/P/S 门控与 13 级扩展、纯 Fire 在 12 级被拒、无 Reaction 不提供、减伤公式（骰值 + Dex + Monk 级）、减到 0 不下血也不治疗、部分减伤只落差额、减到 0 且 Focus 够时开重定向、重定向扣 1 Focus 并让目标掷 Dex 豁免、豁免失败吃 2 × 武艺骰 + Dex、豁免成功零伤害、Focus 为 0 时不开窗口、放弃重定向不扣 Focus（且不补打伤害）、玩家视角能看到重定向的目标与 DC。
+
+**白名单外必须改的两处既有用例**：`test_dnd2024_active_buffs.py`（6 条）与 `test_dnd2024_save_damage_survival.py`（1 条）用 18/7 级武僧驱动伤害断言，现在被命中会先得到拨挡窗口、伤害被挂起，`_damage_events(...)` 因此为空。它们的 `_enemy_attack` 现在会放弃**这一条**窗口（且只在窗口真的提供 `deflect_attacks` 时）——笼统地放弃会把 `_zeroing_hit` 自己要测的 Relentless Rage 生存窗口一起吃掉。
