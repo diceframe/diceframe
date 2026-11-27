@@ -491,6 +491,12 @@ class AdvancementChoicesMixin:
                     and record["feature_id"] == definition.id
                     and record["choice_id"] == choice.id
                 ]
+                if len(slot) > 1:
+                    errors.append(
+                        f"feature choice {definition.id} was submitted more than once"
+                    )
+                    matched.update(slot)
+                    continue
                 if not slot:
                     continue
                 matched.add(slot[0])
@@ -514,7 +520,7 @@ class AdvancementChoicesMixin:
                         f"feature choice {definition.id} selected_refs repeats an option"
                     )
                     continue
-                allowed_languages = {
+                allowed_languages = set(choice.enabled_options) or {
                     f"language:{entity['id']}" for entity in self.bundle.list("language")
                     if entity.get("rarity") == "standard"
                 }
@@ -522,6 +528,15 @@ class AdvancementChoicesMixin:
                     errors.append(
                         f"feature choice {definition.id} selected a non-Standard language"
                     )
+                    continue
+                known_languages = {
+                    *(str(ref) for ref in ((character.get("proficiencies") or {}).get("language_refs") or [])),
+                    *resolver.language_sources(character),
+                    *(str(ref) for prior in records for ref in prior["selected_refs"] if str(ref).startswith("language:")),
+                }
+                duplicate_lang = next((ref for ref in raw_refs if ref in known_languages), "")
+                if duplicate_lang:
+                    errors.append(f"{duplicate_lang} is already known")
                     continue
                 records.append({
                     "owner": definition.owner,
@@ -551,9 +566,14 @@ class AdvancementChoicesMixin:
                     expertise=expertise,
                 )
                 records.extend(chosen)
-                expertise.update(
-                    str(ref) for record in chosen for ref in record["selected_refs"]
-                )
+                if choice.grants == "expertise":
+                    expertise.update(
+                        str(ref) for record in chosen for ref in record["selected_refs"]
+                    )
+                elif choice.grants == "proficiency":
+                    proficient.update(
+                        str(ref) for record in chosen for ref in record["selected_refs"]
+                    )
                 continue
             if choice is not None and choice.kind == "feature_option":
                 # 互斥特性选项（Divine Strike / Potent Spellcasting、Primal

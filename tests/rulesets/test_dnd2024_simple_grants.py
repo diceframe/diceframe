@@ -616,3 +616,188 @@ def test_creation_accepts_a_committed_divine_order() -> None:
     assert runtime.validate_character(None, draft) == []
     canonical = _canonical(runtime, draft)
     assert "armor_category:heavy" in canonical["proficiencies"]["armor_category_refs"]
+
+
+def test_thaumaturge_and_magician_are_creatable_end_to_end_with_extra_cantrip() -> None:
+    runtime = Dnd2024Runtime()
+
+    cleric_draft = _draft_for(runtime, "class:cleric", ["skill:medicine", "skill:history"])
+    cleric_draft["feature_choices"] = [{
+        "owner": "class:cleric",
+        "feature_id": "divine_order",
+        "choice_id": "divine_order_option",
+        "selected_refs": ["feature:divine_order_thaumaturge"],
+    }]
+    # Base 3 cantrips must fail validation when Thaumaturge requires 4
+    assert runtime.validate_character(None, cleric_draft)
+    cleric_opts = runtime.builder_choices(None, cleric_draft)["class_spells"]
+    assert cleric_opts["requirements"]["cantrip_count"] == 4
+    cleric_draft["class_spell_choices"]["cantrip_refs"] = [
+        item["ref"] for item in cleric_opts["cantrips"][:4]
+    ]
+    assert runtime.validate_character(None, cleric_draft) == []
+    cleric_sheet = runtime.finalize_character(None, cleric_draft)
+    assert len(cleric_sheet["ruleset_character"]["spellcasting"]["class"]["cantrip_refs"]) == 4
+
+    druid_draft = _draft_for(runtime, "class:druid", ["skill:nature", "skill:survival"])
+    druid_draft["feature_choices"] = [{
+        "owner": "class:druid",
+        "feature_id": "primal_order",
+        "choice_id": "primal_order_option",
+        "selected_refs": ["feature:primal_order_magician"],
+    }]
+    druid_opts = runtime.builder_choices(None, druid_draft)["class_spells"]
+    assert druid_opts["requirements"]["cantrip_count"] == 3
+    druid_draft["class_spell_choices"]["cantrip_refs"] = [
+        item["ref"] for item in druid_opts["cantrips"][:3]
+    ]
+    assert runtime.validate_character(None, druid_draft) == []
+    druid_sheet = runtime.finalize_character(None, druid_draft)
+    assert len(druid_sheet["ruleset_character"]["spellcasting"]["class"]["cantrip_refs"]) == 3
+
+
+def _default_answers(preview: dict, sheet: dict | None = None) -> dict:
+    answers: dict = {}
+    class_magic = ((sheet or {}).get("ruleset_character") or {}).get("spellcasting", {}).get("class") or {}
+    for req in preview.get("requirements") or []:
+        req_id = req.get("id")
+        if req_id == "subclass_ref":
+            answers["subclass_ref"] = str(req["options"][0]["value"])
+        elif req_id == "class_spell_choices":
+            cur_cantrips = list(class_magic.get("cantrip_refs") or [])
+            need_c = int(req.get("cantrip_count") or 0)
+            for opt in req.get("cantrips") or []:
+                ref = opt["ref"] if isinstance(opt, dict) else opt
+                if len(cur_cantrips) < need_c and ref not in cur_cantrips:
+                    cur_cantrips.append(ref)
+            cur_prep = list(class_magic.get("prepared_spell_refs") or [])
+            need_p = int(req.get("prepared_spell_count") or 0)
+            for opt in req.get("leveled_spells") or []:
+                ref = opt["ref"] if isinstance(opt, dict) else opt
+                if len(cur_prep) < need_p and ref not in cur_prep:
+                    cur_prep.append(ref)
+            answers["class_spell_choices"] = {
+                "cantrip_refs": cur_cantrips,
+                "prepared_spell_refs": cur_prep,
+            }
+        elif req.get("kind") == "feature_choice" and req.get("required"):
+            available = [
+                opt["value"] for opt in (req.get("options") or [])
+                if opt.get("available", True)
+            ]
+            count = int(req.get("count") or 1)
+            answers.setdefault("feature_choices", []).append({
+                "owner": str(req["owner"]),
+                "feature_id": str(req["feature_id"]),
+                "choice_id": str(req["choice_id"]),
+                "selected_refs": available[:count],
+            })
+    return answers
+
+
+def test_advancement_persists_skill_refs_language_refs_and_skill_parts() -> None:
+    runtime = Dnd2024Runtime()
+
+    # Ranger level 1 -> 2 chooses 2 languages via Deft Explorer
+    ranger_draft = _draft_for(runtime, "class:ranger", ["skill:perception", "skill:stealth", "skill:survival"])
+    ranger_sheet = runtime.finalize_character(None, ranger_draft)
+    existing_langs = set(ranger_sheet["ruleset_character"]["proficiencies"]["language_refs"])
+    new_langs = [
+        ref for ref in ("language:elvish", "language:dwarvish", "language:giant", "language:gnomish", "language:goblin")
+        if ref not in existing_langs
+    ][:2]
+    preview = runtime.preview_advancement(None, ranger_sheet, {})
+    answers = _default_answers(preview, ranger_sheet)
+    answers.setdefault("feature_choices", []).append({
+        "owner": "class:ranger",
+        "feature_id": "deft_explorer_languages",
+        "choice_id": "deft_explorer_language",
+        "selected_refs": new_langs,
+    })
+    assert runtime.preview_advancement(None, ranger_sheet, answers)["ok"] is True
+    ranger_l2 = runtime.apply_advancement(None, ranger_sheet, answers)
+    for lang in new_langs:
+        assert lang in ranger_l2["ruleset_character"]["proficiencies"]["language_refs"]
+
+    # Barbarian level 1 -> 3 gains Primal Knowledge skill proficiency persisted to skill_refs & skill_parts
+    barb_draft = _draft_for(runtime, "class:barbarian", ["skill:athletics", "skill:survival"])
+    barb_sheet = runtime.finalize_character(None, barb_draft)
+    for target in (2, 3):
+        preview = runtime.preview_advancement(None, barb_sheet, {})
+        answers = _default_answers(preview, barb_sheet)
+        if target == 3:
+            answers["feature_choices"] = [{
+                "owner": "class:barbarian",
+                "feature_id": "primal_knowledge",
+                "choice_id": "primal_knowledge_skill",
+                "selected_refs": ["skill:intimidation"],
+            }]
+        assert runtime.preview_advancement(None, barb_sheet, answers)["ok"] is True
+        barb_sheet = runtime.apply_advancement(None, barb_sheet, answers)
+    profs = barb_sheet["ruleset_character"]["proficiencies"]
+    assert "skill:intimidation" in profs["skill_refs"]
+    assert profs["skill_parts"]["intimidation"]["contribution"] == int(
+        barb_sheet["ruleset_character"]["derived"]["proficiency_bonus"]
+    )
+
+
+def test_duplicate_known_language_is_rejected_on_creation_and_advancement() -> None:
+    runtime = Dnd2024Runtime()
+    rogue_draft = _draft_for(
+        runtime, "class:rogue",
+        ["skill:stealth", "skill:acrobatics", "skill:sleight_of_hand", "skill:perception"],
+    )
+    rogue_draft["feature_choices"] = [{
+        "owner": "class:rogue",
+        "feature_id": "thieves_cant",
+        "choice_id": "thieves_cant_language",
+        "selected_refs": ["language:common"],
+    }]
+    errors = runtime.validate_character(None, rogue_draft)
+    assert any("already known" in err for err in errors), errors
+
+    ranger_draft = _draft_for(runtime, "class:ranger", ["skill:perception", "skill:stealth", "skill:survival"])
+    ranger_sheet = runtime.finalize_character(None, ranger_draft)
+    preview = runtime.preview_advancement(None, ranger_sheet, {})
+    answers = _default_answers(preview, ranger_sheet)
+    answers.setdefault("feature_choices", []).append({
+        "owner": "class:ranger",
+        "feature_id": "deft_explorer_languages",
+        "choice_id": "deft_explorer_language",
+        "selected_refs": ["language:common", "language:elvish"],
+    })
+    adv_preview = runtime.preview_advancement(None, ranger_sheet, answers)
+    assert adv_preview["ok"] is False
+    assert any("already known" in err for err in adv_preview["errors"])
+
+
+def test_optional_replace_ability_never_penalizes_higher_base_ability_and_works_in_combat() -> None:
+    from src.rulesets.dnd2024.combat.check_modifiers import check_total
+    from src.rulesets.dnd2024.combat.engine import Dnd2024CombatEngine
+
+    # When DEX (+4) > STR (+1), optional Primal Knowledge keeps DEX instead of penalizing
+    parts = {"ability": "dex", "ability_modifier": 4, "contribution": 2}
+    abilities = {"str": 12, "dex": 18, "wis": 10}
+    rows = [{"replace_ability": "str", "feature_id": "primal_knowledge"}]
+    total, effective, modifier, _sources = check_total(
+        parts, abilities, default_ability="dex", fallback_total=6, rows=rows,
+    )
+    assert effective == "dex"
+    assert modifier == 4
+    assert total == 6
+
+    # Combat _skill_check_bonus integration for raging Barbarian L3 with STR 18 (+4) > DEX 10 (+0)
+    runtime = Dnd2024Runtime()
+    engine = Dnd2024CombatEngine(runtime.load_bundle())
+    raging_actor = {
+        "actor_id": "player:barb",
+        "build": {"level": 3, "class_levels": [{"class_ref": "class:barbarian", "level": 3}]},
+        "abilities": {"str": 18, "dex": 10, "con": 14, "int": 8, "wis": 12, "cha": 10},
+        "proficiency_bonus": 2,
+        "skill_values": {"stealth": 2},
+        "conditions": {"rage": {"turns_remaining": 10}},
+        "feature_choices": [],
+    }
+    bonus, check_ability, _sources = engine._skill_check_bonus(raging_actor, "stealth", 2)
+    assert check_ability == "str"
+    assert bonus == 6

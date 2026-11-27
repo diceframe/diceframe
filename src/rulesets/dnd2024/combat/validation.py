@@ -764,6 +764,7 @@ def _validate_statblock_extras(enemy: dict[str, Any], label: str) -> None:
             if (
                 not isinstance(item, str)
                 or not item.startswith("language:")
+                or not item[len("language:"):].strip()
                 or len(item) > 60
             ):
                 raise CombatIntentError(f"{label} language entry is invalid")

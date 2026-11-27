@@ -474,7 +474,13 @@ class Dnd2024ClassFeatureResolver:
     ) -> dict[str, str]:
         """``{language_ref: feature_id}`` for every feature-granted language."""
 
-        return fixed_sources(self.features_for(character), "language_grants")
+        return fixed_sources(
+            (
+                definition for definition in self.features_for(character)
+                if self.owns_definition(character, definition)
+            ),
+            "language_grants",
+        )
 
     def category_sources(
         self, character: Mapping[str, Any] | None, key: str,

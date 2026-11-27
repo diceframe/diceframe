@@ -312,7 +312,7 @@ class CombatSavingThrowsMixin:
             ability=default_ability,
             conditions=actor.get("conditions") or {},
         )
-        if not rows and isinstance(part, dict):
+        if not rows:
             return base, default_ability, []
         total, effective, _modifier, bonus_sources = check_total(
             part,

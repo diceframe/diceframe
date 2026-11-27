@@ -61,20 +61,35 @@ def active_modifiers(
 
 
 def effective_ability(
-    rows: list[dict[str, Any]], *, default_ability: str,
+    rows: list[dict[str, Any]],
+    *,
+    default_ability: str,
+    abilities: Mapping[str, int] | None = None,
 ) -> str:
     """The ability this check should actually read.
 
-    Last declaration wins when two overlap: the rules never define an ordering,
-    so overlapping replacements are a content bug the loader cannot see.  Taking
-    the last one keeps the result deterministic instead of order-of-dict.
+    When ``abilities`` is supplied, optional ability replacements (such as
+    Primal Knowledge: "you can make it as a Strength check") only replace the
+    default ability when their modifier is at least as high, so an optional
+    feature never penalizes a character whose base ability is higher.
     """
 
     ability = default_ability
+    best_mod = (
+        ability_modifier(int(abilities.get(ability, 10) or 10))
+        if abilities is not None else None
+    )
     for row in rows:
         replacement = str(row.get("replace_ability") or "")
-        if replacement:
+        if not replacement:
+            continue
+        if abilities is None or best_mod is None:
             ability = replacement
+            continue
+        candidate_mod = ability_modifier(int(abilities.get(replacement, 10) or 10))
+        if candidate_mod >= best_mod:
+            ability = replacement
+            best_mod = candidate_mod
     return ability
 
 
@@ -146,7 +161,7 @@ def check_total(
     else:
         ability = default_ability
         non_ability = fallback_total - modifier
-    effective = effective_ability(rows, default_ability=ability)
+    effective = effective_ability(rows, default_ability=ability, abilities=abilities)
     bonus, sources = flat_bonus(rows, abilities, proficiency_bonus=proficiency_bonus)
     effective_modifier = ability_modifier(int(abilities.get(effective, 10) or 10))
     return non_ability + effective_modifier + bonus, effective, effective_modifier, sources

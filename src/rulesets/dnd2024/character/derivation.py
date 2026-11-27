@@ -255,14 +255,13 @@ def plan_feature_choices(
     skill_refs: Collection[str],
     *,
     level: int,
+    known_languages: Collection[str] = (),
 ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
     """Validate the selections a draft commits, and return the languages gained.
 
     两类槽共用同一份解析：技能槽（Expertise / 新增熟练）与语言槽。分开写会让
     同一次 `selected_refs` 被解析两遍，而且"这个角色没有这个槽"的判断会在两处
     各写一遍、迟早不一致。
-
-    Only a feature the character actually owns *at this level* may hold a slot,
 
     Only a feature the character actually owns *at this level* may hold a slot,
     so a submitted record can neither invent an owner nor pre-fill a future
@@ -319,6 +318,10 @@ def plan_feature_choices(
     matched: set[int] = set()
     records: list[dict[str, Any]] = []
     languages: list[str] = []
+    existing_languages = {
+        *(str(ref) for ref in known_languages if ref),
+        *features.language_sources(dict(proxy)),
+    }
     taken: dict[str, str] = {}
     proficient = {str(ref) for ref in skill_refs}
     for definition in slots:
@@ -376,7 +379,7 @@ def plan_feature_choices(
                         f"{ref} is not a selectable language of {definition.id}"
                     )
                     continue
-                if ref in languages:
+                if ref in existing_languages or ref in languages:
                     errors.append(f"{ref} is already known")
                     continue
                 languages.append(ref)
@@ -685,6 +688,7 @@ class CharacterDerivationMixin:
             _feature_proxy(draft["class_ref"], level, draft.get("features")),
             skill_refs,
             level=level,
+            known_languages=draft.get("language_refs") or (),
         )
         if choice_errors:
             raise ValueError("; ".join(choice_errors))

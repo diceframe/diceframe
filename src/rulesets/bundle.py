@@ -276,6 +276,11 @@ class RulesetBundleLoader:
                                     f"invalid internal reference {value!r} in {source_kind}:{source_id}"
                                 )
                             target_kind, target_id = value.split(":", 1)
+                            expected_kind = _REF_ALIASES.get(key)
+                            if expected_kind and target_kind != expected_kind:
+                                raise RulesetBundleError(
+                                    f"invalid reference kind {value!r} for {key} in {source_kind}:{source_id}"
+                                )
                             if target_id not in entities.get(target_kind, {}):
                                 raise RulesetBundleError(
                                     f"unresolved reference {value!r} in {source_kind}:{source_id}"

@@ -724,12 +724,32 @@ class Dnd2024Runtime:
             try:
                 choices["class_spells"] = Dnd2024SpellSelection(
                     self.load_bundle(str(draft.get("locale") or ""))
-                ).options(class_ref, 1)
+                ).options(class_ref, 1, character=self._draft_spell_proxy(draft, class_ref))
             except (ProgressionCatalogError, SpellCatalogError):
                 choices["class_spells"] = {}
         else:
             choices["class_spells"] = {}
         return choices
+
+    @staticmethod
+    def _draft_spell_proxy(draft: Mapping[str, Any], class_ref: str) -> dict[str, Any]:
+        level = int(draft.get("level", 1) or 1)
+        features_block: dict[str, Any] = {}
+        raw_features = draft.get("features")
+        if isinstance(raw_features, Mapping) and raw_features.get("subclass_ref"):
+            features_block["subclass_ref"] = str(raw_features["subclass_ref"])
+        raw_choices = draft.get("feature_choices")
+        if isinstance(raw_choices, list):
+            features_block["feature_choices"] = [
+                dict(row) for row in raw_choices if isinstance(row, Mapping)
+            ]
+        return {
+            "build": {
+                "level": level,
+                "class_levels": [{"class_ref": class_ref, "level": level}],
+            },
+            "features": features_block,
+        }
 
     def validate_character(self, rule: Any, draft: dict[str, Any]) -> list[str]:
         del rule
@@ -742,7 +762,10 @@ class Dnd2024Runtime:
             return errors
         _parsed, spell_errors = Dnd2024SpellSelection(
             bundle
-        ).validate(class_ref, 1, draft.get("class_spell_choices"))
+        ).validate(
+            class_ref, 1, draft.get("class_spell_choices"),
+            character=self._draft_spell_proxy(draft, class_ref),
+        )
         form_errors: list[str] = []
         if class_ref == "class:druid":
             entries = [

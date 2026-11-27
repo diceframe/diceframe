@@ -418,13 +418,13 @@ class Dnd2024SpellSelection:
         }
         if not class_ref:
             return empty
-        requirements = self.requirements(class_ref, level)
+        requirements = self.requirements(class_ref, level, character)
         if not requirements["slot_profile"]:
             return empty
         policy = PreparationPolicy.for_class(self.bundle, class_ref)
         if policy is None:
             return empty
-        options = self.options(class_ref, level)
+        options = self.options(class_ref, level, character)
         leveled = options["leveled_spells"]
         if policy.source == "spellbook":
             known = {

@@ -372,6 +372,7 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             self._skill_choice_proxy(draft, class_ref),
             self._skill_proficiency_refs(draft, background),
             level=int(draft.get("level", 1) or 1),
+            known_languages=draft.get("language_refs") or (),
         )
         return [*errors, *choice_errors]
 
@@ -552,15 +553,15 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
         }
 
     @property
-    def _creation_choice_kinds(self) -> dict[str, str]:
-        """``{feature id: choice kind}`` for the choices creation can answer."""
+    def _creation_choice_kinds(self) -> dict[tuple[str, str], str]:
+        """``{(owner, feature id): choice kind}`` for the choices creation can answer."""
 
-        kinds: dict[str, str] = {}
+        kinds: dict[tuple[str, str], str] = {}
         for definition in Dnd2024ClassFeatureResolver(
             self.bundle,
         ).catalog.features_by_key.values():
             if definition.choice is not None:
-                kinds.setdefault(definition.id, definition.choice.kind)
+                kinds.setdefault((definition.owner, definition.id), definition.choice.kind)
         return kinds
 
     def normalize_submission(self, character: dict[str, Any]) -> dict[str, Any]:
@@ -646,7 +647,7 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
                 # `advancement_feat` 的槽由 `feat_refs` 承载，重建时从那里
                 # 重新发放；一起搬进来只会被当成"这个角色没有的槽"。
                 and self._creation_choice_kinds.get(
-                    str(record.get("feature_id")), "",
+                    (str(record.get("owner") or ""), str(record.get("feature_id") or "")), "",
                 ) in {"skill_proficiency", "language", "feature_option"}
             ],
         }
