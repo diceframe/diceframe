@@ -36,8 +36,6 @@ from src.localization.messages import t
 
 logger = logging.getLogger("trpg")
 
-#: 冻结的存量错误码（来自下面的映射表）。新增错误码必须走 error_payload。
-FROZEN_ERROR_CODES: frozenset[str] = frozenset()
 #: 历史遗留的 UPPER_SNAKE code，仍在抛出点声明。新 code 一律 snake_case。
 LEGACY_DECLARED_CODES: frozenset[str] = frozenset({
     "ACCESS_PASSWORD_CHANGED",
@@ -302,6 +300,7 @@ ERROR_CODE_MAP: dict[str, str] = {
     "seconds 必须是整数（秒，0=禁用）": "invalid_seconds",
 }
 
+#: 冻结的存量错误码（来自上面的映射表）。新增错误码必须走 error_payload。
 FROZEN_ERROR_CODES = frozenset(ERROR_CODE_MAP.values())
 
 
@@ -338,6 +337,35 @@ def validate_error_code(code: str) -> str:
     )
 
 
+def declared_error_code(result: object) -> str:
+    """The error code of a service/orchestrator result, in either spelling.
+
+    Service payloads moved to `error_code` with `error_payload`; older engine
+    results still carry `code`. Route status must not depend on which one a
+    given module happens to use, otherwise a 409 silently becomes a 400 —
+    read codes through here instead of `result.get("code")`.
+    """
+
+    if not isinstance(result, dict):
+        return ""
+    for key in ("error_code", "code"):
+        value = result.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def error_fields(key: str, /, *, code: str | None = None, **params: object) -> dict:
+    """``{"error_code", "error"}`` only — for bodies that must keep their shape.
+
+    Route handlers that answer with a bare ``{"error": ...}`` object use this
+    so adding a code does not also add an ``ok`` field.
+    """
+
+    resolved = validate_error_code(code or error_code_for_key(key))
+    return {"error_code": resolved, "error": t(key, **params)}
+
+
 def error_payload(key: str, /, *, code: str | None = None, **params: object) -> dict:
     """An error result that carries its stable code.
 
@@ -347,8 +375,7 @@ def error_payload(key: str, /, *, code: str | None = None, **params: object) -> 
     the frontend and third-party clients translate from.
     """
 
-    resolved = validate_error_code(code or error_code_for_key(key))
-    return {"ok": False, "error_code": resolved, "error": t(key, **params)}
+    return {"ok": False, **error_fields(key, code=code, **params)}
 
 
 def _localized_error(code: str) -> str | None:

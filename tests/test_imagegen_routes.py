@@ -605,7 +605,11 @@ async def test_storyboard_candidate_rejects_entry_replaced_while_waiting_for_aut
     result = await service.analyze_storyboard("web|room|bot", "gm", 3)
 
     assert replaced
-    assert result == {"ok": False, "error": "目标剧情已变化，请重新分析分镜"}
+    assert result == {
+        "ok": False,
+        "error_code": "generated_images_story_changed_analyze_again",
+        "error": "目标剧情已变化，请重新分析分镜",
+    }
     assert "scene_panel_candidate" not in replacement
 
 

@@ -23,6 +23,7 @@ from src.webui.routes.game_route_common import (
     _narration_callbacks,
 )
 from src.localization.messages import t
+from src.webui.errors import declared_error_code
 
 
 async def api_gm_command(request: web.Request) -> web.Response:
@@ -41,7 +42,7 @@ async def api_gm_command(request: web.Request) -> web.Response:
             status=400,
         )
     result = await api.gm_command(gk, command, str(body.get("mode", "note") or "note"))
-    status = 200 if result.get("ok") else 409 if result.get("code") == "REWRITE_IN_PROGRESS" else 400
+    status = 200 if result.get("ok") else 409 if declared_error_code(result) == "REWRITE_IN_PROGRESS" else 400
     return web.json_response(result, status=status)
 
 
@@ -52,7 +53,7 @@ async def api_rollback(request: web.Request) -> web.Response:
     if err:
         return err
     result = await api.rollback_round(gk)
-    status = 200 if result.get("ok") else 409 if result.get("code") == "REWRITE_IN_PROGRESS" else 400
+    status = 200 if result.get("ok") else 409 if declared_error_code(result) == "REWRITE_IN_PROGRESS" else 400
     return web.json_response(result, status=status)
 
 
@@ -191,7 +192,7 @@ async def api_kp_question(request: web.Request) -> web.Response:
 def _ruleset_gameplay_status(result: dict) -> int:
     if result.get("ok"):
         return 200
-    code = str(result.get("code") or "")
+    code = declared_error_code(result)
     if code in {"GAME_NOT_FOUND", "RULE_NOT_FOUND"}:
         return 404
     if code in {"AUTH_REQUIRED", "PLAYER_NOT_IN_GAME", "GM_ONLY"}:
@@ -406,7 +407,7 @@ async def api_payment_resolve(request: web.Request) -> web.Response:
     result = await api.resolve_payment(
         gk, payment_id, bool(body.get("accepted")), session_uid
     )
-    code = str(result.get("code") or "")
+    code = declared_error_code(result)
     status = (
         200 if result.get("ok")
         else 404 if code in {"NOT_FOUND", "GAME_NOT_FOUND", "PROPOSAL_NOT_FOUND"}
@@ -515,7 +516,7 @@ async def api_combat_action(request: web.Request) -> web.Response:
         viewer_is_gm=is_game_gm(inst, session_uid, owner),
     )
     await _broadcast_combat_change(request, gk, result)
-    code = str(result.get("code") or "")
+    code = declared_error_code(result)
     status = 200 if result.get("ok") else 409 if code in {
         "INTENT_ID_CONFLICT", "REWRITE_IN_PROGRESS", "STALE_RUN",
     } else 400
@@ -536,7 +537,7 @@ async def api_combat_scheduler_advance(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "GM only"}, status=403)
     result = await api.combat_extension_scheduler_advance(gk)
     await _broadcast_combat_change(request, gk, result)
-    code = str(result.get("code") or "")
+    code = declared_error_code(result)
     status = 200 if result.get("ok") else 409 if code in {
         "REWRITE_IN_PROGRESS", "STALE_RUN",
     } else 400

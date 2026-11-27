@@ -31,14 +31,6 @@ SCAN_FILES = ("src/webui/api.py",)
 _DIRECT_ERROR = re.compile(r'["\']error["\']\s*:\s*')
 
 
-def _is_t_call(node: ast.AST) -> bool:
-    return (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "t"
-    )
-
-
 def undeclared_sites(path: Path) -> list[int]:
     """行号：``{"error": t(...)}`` 顶层返回，且没有 error_code 兄弟键。"""
 
@@ -56,12 +48,9 @@ def undeclared_sites(path: Path) -> list[int]:
         values = node.values
         if "error" not in keys or "error_code" in keys:
             continue
-        error_value = values[keys.index("error")]
-        if _is_t_call(error_value) or (
-            isinstance(error_value, ast.IfExp)
-            and (_is_t_call(error_value.body) or _is_t_call(error_value.orelse))
-        ):
-            found.append(node.lineno)
+        # 计数口径是「载荷有没有 error_code」，不是文案怎么写：`t()` 渲染的、
+        # 裸字面量的、以及只写了 `code` 的，前端都拿不到 code。
+        found.append(node.lineno)
     return sorted(set(found))
 
 

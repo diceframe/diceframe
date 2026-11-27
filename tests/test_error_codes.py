@@ -170,11 +170,13 @@ def test_undeclared_interface_errors_never_grow() -> None:
     assert not grown, f"新增未声明错误码的接口错误（请改用 error_payload）：{grown}"
 
 
-def test_the_reference_module_declares_every_top_level_error() -> None:
-    """worlds.py was migrated first; only the nested batch report still uses t()."""
+def test_the_reference_module_still_declares_its_catalog_errors() -> None:
+    """A migrated module must not quietly fall back to bare `{"error": t(...)}`."""
 
-    sites = _ratchet_module().undeclared_sites(ROOT / "src" / "webui" / "services" / "worlds.py")
-    assert len(sites) == 2  # 批量导入的逐条目失败明细，不是接口错误
+    source = (ROOT / "src" / "webui" / "services" / "worlds.py").read_text(encoding="utf-8")
+    assert 'error_payload("webui.services.worlds.name_empty")' in source
+    assert 'error_payload("webui.services.worlds.world_id_invalid", code="invalid_world_id")' in source
+    # 剩下的是动态/字面量载荷（如批量导入的逐条目明细），由 ratchet 守住不增长。
 
 
 # ------------------------------------------------------------- the exit

@@ -72,6 +72,7 @@ from src.webui.services import memory as memory_service
 from src.webui.services import module_import_adapters
 from src.webui.services._common import _parse_game_key, _is_safe_world_id
 from src.localization.messages import t
+from src.webui.errors import error_payload
 
 # Preserve the existing public import used by callers while the service owns the value.
 CANONICAL_ENTRY_DEFAULTS = lorebooks.CANONICAL_ENTRY_DEFAULTS
@@ -3258,13 +3259,9 @@ class WebAPI:
             return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
         async with instance.authoritative_write() as entered:
             if not entered:
-                return {
-                    "ok": False,
-                    "code": "REWRITE_IN_PROGRESS",
-                    "error": t("webui.api.rewriting_wait_and_retry"),
-                }
+                return error_payload("webui.api.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")
             if self.get_game_instance(game_key) is not instance:
-                return {"ok": False, "code": "STALE_RUN", "error": t("webui.api.game_restarted_refresh_and_retry")}
+                return error_payload("webui.api.game_restarted_refresh_and_retry", code="STALE_RUN")
             async with instance._lock:
                 rule = self._load_rule_for_game(instance)
                 result = combat_extension_service.scheduler_advance(instance, rule)
@@ -3283,13 +3280,9 @@ class WebAPI:
             return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
         async with instance.authoritative_write() as entered:
             if not entered:
-                return {
-                    "ok": False,
-                    "code": "REWRITE_IN_PROGRESS",
-                    "error": t("webui.api.rewriting_wait_and_retry"),
-                }
+                return error_payload("webui.api.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")
             if self.get_game_instance(game_key) is not instance:
-                return {"ok": False, "code": "STALE_RUN", "error": t("webui.api.game_restarted_refresh_and_retry")}
+                return error_payload("webui.api.game_restarted_refresh_and_retry", code="STALE_RUN")
             async with instance._lock:
                 rule = self._load_rule_for_game(instance)
                 result = combat_extension_service.resolve_combat_action(

@@ -28,6 +28,7 @@ from src.webui.routes.game_route_common import (
     _should_rebind_player_session,
 )
 from src.localization.messages import t
+from src.webui.errors import declared_error_code
 
 
 async def api_char_update(request: web.Request) -> web.Response:
@@ -184,7 +185,7 @@ async def _api_live_character_advancement(
         )
     except ValueError as exc:
         result = {"ok": False, "code": "INVALID_ADVANCEMENT", "error": str(exc)}
-    code = str(result.get("code") or "")
+    code = declared_error_code(result)
     status = (
         200
         if result.get("ok")
@@ -214,7 +215,7 @@ async def api_live_advancement_control(request: web.Request) -> web.Response:
         game_key, await request.json(),
     )
     await _broadcast_ruleset_change(request, game_key, result)
-    code = str(result.get("code") or "")
+    code = declared_error_code(result)
     status = (
         200
         if result.get("ok")
@@ -250,7 +251,7 @@ async def api_live_character_rest(request: web.Request) -> web.Response:
     payload = await request.json()
     result = await api.ruleset_rest_submit_live(gk, uid, payload)
     await _broadcast_ruleset_change(request, gk, result)
-    code = str(result.get("code") or "")
+    code = declared_error_code(result)
     status = (
         200
         if result.get("ok")
@@ -280,7 +281,7 @@ async def api_live_character_spells(request: web.Request) -> web.Response:
     ):
         return web.json_response({"ok": False, "error": "无权查看他人角色卡"}, status=403)
     result = api.live_character_spell_options(gk, uid)
-    code = str(result.get("code") or "")
+    code = declared_error_code(result)
     status = (
         200
         if result.get("ok")
@@ -310,7 +311,7 @@ async def api_live_character_rest_options(request: web.Request) -> web.Response:
             {"ok": False, "error": "无权查看他人角色卡的休息选项"}, status=403
         )
     result = api.ruleset_rest_options(gk, uid)
-    code = str(result.get("code") or "")
+    code = declared_error_code(result)
     status = (
         200
         if result.get("ok")
@@ -342,7 +343,7 @@ async def api_live_character_ritual(request: web.Request) -> web.Response:
     payload = await request.json()
     result = await api.ruleset_ritual_resolve_live(gk, uid, payload)
     await _broadcast_ruleset_change(request, gk, result)
-    code = str(result.get("code") or "")
+    code = declared_error_code(result)
     status = (
         200
         if result.get("ok")
@@ -374,7 +375,7 @@ async def api_live_character_ritual_options(request: web.Request) -> web.Respons
             {"ok": False, "error": "无权查看他人角色卡的仪式选项"}, status=403
         )
     result = api.ruleset_ritual_options(gk, uid)
-    code = str(result.get("code") or "")
+    code = declared_error_code(result)
     status = (
         200
         if result.get("ok")
@@ -403,7 +404,7 @@ async def api_game_rest_decide(request: web.Request) -> web.Response:
         gk, str(request.get("user_id", "") or ""), True, payload,
     )
     await _broadcast_ruleset_change(request, gk, result)
-    code = str(result.get("code") or "")
+    code = declared_error_code(result)
     status = (
         200
         if result.get("ok")

@@ -124,7 +124,7 @@ def test_malformed_combat_block_disables_optional_projection() -> None:
         actor_uid="p1",
         viewer_is_gm=False,
     )
-    assert result["code"] == "COMBAT_EXTENSION_NOT_CONFIGURED"
+    assert result["error_code"] == "COMBAT_EXTENSION_NOT_CONFIGURED"
 
 
 @pytest.mark.parametrize("scheduler_kind", ["round_robin", "initiative"])
@@ -205,7 +205,7 @@ def test_player_cannot_drive_other_entities() -> None:
          "actor_id": "player:p2"},
         actor_uid="p1", viewer_is_gm=False,
     )
-    assert result["code"] == "ACTOR_FORBIDDEN"
+    assert result["error_code"] == "ACTOR_FORBIDDEN"
     assert instance.get_character_sheet("p2")["qi"] == before
     npc_forbidden = svc.resolve_combat_action(
         instance, _rule(),
@@ -213,7 +213,7 @@ def test_player_cannot_drive_other_entities() -> None:
          "actor_id": "npc:old_monk"},
         actor_uid="p1", viewer_is_gm=False,
     )
-    assert npc_forbidden["code"] == "ACTOR_FORBIDDEN"
+    assert npc_forbidden["error_code"] == "ACTOR_FORBIDDEN"
 
 
 def test_gm_can_drive_npc_entity() -> None:
@@ -254,13 +254,13 @@ def test_unknown_action_and_target_fail_closed() -> None:
         {"intent_id": "i-6", "action_id": "ability:fly"},
         actor_uid="p1", viewer_is_gm=False,
     )
-    assert result["code"] == "ACTION_NOT_FOUND"
+    assert result["error_code"] == "ACTION_NOT_FOUND"
     result = svc.resolve_combat_action(
         instance, _rule(),
         {"intent_id": "i-7", "action_id": "ability:qi_palm", "target_ids": ["npc:ghost"]},
         actor_uid="p1", viewer_is_gm=False,
     )
-    assert result["code"] == "TARGET_NOT_FOUND"
+    assert result["error_code"] == "TARGET_NOT_FOUND"
 
 
 def test_insufficient_qi_rejects_without_state_change() -> None:
@@ -272,7 +272,7 @@ def test_insufficient_qi_rejects_without_state_change() -> None:
         {"intent_id": "i-8", "action_id": "ability:qi_palm", "target_ids": ["npc:old_monk"]},
         actor_uid="p1", viewer_is_gm=False,
     )
-    assert result["code"] == "ACTION_REJECTED"
+    assert result["error_code"] == "ACTION_REJECTED"
     assert combat_extension_state.current(instance) == before_pools
     assert instance.get_character_sheet("p1")["qi"] == 3
 
@@ -286,7 +286,7 @@ def test_unconfigured_rule_is_rejected() -> None:
         {"intent_id": "i-9", "action_id": "anything"},
         actor_uid="p1", viewer_is_gm=False,
     )
-    assert result["code"] == "COMBAT_EXTENSION_NOT_CONFIGURED"
+    assert result["error_code"] == "COMBAT_EXTENSION_NOT_CONFIGURED"
 
 
 def test_state_survives_round_trip() -> None:
@@ -413,7 +413,7 @@ def test_scheduler_gates_actions_before_ready() -> None:
          "actor_id": other},
         actor_uid=actor_uid, viewer_is_gm=viewer_is_gm,
     )
-    assert result["code"] == "SCHEDULER_NOT_READY"
+    assert result["error_code"] == "SCHEDULER_NOT_READY"
 
 
 def test_ready_actor_action_consumes_turn() -> None:
@@ -510,7 +510,7 @@ def test_repeated_intent_replays_without_double_spending() -> None:
         actor_uid="p1",
         viewer_is_gm=False,
     )
-    assert conflict["code"] == "INTENT_ID_CONFLICT"
+    assert conflict["error_code"] == "INTENT_ID_CONFLICT"
     assert instance.get_character_sheet("p1")["qi"] == 42
 
 
@@ -534,8 +534,8 @@ def test_multi_target_or_malformed_target_intent_is_rejected() -> None:
         viewer_is_gm=False,
     )
 
-    assert repeated["code"] == "INVALID_TARGETS"
-    assert malformed["code"] == "INVALID_TARGETS"
+    assert repeated["error_code"] == "INVALID_TARGETS"
+    assert malformed["error_code"] == "INVALID_TARGETS"
     assert instance.get_character_sheet("p1")["qi"] == 50
     assert instance.npcs["old_monk"]["hp"] == 14
 
@@ -554,8 +554,8 @@ def test_combat_writes_are_rejected_outside_action_phase() -> None:
     )
     advance = svc.scheduler_advance(instance, _rule())
 
-    assert action["code"] == "ROUND_NOT_ACCEPTING_ACTIONS"
-    assert advance["code"] == "ROUND_NOT_ACCEPTING_ACTIONS"
+    assert action["error_code"] == "ROUND_NOT_ACCEPTING_ACTIONS"
+    assert advance["error_code"] == "ROUND_NOT_ACCEPTING_ACTIONS"
     assert combat_extension_state.current(instance) == {}
 
 
@@ -576,7 +576,7 @@ def test_corrupt_idempotency_record_fails_closed_without_reexecuting() -> None:
         instance, _rule(), intent, actor_uid="p1", viewer_is_gm=False,
     )
 
-    assert replay["code"] == "INTENT_RECORD_INVALID"
+    assert replay["error_code"] == "INTENT_RECORD_INVALID"
     assert instance.get_character_sheet("p1")["qi"] == 42
     assert instance.npcs["old_monk"]["hp"] == 4
 
@@ -600,7 +600,7 @@ def test_unsupported_combat_state_schema_rejects_writes(
         viewer_is_gm=False,
     )
 
-    assert result["code"] == "COMBAT_STATE_UNSUPPORTED"
+    assert result["error_code"] == "COMBAT_STATE_UNSUPPORTED"
     assert instance.get_character_sheet("p1")["qi"] == 50
 
 
@@ -689,7 +689,7 @@ def test_inventory_is_not_consumed_when_action_is_rejected() -> None:
         viewer_is_gm=False,
     )
 
-    assert result["code"] == "ACTION_REJECTED"
+    assert result["error_code"] == "ACTION_REJECTED"
     assert instance.get_character_sheet("p1")["inventory"] == [
         {"name": "回春丹", "qty": 1},
     ]
@@ -760,7 +760,7 @@ def test_malformed_scheduler_state_cannot_bypass_turn_gating() -> None:
         viewer_is_gm=False,
     )
 
-    assert result["code"] == "SCHEDULER_STATE_INVALID"
+    assert result["error_code"] == "SCHEDULER_STATE_INVALID"
     assert instance.get_character_sheet("p1")["qi"] == 50
 
 
@@ -897,7 +897,7 @@ async def test_facade_rejects_combat_write_during_historical_rewrite(
         release.set()
         await rewrite
 
-    assert result["code"] == "REWRITE_IN_PROGRESS"
+    assert result["error_code"] == "REWRITE_IN_PROGRESS"
     assert instance.get_character_sheet("p1")["qi"] == 50
     assert combat_extension_state.current(instance) == {}
 
@@ -932,4 +932,4 @@ async def test_facade_action_path_is_usable(web_api) -> None:
     )
     # template_world 未声明 combat：应得到显式"未配置"，而不是 500。
     assert result["ok"] is False
-    assert result["code"] == "COMBAT_EXTENSION_NOT_CONFIGURED"
+    assert result["error_code"] == "COMBAT_EXTENSION_NOT_CONFIGURED"

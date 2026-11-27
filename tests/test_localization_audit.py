@@ -140,7 +140,19 @@ def test_the_interface_ratchet_never_grows(error_codes) -> None:
 def test_the_interfaces_are_scanned_including_the_orchestrator(error_codes) -> None:
     """`api.py` 直接组装响应体；漏扫它等于给 orchestrator 开一条免检通道。"""
 
+    assert "src/webui/api.py" in error_codes.SCAN_FILES
     scanned = set(error_codes.scan())
     assert "src/webui/api.py" in scanned
     assert any(name.startswith("src/webui/services/") for name in scanned)
     assert any(name.startswith("src/webui/routes/") for name in scanned)
+
+
+def test_a_payload_that_only_declares_code_still_counts(tmp_path: Path, error_codes) -> None:
+    """`code` 是前端读不到的写法：它和完全没声明一样需要迁移。"""
+
+    path = tmp_path / "sample.py"
+    path.write_text(
+        'VALUE = {"ok": False, "code": "STALE_RUN", "error": "x"}\n',
+        encoding="utf-8",
+    )
+    assert len(error_codes.undeclared_sites(path)) == 1
