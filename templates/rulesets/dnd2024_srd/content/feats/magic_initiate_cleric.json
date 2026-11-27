@@ -4,7 +4,7 @@
   "id": "magic_initiate_cleric",
   "automation_level": "guided",
   "category": "origin",
-  "spell_list": "cleric",
+  "parameters": {"spell_list": "cleric"},
   "choice_specs": [
     {"id": "spellcasting_ability", "count": 1, "option_ids": ["int", "wis", "cha"]},
     {

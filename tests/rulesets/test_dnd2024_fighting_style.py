@@ -678,9 +678,12 @@ def test_advancement_rejects_invalid_feat_parameters() -> None:
 
     for bad in (
         {"ranged_damage_bonus": 2},
-        {"ranged_attack_bonus": 0},
+        # 值域由参数注册表按条目给出：ranged_attack_bonus 是 -10..10，
+        # 所以 11 与 -11 越界，而 0 与 -2 都是合法值（见函数末尾）。
         {"ranged_attack_bonus": 11},
+        {"ranged_attack_bonus": -11},
         {"ranged_attack_bonus": True},
+        {"ranged_attack_bonus": "2"},
     ):
         mutated = {**feats, "archery": {**feats["archery"], "parameters": bad}}
         with pytest.raises(ProgressionCatalogError):
@@ -690,6 +693,19 @@ def test_advancement_rejects_invalid_feat_parameters() -> None:
                     advancement_feat_catalog={**catalog, "feats": mutated},
                 ),
             )
+
+    # 旧的白名单把每个数值钉在 1..10，惩罚值根本写不进来。注册表按条目给
+    # 值域，负加成现在是一条合法声明。
+    negative = {
+        **feats,
+        "archery": {**feats["archery"], "parameters": {"ranged_attack_bonus": -2}},
+    }
+    Dnd2024AdvancementEngine(
+        bundle_with(
+            bundle,
+            advancement_feat_catalog={**catalog, "feats": negative},
+        ),
+    )
 
 
 # --------------------------------------------------------------------------

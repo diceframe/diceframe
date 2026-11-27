@@ -4,12 +4,14 @@
   "id": "skilled",
   "automation_level": "deterministic",
   "category": "origin",
-  "proficiency_choice": {
+  "choice": {
+    "id": "proficiencies",
+    "kind": "skill_proficiency",
+    "category": "skill_or_tool",
     "count": 3,
-    "allowed_kinds": [
-      "skill",
-      "tool"
-    ]
+    "grants": "proficiency",
+    "requires_proficiency": false,
+    "exclude_expertise": false
   },
   "source_ref": "srd-5.2.1:p87:skilled"
 }

@@ -49,9 +49,11 @@ EQUIPMENT_REQUIREMENT_KEYS = frozenset(
 FEATURE_CHOICE_KINDS = frozenset({
     "advancement_feat", "skill_proficiency", "feature_option",
 })
-# 技能选择最终"授予什么"的闭集。目前只有 Expertise；未知值必须加载期拒绝，
+# 技能选择最终"授予什么"的闭集。``expertise`` 是子职侧的加值翻倍，
+# ``proficiency`` 是专长侧（Skilled）的"直接获得熟练"——两者都写在这张表里，
+# 因为玩家看到的是同一个"选技能"动作，只有结果不同。未知值必须加载期拒绝，
 # 否则选中一个技能却在运行时什么都不发生。
-SKILL_CHOICE_GRANTS = frozenset({"expertise"})
+SKILL_CHOICE_GRANTS = frozenset({"expertise", "proficiency"})
 # 特性参数的射程键统一以英尺计。``range_ft`` 是"该特性对目标生效的射程"，
 # 与前缀式 ``aura_range_ft``/``defeat_share_range_ft`` 并列：后者是"一个特性有
 # 多条射程"时才需要的消歧前缀，单条射程用裸键即可。
@@ -292,8 +294,21 @@ class FeatureChoice:
     exclude_expertise: bool = True
 
 
-def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
-    """Validate a declared player choice, failing closed on unknown shapes."""
+def _parse_feature_choice(
+    feature_id: str,
+    raw: Any,
+    *,
+    allow_skill_or_tool: bool = False,
+    allow_proficiency_grant: bool = False,
+) -> FeatureChoice | None:
+    """Validate a declared player choice, failing closed on unknown shapes.
+
+    ``allow_skill_or_tool`` / ``allow_proficiency_grant`` are opt-in because the
+    two widenings belong to the *feat* side of the catalog: a subclass skill
+    slot always picks from skills and always grants Expertise.  Leaving them on
+    for every caller would ship two values nothing on that side can consume --
+    exactly the "declared but unread" shape this slice exists to remove.
+    """
 
     if raw is None:
         return None
@@ -333,14 +348,28 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
         "advancement_feat": "feat:",
         "feature_option": "feature:",
     }.get(kind, "skill:")
+    # ``skill_or_tool`` 的候选是"技能或工具"的并集，一个前缀表达不了：Skilled
+    # 的三个名额可以在两类里任意分配。子职侧只用 ``skill``，因此这条分支不
+    # 改变既有形状。
+    prefixes: tuple[str, ...] = (prefix,)
+    if allow_skill_or_tool and kind == "skill_proficiency" and category == "skill_or_tool":
+        prefixes = ("skill:", "tool:")
     refs: list[str] = []
     seen: set[str] = set()
     for raw_ref in raw_refs:
-        if not isinstance(raw_ref, str) or not raw_ref.startswith(prefix):
+        matched = next(
+            (
+                candidate for candidate in prefixes
+                if isinstance(raw_ref, str) and raw_ref.startswith(candidate)
+            ),
+            "",
+        )
+        if not matched:
             raise ClassFeatureError(
-                f"{feature_id}.choice.enabled_options must hold {prefix} refs"
+                f"{feature_id}.choice.enabled_options must hold "
+                f"{' or '.join(prefixes)} refs"
             )
-        ref = f"{prefix}{_require_id(raw_ref[len(prefix):], f'{feature_id}.choice.enabled_options')}"
+        ref = f"{matched}{_require_id(raw_ref[len(matched):], f'{feature_id}.choice.enabled_options')}"
         if ref in seen:
             raise ClassFeatureError(
                 f"{feature_id}.choice.enabled_options repeats {ref}"
@@ -362,9 +391,13 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
                     f"{feature_id}.choice.{key} is only meaningful for a "
                     "skill_proficiency choice"
                 )
-    if kind == "skill_proficiency" and category != "skill":
+    skill_categories = (
+        {"skill", "skill_or_tool"} if allow_skill_or_tool else {"skill"}
+    )
+    if kind == "skill_proficiency" and category not in skill_categories:
         raise ClassFeatureError(
-            f"{feature_id}.choice.category must be 'skill' for a skill choice"
+            f"{feature_id}.choice.category must be one of "
+            f"{sorted(skill_categories)} for a skill choice"
         )
     if kind == "feature_option" and category != "feature":
         raise ClassFeatureError(
@@ -374,9 +407,12 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
     if kind == "skill_proficiency":
         # 选中的技能"得到什么"必须显式声明：Expertise 与"获得熟练"是两种不同
         # 效果，靠 choice id 猜等于让命名承担语义。
-        if grants not in SKILL_CHOICE_GRANTS:
+        allowed_grants = (
+            SKILL_CHOICE_GRANTS if allow_proficiency_grant else frozenset({"expertise"})
+        )
+        if grants not in allowed_grants:
             raise ClassFeatureError(
-                f"{feature_id}.choice.grants must be one of {sorted(SKILL_CHOICE_GRANTS)}"
+                f"{feature_id}.choice.grants must be one of {sorted(allowed_grants)}"
             )
     elif grants:
         raise ClassFeatureError(
@@ -392,6 +428,28 @@ def _parse_feature_choice(feature_id: str, raw: Any) -> FeatureChoice | None:
         grants=grants,
         requires_proficiency=flags["requires_proficiency"],
         exclude_expertise=flags["exclude_expertise"],
+    )
+
+
+def parse_feature_choice(
+    feature_id: str,
+    raw: Any,
+    *,
+    allow_skill_or_tool: bool = False,
+    allow_proficiency_grant: bool = False,
+) -> FeatureChoice | None:
+    """Validate one declared choice; ``None`` means the declaration has none.
+
+    Public so feat declarations can reuse the exact same shape instead of
+    growing a second, weaker parser of their own.  The two flags are what the
+    feat side turns on; a subclass caller leaves them off.
+    """
+
+    return _parse_feature_choice(
+        feature_id,
+        raw,
+        allow_skill_or_tool=allow_skill_or_tool,
+        allow_proficiency_grant=allow_proficiency_grant,
     )
 
 
@@ -429,17 +487,29 @@ def _validate_feature_choices(
         str(entity.get("id")) for entity in bundle.list("skill")
         if isinstance(entity, Mapping)
     }
+    tool_ids = {
+        str(entity.get("id")) for entity in bundle.list("tool")
+        if isinstance(entity, Mapping)
+    }
     for definition in features:
         choice = definition.choice
         if choice is None:
             continue
         if choice.kind == "skill_proficiency":
+            # ``skill_or_tool`` 从两个目录的并集里选，所以池子是一张表而不是
+            # 一个集合；``skill`` 退化成只有一项，行为与之前完全一致。
+            pools = (
+                {"skill": skill_ids, "tool": tool_ids}
+                if choice.category == "skill_or_tool"
+                else {"skill": skill_ids}
+            )
             for ref in choice.enabled_options:
-                if ref[6:] not in skill_ids:
+                prefix, _, local_id = ref.partition(":")
+                if prefix not in pools or local_id not in pools[prefix]:
                     raise ClassFeatureError(
-                        f"{definition.id}.choice references an undeclared skill: {ref}"
+                        f"{definition.id}.choice references an undeclared {prefix}: {ref}"
                     )
-            pool = len(choice.enabled_options) if choice.enabled_options else len(skill_ids)
+            pool = len(choice.enabled_options) or sum(len(ids) for ids in pools.values())
             if choice.count > pool:
                 raise ClassFeatureError(
                     f"{definition.id}.choice.count exceeds the {choice.category} pool"

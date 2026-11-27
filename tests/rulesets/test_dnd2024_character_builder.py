@@ -91,7 +91,7 @@ def runtime(tmp_path: Path) -> Dnd2024Runtime:
         feat_ref="feat:savage_attacker",
     ))
     _write(root / "content" / "feats" / "savage_attacker.json", _entity(
-        "feat", "savage_attacker", automation_level="guided",
+        "feat", "savage_attacker", automation_level="guided", category="origin",
     ))
     _write(root / "content" / "items" / "chain_mail.json", _entity(
         "item", "chain_mail", item_type="armor", category="heavy",

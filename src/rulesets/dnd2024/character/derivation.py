@@ -7,7 +7,10 @@ from copy import deepcopy
 from typing import Any
 
 from src.rulesets.dnd2024.binding import rule_binding
-from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.features import (
+    Dnd2024ClassFeatureResolver,
+    load_feat_definitions,
+)
 
 from .attunement import AttunementError as _AttunementError
 from .attunement import attunement_capacity as _attunement_capacity
@@ -83,28 +86,42 @@ def _passive_armor_class_bonus(bundle: Any, feat_refs: Collection[str]) -> int:
 
     if not feat_refs:
         return 0
-    catalog = bundle.get("advancement_feat_catalog", "srd_advancement_feats")
-    feats = catalog.get("feats") if isinstance(catalog, Mapping) else None
-    if not isinstance(feats, Mapping):
-        return 0
+    definitions = load_feat_definitions(bundle)
     total = 0
     for ref in {str(raw) for raw in feat_refs}:
-        feat = feats.get(ref.removeprefix("feat:"))
-        if not isinstance(feat, Mapping):
+        definition = definitions.get(ref.removeprefix("feat:"))
+        if definition is None:
             continue
-        effects = feat.get("passive_effects")
-        if not isinstance(effects, list):
+        # 只算"穿甲时才生效"的那一类：不穿甲的角色由调用方决定要不要走这里，
+        # 但声明上的 requires_armor 仍是唯一判据。
+        total += sum(
+            effect.value
+            for effect in definition.passive_effects
+            if effect.kind == "armor_class_bonus" and effect.requires_armor
+        )
+    return total
+
+
+def feat_initiative_bonus(
+    bundle: Any, feat_refs: Collection[str], proficiency_bonus: int,
+) -> int:
+    """The initiative bonus feats declare, read from the parameter registry.
+
+    Alert used to be a membership test against its name.  A second feat with the
+    same effect, or a feat rename, would have meant editing this line; now the
+    declaration says ``initiative_proficiency_bonus`` and the value decides.
+    """
+
+    if not feat_refs:
+        return 0
+    definitions = load_feat_definitions(bundle)
+    total = 0
+    for ref in {str(raw) for raw in feat_refs}:
+        definition = definitions.get(ref.removeprefix("feat:"))
+        if definition is None:
             continue
-        for effect in effects:
-            if not isinstance(effect, Mapping):
-                continue
-            if effect.get("kind") != "armor_class_bonus":
-                continue
-            if effect.get("requires_armor") is not True:
-                continue
-            value = effect.get("value")
-            if isinstance(value, int) and not isinstance(value, bool):
-                total += value
+        if definition.parameters.get("initiative_proficiency_bonus") == "proficiency":
+            total += proficiency_bonus
     return total
 
 
@@ -749,8 +766,7 @@ class CharacterDerivationMixin:
         passive_perception = 10 + int(skill_values.get("perception", 0) or 0)
 
         initiative = ability_modifier(abilities["dex"])
-        if "feat:alert" in feat_refs:
-            initiative += prof
+        initiative += feat_initiative_bonus(self.bundle, feat_refs, prof)
         size_options = list(species.get("size_options") or [])
         selected_size = str(draft.get("species_size") or (size_options[0] if size_options else "medium"))
         language_refs = list(draft.get("language_refs") or [])
@@ -763,19 +779,23 @@ class CharacterDerivationMixin:
             *background_tool_refs, *class_tool_refs, *skilled_tool_refs,
         ]))
 
+        feat_definitions = load_feat_definitions(self.bundle) if feat_refs else {}
         magic_initiate = []
         for feat_ref in feat_refs:
-            feat = self.bundle.get("feat", _ref_id(feat_ref, "feat")) or {}
-            if not feat.get("spell_list"):
+            definition = feat_definitions.get(_ref_id(feat_ref, "feat"))
+            if definition is None:
+                continue
+            spell_list = definition.parameters.get("spell_list")
+            if not spell_list:
                 continue
             answers = feat_choice_answers.get(feat_ref) or {}
             magic_initiate.append({
                 "feat_ref": feat_ref,
-                "spell_list": str(feat["spell_list"]),
+                "spell_list": str(spell_list),
                 "spellcasting_ability": (answers.get("spellcasting_ability") or [""])[0],
                 "cantrip_ids": list(answers.get("cantrips") or []),
                 "level_1_spell_id": (answers.get("level_1_spell") or [""])[0],
-                "source_ref": str(feat.get("source_ref") or ""),
+                "source_ref": definition.source_ref,
             })
 
         grants_with_sources = [
