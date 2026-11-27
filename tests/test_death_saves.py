@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from src.commands.check_planner import _planner_context
 from src.commands.death_save_tracker import resolve_round_death_saves
+from src.commands.round_processor import RoundProcessor
 from src.engine.character_utils import (
     apply_death_save,
     enter_downed_state,
@@ -296,3 +302,100 @@ def test_combat_critical_on_downed_player_counts_double(monkeypatch) -> None:
 
     cs = instance.get_character_sheet("b")
     assert cs["deceased"] is True
+
+
+class _RoundReachedLLM(Exception):
+    pass
+
+
+class _GatePrompt:
+    """Reach the death-save gate, then fail before the LLM call."""
+
+    ruleset_registry = None
+
+    def __init__(self, combat_model: str, rule: RuleSystem) -> None:
+        self.combat_model = combat_model
+        self.rule = rule
+
+    def load_rule_context(self, instance, load_world_template):
+        return SimpleNamespace(
+            rule_appendix="", combat_model=self.combat_model, dice_system="d20",
+            world_data={}, rule=self.rule,
+        )
+
+    def compose_gm_prompt(self, *args, **kwargs):
+        raise _RoundReachedLLM
+
+
+def _gate_processor(combat_model: str, rule: RuleSystem) -> RoundProcessor:
+    processor = RoundProcessor(
+        registry=None,
+        llm_client=SimpleNamespace(default="gate-test"),
+        matcher=None,
+        lorebook_store=None,
+        memory_store=None,
+        prompt=_GatePrompt(combat_model, rule),
+        dice=None,
+        combat=None,
+        puzzles=SimpleNamespace(process_puzzles=lambda instance, text: ""),
+        state_applier=None,
+        progression=None,
+        load_world_template=lambda *args: None,
+        ensure_matcher_for_world=lambda *args: None,
+        narrative_max_tokens=64,
+        summary_max_tokens=64,
+        analysis_max_tokens=64,
+        lore_retriever=SimpleNamespace(retrieve=AsyncMock(return_value=[])),
+    )
+    processor.prepare_round_checks_ai = AsyncMock(return_value=[])
+    return processor
+
+
+def _downed_gate_instance() -> GameInstance:
+    instance = GameInstance(game_key=("web", "ds-gate", "bot"), rule_id="dnd5e")
+    instance.players["a"] = {
+        "character_name": "尤落",
+        "control": {"mode": "human", "revision": 0},
+        "character_sheet": {
+            "hp": 0,
+            "max_hp": 10,
+            "status": "downed",
+            "death_saves": {"success": 0, "failure": 0},
+        },
+    }
+    instance.action_queue = [{"user_id": "a", "text": "我还想起身。"}]
+    return instance
+
+
+@pytest.mark.asyncio
+async def test_authoritative_round_skips_legacy_death_save_tracker(monkeypatch) -> None:
+    from src.commands import round_processor as round_processor_module
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        round_processor_module, "resolve_round_death_saves",
+        lambda instance, rule: calls.append((instance, rule)) or "",
+    )
+    instance = _downed_gate_instance()
+    before = deepcopy(instance.get_character_sheet("a"))
+    processor = _gate_processor("authoritative_event_batch", _dnd())
+
+    with pytest.raises(_RoundReachedLLM):
+        await processor.process_round_impl(instance)
+
+    assert calls == []
+    assert instance.get_character_sheet("a") == before
+
+
+@pytest.mark.asyncio
+async def test_legacy_round_still_rolls_death_saves(monkeypatch) -> None:
+    monkeypatch.setattr("random.randint", lambda _a, _b: 17)
+    instance = _downed_gate_instance()
+    processor = _gate_processor("hp_based", _dnd())
+
+    with pytest.raises(_RoundReachedLLM):
+        await processor.process_round_impl(instance)
+
+    cs = instance.get_character_sheet("a")
+    assert cs["status"] == "downed"
+    assert cs["death_saves"] == {"success": 1, "failure": 0}
