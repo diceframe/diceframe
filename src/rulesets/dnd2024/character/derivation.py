@@ -280,6 +280,74 @@ def derive_speed(
 _SKILL_CHOICE_KEYS = frozenset({"owner", "feature_id", "choice_id", "selected_refs"})
 
 
+def _plan_creation_pools(
+    bundle: Any,
+    features: Any,
+    proxy: Mapping[str, Any],
+    draft: Mapping[str, Any],
+    level: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """The pool picks a draft commits at creation, validated like a level-up.
+
+    An unanswered slot is tolerated (the draft predates the field and the first
+    level-up tops the character up), but anything submitted must satisfy the
+    same count, level, prerequisite and binding rules.
+    """
+
+    from src.rulesets.dnd2024.features import option_pool
+
+    class_ref = str(draft.get("class_ref") or "")
+    cantrips = [
+        str(ref) for ref in (
+            (draft.get("class_spell_choices") or {}).get("cantrip_refs") or []
+        )
+    ]
+    submitted: dict[tuple[str, str, str], list[Any]] = {}
+    for record in draft.get("feature_choices") or []:
+        if not isinstance(record, dict):
+            continue
+        refs = record.get("selected_refs")
+        if not isinstance(refs, list):
+            continue
+        key = (
+            str(record.get("owner") or ""),
+            str(record.get("feature_id") or ""),
+            str(record.get("choice_id") or ""),
+        )
+        submitted.setdefault(key, []).extend(refs)
+    spells_catalog = bundle.get("spell_catalog", "srd_spells") or {}
+    spells = {
+        str(row.get("id")): row
+        for row in (spells_catalog.get("spells") or [])
+        if isinstance(row, dict)
+    }
+    combat = bundle.get("combat_catalog", "srd_combat_core") or {}
+    effects = combat.get("spell_effects") if isinstance(combat, Mapping) else None
+    progression = bundle.get("progression_catalog", "srd_classes") or {}
+    records: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for definition in features.features_for(proxy):
+        choice = definition.choice
+        if choice is None or not choice.count_track:
+            continue
+        record, slot_errors = option_pool.plan_creation_pool(
+            resolver=features,
+            definition=definition,
+            cantrips=cantrips,
+            submitted=submitted.get((definition.owner, definition.id, choice.id)),
+            level=level,
+            track_total=option_pool.track_value(
+                progression, choice.count_track, class_ref, level,
+            ),
+            spells=spells,
+            spell_effects=effects if isinstance(effects, Mapping) else {},
+        )
+        if record is not None:
+            records.append(record)
+        errors.extend(slot_errors)
+    return records, errors
+
+
 def plan_feature_choices(
     raw_choices: Any,
     features: Dnd2024ClassFeatureResolver,
@@ -331,6 +399,7 @@ def plan_feature_choices(
     slots = [
         definition for definition in features.features_for(dict(proxy))
         if definition.choice is not None
+        and not definition.choice.count_track
         and definition.choice.kind in {
             "skill_proficiency", "language", "feature_option",
         }
@@ -717,16 +786,42 @@ class CharacterDerivationMixin:
         # slot has to be validated before any skill value is derived: honouring an
         # unvalidated slot would pay out a doubled bonus for a selection the
         # level-up path would have rejected.
+        creation_proxy = _feature_proxy(
+            draft["class_ref"], level, draft.get("features"),
+        )
+        # 池记录先摘出去：`plan_skill_choices` 会把任何匹配不到技能槽的记录
+        # 判成"这张卡没有这个槽"，而池子本来就由下一段单独校验。
+        pool_keys = {
+            (definition.owner, definition.id, definition.choice.id)
+            for definition in features.features_for(creation_proxy)
+            if definition.choice is not None and definition.choice.count_track
+        }
+        skill_submissions = [
+            record for record in draft.get("feature_choices") or []
+            if not (
+                isinstance(record, dict)
+                and (
+                    str(record.get("owner") or ""),
+                    str(record.get("feature_id") or ""),
+                    str(record.get("choice_id") or ""),
+                ) in pool_keys
+            )
+        ]
         feature_choices, chosen_languages, choice_errors = plan_feature_choices(
-            draft.get("feature_choices"),
+            skill_submissions,
             features,
-            _feature_proxy(draft["class_ref"], level, draft.get("features")),
+            creation_proxy,
             skill_refs,
             level=level,
             known_languages=draft.get("language_refs") or (),
         )
-        if choice_errors:
-            raise ValueError("; ".join(choice_errors))
+        pool_records, pool_errors = _plan_creation_pools(
+            self.bundle, features, creation_proxy, draft, level,
+        )
+        if choice_errors or pool_errors:
+            raise ValueError("; ".join([*choice_errors, *pool_errors]))
+        feature_choices = [*feature_choices, *pool_records]
+
         # grants == "proficiency" 的槽真的把技能加进熟练表：Bonus Proficiencies
         # 与 Primal Knowledge 选中的技能必须计入 skill_values，否则只是记录了
         # 一个名字，玩家拿到的加值是 0。
@@ -739,6 +834,7 @@ class CharacterDerivationMixin:
         ]
         if granted_skills:
             skill_refs = list(dict.fromkeys([*skill_refs, *granted_skills]))
+
         expertise = {
             row["skill_ref"] for row in features.expertise_skills(
                 _feature_proxy(

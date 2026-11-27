@@ -18,6 +18,7 @@ import {
   validateRulesetBuilderDraft,
 } from '../api'
 import type { Dnd2024Draft } from '../types'
+import type { RulesetInvocationChoice } from '@/api/types'
 import { useDnd2024BuilderStore } from '../store'
 import ProgressRail from '../../shared/ProgressRail.vue'
 import ChoiceGrid from '../../shared/ChoiceGrid.vue'
@@ -51,6 +52,7 @@ const emptyChoices = (): RulesetBuilderChoices => ({
   species_sizes: [], species_choices: [], species_skills: [], species_skill_count: 0,
   species_feats: [], species_feat_count: 0, class_tools: [], class_tool_count: 0,
   feat_choices: [],
+  invocation_choices: [],
   recommended_base_abilities: {}, skills: [], languages: [], origin_feats: [],
   quick_presets: [], class_spells: {}, recommended_class_spells: {},
 })
@@ -175,6 +177,66 @@ const ruleChoiceChecklist = computed<CompletionCheck[]>(() => {
   }
   return checks
 })
+// 祈唤槽：建卡时职业表说 1 级有 1 个名额。选择写成 `feature_choices` ——
+// 与升级路径同形状，`_plan_creation_pools` 用同一套规则复核。
+type InvocationPick = { ref: string; object_ref?: string }
+const invocationPicks = ref<Record<string, InvocationPick[]>>({})
+const invocationBindChoice = ref<Record<string, string>>({})
+
+function invocationSlots(): RulesetInvocationChoice[] {
+  return choices.value.invocation_choices || []
+}
+
+function invocationPicked(slot: RulesetInvocationChoice): InvocationPick[] {
+  return invocationPicks.value[slot.id] || []
+}
+
+function invocationBindOptions(option: RulesetInvocationChoice['options'][number]) {
+  return option.bind_options || []
+}
+
+function invocationBindValue(option: RulesetInvocationChoice['options'][number]): string {
+  const explicit = invocationBindChoice.value[option.value]
+  if (explicit) return explicit
+  return String(invocationBindOptions(option).find(row => row.available)?.value || '')
+}
+
+function setInvocationBind(option: RulesetInvocationChoice['options'][number], value: string): void {
+  invocationBindChoice.value[option.value] = value
+}
+
+function toggleInvocation(
+  slot: RulesetInvocationChoice, option: RulesetInvocationChoice['options'][number],
+): void {
+  const objectRef = invocationBindOptions(option).length ? invocationBindValue(option) : ''
+  const selected = [...invocationPicked(slot)]
+  const index = selected.findIndex(
+    pick => pick.ref === option.value && (pick.object_ref || '') === objectRef,
+  )
+  if (index >= 0) selected.splice(index, 1)
+  else if (selected.length < slot.count) {
+    selected.push(objectRef ? { ref: option.value, object_ref: objectRef } : { ref: option.value })
+  }
+  if (selected.length) invocationPicks.value[slot.id] = selected
+  else delete invocationPicks.value[slot.id]
+  syncInvocationChoices()
+}
+
+function syncInvocationChoices(): void {
+  const rows = invocationSlots()
+    .filter(slot => invocationPicked(slot).length)
+    .map(slot => ({
+      owner: slot.owner,
+      feature_id: slot.feature_id,
+      choice_id: slot.choice_id,
+      selected_refs: invocationPicked(slot).map(
+        pick => (pick.object_ref ? { ref: pick.ref, object_ref: pick.object_ref } : pick.ref),
+      ),
+    }))
+  if (rows.length) draft.value.feature_choices = rows
+  else delete draft.value.feature_choices
+}
+
 const incompleteRuleChoices = computed(() => ruleChoiceChecklist.value.filter(item => !item.done))
 const ruleChoicesReady = computed(() => !incompleteRuleChoices.value.length)
 const pointBuyCosts: Record<number, number> = { 8: 0, 9: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 7, 15: 9 }
@@ -742,6 +804,8 @@ onMounted(async () => {
         <fieldset v-if="choices.class_tool_count"><legend>{{ text(`职业工具（${draft.class_tool_refs.length}/${choices.class_tool_count}）`, `Class tools (${draft.class_tool_refs.length}/${choices.class_tool_count})`) }}</legend><div class="check-grid"><label v-for="item in choices.class_tools" :key="item.ref" :class="{ unavailable: refChoiceDisabled('class_tool_refs', item.ref, choices.class_tool_count) }"><input type="checkbox" :checked="draft.class_tool_refs.includes(item.ref)" :disabled="refChoiceDisabled('class_tool_refs', item.ref, choices.class_tool_count)" @change="toggleRef('class_tool_refs', item.ref, choices.class_tool_count)"> {{ item.name }}</label></div></fieldset>
         <fieldset v-if="choices.species_sizes.length > 1"><legend>{{ text('体型', 'Size') }}</legend><div class="check-grid"><label v-for="size in choices.species_sizes" :key="size"><input type="radio" v-model="draft.species_size" :value="size"> {{ optionLabel(size) }}</label></div></fieldset>
         <fieldset v-for="choice in choices.species_choices" :key="choice.id"><legend>{{ optionLabel(choice.id) }}</legend><select :value="draft.species_choice_answers[choice.id] || ''" @change="draft.species_choice_answers[choice.id] = ($event.target as HTMLSelectElement).value"><option value="" disabled>{{ text('请选择', 'Choose') }}</option><option v-for="option in (choice.option_ids || choice.option_refs || [])" :key="option" :value="option">{{ option.includes(':') ? choiceName(option) : optionLabel(option) }}</option></select></fieldset>
+        <fieldset v-for="slot in invocationSlots()" :key="slot.id"><legend>{{ text('祈唤', 'Eldritch Invocation') }}（{{ invocationPicked(slot).length }}/{{ slot.count }}）</legend><p>{{ text('1 级就有一个名额。不选也可以先建卡，升级时系统会按职业表补齐。', 'You have one at level 1. You may leave it empty and let the level-up top you up.') }}</p><div class="check-grid"><label v-for="option in slot.options" :key="option.value" :class="{ unavailable: !option.available }"><input type="radio" :name="slot.id" :checked="invocationPicked(slot).some(pick => pick.ref === option.value && (pick.object_ref || '') === invocationBindValue(option))" :disabled="!option.available" @change="toggleInvocation(slot, option)"> {{ option.name || option.value }}<select v-if="invocationBindOptions(option).length" :value="invocationBindValue(option)" @click.stop @change.stop="setInvocationBind(option, ($event.target as HTMLSelectElement).value)"><option v-for="bind in invocationBindOptions(option)" :key="bind.value" :value="bind.value" :disabled="!bind.available">{{ bind.value }}</option></select></label></div></fieldset>
+
         <fieldset v-for="feat in choices.feat_choices" :key="feat.feat_ref" class="feat-choices"><legend>{{ feat.name }} · {{ text('后续选择', 'Required choices') }}</legend><p>{{ feat.summary }}</p><div v-for="spec in feat.specs" :key="spec.id" class="feat-choice-group"><b>{{ spec.name }}</b><div class="check-grid"><label v-for="option in spec.options" :key="option.value" :class="{ unavailable: featChoiceDisabled(feat.feat_ref, spec.id, option.value, spec.count) }"><input :type="spec.count === 1 ? 'radio' : 'checkbox'" :name="`${feat.feat_ref}-${spec.id}`" :checked="(draft.feat_choice_answers[feat.feat_ref]?.[spec.id] || []).includes(option.value)" :disabled="featChoiceDisabled(feat.feat_ref, spec.id, option.value, spec.count)" @change="setFeatChoice(feat.feat_ref, spec.id, option.value, spec.count)"> {{ option.name }}</label></div><small>{{ text(`已选 ${(draft.feat_choice_answers[feat.feat_ref]?.[spec.id] || []).length}/${spec.count}`, `Selected ${(draft.feat_choice_answers[feat.feat_ref]?.[spec.id] || []).length}/${spec.count}`) }}</small></div><code v-if="sourceVisible">{{ feat.source_ref }}</code></fieldset>
         <fieldset v-if="classSpells" class="class-spells"><legend>{{ text('职业法术', 'Class spells') }}</legend>
           <div class="spell-toolbar"><p>{{ text('只列出该职业在当前等级可合法选择的法术。推荐组合可以直接使用，也可以逐项替换。', 'Only spells legal for this class and level are listed. Keep the recommended set or replace individual choices.') }}</p><button type="button" @click="setRecommendedSpells">{{ text('恢复推荐组合', 'Restore recommendations') }}</button></div>

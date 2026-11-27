@@ -42,6 +42,7 @@ from .environment import CombatEnvironmentMixin
 from .check_modes import condition_check_bonus_rolls, condition_flags, effective_speed
 from .check_windows import CombatCheckWindowsMixin
 from .divine_actions import CombatDivineActionsMixin
+from . import invocation_effects
 from .stealth_actions import CombatStealthActionsMixin
 from .martial_actions import CombatMartialActionsMixin
 from .support_actions import CombatSupportActionsMixin
@@ -1134,9 +1135,22 @@ class Dnd2024CombatEngine(
         extended = bool(
             isinstance(concentration, dict) and concentration.get("extended")
         )
+        # 两个来源都是"掷两颗取高"，但它们回答的是不同问题：Extended Spell
+        # 把持续时间拉长（F28），Eldritch Mind 只给维持专注的这一下优势。
+        # 合并成"要不要掷第二颗"是对的，合并成"谁给的"就不行，所以来源分开记。
+        advantage_sources: list[dict[str, str]] = []
+        if extended:
+            advantage_sources.append({"code": "extended_spell", "mode": "advantage"})
+        concentration_feature = invocation_effects.concentration_advantage(
+            self.features, self._feature_character(target),
+        )
+        if concentration_feature:
+            advantage_sources.append(
+                {"code": concentration_feature, "mode": "advantage"},
+            )
         first = int(rng.randint(1, 20))
-        second = int(rng.randint(1, 20)) if extended else None
-        roll = max(first, second) if extended else first
+        second = int(rng.randint(1, 20)) if advantage_sources else None
+        roll = max(first, second) if advantage_sources else first
         # 专注维持是一次体质豁免，条件声明的豁免加值骰同样生效。
         check_bonus_rolls = condition_check_bonus_rolls(
             self.catalog.conditions, target.get("conditions") or {}, "saving_throw", rng,
@@ -1151,8 +1165,7 @@ class Dnd2024CombatEngine(
             "type": "check.resolved", "kind": "concentration", "actor_id": target["actor_id"],
             "rolls": [value for value in (first, second) if value is not None],
             "natural": roll, "modifier": modifier,
-            **({"advantage_sources": [{"code": "extended_spell", "mode": "advantage"}]}
-               if extended else {}),
+            **({"advantage_sources": advantage_sources} if advantage_sources else {}),
             "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
             "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
             "total": total, "target": dc, "success": success,
