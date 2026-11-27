@@ -41,14 +41,18 @@ def attack_is_ranged(weapon: dict[str, Any]) -> bool:
     Stat-block attacks are deep-copied as-is by ``_available_attacks`` and
     carry ``range`` / ``long_range`` but no ``ranged`` flag, so keying the
     redirect's 60-foot range off ``weapon["ranged"]`` alone would make every
-    monster bow a melee attack.  A thrown melee weapon is not included: the
-    engine cannot tell "stabbed with it" from "threw it", and guessing ranged
-    would hand the monk a 60-foot redirect for a dagger fight.
+    monster bow a melee attack.  The SRD catalog stores a melee attack as
+    ``{"range": 5, "long_range": 5}`` and a reach weapon as 10/10, so the
+    question is whether the attack's own reach goes beyond melee -- never
+    whether a long range exists at all, which every melee stat block has.
+    A thrown melee weapon is not included: the engine cannot tell "stabbed
+    with it" from "threw it", and guessing ranged would hand the monk a
+    60-foot redirect for a dagger fight.
     """
 
     if bool(weapon.get("ranged")):
         return True
-    return int(weapon.get("long_range", 0) or 0) > 0
+    return int(weapon.get("range", 5) or 5) > 10
 
 # 受击反应特性效果注册表：条目 = 参数名 + 声明的效果种类。
 # 注册表之外不存在硬编码特性分支；新受击反应特性 = 注册表行 + 目录声明。
@@ -693,7 +697,7 @@ class CombatReactionSpellsMixin:
             "redirect": {
                 "feature_id": str(choice["feature_id"]),
                 "focus_cost": cost,
-                "dice": f"{int(redirect.get('dice_count') or 0)}{die.split('d')[-1]}" if "d" in die else "",
+                "dice": f"{int(redirect.get('dice_count') or 0)}d{die.split('d')[-1]}" if "d" in die else "",
                 "dice_count": int(redirect.get("dice_count") or 0),
                 "ability": str(redirect.get("ability") or "dex"),
                 "save_ability": str(redirect.get("ability") or "dex"),

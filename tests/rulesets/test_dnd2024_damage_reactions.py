@@ -11,6 +11,8 @@ slice stops it and the gap is registered as GAP-50.
 
 from __future__ import annotations
 
+import pytest
+
 from src.engine.game_instance import GameInstance
 from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.character.builder import ability_modifier
@@ -372,3 +374,58 @@ def test_the_owner_sees_the_redirect_targets_in_their_own_window() -> None:
     }
     assert redirect["save_dc"] > 0
     assert projected["options"] == ["redirect", "decline"]
+
+
+@pytest.mark.parametrize("level", [5, 9, 13])
+def test_the_redirect_rolls_the_monks_martial_arts_die(level: int) -> None:
+    """Two rolls of *the monk's* Martial Arts die, which stops being a d6 at 5."""
+
+    engine, instance, _sheet = _instance(
+        level=level, focus=3, enemy=[goblin(), _second_goblin()],
+    )
+    combat = ruleset_runtime.state(instance)["combat"]
+    die = str(engine._actor_view(instance, combat, "player:gm")["martial_arts_die"])
+    assert die != "1d6"
+    size = int(die.split("d")[-1])
+
+    _hit(engine, instance, [15, 4])
+    _resolve(engine, instance, {
+        "option": "feature", "feature_id": "deflect_attacks",
+    }, SequenceRng([10]))
+    window = _pending(instance)
+    assert window is not None
+    # 骰式少了字母 d 就不是 NdM，结算时会静默回退成 d6。
+    assert window["redirect"]["dice"] == f"2d{size}"
+    resolved = _resolve(engine, instance, {
+        "option": "redirect", "redirect_target_id": "enemy:goblin-2",
+    }, SequenceRng([2, size, size]))
+
+    landed = _event(resolved, "resource.changed")
+    assert landed["rolls"] == [size, size]
+
+
+@pytest.mark.parametrize(
+    ("shape", "ranged"),
+    [((5, 5), False), ((10, 10), False), ((80, 320), True), ((60, 60), True)],
+)
+def test_the_redirect_range_follows_whether_the_attack_was_ranged(
+    shape: tuple[int, int], ranged: bool,
+) -> None:
+    """The SRD catalog stores melee as 5/5 (reach 10/10) and a bow as 80/320."""
+
+    attacker = goblin()
+    attacker["attacks"][0]["range"], attacker["attacks"][0]["long_range"] = shape
+    engine, instance, _sheet = _instance(
+        level=3, focus=3, enemy=[attacker, _second_goblin()],
+    )
+
+    _hit(engine, instance, [15, 4])
+    first = _pending(instance)
+    assert first is not None
+    assert first["attack_ranged"] is ranged
+    _resolve(engine, instance, {
+        "option": "feature", "feature_id": "deflect_attacks",
+    }, SequenceRng([10]))
+    window = _pending(instance)
+    assert window is not None
+    assert window["redirect"]["range_ft"] == (60 if ranged else 5)
