@@ -98,6 +98,7 @@ class CombatHitResolutionMixin:
             self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
             defender: dict[str, Any], check: dict[str, Any], damage_event: dict[str, Any],
             intent: dict[str, Any], next_decision: dict[str, Any] | None = None,
+            ranged: bool = False,
         ) -> dict[str, Any] | None: ...
         def _hit_spell_offer(
             self, instance, combat, actor, weapon, target_id, damage_event, intent
@@ -427,6 +428,8 @@ class CombatHitResolutionMixin:
         reaction = self._hit_reaction_offer(
             instance, combat, actor, target, check, damage_event, intent,
             next_decision=next_decision,
+            # 拨挡的重定向范围取决于原攻击是近战还是远程，窗口建立时就要定。
+            ranged=bool(weapon.get("ranged")),
         )
         if reaction is not None and str(target["actor_id"]) in spent_reactions:
             # 同一反应预算已被本次攻击的检定面花掉：不能再开防守反应窗。

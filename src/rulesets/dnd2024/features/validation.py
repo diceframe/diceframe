@@ -146,6 +146,9 @@ def validate_declarations(
     combat_conditions = (
         bundle.get("combat_catalog", "srd_combat_core") or {}
     ).get("conditions", {})
+    known_feature_ids = frozenset(
+        definition.id for definition in catalog.features_by_key.values()
+    )
     for definition in catalog.features_by_key.values():
         spell_ref = definition.parameters.get("granted_spell_id")
         if spell_ref is not None:
@@ -210,6 +213,7 @@ def validate_declarations(
         validate_overchannel_parameters(definition)
         validate_hit_rider_parameters(definition)
         validate_cunning_strike_parameters(definition, combat_conditions)
+        validate_deflect_parameters(definition, known_feature_ids)
         validate_attack_state_parameters(definition)
         validate_mark_parameters(definition)
         if definition.resource_id:
@@ -1088,7 +1092,90 @@ def positive_int_parameter(
         raise ClassFeatureError(f"{feature_id}.{key} must be a positive integer")
 
 
-def validate_attack_state_parameters(definition: ClassFeatureDefinition) -> None:
+_DEFLECT_KEYS = frozenset({
+    "reduction_dice",
+    "reduction_ability",
+    "reduction_level_scale",
+    "deflect_damage_types",
+    "redirect_focus_cost",
+    "redirect_dice_count",
+    "redirect_ability",
+    "redirect_range_melee_ft",
+    "redirect_range_ranged_ft",
+    "redirect_requires_total_cover",
+})
+_DEFLECT_ENERGY_KEYS = frozenset({"extends_feature", "deflect_all_damage_types"})
+
+
+def validate_deflect_parameters(
+    definition: ClassFeatureDefinition, known_ids: frozenset[str],
+) -> None:
+    """Fail closed on the two Deflect declarations.
+
+    ``deflect_energy`` is not a second implementation: it names the feature it
+    extends and flips one switch.  Anything else it declares would promise
+    behaviour no code reads, so the key set is exact in both directions.
+    """
+
+    feature_id = definition.id
+    if feature_id not in {"deflect_attacks", "deflect_energy"}:
+        return
+    # 延迟导入：与 ``validate_cunning_strike_parameters`` 同一个理由。
+    from src.rulesets.dnd2024.combat.action_adapter import _NDM_RE
+    from src.rulesets.dnd2024.combat.catalog import DAMAGE_TYPES
+
+    parameters = definition.parameters
+    if feature_id == "deflect_energy":
+        unknown = sorted(set(parameters) - _DEFLECT_ENERGY_KEYS)
+        if unknown:
+            raise ClassFeatureError(f"{feature_id} does not support {', '.join(unknown)}")
+        missing = sorted(_DEFLECT_ENERGY_KEYS - set(parameters))
+        if missing:
+            raise ClassFeatureError(f"{feature_id} is missing {', '.join(missing)}")
+        target = parameters["extends_feature"]
+        if not isinstance(target, str) or target not in known_ids:
+            raise ClassFeatureError(
+                f"{feature_id}.extends_feature names an unknown feature"
+            )
+        if parameters["deflect_all_damage_types"] is not True:
+            raise ClassFeatureError(
+                f"{feature_id}.deflect_all_damage_types must be true"
+            )
+        return
+    unknown = sorted(set(parameters) - _DEFLECT_KEYS)
+    if unknown:
+        raise ClassFeatureError(f"{feature_id} does not support {', '.join(unknown)}")
+    missing = sorted(_DEFLECT_KEYS - set(parameters))
+    if missing:
+        raise ClassFeatureError(f"{feature_id} is missing {', '.join(missing)}")
+    dice = parameters["reduction_dice"]
+    if not isinstance(dice, str) or not _NDM_RE.match(dice):
+        raise ClassFeatureError(f"{feature_id}.reduction_dice must be an NdM formula")
+    for key in ("reduction_ability", "redirect_ability"):
+        if parameters[key] not in ABILITY_IDS:
+            raise ClassFeatureError(f"{feature_id}.{key} must be one of {sorted(ABILITY_IDS)}")
+    types = parameters["deflect_damage_types"]
+    if (
+        not isinstance(types, list)
+        or not types
+        or any(not isinstance(item, str) or item not in DAMAGE_TYPES for item in types)
+    ):
+        raise ClassFeatureError(
+            f"{feature_id}.deflect_damage_types must list known damage types"
+        )
+    positive_int_parameter(feature_id, parameters, "reduction_level_scale")
+    positive_int_parameter(feature_id, parameters, "redirect_focus_cost")
+    positive_int_parameter(feature_id, parameters, "redirect_dice_count")
+    positive_int_parameter(feature_id, parameters, "redirect_range_melee_ft")
+    positive_int_parameter(feature_id, parameters, "redirect_range_ranged_ft")
+    if parameters["redirect_requires_total_cover"] is not True:
+        raise ClassFeatureError(
+            f"{feature_id}.redirect_requires_total_cover must be true"
+        )
+
+
+def validate_attack_state_parameters(
+    definition: ClassFeatureDefinition) -> None:
     """Fail closed on the pre-roll declaration and persistent-state contract.
 
     Same two-way rule as the rider table: an unknown key promises behaviour
