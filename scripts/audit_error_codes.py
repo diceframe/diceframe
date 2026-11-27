@@ -19,12 +19,15 @@ import ast
 import json
 import re
 import sys
+import warnings
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE_PATH = ROOT / "scripts" / "error_code_baseline.json"
 SCAN_DIRS = ("src/webui/services", "src/webui/routes")
-#: 目录里只放“返回给请求方”的提示；引擎内部文案由 messages 契约管。
+SCAN_FILES = ("src/webui/api.py",)
+#: 只巡接口边界：这些载荷直接进响应体。引擎内部文案由 messages 契约管；
+#: 需要 code 的引擎结果由 webui 层包成 error_payload。
 _DIRECT_ERROR = re.compile(r'["\']error["\']\s*:\s*')
 
 
@@ -40,7 +43,9 @@ def undeclared_sites(path: Path) -> list[int]:
     """行号：``{"error": t(...)}`` 顶层返回，且没有 error_code 兄弟键。"""
 
     try:
-        tree = ast.parse(path.read_bytes().decode("utf-8-sig"))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)  # 被扫描文件自身的转义告警
+            tree = ast.parse(path.read_bytes().decode("utf-8-sig"))
     except SyntaxError:  # 扫描失败不能静默当成 0
         raise
     found: list[int] = []
@@ -62,14 +67,16 @@ def undeclared_sites(path: Path) -> list[int]:
 
 def scan() -> dict[str, list[int]]:
     result: dict[str, list[int]] = {}
+    paths: list[Path] = []
     for dirname in SCAN_DIRS:
         base = ROOT / dirname
-        if not base.exists():
-            continue
-        for path in sorted(base.rglob("*.py")):
-            sites = undeclared_sites(path)
-            if sites:
-                result[path.relative_to(ROOT).as_posix()] = sites
+        if base.exists():
+            paths.extend(sorted(base.rglob("*.py")))
+    paths.extend(path for path in (ROOT / name for name in SCAN_FILES) if path.exists())
+    for path in paths:
+        sites = undeclared_sites(path)
+        if sites:
+            result[path.relative_to(ROOT).as_posix()] = sites
     return result
 
 

@@ -110,10 +110,13 @@ def _declared_codes() -> dict[str, str]:
         for node in ast.walk(tree):
             if isinstance(node, ast.Dict):
                 keys = [k.value for k in node.keys if isinstance(k, ast.Constant)]
-                if "error_code" in keys:
-                    value = node.values[keys.index("error_code")]
-                    if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                        found.setdefault(value.value, rel)
+                # `code` 只在带 error 的错误载荷里算错误码；它曾经绕过前端。
+                names = ("error_code", "code") if "error" in keys else ("error_code",)
+                for name in names:
+                    if name in keys:
+                        value = node.values[keys.index(name)]
+                        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                            found.setdefault(value.value, rel)
             if (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)

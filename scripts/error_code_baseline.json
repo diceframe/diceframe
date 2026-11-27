@@ -1,6 +1,7 @@
 {
   "note": "ADR-0015 §4 ratchet: undeclared interface errors per file. Only decrease.",
   "files": {
+    "src/webui/api.py": 4,
     "src/webui/routes/_common.py": 1,
     "src/webui/routes/asr.py": 2,
     "src/webui/routes/assistant.py": 1,
@@ -36,7 +37,6 @@
     "src/webui/services/avatars.py": 11,
     "src/webui/services/bot_access.py": 2,
     "src/webui/services/bot_extensions.py": 4,
-    "src/webui/services/characters.py": 21,
     "src/webui/services/check_reveals.py": 3,
     "src/webui/services/combat_extension.py": 26,
     "src/webui/services/content_pack_export.py": 12,

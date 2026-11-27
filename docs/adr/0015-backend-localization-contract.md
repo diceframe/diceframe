@@ -150,8 +150,11 @@
 
 ### 8. 门禁（ratchet，不清算存量）
 
-- `scripts/audit_error_codes.py`：未声明错误码的接口错误按文件计数，只允许减少（ADR §4）。
-- 待建：`scripts/audit_localization.py`，用于机械目录禁止新增 CJK 字面量、全仓 CJK 计数 ratchet、`localization/locales/**/*.yml` 的 en / zh-CN key 齐平（后者目前由 `tests/test_localization_messages.py` 与前端 `locales:check` 分别覆盖）。
+两个脚本都是「冻结今天，只允许变好」，不清算存量：
+
+- `scripts/audit_error_codes.py` + `scripts/error_code_baseline.json`：扫描 `src/webui/services`、`src/webui/routes` 与 `src/webui/api.py`，按文件统计「顶层 `{"error": t(...)}` 且没有 `error_code`」的处数。`src/webui/api.py` 必须在内，否则 orchestrator 等于有免检通道。
+- `scripts/audit_localization.py` + `scripts/localization_baseline.json`：按包统计运行期 CJK 字符串字面量（排除 docstring），并对 `src/engine/` 与 `src/rulesets/` 逐文件单独统计 —— 机械目录的增长（包括新增文件）直接失败。已登记例外只有 `check_verdict.py`、`language.py` 与 `intent/locales/`。
+- `localization/locales/**/*.yml` 的 en / zh-CN key 齐平由 `tests/test_localization_messages.py` 覆盖；前端目录由 `locales:check` 覆盖。
 
 ## Alternatives Considered
 

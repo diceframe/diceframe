@@ -61,6 +61,7 @@ from src.webui.character_sheet_authority import (
     player_field_violations,
 )
 from src.localization.messages import t
+from src.webui.errors import error_payload
 
 if TYPE_CHECKING:
     from src.rulesets.registry import RulesetRuntimeRegistry
@@ -268,13 +269,13 @@ async def create_payment_proposal(
     try:
         amount = int(amount)
     except (TypeError, ValueError):
-        return {"ok": False, "error": t("webui.services.characters.amount_not_integer")}
+        return error_payload("webui.services.characters.amount_not_integer")
     if not 0 < amount <= MAX_ECONOMY_AMOUNT:
-        return {"ok": False, "error": t("webui.services.characters.amount_out_of_range", max_economy_amount=MAX_ECONOMY_AMOUNT)}
+        return error_payload("webui.services.characters.amount_out_of_range", max_economy_amount=MAX_ECONOMY_AMOUNT)
     if payer_uid not in inst.players:
-        return {"ok": False, "error": t("webui.services.characters.payer_missing")}
+        return error_payload("webui.services.characters.payer_missing")
     if recipient_uid not in inst.players:
-        return {"ok": False, "error": t("webui.services.characters.payee_missing")}
+        return error_payload("webui.services.characters.payee_missing")
     normalized_items = [
         str(item).strip()[:120]
         for item in list(items or [])[:8]
@@ -285,18 +286,10 @@ async def create_payment_proposal(
         reason = f"购买 {'、'.join(normalized_items)}" if normalized_items else "GM 发起的支付"
     async with inst.authoritative_write() as write_entered, inst._lock:
         if not write_entered:
-            return {
-                "ok": False,
-                "code": "REWRITE_IN_PROGRESS",
-                "error": t("webui.services.characters.rewriting_wait_before_payment"),
-            }
+            return error_payload("webui.services.characters.rewriting_wait_before_payment", code="REWRITE_IN_PROGRESS")
         current = dependencies.games.get_instance(inst.game_key)
         if current is None or current is not inst:
-            return {
-                "ok": False,
-                "code": "STALE_RUN",
-                "error": t("webui.services.characters.game_reset_refresh_before_payment"),
-            }
+            return error_payload("webui.services.characters.game_reset_refresh_before_payment", code="STALE_RUN")
         if normalized_items:
             try:
                 proposal = queue_purchase_offer(
@@ -586,7 +579,7 @@ def character_schema(
     """Return rule-driven creation fields without requiring a GameInstance."""
     rule = dependencies.rules.load_rule_by_id(rule_id, language)
     if not rule:
-        return {"ok": False, "error": t("webui.services.characters.rule_missing", rule_id=rule_id)}
+        return error_payload("webui.services.characters.rule_missing", rule_id=rule_id)
     return {
         "ok": True,
         **_character_schema_for_rule(rule),
@@ -792,12 +785,9 @@ async def update_character(
         return {"ok": False, "error": "角色不存在"}
     async with inst.authoritative_write() as write_entered:
         if not write_entered:
-            return {
-                "ok": False, "error_code": "REWRITE_IN_PROGRESS",
-                "error": t("webui.services.characters.rewriting_wait_and_retry"),
-            }
+            return error_payload("webui.services.characters.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")
         if dependencies.games.get_instance(inst.game_key) is not inst:
-            return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.characters.game_restarted_refresh_and_retry")}
+            return error_payload("webui.services.characters.game_restarted_refresh_and_retry", code="STALE_RUN")
         return await _update_character_authority(
             dependencies, inst, user_id, updates, gm_authority=gm_authority,
         )
@@ -831,10 +821,7 @@ async def adopt_library_card(
     instance: GameInstance = inst
     async with instance.authoritative_write() as write_entered:
         if not write_entered:
-            return {
-                "ok": False, "error_code": "REWRITE_IN_PROGRESS",
-                "error": t("webui.services.characters.rewriting_wait_and_retry"),
-            }
+            return error_payload("webui.services.characters.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")
         player_side_after_acting = (
             not gm_authority
             and user_id in instance.players
@@ -842,7 +829,7 @@ async def adopt_library_card(
             and module_hooks.seat_has_acted(instance, user_id)
         )
         if dependencies.games.get_instance(instance.game_key) is not instance:
-            return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.characters.game_restarted_refresh_and_retry")}
+            return error_payload("webui.services.characters.game_restarted_refresh_and_retry", code="STALE_RUN")
         if player_side_after_acting:
             return adopt_requires_gm_failure()
         card = deepcopy(card)
@@ -885,11 +872,7 @@ async def _update_character_authority(
     if not inst or user_id not in inst.players:
         return {"ok": False, "error": "角色不存在"}
     if _is_rules_aware_game(dependencies, inst):
-        return {
-            "ok": False,
-            "error_code": "RULESET_CHARACTER_OPERATION_REQUIRED",
-            "error": t("webui.services.characters.professional_character_no_legacy_edit"),
-        }
+        return error_payload("webui.services.characters.professional_character_no_legacy_edit", code="RULESET_CHARACTER_OPERATION_REQUIRED")
     # Only player-editable sheet fields; anything else (card metadata, plugin
     # provenance, server-owned state) is dropped instead of mass-assigned.
     updates = {
@@ -925,7 +908,7 @@ async def _update_character_authority(
         inst.set_player_name(user_id, character_name)
     cs = inst.get_character_sheet(user_id)
     if "background" in updates and len(str(updates.get("background", ""))) > MAX_BIO_CHARS:
-        return {"ok": False, "error": t("webui.services.characters.background_too_long", max_bio_chars=MAX_BIO_CHARS)}
+        return error_payload("webui.services.characters.background_too_long", max_bio_chars=MAX_BIO_CHARS)
     rule = dependencies.rules.load_rule_for_game(inst)
     damage_dice_error = _validate_damage_dice(updates.get("equipment"))
     if damage_dice_error:
@@ -1194,10 +1177,7 @@ async def update_npc_portrait(
         return {"ok": False, "error": "游戏不存在"}
     async with inst.authoritative_write() as write_entered:
         if not write_entered:
-            return {
-                "ok": False, "error_code": "REWRITE_IN_PROGRESS",
-                "error": t("webui.services.characters.rewriting_wait_and_retry"),
-            }
+            return error_payload("webui.services.characters.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")
         return await _update_npc_portrait_authority(
             dependencies, inst, npc_id, portrait,
         )
@@ -1256,7 +1236,7 @@ async def _update_npc_portrait_authority(
 ) -> dict[str, Any]:
     resolved = _resolve_npc_for_update(dependencies, inst, npc_id)
     if resolved is None:
-        return {"ok": False, "error": t("webui.services.characters.npc_missing")}
+        return error_payload("webui.services.characters.npc_missing")
     _npc_key, npc = resolved
     try:
         normalized = _validated_portrait(dependencies.assets, portrait)
@@ -1293,18 +1273,15 @@ async def update_npc_standing_portrait(
         return {"ok": False, "error": "游戏不存在"}
     async with inst.authoritative_write() as write_entered:
         if not write_entered:
-            return {
-                "ok": False, "error_code": "REWRITE_IN_PROGRESS",
-                "error": t("webui.services.characters.rewriting_wait_and_retry"),
-            }
+            return error_payload("webui.services.characters.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")
         resolved = _resolve_npc_for_update(dependencies, inst, npc_id)
         if resolved is None:
-            return {"ok": False, "error": t("webui.services.characters.npc_missing")}
+            return error_payload("webui.services.characters.npc_missing")
         _npc_key, npc = resolved
         portrait_present = standing_portrait is not UNCHANGED
         expressions_present = expressions is not UNCHANGED
         if not portrait_present and not expressions_present:
-            return {"ok": False, "error": t("webui.services.characters.standing_portrait_field_missing")}
+            return error_payload("webui.services.characters.standing_portrait_field_missing")
         try:
             # Validate every supplied field before mutating either one.
             normalized = (
@@ -1350,13 +1327,10 @@ async def update_npc_voice(
         return {"ok": False, "error": "游戏不存在"}
     async with inst.authoritative_write() as write_entered:
         if not write_entered:
-            return {
-                "ok": False, "error_code": "REWRITE_IN_PROGRESS",
-                "error": t("webui.services.characters.rewriting_wait_and_retry"),
-            }
+            return error_payload("webui.services.characters.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")
         resolved = _resolve_npc_for_update(dependencies, inst, npc_id)
         if resolved is None:
-            return {"ok": False, "error": t("webui.services.characters.npc_missing")}
+            return error_payload("webui.services.characters.npc_missing")
         _npc_key, npc = resolved
         try:
             normalized = _validated_voice_profile(voice_profile)
@@ -1408,20 +1382,12 @@ async def resolve_payment(
     scene_image_payload: dict[str, Any] | None = None
     async with inst.authoritative_write() as write_entered, inst._lock:
         if not write_entered:
-            return {
-                "ok": False,
-                "code": "REWRITE_IN_PROGRESS",
-                "error": t("webui.services.characters.rewriting_wait_before_resolving_payment"),
-            }
+            return error_payload("webui.services.characters.rewriting_wait_before_resolving_payment", code="REWRITE_IN_PROGRESS")
         current = dependencies.games.get_instance(
             dependencies.games.parse_game_key(game_key),
         )
         if current is None or id(current) != id(inst):
-            return {
-                "ok": False,
-                "code": "STALE_RUN",
-                "error": t("webui.services.characters.game_restarted_refresh_for_new_request"),
-            }
+            return error_payload("webui.services.characters.game_restarted_refresh_for_new_request", code="STALE_RUN")
         staged = type(inst).from_dict(deepcopy(inst.to_dict()))
         # The persistence projection intentionally keeps only the recent log
         # window. A transaction stage must retain the live aggregate's full
@@ -1470,11 +1436,7 @@ async def resolve_payment(
                     game_key,
                     payment_id,
                 )
-                return {
-                    "ok": False,
-                    "code": "EFFECT_COMMIT_FAILED",
-                    "error": t("webui.services.characters.linked_result_failed"),
-                }
+                return error_payload("webui.services.characters.linked_result_failed", code="EFFECT_COMMIT_FAILED")
             finally:
                 staged.__dict__.pop("_economy_authorized_receipt_id", None)
             if memory_delta and dependencies.apply_economy_memory is not None:
@@ -1654,10 +1616,7 @@ async def delete_character(
         return {"ok": False, "error": "角色不存在"}
     async with inst.authoritative_write() as write_entered:
         if not write_entered:
-            return {
-                "ok": False, "error_code": "REWRITE_IN_PROGRESS",
-                "error": t("webui.services.characters.rewriting_wait_and_retry"),
-            }
+            return error_payload("webui.services.characters.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")
         player_side_after_acting = (
             not gm_authority
             and user_id in inst.players
@@ -1665,7 +1624,7 @@ async def delete_character(
         )
         current = dependencies.games.get_instance(inst.game_key)
         if current is not inst:
-            return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.characters.game_restarted_refresh_and_retry")}
+            return error_payload("webui.services.characters.game_restarted_refresh_and_retry", code="STALE_RUN")
         if player_side_after_acting:
             return delete_requires_gm_failure()
         return await _delete_character_authority(dependencies, inst, user_id)
@@ -1680,7 +1639,7 @@ async def _delete_character_authority(
     if not inst or user_id not in inst.players:
         return {"ok": False, "error": "角色不存在"}
     if len(inst.players) <= 1:
-        return {"ok": False, "error": t("webui.services.characters.keep_at_least_one_character")}
+        return error_payload("webui.services.characters.keep_at_least_one_character")
     name = inst.players[user_id].get("character_name", user_id)
     removed = await inst.remove_player(user_id)
     if not removed:
@@ -1705,12 +1664,9 @@ async def create_player(
     inst = cast(GameInstance, inst)
     async with inst.authoritative_write() as write_entered:
         if not write_entered:
-            return {
-                "ok": False, "error_code": "REWRITE_IN_PROGRESS",
-                "error": t("webui.services.characters.rewriting_wait_and_retry"),
-            }
+            return error_payload("webui.services.characters.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")
         if dependencies.games.get_instance(inst.game_key) is not inst:
-            return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.characters.game_restarted_refresh_and_retry")}
+            return error_payload("webui.services.characters.game_restarted_refresh_and_retry", code="STALE_RUN")
         # Serialize membership changes with authoritative combat actions.  A
         # player joining during an active encounter must be enrolled in the
         # ruleset's live turn state before the new seat is persisted.
@@ -1806,11 +1762,7 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
     room_access.require_writable(inst)
     max_players = max(1, int(room_access.max_players(inst) or 6))
     if uid not in inst.players and len(inst.players) >= max_players:
-        return {
-            "ok": False,
-            "error": t("webui.services.characters.room_full", max_players=max_players),
-            "error_code": "game_room_full",
-        }
+        return error_payload("webui.services.characters.room_full", max_players=max_players, code="game_room_full")
     rule = dependencies.rules.load_rule_for_game(inst)
     rule_id = rule.rule_id if rule else "freeform_fantasy"
     professional_character = False
@@ -1838,17 +1790,9 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
             binding = canonical.get("rule_binding") if isinstance(canonical, dict) else None
             # 绑定由游戏在创建时决定；加入的角色只能匹配，不能反向建立绑定。
             if not ruleset_runtime.binding(inst):
-                return {
-                    "ok": False,
-                    "error_code": "RULESET_BINDING_MISSING",
-                    "error": t("webui.services.characters.save_without_runtime_binding"),
-                }
+                return error_payload("webui.services.characters.save_without_runtime_binding", code="RULESET_BINDING_MISSING")
             if not isinstance(binding, dict) or not inst.ruleset_binding_matches(binding):
-                return {
-                    "ok": False,
-                    "error_code": "INCOMPATIBLE_RULESET_CHARACTER",
-                    "error": t("webui.services.characters.character_runtime_incompatible"),
-                }
+                return error_payload("webui.services.characters.character_runtime_incompatible", code="INCOMPATIBLE_RULESET_CHARACTER")
     # 仅传了名字的轻量加入会自动生成默认角色卡。
     has_full_sheet = bool(character.get("attributes") or character.get("equipment") or character.get("skills"))
     if not has_full_sheet:
@@ -1888,7 +1832,7 @@ async def _create_player_authority(dependencies: CharacterDependencies, inst: Ga
         max_hp = hp
     default_class = rule.classes[0]["name"] if (rule and rule.classes) else "冒险者"
     if len(str(character.get("background", ""))) > MAX_BIO_CHARS:
-        return {"ok": False, "error": t("webui.services.characters.background_too_long", max_bio_chars=MAX_BIO_CHARS)}
+        return error_payload("webui.services.characters.background_too_long", max_bio_chars=MAX_BIO_CHARS)
     damage_dice_error = _validate_damage_dice(character.get("equipment"))
     if damage_dice_error:
         return {"ok": False, "error": damage_dice_error}
