@@ -1222,6 +1222,19 @@ class CombatValidationMixin(
 
     _WILD_SHAPE_CR_BY_LEVEL = ((4, "1/4"), (8, "1/2"), (99, "1"))
 
+    def _relaxed_capability_ids(self, actor: dict[str, Any]) -> frozenset[str]:
+        """Every capability id a declared relaxation covers, for this actor."""
+
+        character = self._feature_character(actor)
+        owned = self.features.active_features_for(character)
+        relaxed = relaxed_bonus_action_targets(owned)
+        return frozenset(
+            capability.id
+            for definition in owned
+            if definition.id in relaxed
+            for capability in definition.capabilities
+        )
+
     def _validate_class_capability(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
         actor: dict[str, Any], economy: dict[str, Any],
