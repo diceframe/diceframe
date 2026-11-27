@@ -156,7 +156,11 @@ git diff --check
 | §6.12「Druidic 固定语言」 | Speak with Animals 常备保留，语言移出 |
 | §6.13「Druidic 阅读者自动发现/解读」 | 整体移出（与 GAP-51 同一条） |
 
-裁剪理由：语言在引擎里**不参与任何机械化判定**——`language_refs` 只有三处读写（`derivation.py:756` 读 draft，858/872 输出），`exploration/engine.py` 不掷技能检定，全文没有消费者。它本身很轻，但授予它需要给 `FeatureChoice` 加一种 kind，而那是 builder / advancement / 存档重建三条路共用的选择基础设施。按"一次只动一层"的原则，把它单独留成一片比夹在本片里安全。
+裁剪理由：语言在引擎里**不参与任何机械化判定**，而且是条**断头的链路**——建卡能选（`validation.py:244-256` 强制 3 个、必须含 `language:common`，前端建卡界面有 3 个槽），canonical 也存了（`derivation.py:872` 写进 `proficiencies.language_refs`），然后**没有任何消费者**：不判定、`_player_view` 不投影、角色卡不显示、GM/GMAgent 的 actor 视图里没有玩家语言。对照敌人侧——stat block 的 `languages` 是活的（`view.py:172` 带出，forms 面板读写）。
+
+所以 GAP-51 其实是两件事：**授予通道**（`FeatureChoice` 加 `language` kind + 固定授予查询）与**投影**（actor view / 角色卡 / GM 面板）。第二件才是语言唯一的消费者；只做第一件等于给一个看不见的列表加条目。两件都留到单独一片。
+
+而**授予通道**之所以不在本片：它要动 `FeatureChoice` 的 kind，而那是 builder / advancement / 存档重建三条路共用的选择基础设施。按"一次只动一层"的原则，把它单独留成一片比夹在本片里安全。
 
 **本片仍然要为它留形状**：`language_refs` 保持 canonical 字段不动；固定授予走 §10.3 的"固定授予查询"形态（与豁免熟练同形），可选语言走 choice。两者都是"接上就有"的位置，不是空接口。
 
