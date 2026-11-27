@@ -52,7 +52,7 @@ async def test_factory_owns_dedicated_client_and_passes_it_to_planning(tmp_path,
         assert narrative_checks is False
         selected.append(client)
         return [], {"available": True, "skipped": True}
-    monkeypatch.setattr("src.commands.round_processor.plan_round_checks", plan)
+    monkeypatch.setattr("src.commands.round_checks.plan_round_checks", plan)
     for name in ("prompts", "rules", "worlds"):
         (tmp_path / name).mkdir()
     runtime = create_trpg_subsystems(

@@ -250,13 +250,36 @@ def _enemy_attack(engine, instance, rolls, *, target_id: str = "player:gm") -> l
     combat["economy"] = engine._fresh_economy(
         engine._actor_view(instance, combat, "enemy:goblin-1"),
     )
-    return _apply(engine, instance, {
+    events = _apply(engine, instance, {
         "intent_id": f"attack:{target_id}:{ruleset_runtime.state(instance)['version']}",
         "type": "attack",
         "expected_version": ruleset_runtime.state(instance)["version"],
         "submitted_by": "gm", "actor_id": "enemy:goblin-1", "target_id": target_id,
         "attack_id": "scimitar",
     }, SequenceRng(list(rolls)))
+    # 3 级起的武僧被命中时会得到拨挡攻击的反应窗口（S0-F11）。这些用例测的是
+    # 豁免面，不是反应，所以在这里放弃窗口，让伤害按原来的路径落地。
+    events.extend(_decline_hit_reaction(engine, instance))
+    return events
+
+
+def _decline_hit_reaction(engine, instance) -> list[dict]:
+    pending = _combat_state(instance).get("pending_decisions") or []
+    if not pending or pending[0].get("kind") != "hit_reaction_spell":
+        return []
+    # 只放弃**拨挡**这一条：别的受击特性（例如狂战士的 Retaliation、
+    # 盗贼的 Uncanny Dodge）由各自的用例自己决定，不在这里代为处理。
+    if not any(
+        row.get("feature_id") == "deflect_attacks"
+        for row in pending[0].get("features") or []
+    ):
+        return []
+    version = ruleset_runtime.state(instance)["version"]
+    return _apply(engine, instance, {
+        "intent_id": f"decline-reaction:{version}", "type": "decision.resolve",
+        "expected_version": version, "submitted_by": "gm",
+        "decision_id": pending[0]["decision_id"], "option": "decline",
+    }, SequenceRng([]))
 
 
 def _direct_cast(

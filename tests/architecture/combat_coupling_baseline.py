@@ -131,6 +131,13 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch", "intent_id"),
     DependencyDebt("src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch", "metamagic"),
     DependencyDebt("src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch", "option"),
+    # S0-F11：拨挡的重定向要在第二个窗口里选目标。这是**新增的 intent 字段**，
+    # 守卫说对了。它应该在哪一步消失：GAP-43 的 answer-intent 统一方案落地后，
+    # 窗口的选择项（含目标）由注册表声明，而不是从 intent 里裸读一个键。
+    DependencyDebt(
+        "src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch",
+        "redirect_target_id",
+    ),
     DependencyDebt("src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch", "slot_level"),
     DependencyDebt("src/rulesets/dnd2024/combat/reaction_spells.py", "intent_switch", "spell_ref"),
     DependencyDebt("src/rulesets/dnd2024/combat/reducer.py", "kind_branch", "attack"),
