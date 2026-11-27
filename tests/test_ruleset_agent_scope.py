@@ -277,7 +277,7 @@ def test_an_unknown_target_comes_back_with_the_current_list():
 
     # 裸 id 是模型最可能先试的形状：错误里必须直接给出可填的值，
     # 否则它只能对着 "target actor does not exist" 猜第二次。
-    assert result["code"] == "UNKNOWN_TARGET"
+    assert result["error_code"] == "UNKNOWN_TARGET"
     assert [row["actor_id"] for row in result["targets"]] == [
         "player:p1", "enemy:goblin",
     ]
@@ -294,7 +294,7 @@ def test_cover_is_refused_before_combat_starts():
         "target_id": "enemy:goblin", "level": "half",
     }, "gm"))
 
-    assert result["code"] == "COMBAT_NOT_ACTIVE"
+    assert result["error_code"] == "COMBAT_NOT_ACTIVE"
     assert captured == {}
 
 
@@ -308,7 +308,7 @@ def test_non_gm_cannot_probe_cover_targets_or_declare_cover():
     }, "p1"))
 
     assert result["ok"] is False
-    assert result["code"] == "FORBIDDEN"
+    assert result["error_code"] == "FORBIDDEN"
     assert "targets" not in result
     assert captured == {}
 

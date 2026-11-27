@@ -56,7 +56,6 @@
     "src/webui/services/assistant_agent_framework.py": 1,
     "src/webui/services/assistant_authoring.py": 3,
     "src/webui/services/assistant_content.py": 1,
-    "src/webui/services/assistant_ruleset_tools.py": 2,
     "src/webui/services/character_cards.py": 10,
     "src/webui/services/characters.py": 12,
     "src/webui/services/check_decisions.py": 7,
