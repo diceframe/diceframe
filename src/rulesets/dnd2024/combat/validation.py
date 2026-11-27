@@ -1225,7 +1225,7 @@ class CombatValidationMixin(
         """Every capability id a declared relaxation covers, for this actor."""
 
         character = self._feature_character(actor)
-        owned = self.features.active_features_for(character)
+        owned = self.features.capability_owners_for(character)
         relaxed = self.features.relaxed_bonus_action_targets_for(character)
         return frozenset(
             capability.id

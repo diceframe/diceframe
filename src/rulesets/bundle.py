@@ -249,7 +249,12 @@ class RulesetBundleLoader:
                 # 来源写在实体上而不是靠目录布局：同一条目录（feats/）里可以
                 # 同时装 SRD 与 PHB 的内容，只靠"文件放在哪"是分不出来的。
                 # 缺省归属主包，所以只有非主来源的内容需要显式声明。
-                pack = str(entity.get("content_pack") or "")
+                raw_pack = entity.get("content_pack")
+                if raw_pack is not None and not isinstance(raw_pack, str):
+                    raise RulesetBundleError(
+                        f"entity {kind}:{entity_id} content_pack must be a string"
+                    )
+                pack = raw_pack or ""
                 if not pack:
                     pack = manifest.primary_content_pack
                     entity["content_pack"] = pack

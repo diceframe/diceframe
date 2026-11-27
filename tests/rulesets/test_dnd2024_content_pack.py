@@ -111,3 +111,29 @@ def test_a_bundle_without_a_pack_system_still_loads(tmp_path: Path) -> None:
     # 被判为"非法来源"，只是没有来源信息可用。
     entity = _load(tmp_path, manifest_packs=None)
     assert entity["content_pack"] == ""
+
+
+def test_non_string_content_pack_fails_closed(tmp_path: Path) -> None:
+    with pytest.raises(RulesetBundleError, match="content_pack must be a string"):
+        _load(
+            tmp_path,
+            manifest_packs={"primary": "srd-5.2.1", "declared": ["srd-5.2.1"]},
+            feat_pack=123,  # type: ignore[arg-type]
+        )
+
+
+def test_advancement_catalog_row_undeclared_content_pack_fails_closed() -> None:
+    from copy import deepcopy
+    from src.rulesets.dnd2024.features.feat_models import (
+        FeatDefinitionError,
+        load_feat_definitions,
+    )
+    from src.rulesets.dnd2024.runtime import Dnd2024Runtime
+
+    bundle = deepcopy(Dnd2024Runtime().load_bundle("en"))
+    catalog = bundle.entities["advancement_feat_catalog"]["srd_advancement_feats"]
+    first_key = next(iter(catalog["feats"]))
+    catalog["feats"][first_key]["content_pack"] = "undeclared-pack"
+
+    with pytest.raises(FeatDefinitionError, match="undeclared content_pack"):
+        load_feat_definitions(bundle)

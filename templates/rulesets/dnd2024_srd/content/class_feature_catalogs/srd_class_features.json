@@ -344,8 +344,8 @@
           "source_ref": "srd-5.2.1:p51:fleet-step",
           "summary": "When you take a Bonus Action other than Step of the Wind, you can also use Step of the Wind immediately after that Bonus Action.",
           "parameters": {
-      "free_step_after_bonus_action_for": "step_of_the_wind"
-    }
+            "free_step_after_bonus_action_for": "step_of_the_wind"
+          }
         },
         {
           "id": "monks_focus",

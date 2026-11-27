@@ -182,7 +182,7 @@ def parse_feat(raw: Mapping[str, Any]) -> FeatDefinition:
         category=category,
         source_ref=source_ref,
         automation_level=automation,
-        content_pack=str(raw.get("content_pack") or ""),
+        content_pack=_parse_content_pack(feat_id, raw.get("content_pack")),
         labels=_parse_labels(raw.get("labels")),
         minimum_level=minimum_level,
         repeatable=repeatable,
@@ -336,6 +336,15 @@ def load_feat_definitions(bundle: LoadedRulesetBundle) -> dict[str, FeatDefiniti
             # manifest 的 primary 填好）。不继承的话它们会落进"来源未知"那一组。
             row.setdefault("content_pack", str(catalog.get("content_pack") or ""))
             definition = parse_feat(row)
+            if (
+                bundle.manifest.content_packs
+                and definition.content_pack
+                and definition.content_pack not in bundle.manifest.content_packs
+            ):
+                raise FeatDefinitionError(
+                    f"feat {definition.id} declares an undeclared content_pack: "
+                    f"{definition.content_pack!r}"
+                )
             if definition.id in definitions:
                 raise FeatDefinitionError(
                     f"feat {definition.id} is declared twice: once as an entity "
@@ -343,6 +352,14 @@ def load_feat_definitions(bundle: LoadedRulesetBundle) -> dict[str, FeatDefiniti
                 )
             definitions[definition.id] = definition
     return definitions
+
+
+def _parse_content_pack(feat_id: str, value: Any) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise FeatDefinitionError(f"{feat_id}.content_pack must be a string")
+    return value
 
 
 def _require_text(value: Any, field_name: str) -> str:

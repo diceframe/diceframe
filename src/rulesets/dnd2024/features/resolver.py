@@ -1670,9 +1670,16 @@ class Dnd2024ClassFeatureResolver:
         different owner set -- the asymmetry the review flagged.
         """
 
-        return relaxed_bonus_action_targets(
-            (*self.active_features_for(character),
-             *self._owned_feat_capability_owners(character))
+        return relaxed_bonus_action_targets(self.capability_owners_for(character))
+
+    def capability_owners_for(
+        self, character: Mapping[str, Any] | None,
+    ) -> tuple[ClassFeatureDefinition | FeatDefinition, ...]:
+        """All owned class features and feats that can declare combat capabilities."""
+
+        return (
+            *self.active_features_for(character),
+            *self._owned_feat_capability_owners(character),
         )
 
     def declared_capability(
