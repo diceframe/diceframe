@@ -299,6 +299,36 @@
           ]
         },
         {
+          "id": "deflect_attacks",
+          "owner": "class:monk",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p51:deflect-attacks",
+          "summary": "When an attack roll hits you and its damage includes Bludgeoning, Piercing or Slashing damage, you can take a Reaction to reduce the attack's total damage by 1d10 plus your Dexterity modifier plus your Monk level. If you reduce the damage to 0, you can expend 1 Focus Point to redirect it: a creature you can see within 5 feet (melee attack) or 60 feet (ranged attack) and not behind Total Cover makes a Dexterity saving throw against your Focus save DC, taking two Martial Arts dice plus your Dexterity modifier damage of the attack's type on a failure.",
+          "parameters": {
+            "reduction_dice": "1d10",
+            "reduction_ability": "dex",
+            "reduction_level_scale": 1,
+            "deflect_damage_types": ["bludgeoning", "piercing", "slashing"],
+            "redirect_focus_cost": 1,
+            "redirect_dice_count": 2,
+            "redirect_ability": "dex",
+            "redirect_range_melee_ft": 5,
+            "redirect_range_ranged_ft": 60,
+            "redirect_requires_total_cover": true
+          }
+        },
+        {
+          "id": "deflect_energy",
+          "owner": "class:monk",
+          "minimum_level": 13,
+          "source_ref": "srd-5.2.1:p52:deflect-energy",
+          "summary": "Your Deflect Attacks works against attacks that deal any damage type, not only Bludgeoning, Piercing or Slashing.",
+          "parameters": {
+            "extends_feature": "deflect_attacks",
+            "deflect_all_damage_types": true
+          }
+        },
+        {
           "id": "heightened_focus",
           "minimum_level": 10,
           "source_ref": "srd-5.2.1:p52:heightened-focus",

@@ -11,9 +11,12 @@ Clients never supply the attack total, the AC, or the damage.
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 from src.engine.player_control import is_ai_controlled
+from src.rulesets.dnd2024.character.builder import ability_modifier
+from src.rulesets.dnd2024.features.resources import resource_state
 from .check_modes import condition_check_bonus_rolls, condition_flags
 from .primitives import CombatIntentError, actor_kind, enemy_actor, player_actor as _player_actor
 from .triggered_spells import free_cast_resource
@@ -21,6 +24,35 @@ from .triggered_spells import free_cast_resource
 
 HIT_REACTION_DECISION = "hit_reaction_spell"
 COUNTER_SPELL_DECISION = "counter_spell"
+
+#: 拨挡的减伤公式与增量都要是纯 NdM / 正整数，缺一项就不提供这条反应。
+_DEFLECT_DICE_RE = re.compile(r"^([1-9]\d{0,2})d([1-9]\d{0,3})$")
+
+#: 挂在伤害事件上的"后续还要结算的东西"。它们尚未掷定，所以"减到 0"
+#: 只在这一次伤害本身就是全部伤害时才成立。
+_CARRYING_TAIL_KEYS = frozenset({
+    "hit_riders", "extra_damage_parts", "brutal_strike_effects",
+})
+
+
+def attack_is_ranged(weapon: dict[str, Any]) -> bool:
+    """Whether this profile counts as a ranged attack for reaction ranges.
+
+    Stat-block attacks are deep-copied as-is by ``_available_attacks`` and
+    carry ``range`` / ``long_range`` but no ``ranged`` flag, so keying the
+    redirect's 60-foot range off ``weapon["ranged"]`` alone would make every
+    monster bow a melee attack.  The SRD catalog stores a melee attack as
+    ``{"range": 5, "long_range": 5}`` and a reach weapon as 10/10, so the
+    question is whether the attack's own reach goes beyond melee -- never
+    whether a long range exists at all, which every melee stat block has.
+    A thrown melee weapon is not included: the engine cannot tell "stabbed
+    with it" from "threw it", and guessing ranged would hand the monk a
+    60-foot redirect for a dagger fight.
+    """
+
+    if bool(weapon.get("ranged")):
+        return True
+    return int(weapon.get("range", 5) or 5) > 10
 
 # 受击反应特性效果注册表：条目 = 参数名 + 声明的效果种类。
 # 注册表之外不存在硬编码特性分支；新受击反应特性 = 注册表行 + 目录声明。
@@ -44,6 +76,16 @@ REACTION_FEATURE_EFFECTS: dict[str, dict[str, Any]] = {
         "effect_kind": "counterattack",
         "parameter": "counterattack_range",
         "requires_sight": False,
+    },
+    # Monk：把这一次攻击的伤害按固定值压下去，压到 0 之后还能花 Focus 打回去。
+    # 13 级的 Deflect Energy 不是第二条实现——它只把伤害类型门禁放宽到任意类型，
+    # 所以这里存"谁来放宽"，代码用变量而不是字面量去问特性。
+    "deflect_attacks": {
+        "effect_kind": "damage_reduction",
+        "parameter": "reduction_dice",
+        "requires_sight": False,
+        "widens_to_all_types": "deflect_energy",
+        "level_class": "class:monk",
     },
 }
 
@@ -133,6 +175,7 @@ class CombatReactionSpellsMixin:
         attacker: dict[str, Any] | None = None,
         damage_event: dict[str, Any] | None = None,
         next_decision: dict[str, Any] | None = None,
+        ranged: bool = False,
     ) -> list[dict[str, Any]]:
         """Class features the defender may spend their reaction on when hit.
 
@@ -185,6 +228,14 @@ class CombatReactionSpellsMixin:
                     combat, defender["actor_id"], attacker["actor_id"],
                 ) > int(value):
                     continue
+            elif effect["effect_kind"] == "damage_reduction":
+                reduced = self._damage_reduction_choice(
+                    character, feature_id, effect, damage_event, ranged,
+                )
+                if reduced is None:
+                    continue
+                choices.append(reduced)
+                continue
             else:  # pragma: no cover - the registry is closed
                 continue
             if effect.get("requires_sight"):
@@ -209,16 +260,102 @@ class CombatReactionSpellsMixin:
             choices.append(choice)
         return choices
 
+    @staticmethod
+    def _declared_class_level(character: dict[str, Any], class_ref: str) -> int:
+        """Levels in one class, not the character's total.
+
+        Deflect's reduction scales with *Monk* level; a multiclass character
+        would take a bigger reduction if this returned the sum.
+        """
+
+        build = (character or {}).get("build") or {}
+        for row in build.get("class_levels") or []:
+            if isinstance(row, dict) and str(row.get("class_ref") or "") == class_ref:
+                return int(row.get("level", 0) or 0)
+        return 0
+
+    def _damage_reduction_choice(
+        self, character: dict[str, Any], feature_id: str, effect: dict[str, Any],
+        damage_event: dict[str, Any] | None, ranged: bool,
+    ) -> dict[str, Any] | None:
+        """The Deflect Attacks entry, or nothing when this hit cannot be deflected.
+
+        Fails closed on every missing parameter: a reduction formula that is not
+        ``NdM`` would otherwise be rolled as zero and silently make the reaction
+        useless instead of refusing it.
+        """
+
+        if damage_event is None:
+            return None
+        if int(damage_event.get("amount", 0) or 0) <= 0:
+            return None
+        damage_type = str(damage_event.get("damage_type") or "")
+        allowed = self.features.feature_value(
+            character, feature_id, "deflect_damage_types", [],
+        )
+        if not (damage_type and isinstance(allowed, list) and damage_type in allowed):
+            widener = str(effect.get("widens_to_all_types") or "")
+            widened = bool(widener) and self.features.has_feature(character, widener) and (
+                self.features.feature_value(
+                    character, widener, "deflect_all_damage_types", False,
+                ) is True
+            )
+            if not widened:
+                return None
+        dice = self.features.feature_value(character, feature_id, "reduction_dice", "")
+        if not isinstance(dice, str) or not _DEFLECT_DICE_RE.match(dice):
+            return None
+        level = self._declared_class_level(
+            character, str(effect.get("level_class") or ""),
+        )
+        return {
+            "feature_id": feature_id,
+            "name": self.features.catalog.label(
+                feature_id, feature_id.replace("_", " ").title(),
+            ),
+            "mode": "reaction_defense",
+            "effect_kind": "damage_reduction",
+            "reduction_dice": dice,
+            "reduction_ability": str(self.features.feature_value(
+                character, feature_id, "reduction_ability", "dex",
+            )),
+            "reduction_level_scale": int(self.features.feature_value(
+                character, feature_id, "reduction_level_scale", 0,
+            ) or 0),
+            "class_level": level,
+            "redirect": {
+                "focus_cost": int(self.features.feature_value(
+                    character, feature_id, "redirect_focus_cost", 0,
+                ) or 0),
+                "dice_count": int(self.features.feature_value(
+                    character, feature_id, "redirect_dice_count", 0,
+                ) or 0),
+                "ability": str(self.features.feature_value(
+                    character, feature_id, "redirect_ability", "dex",
+                )),
+                "range": int(self.features.feature_value(
+                    character, feature_id,
+                    "redirect_range_ranged_ft" if ranged else "redirect_range_melee_ft",
+                    0,
+                ) or 0),
+                "requires_total_cover": self.features.feature_value(
+                    character, feature_id, "redirect_requires_total_cover", True,
+                ) is True,
+                "damage_type": damage_type,
+            },
+        }
+
     def _hit_reaction_offer(
         self, instance: Any, combat: dict[str, Any], attacker: dict[str, Any],
         defender: dict[str, Any], check: dict[str, Any], damage_event: dict[str, Any],
         intent: dict[str, Any], next_decision: dict[str, Any] | None = None,
+        ranged: bool = False,
     ) -> dict[str, Any] | None:
         if attacker.get("side") == defender.get("side"):
             return None
         spells = self._reaction_spell_choices(combat, defender)
         features = self._reaction_feature_choices(
-            combat, defender, attacker, damage_event, next_decision,
+            combat, defender, attacker, damage_event, next_decision, ranged=ranged,
         )
         if not spells and not features:
             return None
@@ -236,6 +373,9 @@ class CombatReactionSpellsMixin:
             "armor_class": int(check["target"]),
             "critical": bool(check["critical"]),
             "damage_event": deepcopy(damage_event),
+            # 拨挡的重定向要看原攻击是近战还是远程（5 尺 / 60 尺）。窗口建立
+            # 时知道、结算时也必须拿到同一个答案，所以存在决策里。
+            "attack_ranged": bool(ranged),
             "spells": spells,
             "features": features,
             # A hit-triggered spell (for example Divine Smite) is offered only
@@ -248,6 +388,9 @@ class CombatReactionSpellsMixin:
         intent: dict[str, Any],
     ) -> None:
         option = intent.get("option")
+        if option == "redirect":
+            self._validate_redirect(instance, combat, decision, intent)
+            return
         if option not in {"cast", "feature"}:
             return
         defender = self._actor_view(instance, combat, str(decision["actor_id"]))
@@ -271,6 +414,9 @@ class CombatReactionSpellsMixin:
                 row for row in self._reaction_feature_choices(
                     combat, defender, attacker,
                     decision.get("damage_event"), decision.get("next_decision"),
+                    # 结算时重建同一份选项：近战还是远程必须与建窗时一致，
+                    # 否则重定向的范围会在两次校验之间漂移。
+                    ranged=bool(decision.get("attack_ranged")),
                 )
                 if row["feature_id"] == intent.get("feature_id")
             ),
@@ -289,6 +435,11 @@ class CombatReactionSpellsMixin:
             "option": intent["option"],
         }]
         armor_class = int(decision["armor_class"])
+        if intent["option"] == "redirect":
+            events.extend(self._finish_redirect(
+                instance, combat, decision, intent, rng,
+            ))
+            return events
         if intent["option"] == "feature":
             choice = next(
                 row for row in decision["features"]
@@ -297,6 +448,10 @@ class CombatReactionSpellsMixin:
             if str(choice.get("effect_kind") or "") == "counterattack":
                 return self._counterattack_events(
                     instance, combat, decision, rng, events,
+                )
+            if str(choice.get("effect_kind") or "") == "damage_reduction":
+                return self._damage_reduction_events(
+                    instance, combat, decision, choice, events, rng,
                 )
             events.append({
                 "type": "dnd2024.reaction.spent", "actor_id": defender_id,
@@ -384,6 +539,10 @@ class CombatReactionSpellsMixin:
             })
             if not hit:
                 return events
+        if isinstance(decision.get("redirect"), dict):
+            # 重定向窗口被放弃：这次攻击的伤害**已经在第一段被减到 0**，反应
+            # 也已经花掉。走到下面的"提交基础伤害"会把原始伤害重新打一次。
+            return events
         next_decision = decision.get("next_decision")
         if isinstance(next_decision, dict):
             events.append({"type": "dnd2024.decision.pending", **deepcopy(next_decision)})
@@ -402,6 +561,246 @@ class CombatReactionSpellsMixin:
         events.extend(self._concentration_events(instance, combat, defender, total, rng))
         events.extend(self._enemy_zero_hp_feature_events(
             instance, combat, str(decision["attacker_id"]), defender, total,
+        ))
+        return events
+
+    def _damage_reduction_events(
+        self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
+        choice: dict[str, Any], events: list[dict[str, Any]], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Pay one Reaction, roll the reduction, then either redirect or land it.
+
+        The dice are rolled here and only here: a replay carries the recorded
+        ``rolls`` on the event, so resolve never re-rolls.
+        """
+
+        defender_id = str(decision["actor_id"])
+        attacker_id = str(decision["attacker_id"])
+        events.append({
+            "type": "dnd2024.reaction.spent", "actor_id": defender_id,
+            "reason": "reaction_feature",
+        })
+        defender = self._actor_view(instance, combat, defender_id)
+        damage_event = deepcopy(decision["damage_event"])
+        original = int(damage_event["amount"])
+        formula = str(choice["reduction_dice"])
+        segments = _DEFLECT_DICE_RE.match(formula)
+        if segments is None:  # pragma: no cover - guarded when the choice was built
+            raise CombatIntentError("deflect reduction dice are not an NdM formula")
+        count, size = int(segments.group(1)), int(segments.group(2))
+        rolls = [int(rng.randint(1, size)) for _ in range(count)]
+        ability = str(choice.get("reduction_ability") or "dex")
+        modifier = ability_modifier(int((defender.get("abilities") or {}).get(ability, 10) or 10))
+        level_bonus = int(choice.get("class_level") or 0) * int(
+            choice.get("reduction_level_scale") or 0
+        )
+        reduction = sum(rolls) + modifier + level_bonus
+        final = max(0, original - reduction)
+        events.append({
+            "type": "dnd2024.damage.reduced", "actor_id": defender_id,
+            "feature_id": str(choice["feature_id"]),
+            "original_amount": original, "reduction": reduction,
+            "final_amount": final, "dice": formula, "rolls": rolls,
+            "ability": ability, "ability_modifier": modifier,
+            "class_level_bonus": level_bonus,
+        })
+        next_decision = decision.get("next_decision")
+        if isinstance(next_decision, dict):
+            # 命中之后的触发窗口（诗人的语出惊人、至圣斩之类）持有同一份伤害：
+            # 不减伤就发出去，等于把它们从流程里吞掉。先把减后的值写回去。
+            forwarded = deepcopy(next_decision)
+            held = forwarded.get("damage_event")
+            if isinstance(held, dict):
+                held["amount"] = final
+                held["delta"] = -final
+            events.append({"type": "dnd2024.decision.pending", **forwarded})
+            return events
+        redirect = choice.get("redirect") or {}
+        if final == 0 and not _CARRYING_TAIL_KEYS.intersection(damage_event):
+            window = self._redirect_window(
+                instance, combat, decision, choice, redirect, attacker_id, defender_id,
+            )
+            if window is not None:
+                events.append({"type": "dnd2024.decision.pending", **window})
+                return events
+        damage_event["amount"] = final
+        damage_event["delta"] = -final
+        if final > 0:
+            events.extend(self._submit_hit_damage(damage_event))
+        defender = self._actor_view(instance, combat, defender_id)
+        tail_events, tail_damage = self._hit_tail_events(
+            instance, combat, attacker_id, defender, damage_event, rng,
+        )
+        events.extend(tail_events)
+        total = final + tail_damage
+        events.extend(self._concentration_events(instance, combat, defender, total, rng))
+        events.extend(self._enemy_zero_hp_feature_events(
+            instance, combat, attacker_id, defender, total,
+        ))
+        return events
+
+    def _redirect_window(
+        self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
+        choice: dict[str, Any], redirect: dict[str, Any],
+        attacker_id: str, defender_id: str,
+    ) -> dict[str, Any] | None:
+        """The Focus-priced second decision, or nothing when it cannot be paid."""
+
+        character = self._feature_character(self._actor_view(instance, combat, defender_id))
+        focus = resource_state(character, "focus_points")
+        cost = int(redirect.get("focus_cost") or 0)
+        if cost <= 0 or int(focus.get("current", 0) or 0) < cost:
+            return None
+        ranged = bool(decision.get("attack_ranged"))
+        span = int(redirect.get("range") or 0)
+        if span <= 0:
+            return None
+        targets: list[dict[str, Any]] = []
+        for row in self._all_targets(instance, combat):
+            target_id = str(row["actor_id"])
+            if target_id == defender_id or int(row.get("hp", 0) or 0) <= 0:
+                continue
+            if self._distance(combat, defender_id, target_id) > span:
+                continue
+            if redirect.get("requires_total_cover") and self.cover_level(
+                instance, combat, target_id,
+            ) == "total":
+                continue
+            targets.append({"actor_id": target_id, "name": str(row.get("name") or target_id)})
+        if not targets:
+            return None
+        defender = self._actor_view(instance, combat, defender_id)
+        die = str(defender.get("martial_arts_die") or "")
+        # Monk 的 Focus save DC = 8 + 熟练加值 + 感知调整值，与既有 open_hand /
+        # stunning_strike 的计算同源。
+        dc = (
+            8
+            + int(defender.get("proficiency_bonus", 0) or 0)
+            + ability_modifier(int((defender.get("abilities") or {}).get("wis", 10) or 10))
+        )
+        kind, raw_id = actor_kind(defender_id)
+        human = kind == "player" and not is_ai_controlled(instance, raw_id)
+        return {
+            "decision_id": f"deflect-redirect:{decision['decision_id']}",
+            "kind": HIT_REACTION_DECISION,
+            "actor_id": defender_id,
+            "attacker_id": attacker_id,
+            "assigned_to": raw_id if human else str(getattr(instance, "gm_uid", "") or ""),
+            "options": ["redirect", "decline"],
+            "attack_ranged": ranged,
+            "attack_total": int(decision.get("attack_total", 0) or 0),
+            "armor_class": int(decision.get("armor_class", 0) or 0),
+            "critical": bool(decision.get("critical")),
+            "damage_event": deepcopy(decision.get("damage_event")),
+            "spells": [],
+            "features": [],
+            "redirect": {
+                "feature_id": str(choice["feature_id"]),
+                "focus_cost": cost,
+                "dice": f"{int(redirect.get('dice_count') or 0)}d{die.split('d')[-1]}" if "d" in die else "",
+                "dice_count": int(redirect.get("dice_count") or 0),
+                "ability": str(redirect.get("ability") or "dex"),
+                "save_ability": str(redirect.get("ability") or "dex"),
+                "save_dc": dc,
+                "damage_type": str(redirect.get("damage_type") or ""),
+                # 结算时要按同一口径复核：窗口建立后目标可能移动，也可能
+                # 因为掩蔽变化而不再可被指定。
+                "range_ft": span,
+                "requires_total_cover": bool(redirect.get("requires_total_cover")),
+                "targets": targets,
+            },
+        }
+
+    def _validate_redirect(
+        self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
+        intent: dict[str, Any],
+    ) -> None:
+        """Re-check the redirect at resolution time, never at window time only."""
+
+        window = decision.get("redirect")
+        if not isinstance(window, dict):
+            raise CombatIntentError("this decision has nothing to redirect")
+        target_id = str(intent.get("redirect_target_id") or "")
+        allowed = {str(row["actor_id"]) for row in window.get("targets") or []}
+        if target_id not in allowed:
+            raise CombatIntentError("the redirect target is not available")
+        defender = self._actor_view(instance, combat, str(decision["actor_id"]))
+        focus = resource_state(self._feature_character(defender), "focus_points")
+        if int(focus.get("current", 0) or 0) < int(window.get("focus_cost") or 0):
+            raise CombatIntentError("not enough Focus to redirect the attack")
+        target = self._actor_view(instance, combat, target_id)
+        if int(target.get("hp", 0) or 0) <= 0:
+            raise CombatIntentError("the redirect target is no longer standing")
+        defender_id = str(decision["actor_id"])
+        if self._distance(combat, defender_id, target_id) > int(window.get("range_ft") or 0):
+            raise CombatIntentError("the redirect target is out of range")
+        if window.get("requires_total_cover") and self.cover_level(
+            instance, combat, target_id,
+        ) == "total":
+            raise CombatIntentError("the redirect target is behind Total Cover")
+
+    def _finish_redirect(
+        self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
+        intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Spend the Focus, roll the target's save, then the redirect damage.
+
+        The original attack's damage was already reduced to 0, so nothing else
+        lands here -- this is a save-and-damage effect, not a second attack, and
+        it must not wake Sneak Attack, a Smite rider or Retaliation.
+        """
+
+        defender_id = str(decision["actor_id"])
+        window = decision["redirect"]
+        target_id = str(intent["redirect_target_id"])
+        defender = self._actor_view(instance, combat, defender_id)
+        target = self._actor_view(instance, combat, target_id)
+        events: list[dict[str, Any]] = [{
+            "type": "dnd2024.class_resource.spent", "actor_id": defender_id,
+            "resource_id": "focus_points", "amount": int(window.get("focus_cost") or 0),
+        }]
+        ability = str(window.get("save_ability") or "dex")
+        dc = int(window["save_dc"])
+        # 走既有的豁免入口，而不是手搓一个 check.resolved：传说抗性、豁免加值
+        # 来源与"重试投掷"这些规则都写在它里面，绕过去等于让重定向成为一条
+        # 不受同一套豁免规则约束的旁路。
+        # ``_saving_throw_check`` 返回的就是那条 check.resolved 事件，它不自己
+        # 入列（调用方的 events 用于 roll_id 去重）。
+        check = self._saving_throw_check(
+            instance, combat, target, target_id, ability, dc, defender_id,
+            events, rng,
+        )
+        events.append(check)
+        if bool(check.get("success")):
+            return events
+        segments = _DEFLECT_DICE_RE.match(str(window.get("dice") or ""))
+        count = int(segments.group(1)) if segments else int(window.get("dice_count") or 0)
+        size = int(segments.group(2)) if segments else 6
+        rolls = [int(rng.randint(1, size)) for _ in range(count)]
+        bonus_ability = str(window.get("ability") or "dex")
+        bonus = ability_modifier(
+            int((defender.get("abilities") or {}).get(bonus_ability, 10) or 10)
+        )
+        raw = sum(rolls) + bonus
+        damage_type = str(window.get("damage_type") or "")
+        amount, resistance = self._resist_damage(target, raw, damage_type)
+        event: dict[str, Any] = {
+            "type": "resource.changed", "resource": "hp", "target_id": target_id,
+            "delta": -amount, "amount": amount,
+            "damage_type": damage_type, "rolls": rolls,
+            "feature_id": str(window.get("feature_id") or ""),
+            "source_actor_id": defender_id,
+        }
+        if resistance:
+            event["resisted"] = True
+            event["resistance"] = resistance
+        events.append(event)
+        # 重定向造成的伤害同样是"伤害来源是武僧"的一次结算：被重定向的目标
+        # 要掷专注，把它打到 0 HP 也要触发击杀类特性。少这两步会让一条规则
+        # 只在攻击路径上成立。
+        events.extend(self._concentration_events(instance, combat, target, amount, rng))
+        events.extend(self._enemy_zero_hp_feature_events(
+            instance, combat, defender_id, target, amount,
         ))
         return events
 
