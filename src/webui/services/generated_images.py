@@ -149,7 +149,7 @@ class GeneratedImageService:
     def storyboard_draft(self, game_key: str, user_id: str, round_number: int = 0) -> dict[str, Any]:
         instance = self._dependencies.get_instance(game_key)
         if instance is None:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         if user_id != instance.gm_uid:
             return error_payload("webui.services.generated_images.storyboard_draft_gm_only")
         entries = [e for e in reversed(instance.log) if str(e.get("gm_response") or "").strip()]
@@ -314,7 +314,7 @@ class GeneratedImageService:
     async def analyze_storyboard(self, game_key: str, user_id: str, round_number: int = 0, panel_count: int | None = None) -> dict[str, Any]:
         instance = self._dependencies.get_instance(game_key)
         if instance is None:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         if user_id != instance.gm_uid:
             return error_payload("webui.services.generated_images.analyze_storyboard_gm_only")
         if not bool(getattr(self._dependencies.imagegen, "auto_storyboard", False)):
@@ -564,7 +564,7 @@ class GeneratedImageService:
     ) -> dict[str, Any]:
         instance = self._dependencies.get_instance(game_key)
         if instance is None:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         if not user_id or user_id != instance.gm_uid:
             return error_payload("webui.services.generated_images.map_background_gm_only")
         if self.image_file(asset_id) is None:
@@ -582,7 +582,7 @@ class GeneratedImageService:
     ) -> dict[str, Any]:
         instance = self._dependencies.get_instance(game_key)
         if instance is None:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         if not user_id or user_id != instance.gm_uid:
             return error_payload("webui.services.generated_images.generate_scene_gm_only")
         try:

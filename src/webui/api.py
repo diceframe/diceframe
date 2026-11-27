@@ -1329,7 +1329,7 @@ class WebAPI:
 
     def preview_module_import(self, payload: bytes) -> dict[str, Any]:
         if self._plugins is None:
-            return {"ok": False, "error": "插件宿主未启用"}
+            return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
         # FIX-01 §3.3：预览与安装共用同一套深度校验（真实解压 + Adventure/catalog
         # 真装载），所以"预览显示 blocker"与"直接 API 安装被拒"结论一致。
         return self._plugins.validate_package(

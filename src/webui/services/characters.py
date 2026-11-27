@@ -263,7 +263,7 @@ async def create_payment_proposal(
         dependencies.games.parse_game_key(game_key),
     )
     if inst is None:
-        return {"ok": False, "error": "游戏不存在"}
+        return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
     payer_uid = str(payer_uid or "").strip()
     recipient_uid = str(recipient_uid or payer_uid).strip()
     try:
@@ -782,7 +782,7 @@ async def update_character(
         dependencies.games.parse_game_key(game_key),
     )
     if not inst:
-        return {"ok": False, "error": "角色不存在"}
+        return {"ok": False, "error": "角色不存在", "error_code": "character_not_found"}
     async with inst.authoritative_write() as write_entered:
         if not write_entered:
             return error_payload("webui.services.characters.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")
@@ -817,7 +817,7 @@ async def adopt_library_card(
         dependencies.games.parse_game_key(game_key),
     )
     if not inst:
-        return {"ok": False, "error": "角色不存在"}
+        return {"ok": False, "error": "角色不存在", "error_code": "character_not_found"}
     instance: GameInstance = inst
     async with instance.authoritative_write() as write_entered:
         if not write_entered:
@@ -870,7 +870,7 @@ async def _update_character_authority(
 ) -> dict[str, Any]:
     inst = instance
     if not inst or user_id not in inst.players:
-        return {"ok": False, "error": "角色不存在"}
+        return {"ok": False, "error": "角色不存在", "error_code": "character_not_found"}
     if _is_rules_aware_game(dependencies, inst):
         return error_payload("webui.services.characters.professional_character_no_legacy_edit", code="RULESET_CHARACTER_OPERATION_REQUIRED")
     # Only player-editable sheet fields; anything else (card metadata, plugin
@@ -1174,7 +1174,7 @@ async def update_npc_portrait(
         dependencies.games.parse_game_key(game_key),
     )
     if not inst:
-        return {"ok": False, "error": "游戏不存在"}
+        return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
     async with inst.authoritative_write() as write_entered:
         if not write_entered:
             return error_payload("webui.services.characters.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")
@@ -1270,7 +1270,7 @@ async def update_npc_standing_portrait(
         dependencies.games.parse_game_key(game_key),
     )
     if not inst:
-        return {"ok": False, "error": "游戏不存在"}
+        return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
     async with inst.authoritative_write() as write_entered:
         if not write_entered:
             return error_payload("webui.services.characters.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")
@@ -1324,7 +1324,7 @@ async def update_npc_voice(
         dependencies.games.parse_game_key(game_key),
     )
     if not inst:
-        return {"ok": False, "error": "游戏不存在"}
+        return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
     async with inst.authoritative_write() as write_entered:
         if not write_entered:
             return error_payload("webui.services.characters.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")
@@ -1373,7 +1373,7 @@ async def resolve_payment(
         dependencies.games.parse_game_key(game_key),
     )
     if inst is None:
-        return {"ok": False, "error": "游戏不存在"}
+        return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
     actor_uid = str(session_uid or "")
 
     def grant_reward(sheet: dict[str, Any], reward: dict[str, Any]) -> None:
@@ -1613,7 +1613,7 @@ async def delete_character(
         dependencies.games.parse_game_key(game_key),
     )
     if not inst:
-        return {"ok": False, "error": "角色不存在"}
+        return {"ok": False, "error": "角色不存在", "error_code": "character_not_found"}
     async with inst.authoritative_write() as write_entered:
         if not write_entered:
             return error_payload("webui.services.characters.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")
@@ -1637,13 +1637,13 @@ async def _delete_character_authority(
 ) -> dict[str, Any]:
     inst = instance
     if not inst or user_id not in inst.players:
-        return {"ok": False, "error": "角色不存在"}
+        return {"ok": False, "error": "角色不存在", "error_code": "character_not_found"}
     if len(inst.players) <= 1:
         return error_payload("webui.services.characters.keep_at_least_one_character")
     name = inst.players[user_id].get("character_name", user_id)
     removed = await inst.remove_player(user_id)
     if not removed:
-        return {"ok": False, "error": "角色不存在"}
+        return {"ok": False, "error": "角色不存在", "error_code": "character_not_found"}
     cancel_proposals_for_player(inst, user_id)
     inst.clear_private_messages(user_id)
     await dependencies.games.save_instance(inst)
@@ -1660,7 +1660,7 @@ async def create_player(
         dependencies.games.parse_game_key(game_key),
     )
     if not inst:
-        return {"ok": False, "error": "游戏不存在"}
+        return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
     inst = cast(GameInstance, inst)
     async with inst.authoritative_write() as write_entered:
         if not write_entered:

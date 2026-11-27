@@ -158,7 +158,7 @@ class GameMediaService:
     ) -> dict[str, Any]:
         instance = self._instance(game_key)
         if not instance:
-            return {"ok": False, "error": "游戏不存在"}
+            return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
         try:
             if use_default:
                 rule_id = self._dependencies.resolve_rule_id(instance)
@@ -174,7 +174,7 @@ class GameMediaService:
             if not selected:
                 return {
                     "ok": False,
-                    "error": t("webui.services.game_media.choose_adventure_cover_or_default"),
+                    "error": t("webui.services.game_media.choose_adventure_cover_or_default"), "error_code": "game_media_choose_adventure_cover_or_default",
                 }
             materialized = self._dependencies.materialize_scene_image(selected)
         except ValueError as exc:

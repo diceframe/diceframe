@@ -290,7 +290,7 @@ def update_world(
         return error_payload("webui.services.worlds.world_id_invalid", code="invalid_world_id")
     world = dependencies.lorebook.get_world(world_id)
     if not world:
-        return {"ok": False, "error": "世界不存在"}
+        return {"ok": False, "error": "世界不存在", "error_code": "world_not_found"}
     if not isinstance(name, str):
         return error_payload("webui.services.worlds.name_not_text")
     name = name.strip()
@@ -519,7 +519,7 @@ def update_world_gm_style(
     if not world_id:
         return error_payload("webui.services.worlds.world_id_missing", code="invalid_world_id")
     if dependencies.lorebook.get_world(world_id) is None:
-        return {"ok": False, "error": "世界不存在"}
+        return {"ok": False, "error": "世界不存在", "error_code": "world_not_found"}
     worlds_dir = dependencies.worlds_dir
     if not worlds_dir:
         return error_payload("webui.services.worlds.template_dir_unconfigured")
@@ -561,7 +561,7 @@ def set_user_world_scene_image(
     if not world_id:
         return error_payload("webui.services.worlds.world_id_missing", code="invalid_world_id")
     if dependencies.lorebook.get_world(world_id) is None:
-        return {"ok": False, "error": "世界不存在"}
+        return {"ok": False, "error": "世界不存在", "error_code": "world_not_found"}
     worlds_dir = dependencies.worlds_dir
     if not worlds_dir:
         return error_payload("webui.services.worlds.template_dir_unconfigured")
@@ -716,7 +716,7 @@ def get_world_definition(
         if data is not None:
             source = "user"
     if data is None:
-        return {"ok": False, "error": "世界不存在"}
+        return {"ok": False, "error": "世界不存在", "error_code": "world_not_found"}
 
     effective_language = str(
         data.get("active_locale") or data.get("language") or requested_language or DEFAULT_LANGUAGE,
@@ -800,7 +800,7 @@ def import_entries(
 
     world_id = str(world_id or "").strip()
     if dependencies.lorebook.get_world(world_id) is None:
-        return {"ok": False, "error": "世界不存在"}
+        return {"ok": False, "error": "世界不存在", "error_code": "world_not_found"}
     if not isinstance(entries, list) or not entries:
         return error_payload("webui.services.worlds.entries_required")
     if len(entries) > MAX_LOREBOOK_IMPORT_ENTRIES:
