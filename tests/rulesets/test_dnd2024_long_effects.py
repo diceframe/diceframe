@@ -1123,3 +1123,77 @@ def test_the_saved_decision_hurls_with_identical_legacy_and_declared_events(fien
         row for row in _of_type(decided, "resource.changed")
         if row.get("damage_type") == "psychic"
     ]
+
+
+def test_intimidating_presence_rejects_duplicate_empty_and_out_of_range_targets(berserker) -> None:
+    engine, instance = _setup(berserker)
+    far_enemy = _two_enemies()[0]
+    far_enemy["position"] = 60
+    _start(engine, instance, enemies=[far_enemy])
+
+    empty = _capability(engine, instance, "intimidating_presence", [1], target_ids=[])
+    assert empty["ok"] is False
+
+    out_of_range = _capability(
+        engine, instance, "intimidating_presence", [1], target_ids=["enemy:goblin-1"],
+    )
+    assert out_of_range["ok"] is False
+
+    engine2, instance2 = _setup(berserker)
+    _start(engine2, instance2, enemies=_two_enemies())
+    duplicate = _capability(
+        engine2, instance2, "intimidating_presence", [1, 1],
+        target_ids=["enemy:goblin-1", "enemy:goblin-1"],
+    )
+    assert duplicate["ok"] is False
+    assert "twice" in duplicate["error"]
+
+
+def test_intimidating_presence_honors_legendary_resistance_via_saving_throw_pipeline(berserker) -> None:
+    engine, instance = _setup(berserker)
+    boss = _two_enemies()[0]
+    boss["traits"] = [{"id": "legendary_resistance", "params": {"per_day": 1}}]
+    _start(engine, instance, enemies=[boss])
+
+    events = _apply(engine, instance, _capability(
+        engine, instance, "intimidating_presence", [1],
+        target_ids=["enemy:goblin-1"],
+    ))
+
+    check = _of_type(events, "check.resolved")[0]
+    assert check["success"] is True
+    assert check.get("legendary_resistance") == 0
+    assert not _of_type(events, "condition.applied")
+
+
+def test_intimidating_presence_condition_clears_when_combat_ends(berserker) -> None:
+    from tests.rulesets.test_dnd2024_channel_control import _inject
+
+    engine, instance = _setup(berserker)
+    _start(engine, instance, enemies=_two_enemies())
+    _inject(engine, instance, [{
+        "type": "condition.applied", "target_id": "player:gm",
+        "condition": "frightened", "duration": "intimidating_presence",
+        "turns_remaining": 10, "source_actor_id": "enemy:goblin-1",
+    }])
+    assert "frightened" in (_conditions(instance, "player:gm") or {})
+
+    _inject(engine, instance, [{"type": "dnd2024.combat.ended", "reason": "victory"}])
+    assert "frightened" not in (_conditions(instance, "player:gm") or {})
+
+
+def test_all_turns_scoped_durations_clear_when_combat_ends(berserker) -> None:
+    from src.rulesets.dnd2024.combat.primitives import TURNS_SCOPED_DURATIONS
+
+    for duration in sorted(TURNS_SCOPED_DURATIONS):
+        engine, instance = _setup(berserker)
+        _start(engine, instance, enemies=_two_enemies())
+        _inject(engine, instance, [{
+            "type": "condition.applied", "target_id": "player:gm",
+            "condition": "frightened", "duration": duration,
+            "turns_remaining": 10, "source_actor_id": "enemy:goblin-1",
+        }])
+        assert "frightened" in (_conditions(instance, "player:gm") or {})
+
+        _inject(engine, instance, [{"type": "dnd2024.combat.ended", "reason": "victory"}])
+        assert "frightened" not in (_conditions(instance, "player:gm") or {}), duration

@@ -1398,10 +1398,15 @@ class CombatValidationMixin(
         item = self.bundle.get("item", item_ref.removeprefix("item:"))
         if not isinstance(item, dict):
             raise CombatIntentError("item is not defined in the active bundle")
-        if self._item_is_merged_in_form(instance, actor["actor_id"], item_ref):
+        form_mode = self._form_item_mode(instance, actor["actor_id"], item_ref)
+        if form_mode == "merge":
             # merged 的含义就是"没有效果"，不是"在 UI 里藏起来"：连激活也不行。
             raise CombatIntentError(
                 "that item has no effect while you are shape-shifted (merged)"
+            )
+        if form_mode == "drop":
+            raise CombatIntentError(
+                "that item was dropped when you shape-shifted"
             )
         try:
             declaration = validate_activation_declaration(item)

@@ -58,6 +58,11 @@ class EffectOperations(Protocol):
         self, instance: Any, actor_id: str, actor: dict[str, Any], capability: FeatureCapability,
     ) -> list[dict[str, Any]]: ...
 
+    def _validate_intimidating_presence(
+        self, instance: Any, combat: dict[str, Any], actor_id: str,
+        actor: dict[str, Any], capability: FeatureCapability, intent: dict[str, Any],
+    ) -> str: ...
+
     def _intimidating_presence_events(
         self, instance: Any, combat: dict[str, Any], actor_id: str,
         actor: dict[str, Any], capability: FeatureCapability, intent: dict[str, Any], rng: Any,
@@ -125,6 +130,15 @@ def dragon_wings(
 ) -> list[dict[str, Any]]:
     return context.operations._dragon_wings_events(
         context.instance, context.actor_id, context.actor, capability,
+    )
+
+
+def validate_intimidating_presence(
+    capability: FeatureCapability, action: CapabilityAction, context: KindContext,
+) -> str:
+    return context.operations._validate_intimidating_presence(
+        context.instance, context.combat, context.actor_id, context.actor,
+        capability, context.intent,
     )
 
 
