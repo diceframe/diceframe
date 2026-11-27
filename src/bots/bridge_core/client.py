@@ -272,12 +272,12 @@ class DiceFrameClient:
                 raise DiceFrameHTTPError(
                     str(error),
                     status=response.status,
-                    code=str(data.get("code") or ""),
+                    code=str(data.get("error_code") or data.get("code") or ""),
                 )
             if isinstance(data, dict) and data.get("ok") is False:
                 raise DiceFrameHTTPError(
                     str(data.get("error") or data.get("narration") or "DiceFrame 请求失败"),
-                    code=str(data.get("code") or ""),
+                    code=str(data.get("error_code") or data.get("code") or ""),
                 )
             return data if isinstance(data, dict) else {"data": data}
 

@@ -42,15 +42,15 @@ async def apply(
 ) -> dict[str, Any]:
     stage = str(stage or "").strip()
     if stage not in BRIDGE_EXTENSION_STAGES:
-        return {"ok": False, "error": t("webui.services.bot_extensions.unsupported_stage", stage=stage)}
+        return {"ok": False, "error": t("webui.services.bot_extensions.unsupported_stage", stage=stage), "error_code": "bot_extensions_unsupported_stage"}
     if not isinstance(payload, dict):
-        return {"ok": False, "error": t("webui.services.bot_extensions.payload_not_object")}
+        return {"ok": False, "error": t("webui.services.bot_extensions.payload_not_object"), "error_code": "bot_extensions_payload_not_object"}
     try:
         encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     except (TypeError, ValueError):
-        return {"ok": False, "error": t("webui.services.bot_extensions.payload_not_json")}
+        return {"ok": False, "error": t("webui.services.bot_extensions.payload_not_json"), "error_code": "bot_extensions_payload_not_json"}
     if len(encoded) > MAX_BRIDGE_PAYLOAD_BYTES:
-        return {"ok": False, "error": t("webui.services.bot_extensions.payload_too_large")}
+        return {"ok": False, "error": t("webui.services.bot_extensions.payload_too_large"), "error_code": "bot_extensions_payload_too_large"}
     host = dependencies.plugin_host
     if not host:
         return {

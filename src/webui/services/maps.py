@@ -140,7 +140,7 @@ async def update_map_background(
         dependencies.parse_game_key(game_key)
     )
     if not instance:
-        return {"ok": False, "error": "游戏不存在"}
+        return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
     try:
         normalized = dependencies.validate_background_selection(selection)
     except ValueError as exc:
@@ -152,7 +152,7 @@ async def update_map_background(
         )
         definition = select_plugin_map(assets.get("maps", []), normalized.get("map_id", ""))
         if not definition or not public_map_definition(definition, assets).get("background"):
-            return {"ok": False, "error": t("webui.services.maps.content_pack_background_unavailable")}
+            return {"ok": False, "error": t("webui.services.maps.content_pack_background_unavailable"), "error_code": "maps_content_pack_background_unavailable"}
     instance.set_map_background(normalized)
     await dependencies.save_instance(instance)
     return {

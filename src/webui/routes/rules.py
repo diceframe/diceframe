@@ -9,6 +9,7 @@ from aiohttp import web
 from src.webui.routes._common import _get_api, _require_confirmed_request
 from src.webui.ruleset_draft_validation import MAX_BUILDER_DRAFT_BYTES
 from src.localization.messages import t
+from src.webui.errors import declared_error_code
 
 
 async def _builder_body(request: web.Request) -> dict | web.Response:
@@ -100,7 +101,7 @@ async def _ruleset_builder_action(request: web.Request, action: str) -> web.Resp
         result = {"ok": False, "code": "INVALID_DRAFT", "error": str(exc)}
     if result.get("ok"):
         status = 200
-    elif result.get("code") == "RULE_NOT_FOUND":
+    elif declared_error_code(result) == "RULE_NOT_FOUND":
         status = 404
     else:
         status = 422
@@ -136,7 +137,7 @@ async def api_ruleset_progression(request: web.Request) -> web.Response:
         )
     except ValueError as exc:
         result = {"ok": False, "code": "INVALID_PROGRESSION", "error": str(exc)}
-    status = 200 if result.get("ok") else 404 if result.get("code") == "RULE_NOT_FOUND" else 422
+    status = 200 if result.get("ok") else 404 if declared_error_code(result) == "RULE_NOT_FOUND" else 422
     return web.json_response(result, status=status)
 
 
@@ -151,7 +152,7 @@ async def _ruleset_advancement_action(request: web.Request, action: str) -> web.
         )
     except ValueError as exc:
         result = {"ok": False, "code": "INVALID_ADVANCEMENT", "error": str(exc)}
-    status = 200 if result.get("ok") else 404 if result.get("code") == "RULE_NOT_FOUND" else 422
+    status = 200 if result.get("ok") else 404 if declared_error_code(result) == "RULE_NOT_FOUND" else 422
     return web.json_response(result, status=status)
 
 
@@ -173,7 +174,7 @@ async def api_ruleset_rest_resolve(request: web.Request) -> web.Response:
         )
     except ValueError as exc:
         result = {"ok": False, "code": "INVALID_REST", "error": str(exc)}
-    status = 200 if result.get("ok") else 404 if result.get("code") == "RULE_NOT_FOUND" else 422
+    status = 200 if result.get("ok") else 404 if declared_error_code(result) == "RULE_NOT_FOUND" else 422
     return web.json_response(result, status=status)
 
 

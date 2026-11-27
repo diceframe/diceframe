@@ -20,7 +20,7 @@ DF Agent 的统一应用动作目录、动态 descriptor、有限服务端授权
 
 [ADR-0013：玩法包边界](0013-gameplay-packages.md) — `Accepted`；gal、经营等玩法独立成 `src/gameplays/<mode>` 包，玩法注册表、回合驱动与 `/play` 视图按玩法分发；修订 ADR-0010 §2 / §4 的落点。
 
-[ADR-0015：后端本地化契约](0015-backend-localization-contract.md) — `Accepted (local implementation; unreleased)`；后端用户可见文本的四条语言轴、身份与 display 分离、渲染边界、错误文案单一 authority，以及 verdict 词表码化。已落地：`check_verdict` code + 渲染边界 + 叙事一致性校验结构化（阶段一，`modules.checks` 仍 v1，不升 schema）。未落地：错误码单一 authority（§4）、ratchet 门禁（§8）、verdict 阶段二（`verdict_code` 转必需 + `modules.checks` v1→v2 / instance schema 48→49）。
+[ADR-0015：后端本地化契约](0015-backend-localization-contract.md) — `Accepted (local implementation; unreleased)`；后端用户可见文本的四条语言轴、身份与 display 分离、渲染边界、错误文案单一 authority，以及 verdict 词表码化。已落地：`check_verdict` code + 渲染边界 + 叙事一致性校验结构化（verdict 阶段一，`modules.checks` 仍 v1）；错误码单一 authority（§4，`error_payload`，`ERROR_CODE_MAP` 冻结，`worlds.py` / `characters.py` 已迁移）；两道 ratchet（§8，`audit_error_codes.py` 与 `audit_localization.py`）。未落地：verdict 阶段二（`verdict_code` 转必需 + `modules.checks` v1→v2 / instance schema 48→49）；剩余约 382 处逐模块错误码迁移。
 
 以下记录仍是提案：
 

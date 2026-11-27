@@ -2077,7 +2077,7 @@ async def test_effect_failure_rolls_back_the_whole_economy_decision(
         created["game_key"], proposal["id"], True, uid,
     )
 
-    assert failed["code"] == "EFFECT_COMMIT_FAILED"
+    assert failed["error_code"] == "EFFECT_COMMIT_FAILED"
     assert instance.get_character_sheet(uid)["currency"]["amount"] == 20
     assert narrative_notes.scene(instance) != "不应提交的半成品场景"
     assert proposal["status"] == "pending"
@@ -2750,7 +2750,7 @@ async def test_restart_rejects_old_payment_waiting_during_candidate_generation(
     assert (await restarting)["ok"] is True
     paid = await payment
     assert paid["ok"] is False
-    assert paid["code"] == "STALE_RUN"
+    assert paid["error_code"] == "STALE_RUN"
 
     restarted = registry.get(api._parse_key(created["game_key"]))
     assert restarted is not old_instance
@@ -2927,7 +2927,7 @@ async def test_payment_cannot_interleave_with_swipe_rewrite(web_api) -> None:
     rewrite = asyncio.create_task(_hold_historical_rewrite(instance, entered, release))
     await asyncio.wait_for(entered.wait(), timeout=10)
     result = await asyncio.wait_for(api.resolve_payment(created["game_key"], proposal["id"], True, uid), 1)
-    assert result["code"] == "REWRITE_IN_PROGRESS"
+    assert result["error_code"] == "REWRITE_IN_PROGRESS"
     assert economy_state.state(instance) == before
     assert instance.get_character_sheet(uid)["currency"]["amount"] == 20
     release.set()

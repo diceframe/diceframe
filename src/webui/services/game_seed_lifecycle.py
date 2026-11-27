@@ -56,7 +56,7 @@ async def create_from_seed(
     story_mode: str = "",
 ) -> dict[str, Any]:
     if not dependencies.handler or not dependencies.registry:
-        return {"ok": False, "error": t("webui.services.game_seed_lifecycle.system_not_ready")}
+        return {"ok": False, "error": t("webui.services.game_seed_lifecycle.system_not_ready"), "error_code": "game_seed_lifecycle_system_not_ready"}
     if config_error := dependencies.llm_configuration_error(language):
         return config_error
     target_inst = None
@@ -67,10 +67,10 @@ async def create_from_seed(
     if not target_inst:
         return {
             "ok": False,
-            "error": t("webui.services.game_seed_lifecycle.seed_game_missing", seed_code=seed_code),
+            "error": t("webui.services.game_seed_lifecycle.seed_game_missing", seed_code=seed_code), "error_code": "game_seed_lifecycle_seed_game_missing",
         }
     if not players:
-        return {"ok": False, "error": t("webui.services.game_seed_lifecycle.party_character_required")}
+        return {"ok": False, "error": t("webui.services.game_seed_lifecycle.party_character_required"), "error_code": "game_seed_lifecycle_party_character_required"}
     world_id = target_inst.world_id or "default_fantasy"
     world_name = target_inst.world_name
     resolved_language = normalize_language(
@@ -108,7 +108,7 @@ async def create_from_seed(
             resolved_narrative_perspective,
         )
     except ValueError:
-        return {"ok": False, "error": t("webui.services.game_seed_lifecycle.narration_perspective_invalid")}
+        return {"ok": False, "error": t("webui.services.game_seed_lifecycle.narration_perspective_invalid"), "error_code": "game_seed_lifecycle_narration_perspective_invalid"}
 
     # A seed restart is a new save, but it must keep the original save's rule
     # identity.  Professional sheets receive the same all-or-nothing preflight
@@ -210,7 +210,7 @@ async def create_from_seed(
     )
     gameplay = DEFAULT_GAMEPLAYS.get(effective_play_mode)
     if gameplay is None:
-        return {"ok": False, "error": t("webui.services.game_seed_lifecycle.play_mode_invalid")}
+        return {"ok": False, "error": t("webui.services.game_seed_lifecycle.play_mode_invalid"), "error_code": "game_seed_lifecycle_play_mode_invalid"}
     gameplay_rejection = gameplay.validate_create(GameplayCreateRequest(
         solo=bool(solo),
         rule_id=str(rule_id or "").strip(),

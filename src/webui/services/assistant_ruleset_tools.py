@@ -158,7 +158,7 @@ def ruleset_tools(
         if not bool(getattr(viewer, 'is_gm', False)):
             return {
                 'ok': False,
-                'code': 'FORBIDDEN',
+                'error_code': 'FORBIDDEN',
                 'error': 'Only the GM can declare cover',
             }
         # 兜底：目标或阶段不对时，把"现在能填什么"直接回给模型，而不是让它
@@ -168,7 +168,7 @@ def ruleset_tools(
         if str(combat.get('status') or '') != 'active':
             return {
                 'ok': False,
-                'code': 'COMBAT_NOT_ACTIVE',
+                'error_code': 'COMBAT_NOT_ACTIVE',
                 'error': 'Cover can only be declared while combat is active',
             }
         targets = _cover_targets(game)
@@ -176,7 +176,7 @@ def ruleset_tools(
         if target_id not in {row['actor_id'] for row in targets}:
             return {
                 'ok': False,
-                'code': 'UNKNOWN_TARGET',
+                'error_code': 'UNKNOWN_TARGET',
                 'error': f'{target_id!r} is not a player or enemy in this game',
                 'targets': targets,
             }
