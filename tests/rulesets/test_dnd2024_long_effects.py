@@ -1180,3 +1180,20 @@ def test_intimidating_presence_condition_clears_when_combat_ends(berserker) -> N
 
     _inject(engine, instance, [{"type": "dnd2024.combat.ended", "reason": "victory"}])
     assert "frightened" not in (_conditions(instance, "player:gm") or {})
+
+
+def test_all_turns_scoped_durations_clear_when_combat_ends(berserker) -> None:
+    from src.rulesets.dnd2024.combat.primitives import TURNS_SCOPED_DURATIONS
+
+    for duration in sorted(TURNS_SCOPED_DURATIONS):
+        engine, instance = _setup(berserker)
+        _start(engine, instance, enemies=_two_enemies())
+        _inject(engine, instance, [{
+            "type": "condition.applied", "target_id": "player:gm",
+            "condition": "frightened", "duration": duration,
+            "turns_remaining": 10, "source_actor_id": "enemy:goblin-1",
+        }])
+        assert "frightened" in (_conditions(instance, "player:gm") or {})
+
+        _inject(engine, instance, [{"type": "dnd2024.combat.ended", "reason": "victory"}])
+        assert "frightened" not in (_conditions(instance, "player:gm") or {}), duration

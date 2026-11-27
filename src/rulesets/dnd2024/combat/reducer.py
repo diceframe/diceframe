@@ -29,9 +29,9 @@ from src.rulesets.events import EventBatchError
 from .primitives import actor_kind as _actor_kind
 from .primitives import (
     FEATURE_STATE_KEYS,
-    INTIMIDATING_PRESENCE_DURATION,
     PERSISTENT_RAGE_DURATION,
     RELENTLESS_RAGE_DECISION,
+    TURNS_SCOPED_DURATIONS,
 )
 
 
@@ -60,8 +60,8 @@ _GRANTABLE_FLAGS = frozenset({"action_surge_used", "fleet_step_available"})
 _TURN_SCOPED_DURATIONS = frozenset({
     "actor_turn_start", "target_turn_start", "target_turn_end",
     "caster_turn_end", "caster_next_turn_end", "after_next_attack",
-    "attacker_next_turn_start", INTIMIDATING_PRESENCE_DURATION,
-})
+    "attacker_next_turn_start",
+}) | TURNS_SCOPED_DURATIONS
 
 
 class CombatReducerMixin:
