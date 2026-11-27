@@ -193,3 +193,38 @@ Deflect Energy 不是独立实现，它是 `deflect_attacks` 的**类型门控�
 ### 11.4 白名单的现状更新
 
 §5.2 列的 `engine.py` 在 `47fc66ef` 上已不再承载这些入口：反应窗口在 `reaction_spells.py`，受击结算在 `resolution.py`，掩蔽在 `environment.py`。本片按实际归属落文件，不向 `engine.py` 加代码。
+
+## 12. 执行记录（2026-11-27）
+
+| 项 | 值 |
+|---|---|
+| 基座 | `47fc66ef`（#876 之后） |
+| 分支 | `feat/dnd2024-s0f11-deflect` |
+| 交付 | Deflect Attacks + Deflect Energy（Retaliation 已在基线中） |
+| 停工 | Slow Fall（GAP-50） |
+
+### 12.1 落地方式
+
+- 内容：`srd_class_features.json` 加 `deflect_attacks`（Monk 3）与 `deflect_energy`（Monk 13）两条；`deflect_energy` 只有 `extends_feature` + `deflect_all_damage_types` 两个参数，不是第二条实现。locale 里两个键**本来就有**（`偏转攻击` / `偏转能量`），本片没有改动它们——规则书作「拨挡」，属既有译名分歧，不夹带。
+- 注册表：`REACTION_FEATURE_EFFECTS` 加一条 `deflect_attacks`，`effect_kind: "damage_reduction"`。它同时声明 `widens_to_all_types: "deflect_energy"` 与 `level_class: "class:monk"`，代码用**变量**去问特性，不为 13 级写第二个分支。
+- 窗口：复用 `HIT_REACTION_DECISION`，不新增 kind。重定向是同一个 kind 的第二个窗口，`options: ["redirect", "decline"]`，靠 `redirect` 字段与 `decision_id` 前缀区分。
+- 减伤骰**只在 resolve 时掷**（`_damage_reduction_events`），窗口建立时只报公式与等级。重放不会重掷：骰值写在 `dnd2024.damage.reduced` 事件的 `rolls` 上。
+- 新事件 `dnd2024.damage.reduced` 进 reducer 的无状态白名单（它只记录骰值与前后值，HP 变化仍由随后的 `resource.changed` 承担）。
+
+### 12.2 与任务书的三处偏差
+
+1. **重定向走同一 kind 的第二个窗口，不是新决策类型**。§4.2.3 要求"仅当 final_amount == 0 才开放重定向"，而减伤骰在窗口建立时还没掷，所以必须两段式。新增 kind 会踩 GAP-43 的 kind 注册表（`scripts/architecture_fitness.py` 扫描 + `DECLARED_INTENT_TYPES`），而扩展同一 kind 的 `options` 不改变任何既有窗口的形状。
+2. **减伤只作用于主伤害，不吞 rider**。`damage_event["amount"]` 是主伤害；`hit_riders` / `extra_damage_parts` / `brutal_strike_effects` 是尚未掷定的声明。因此"减到 0"只在**这次攻击没有后续伤害段**时才开放重定向（`_CARRYING_TAIL_KEYS`），否则只做减伤。规则说的是"总伤害"，但按总额判定的前提是把 rider 先掷定，那会改变 RNG 顺序与事件时序；宁可少开一个窗口，也不给一个按错口径算出来的"减到 0"。
+3. **重定向目标用 `cover_level` 排除 Total Cover**，不另建遮挡模型。`environment.py` 的 `cover_level` 已经回答"这个人是不是在 Total Cover 后"。
+
+### 12.3 只看门禁才现形的缺陷
+
+- **`_hit_reaction_offer` 在两处有签名**：`hit_resolution.py` 的 `if TYPE_CHECKING` 块里有一份桩声明，`reaction_spells.py` 里是实体。只改实体会让 mypy 报 `Unexpected keyword argument "ranged"`——这正是"同名方法在 MRO 上静默覆盖"的同一类问题，只不过这次由类型检查而不是运行时抓到。
+- **结算时重建选项必须拿到同一个 `ranged`**：`_validate_hit_reaction` 会用 `_reaction_feature_choices` 重建一遍。第一版没传 `decision["attack_ranged"]`，远程攻击的重定向范围会在建立窗口与结算之间从 60 尺变成 5 尺。
+- **减伤骰属于 resolve 的 RNG**：它不在攻击那批骰里。测试第一版把 `4` 放进攻击的 `SequenceRng`，`randint` 耗尽后返回最小值 1，断言 `rolls == [4]` 才暴露出这一点。
+- **放弃重定向会把伤害重新打一次**。`_finish_hit_reaction` 的收尾是「命中成立，提交暂存伤害」——那是每个被放弃的窗口都走的路。对重定向窗口，伤害在第一段已经减到 0、反应也已经花掉，走到那里等于把原始伤害再打一遍。第一版的 decline 用例只断言了 Focus 与 pending 清空，没断言 HP，所以它活过了自查。
+- **`public_pending_decision` 是白名单，`redirect` 不在上面**：真实玩家会收到一个只有两个选项、却看不到任何目标的窗口。它只对 GM 视角（原样返回）不可见，所以用 GM 视角跑用例永远发现不了。
+
+### 12.4 用例
+
+`tests/rulesets/test_dnd2024_damage_reactions.py`（14 条）：等级授予（3 级有 / 2 级无）、B/P/S 门控与 13 级扩展、纯 Fire 在 12 级被拒、无 Reaction 不提供、减伤公式（骰值 + Dex + Monk 级）、减到 0 不下血也不治疗、部分减伤只落差额、减到 0 且 Focus 够时开重定向、重定向扣 1 Focus 并让目标掷 Dex 豁免、豁免失败吃 2 × 武艺骰 + Dex、豁免成功零伤害、Focus 为 0 时不开窗口、放弃重定向不扣 Focus、玩家视角能看到重定向的目标与 DC。

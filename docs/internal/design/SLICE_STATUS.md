@@ -92,7 +92,7 @@
 | F10C | 战前潜行（遭遇前） | ⏸ | **缺口 GAP-5**：Surprised 机制不存在，产物无消费者 |
 | F10D | Fast Hands ①③（工具存在性 + 借用 + 动作降级） | ⬜ | `S0F10D_..._TASK_SPEC`；等 F10B 合入后复用其检定函数 |
 | F10E | Fast Hands ②（Utilize） | ⏸ | **缺口 GAP-6 / GAP-16 / GAP-18**：数据齐（35 个工具的 utilize 表），缺 GM 施加后果与区域触发 |
-| F11 | 伤害反应与远程重定向 | 🟡 | Retaliation 已落地（`REACTION_FEATURE_EFFECTS` + `test_dnd2024_retaliation.py`）；剩 Deflect Attacks / Deflect Energy（§4.2）；**Slow Fall 按 §7 停工**（无 fall trigger，GAP-50），已核记于任务书 §11；**无人接手** |
+| F11 | 伤害反应与远程重定向 | 🟡 | Retaliation 早已落地；Deflect Attacks / Deflect Energy 已完成待提交（`test_dnd2024_damage_reactions.py` 13 条，任务书 §12）；**Slow Fall 按 §7 停工**（无 fall trigger，GAP-50） |
 | F12 | 豁免优势、Evasion、邪魔韧性、无情狂怒 | ✅ | #763 + 执行报告（35 条） |
 | F13 | 条件免疫、抑制与移除 | ✅ | #763 + 报告（30 条） |
 | F14 | 命中附加效果、命中后条件、施法侧加值 | ✅ | #763 + 报告（52 条） |
