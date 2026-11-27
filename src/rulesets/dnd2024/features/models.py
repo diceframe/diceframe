@@ -49,6 +49,9 @@ EQUIPMENT_REQUIREMENT_KEYS = frozenset(
 FEATURE_CHOICE_KINDS = frozenset({
     "advancement_feat", "skill_proficiency", "feature_option",
 })
+# 选项的答案落在哪：特性自己的选项表，还是升级账本。两种存储今天并存（FD6b 统一），
+# 所以这是数据而不是"哪个函数先跑到"。
+FEATURE_CHOICE_HANDLERS = frozenset({"feature_choice", "advancement"})
 # 技能选择最终"授予什么"的闭集。``expertise`` 是子职侧的加值翻倍，
 # ``proficiency`` 是专长侧（Skilled）的"直接获得熟练"——两者都写在这张表里，
 # 因为玩家看到的是同一个"选技能"动作，只有结果不同。未知值必须加载期拒绝，
@@ -289,6 +292,10 @@ class FeatureChoice:
     category: str
     count: int
     enabled_options: tuple[str, ...]
+    #: 这个槽的答案由谁收下。``feature_choice`` 走 ``features.feature_choices``，
+    #: ``advancement`` 走 ``progression.history`` 的账本——两种存储今天并存，
+    #: 所以"怎么记"必须是数据，而不是"哪个函数先跑到"。
+    handled_by: str = "feature_choice"
     grants: str = ""
     requires_proficiency: bool = True
     exclude_expertise: bool = True
@@ -332,15 +339,27 @@ def _parse_feature_choice(
         raise ClassFeatureError(
             f"{feature_id}.choice.count must be 1 for a feature option choice"
         )
+    handled_by = str(raw.get("handled_by") or "feature_choice")
+    if handled_by not in FEATURE_CHOICE_HANDLERS:
+        raise ClassFeatureError(
+            f"{feature_id}.choice.handled_by is not supported: {handled_by!r}"
+        )
+    if handled_by != "feature_choice" and kind != "advancement_feat":
+        raise ClassFeatureError(
+            f"{feature_id}.choice.handled_by only applies to an advancement feat slot"
+        )
     raw_refs = raw.get("enabled_options")
-    if raw_refs is None and kind == "skill_proficiency":
-        # 空清单 = 技能目录全集；Expertise 只按"已有熟练"筛选，不点名具体技能。
+    if raw_refs is None and kind in {"skill_proficiency", "advancement_feat"}:
+        # 空清单 = 整个类别。技能槽是"目录全集"，专长槽是"该 category 的全部
+        # 专长"——尚未实现的那些仍会在投射时被标成 ``effect_not_implemented``。
         raw_refs = []
     if not isinstance(raw_refs, list):
         raise ClassFeatureError(
             f"{feature_id}.choice.enabled_options must be an array"
         )
-    if not raw_refs and kind in {"advancement_feat", "feature_option"}:
+    # 账本槽（ASI / 恩惠）没有白名单："整个 category" 就是它的语义。走
+    # feature_choices 的槽仍然必须点名，否则"未实现"的选项会被当成可选。
+    if not raw_refs and kind in {"advancement_feat", "feature_option"} and handled_by != "advancement":
         raise ClassFeatureError(
             f"{feature_id}.choice.enabled_options must be a non-empty array"
         )
@@ -425,6 +444,7 @@ def _parse_feature_choice(
         category=category,
         count=count,
         enabled_options=tuple(refs),
+        handled_by=handled_by,
         grants=grants,
         requires_proficiency=flags["requires_proficiency"],
         exclude_expertise=flags["exclude_expertise"],

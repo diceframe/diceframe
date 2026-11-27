@@ -712,9 +712,11 @@ def test_rogue_uncanny_dodge_declares_no_capability_and_keeps_parameters() -> No
     _runtime, resolver = _resolver()
     character = _rogue(5)
 
+    # 4 级起 ASI 槽也是一条声明（它只带 choice，没有能力/参数）。
     assert [feature.id for feature in resolver.features_for(character)] == [
         "expertise", "sneak_attack", "steady_aim", "cunning_action", "fast_hands",
-        "second_story_work", "uncanny_dodge", "cunning_strike", "weapon_mastery",
+        "second_story_work", "uncanny_dodge", "cunning_strike",
+        "ability_score_improvement", "weapon_mastery",
     ]
     assert resolver.declared_capability(character, "uncanny_dodge") is None
     assert resolver.feature_value(character, "uncanny_dodge", "damage_multiplier") == 0.5
@@ -727,7 +729,7 @@ def test_uncanny_dodge_is_not_owned_below_level_five() -> None:
     # S0-F10A 把 Steady Aim 兑现成三级特性，清单随之变化。
     assert [feature.id for feature in resolver.features_for(_rogue(4))] == [
         "expertise", "sneak_attack", "steady_aim", "cunning_action", "fast_hands",
-        "second_story_work", "weapon_mastery",
+        "second_story_work", "ability_score_improvement", "weapon_mastery",
     ]
     assert resolver.declared_capability(_rogue(4), "uncanny_dodge") is None
 

@@ -106,9 +106,13 @@ class AdvancementChoicesMixin:
         def _pending_subclass_level(
             feature_state: dict[str, Any], level: int, subclass: dict[str, Any],
         ) -> int | None: ...
-        @staticmethod
-        def _ledger_entries(character: dict[str, Any]) -> list[dict[str, Any]] | None: ...
+        def _ledger_entries(
+            self, character: dict[str, Any],
+        ) -> list[dict[str, Any]] | None: ...
         def _update_derived(self, character: dict[str, Any]) -> None: ...
+        def _advancement_slot(
+            self, character: dict[str, Any], snapshot: dict[str, Any],
+        ) -> Any: ...
 
     def repair_choices(
         self,
@@ -226,7 +230,8 @@ class AdvancementChoicesMixin:
             for ability, points in increases.items():
                 abilities[ability] = int(abilities.get(ability, 0) or 0) + int(points)
             repaired_anything = True
-            epic = "epic_boon" in snapshot["gained_feature_ids"]
+            slot = self._advancement_slot(character, snapshot)
+            epic = slot is not None and slot.category == "epic_boon"
             # The feat slot is a fact about the character, whether or not any
             # ledger is being maintained, so it must not live inside the
             # ledger's branch.
@@ -454,6 +459,10 @@ class AdvancementChoicesMixin:
                     continue
                 definition = resolver.catalog.features_by_key.get(key)
                 if definition is None or definition.choice is None:
+                    continue
+                if definition.choice.handled_by != "feature_choice":
+                    # 答案记在升级账本里的槽（ASI / 恩惠）由 ``_advancement_feat``
+                    # 收下；这里再问一次就会出现两条并行的"你还没选"。
                     continue
                 seen.add(key)
                 declared.append(definition)

@@ -165,3 +165,44 @@ def test_each_option_carries_its_own_profile(engine) -> None:
         "points": 1, "allowed": ["str", "dex"], "maximum": 20,
         "pattern": "1", "auto": None,
     }
+
+
+# ---------------------------------------------------------------------------
+# 3. 槽是声明，不是哨兵名字
+# ---------------------------------------------------------------------------
+
+
+def test_every_class_declares_its_advancement_slots(bundle) -> None:
+    from src.rulesets.dnd2024.features.models import Dnd2024ClassFeatureCatalog
+
+    catalog = Dnd2024ClassFeatureCatalog.from_bundle(bundle)
+    for entity in bundle.list("class"):
+        class_id = str(entity["id"])
+        for feature_id, level, category in (
+            ("ability_score_improvement", 4, "general"),
+            ("epic_boon", 19, "epic_boon"),
+        ):
+            definition = catalog.features_by_key[(f"class:{class_id}", feature_id)]
+            assert definition.minimum_level == level, class_id
+            assert definition.choice is not None, class_id
+            assert definition.choice.handled_by == "advancement", class_id
+            assert definition.choice.category == category, class_id
+            # 空白名单 = "该 category 的全部专长"；未实现的仍在投射时被标记。
+            assert definition.choice.enabled_options == (), class_id
+
+
+def test_the_slot_is_found_by_declaration_not_by_name(engine) -> None:
+    # 战士 6 级与 14 级是它多出来的两格，形状与 4/8/12 完全相同。
+    for level in (4, 6, 8, 12, 14, 16):
+        slot = engine._advancement_slot(
+            {"features": {}}, engine.catalog.snapshot("class:fighter", level),
+        )
+        assert slot is not None and slot.category == "general", level
+    epic = engine._advancement_slot(
+        {"features": {}}, engine.catalog.snapshot("class:fighter", 19),
+    )
+    assert epic is not None and epic.category == "epic_boon"
+    # 没有专长槽的等级必须返回 None，而不是"随便给一个"。
+    assert engine._advancement_slot(
+        {"features": {}}, engine.catalog.snapshot("class:fighter", 5),
+    ) is None

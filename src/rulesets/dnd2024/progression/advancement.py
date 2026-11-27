@@ -307,10 +307,10 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         missing: list[dict[str, Any]] = []
         for row_level in range(1, level + 1):
             snapshot = self.catalog.snapshot(class_ref, row_level)
-            gained = snapshot["gained_feature_ids"]
-            epic = "epic_boon" in gained
-            if not epic and "ability_score_improvement" not in gained:
+            slot = self._advancement_slot(character, snapshot)
+            if slot is None:
                 continue
+            epic = slot.category == "epic_boon"
             record = by_level.get(row_level)
             if record is not None and self._recorded_a_choice(record, epic):
                 continue
@@ -408,8 +408,7 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
             })
         return missing
 
-    @staticmethod
-    def _ledger_entries(character: dict[str, Any]) -> list[dict[str, Any]] | None:
+    def _ledger_entries(self, character: dict[str, Any]) -> list[dict[str, Any]] | None:
         """The growth ledger, derived from the audit history.
 
         ``None`` and ``[]`` mean different things: ``None`` is "this card keeps
@@ -467,8 +466,14 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
             diff = diff if isinstance(diff, dict) else {}
             feat_ref = str(diff.get("advancement_feat_ref") or "")
             if feat_ref and feat_ref != PLAIN_ABILITY_FEAT_REF:
-                gained = diff.get("gained_feature_ids") or []
-                key = "epic_boon_ref" if "epic_boon" in gained else "feat_ref"
+                # 键由"这条专长自己的类别"决定，不看哨兵 id：恩惠进
+                # ``epic_boon_ref``，其余进 ``feat_ref``。
+                definition = self.advancement_feats.get(feat_ref.removeprefix("feat:"))
+                key = (
+                    "epic_boon_ref"
+                    if definition is not None and definition.category == "epic_boon"
+                    else "feat_ref"
+                )
                 entry[key] = feat_ref
             subclass_ref = str(choices.get("subclass_ref") or "")
             if subclass_ref:
@@ -535,7 +540,8 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
             character, after, choices
         )
         errors.extend(ability_errors)
-        if "ability_score_improvement" in after["gained_feature_ids"]:
+        slot = self._advancement_slot(character, after)
+        if slot is not None and slot.category == "general":
             profile = (
                 self._ability_increase_for(advancement_feat_ref)
                 or self._slot_increase_default("general")
@@ -548,7 +554,7 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
                 "required": True,
                 "options": self._feat_options("general", character, target_level, after),
             })
-        if "epic_boon" in after["gained_feature_ids"]:
+        if slot is not None and slot.category == "epic_boon":
             requirements.append({
                 "id": "epic_boon_ref",
                 "kind": "single",
@@ -1074,6 +1080,37 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
             raise ProgressionCatalogError("current class level must be an integer from 1 to 20")
         self.catalog.snapshot(class_ref, level)
         return class_ref, level
+
+    def _advancement_slot(
+        self, character: dict[str, Any], snapshot: dict[str, Any],
+    ) -> Any:
+        """The feat slot this level answers through the ledger, if any.
+
+        The slot is a declaration now (``ability_score_improvement`` /
+        ``epic_boon``), so "does this level grant a feat?" is a lookup instead of
+        a comparison against two sentinel ids.  A level may also grant a slot that
+        is answered elsewhere (Fighting Style goes to ``feature_choices``); those
+        carry ``handled_by: "feature_choice"`` and are skipped here.
+        """
+
+        class_ref = str(snapshot.get("class_ref") or "")
+        features = character.get("features")
+        subclass_ref = (
+            str(features.get("subclass_ref") or "") if isinstance(features, dict) else ""
+        )
+        owners = [f"class:{_class_id(class_ref)}"]
+        if subclass_ref:
+            owners.append(subclass_ref)
+        catalog = self._feature_resolver.catalog
+        for owner in owners:
+            for feature_id in snapshot.get("gained_feature_ids") or []:
+                definition = catalog.features_by_key.get((owner, str(feature_id)))
+                if definition is None or definition.choice is None:
+                    continue
+                if definition.choice.handled_by != "advancement":
+                    continue
+                return definition.choice
+        return None
 
     def _ability_increase_for(self, feat_ref: str) -> AbilityIncrease | None:
         """The declared increase of one feat, or ``None`` when it grants none."""

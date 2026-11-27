@@ -59,6 +59,29 @@ const featRequirement = computed(() => (
   requirement('epic_boon_ref') || requirement('feat_ref')
 ))
 const abilityRequirement = computed(() => requirement('ability_score_increases'))
+// 属性提升的档位属于"这一格实际会选的专长"：Grappler 是"1 点、力或敏"，
+// ASI 是"2 点、可拆成 +1/+1"。专长未选时用服务端给的槽级默认（通用槽就是
+// ASI）。每个选项都带着自己的档位，所以不需要为选中的专长再问一次后端。
+const abilityProfile = computed(() => {
+  const slot = abilityRequirement.value
+  if (!slot) return null
+  const feat = featRequirement.value
+  const options = (feat?.options as JsonObject[] | undefined) || []
+  const selected = feat ? choices.value[String(feat.id)] : undefined
+  const own = options.find(item => item.value === selected)?.ability_increase as JsonObject | undefined
+  const profile = own || slot
+  return {
+    total: Number(own ? profile.points : profile.total) || 0,
+    allowed: profile.allowed as string | string[] | undefined,
+    pattern: String(profile.pattern || '1'),
+    auto: (profile.auto as { ability: string; points: number } | null | undefined) || null,
+  }
+})
+// 只有一项可填时不渲染网格：模板里只用一个字符串，避免在模板中做深层判空。
+const autoIncrease = computed(() => {
+  const auto = abilityProfile.value?.auto
+  return auto ? `${auto.ability.toUpperCase()} +${auto.points}` : ''
+})
 const spellRequirement = computed(() => requirement('class_spell_choices'))
 // 换法术的额度由内容决定（战士式的"整表重排"只属于长休）：本级能新增几个、
 // 能拿掉几个旧法术，全从要求里读，面板不写死任何一个职业的数字。
@@ -375,7 +398,7 @@ function setChoice(key: string, value: string): void {
 }
 
 function abilityAllowed(ability: string): boolean {
-  const allowed = abilityRequirement.value?.allowed
+  const allowed = abilityProfile.value?.allowed
   return allowed === 'any' || !Array.isArray(allowed) || allowed.includes(ability)
 }
 
@@ -617,7 +640,8 @@ onMounted(() => {
 
       <fieldset v-if="featRequirement"><legend>{{ requirement('epic_boon_ref') ? text('选择史诗恩惠', 'Choose Epic Boon') : text('选择通用专长', 'Choose General feat') }}</legend><div class="feat-grid"><label v-for="option in (featRequirement.options as JsonObject[])" :key="String(option.value)" :class="{ unavailable: option.available === false }"><input type="radio" :name="String(featRequirement.id)" :disabled="option.available === false" :checked="choices[String(featRequirement.id)] === option.value" @change="setChoice(String(featRequirement.id), String(option.value))"><span><b>{{ option.name }}</b><small v-if="option.available === false">{{ text('前置条件未满足', 'Prerequisite not met') }}</small><code>{{ option.source_ref }}</code></span></label></div></fieldset>
 
-      <fieldset v-if="abilityRequirement"><legend>{{ text(`属性提升（合计 ${abilityRequirement.total}）`, `Ability increase (total ${abilityRequirement.total})`) }}</legend><div class="ability-grid"><label v-for="ability in ABILITIES" :key="ability" :class="{ unavailable: !abilityAllowed(ability) }"><span>{{ ability.toUpperCase() }} <small>{{ abilityDiff[ability] }}</small></span><select :disabled="!abilityAllowed(ability)" :value="(choices.ability_score_increases as JsonObject)?.[ability] || 0" @change="setAbility(ability, Number(($event.target as HTMLSelectElement).value))"><option :value="0">+0</option><option :value="1">+1</option><option v-if="abilityRequirement.pattern === '2_or_1_1'" :value="2">+2</option></select></label></div></fieldset>
+      <p v-if="autoIncrease" class="spell-help">{{ text(`属性提升：${autoIncrease}（无需选择）`, `Ability increase: ${autoIncrease} (no choice needed)`) }}</p>
+      <fieldset v-if="abilityProfile && !autoIncrease"><legend>{{ text(`属性提升（合计 ${abilityProfile.total}）`, `Ability increase (total ${abilityProfile.total})`) }}</legend><div class="ability-grid"><label v-for="ability in ABILITIES" :key="ability" :class="{ unavailable: !abilityAllowed(ability) }"><span>{{ ability.toUpperCase() }} <small>{{ abilityDiff[ability] }}</small></span><select :disabled="!abilityAllowed(ability)" :value="(choices.ability_score_increases as JsonObject)?.[ability] || 0" @change="setAbility(ability, Number(($event.target as HTMLSelectElement).value))"><option :value="0">+0</option><option :value="1">+1</option><option v-if="abilityProfile.pattern === '2_or_1_1'" :value="2">+2</option></select></label></div></fieldset>
 
       <fieldset v-if="spellRequirement" class="spell-section"><legend>{{ text('调整职业法术', 'Update class spells') }}</legend><p class="spell-help">{{ text('每个区域标题都写着“已选 / 需要”。达到需要的数量后，其他选项会自动锁定；取消一个已选项即可重新选择。法师请先选法术书，再从法术书里选准备法术。', 'Each section shows selected / required. Once the required count is reached, extra options lock automatically; uncheck one to choose another. Wizards choose the spellbook first, then prepared spells from it.') }}</p><p v-if="spellBudgetText" class="spell-help spell-budget">{{ spellBudgetText }}</p><div v-if="Number(spellRequirement.cantrip_count)"><b>{{ text(`戏法：已选 ${selectedSpells('cantrip_refs').length} / 需要 ${spellRequirement.cantrip_count}`, `Cantrips: ${selectedSpells('cantrip_refs').length} selected / ${spellRequirement.cantrip_count} required`) }}</b><div class="spell-grid"><label v-for="spell in spellRows('cantrips')" :key="spell.ref"><input type="checkbox" :disabled="spellDisabled('cantrip_refs', spell)" :checked="selectedSpells('cantrip_refs').includes(spell.ref)" @change="toggleSpell('cantrip_refs', spell)"> {{ spell.name }}</label></div></div><div v-if="Number(spellRequirement.spellbook_minimum)"><b>{{ text(`法术书：已选 ${selectedSpells('spellbook_refs').length} / 需要 ${spellLimit('spellbook_refs')}`, `Spellbook: ${selectedSpells('spellbook_refs').length} selected / ${spellLimit('spellbook_refs')} required`) }}</b><div class="spell-grid"><label v-for="spell in spellRows('leveled_spells')" :key="`book-${spell.ref}`"><input type="checkbox" :disabled="spellDisabled('spellbook_refs', spell)" :checked="selectedSpells('spellbook_refs').includes(spell.ref)" @change="toggleSpell('spellbook_refs', spell)"> {{ spell.name }} <small>Lv.{{ spell.level }}</small></label></div></div><div v-if="Number(spellRequirement.prepared_spell_count)"><b>{{ text(`准备法术：已选 ${selectedSpells('prepared_spell_refs').length} / 需要 ${spellRequirement.prepared_spell_count}`, `Prepared: ${selectedSpells('prepared_spell_refs').length} selected / ${spellRequirement.prepared_spell_count} required`) }}</b><div class="spell-grid"><label v-for="spell in spellRows('leveled_spells')" :key="`prepared-${spell.ref}`" :class="{ unavailable: preparedDisabled(spell) || spellDisabled('prepared_spell_refs', spell) }"><input type="checkbox" :disabled="spellDisabled('prepared_spell_refs', spell)" :checked="selectedSpells('prepared_spell_refs').includes(spell.ref)" @change="toggleSpell('prepared_spell_refs', spell)"> {{ spell.name }} <small>Lv.{{ spell.level }}</small></label></div></div></fieldset>
 
