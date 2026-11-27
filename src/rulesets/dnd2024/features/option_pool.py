@@ -827,6 +827,42 @@ def write_record(features: dict[str, Any], record: Mapping[str, Any]) -> None:
     rows[:] = kept
 
 
+def project_feature_selection(
+    definition: Any,
+    records: list[Mapping[str, Any]],
+    is_valid: Any,
+) -> dict[str, Any] | None:
+    """Project one feature's committed choice records into ``{choice_id, selected_refs}``."""
+
+    choice = definition.choice
+    if choice is None:
+        return None
+    matches = [
+        record for record in records
+        if record.get("owner") == definition.owner
+        and record.get("feature_id") == definition.id
+        and record.get("choice_id") == choice.id
+    ]
+    groups: dict[Any, list[Mapping[str, Any]]] = {}
+    for record in matches:
+        groups.setdefault(record.get("granted_level"), []).append(record)
+    if any(len(group) > 1 for group in groups.values()):
+        return {"choice_id": choice.id, "selected_refs": []}
+    allowed = set(choice.enabled_options)
+    selected: list[str] = []
+    for group in groups.values():
+        raw_refs = group[0].get("selected_refs")
+        if not isinstance(raw_refs, list):
+            continue
+        for raw in raw_refs:
+            pick = parse_ref(raw)
+            if pick is None or not is_valid(choice, pick.ref, allowed):
+                continue
+            if pick.ref not in selected:
+                selected.append(pick.ref)
+    return {"choice_id": choice.id, "selected_refs": selected}
+
+
 __all__ = [
     "CHOICE_RECORD_KEY",
     "InvocationPoolError",

@@ -1071,44 +1071,9 @@ class Dnd2024ClassFeatureResolver:
         contract.
         """
 
-        choice = definition.choice
-        if choice is None:
-            return None
-        matches = [
-            record
-            for record in self._feature_choice_records(character)
-            if record.get("owner") == definition.owner
-            and record.get("feature_id") == definition.id
-            and record.get("choice_id") == choice.id
-        ]
-        # 同一个三元组可以合法地出现多次：Bard 的 Expertise 在 2 级与 9 级各选
-        # 两项，两级共用一个 (owner, feature_id, choice_id)。区分它们的是
-        # ``granted_level``，所以按等级分组：组内重复仍然是"写了两次"的歧义，
-        # 不同等级则是先后两次合法选择，合并成一份选择集。
-        groups: dict[Any, list[Mapping[str, Any]]] = {}
-        for record in matches:
-            groups.setdefault(record.get("granted_level"), []).append(record)
-        if any(len(group) > 1 for group in groups.values()):
-            return {"choice_id": choice.id, "selected_refs": []}
-        allowed = set(choice.enabled_options)
-        selected: list[str] = []
-        for group in groups.values():
-            raw_refs = group[0].get("selected_refs")
-            if not isinstance(raw_refs, list):
-                continue
-            for raw in raw_refs:
-                # 与 `_selected_feature_options` 同一套解析：一次选择可以是
-                # `{ref, object_ref}`，只认字符串会让角色卡的 selection 丢掉
-                # 所有带绑定的选择，而所有权那边认得它们。
-                pick = option_pool.parse_ref(raw)
-                if pick is None:
-                    continue
-                if not self._choice_ref_is_valid(choice, pick.ref, allowed):
-                    continue
-                if pick.ref not in selected:
-                    selected.append(pick.ref)
-        return {"choice_id": choice.id, "selected_refs": selected}
-
+        return option_pool.project_feature_selection(
+            definition, self._feature_choice_records(character), self._choice_ref_is_valid,
+        )
     def _choice_ref_is_valid(
         self, choice: Any, ref: str, allowed: set[str],
     ) -> bool:
@@ -1320,32 +1285,13 @@ class Dnd2024ClassFeatureResolver:
         return frozenset(selected)
 
     def bound_objects(
-        self,
-        character: Mapping[str, Any] | None,
-        feature_id: str,
-        *,
-        owner: str = "",
+        self, character: Mapping[str, Any] | None, feature_id: str, *, owner: str = "",
     ) -> tuple[str, ...]:
-        """Objects a repeatable option is bound to (one pick may name one).
-
-        Eldritch Invocations bind each pick to a cantrip: "Agonizing Blast on
-        Eldritch Blast" is not the same fact as "Agonizing Blast".  The effect
-        side must ask this, not re-walk ``selected_refs`` itself -- a second
-        reader is how "the bonus landed on the wrong cantrip" happens.
-        """
-
         return option_pool.bound_objects(character, feature_id, owner)
 
     def owns_binding(
-        self,
-        character: Mapping[str, Any] | None,
-        feature_id: str,
-        object_ref: str,
-        *,
-        owner: str = "",
+        self, character: Mapping[str, Any] | None, feature_id: str, object_ref: str, *, owner: str = "",
     ) -> bool:
-        """Whether one pick of ``feature_id`` is bound to ``object_ref``."""
-
         return option_pool.owns_binding(character, feature_id, object_ref, owner)
 
     def feature_option_choice(
