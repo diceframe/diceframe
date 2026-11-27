@@ -213,6 +213,7 @@ def cantrip_candidates(
     *,
     spells: Mapping[str, Mapping],
     spell_effects: Mapping[str, Mapping],
+    owner_class_ref: str = "class:warlock",
 ) -> list[dict[str, Any]]:
     """Known Warlock cantrips this option could be bound to.
 
@@ -242,7 +243,7 @@ def cantrip_candidates(
         # 都不剩（这正是第一版漏掉全部候选的原因）。
         if entity.get("level") != 0:
             continue
-        if "class:warlock" not in (entity.get("class_refs") or ()):
+        if owner_class_ref and owner_class_ref not in (entity.get("class_refs") or ()):
             continue
         effect = spell_effects.get(spell_id)
         effect = effect if isinstance(effect, Mapping) else {}
@@ -290,7 +291,9 @@ def _option_reasons(
 
 
 def _fillable_refs(
-    projected: list[dict[str, Any]], options: Mapping[str, Any],
+    projected: list[dict[str, Any]],
+    options: Mapping[str, Any],
+    owned_refs: set[str] | frozenset[str] = frozenset(),
 ) -> set[str]:
     """Options that could end up selected in this batch.
 
@@ -304,7 +307,7 @@ def _fillable_refs(
     }
     fillable = {
         ref for ref, reasons in blocked.items()
-        if not (reasons - {"prerequisite_invocation"})
+        if not reasons
     }
     changed = True
     while changed:
@@ -319,7 +322,7 @@ def _fillable_refs(
             if option is None:
                 continue
             requires = option.parameters.get("invocation_requires_invocations") or ()
-            if all(str(item) in fillable for item in requires):
+            if all(str(item) in fillable or str(item) in owned_refs for item in requires):
                 fillable.add(ref)
                 changed = True
     return fillable
@@ -353,6 +356,7 @@ def _pick_errors(
     reasons_by_ref: Mapping[str, list[str]],
     owned: list[Pick],
     picked_so_far: list[Pick],
+    batch_refs: set[str] | frozenset[str] | None = None,
     bind_options: Mapping[str, list[dict[str, Any]]],
     target_level: int,
 ) -> list[str]:
@@ -368,7 +372,7 @@ def _pick_errors(
     option = options.get(pick.ref)
     if option is None:
         return [f"{pick.ref} is not a declared option of {definition_id}"]
-    allowed = {item.ref for item in picked_so_far} | {item.ref for item in owned}
+    allowed = ({item.ref for item in picked_so_far} if batch_refs is None else set(batch_refs)) | {item.ref for item in owned}
     reasons = [
         reason for reason in (reasons_by_ref.get(pick.ref) or [])
         if reason != "prerequisite_invocation"
@@ -481,6 +485,7 @@ def plan_pool(
             candidates = cantrip_candidates(
                 character, option.parameters,
                 spells=spells, spell_effects=spell_effects,
+                owner_class_ref=definition.owner,
             )
             for row in candidates:
                 if row["available"] and (ref, row["value"]) in bound_already:
@@ -512,7 +517,7 @@ def plan_pool(
     # 容量还要算上"同一批里新拿到的依赖项"：只有前置未满足的选项是可以填的
     # （F34 的 Pact of the Blade + Thirsting Blade 同批获得），否则容量会小于
     # 玩家合法能选的数量，把一次本可填满的提交拒掉。
-    fillable = _fillable_refs(projected, options)
+    fillable = _fillable_refs(projected, options, owned_refs)
     capacity = sum(
         _pick_capacity(row, bind_options, selectable=True)
         for row in projected if row["value"] in fillable
@@ -594,6 +599,7 @@ def plan_pool(
             "option(s)"
         )
     reasons_by_ref = {row["value"]: row["unavailable_reasons"] for row in projected}
+    batch_refs = {item.ref for item in new_picks}
     for index, pick in enumerate(new_picks):
         errors.extend(_pick_errors(
             pick,
@@ -602,6 +608,7 @@ def plan_pool(
             reasons_by_ref=reasons_by_ref,
             owned=owned,
             picked_so_far=new_picks[:index],
+            batch_refs=batch_refs,
             bind_options=bind_options,
             target_level=target_level,
         ))
@@ -647,6 +654,7 @@ def plan_pool(
             reasons_by_ref=reasons_by_ref,
             owned=[],
             picked_so_far=current,
+            batch_refs={item.ref for item in current},
             bind_options=bind_options,
             target_level=target_level,
         ))

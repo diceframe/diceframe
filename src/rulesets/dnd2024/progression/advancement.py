@@ -846,9 +846,26 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         # 按职业表累加名额的选项池（邪术祈唤）：它不在 `_plan_feature_choices`
         # 里，因为那条路径只处理"本级新获得的特性"，而池子每一级都可能再给
         # 一个新名额。
+        preview_spellcasting = deepcopy(character.get("spellcasting") or {})
+        preview_class_magic = preview_spellcasting.setdefault("class", {})
+        if isinstance(preview_class_magic, dict) and spell_choices.get("cantrip_refs"):
+            preview_class_magic["cantrip_refs"] = list(spell_choices["cantrip_refs"])
+        preview_features = dict(feature_state)
+        if next_subclass_ref:
+            preview_features["subclass_ref"] = next_subclass_ref
+        pool_character = {
+            **character,
+            "build": {
+                **(character.get("build") or {}),
+                "level": target_level,
+                "class_levels": [{"class_ref": class_ref, "level": target_level}],
+            },
+            "features": preview_features,
+            "spellcasting": preview_spellcasting,
+        }
         pool_requirements, pool_records, pool_errors = option_pool.plan_pools(
             resolver=self._feature_resolver,
-            character=character,
+            character=pool_character,
             target_level=target_level,
             tracks=after.get("tracks") or {},
             choices=choices,

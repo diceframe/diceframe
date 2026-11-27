@@ -17,10 +17,9 @@ from typing import Any, Mapping
 from src.rulesets.dnd2024.character.builder import ability_modifier
 from src.rulesets.dnd2024.combat.primitives import size_at_most
 
-WARLOCK = "class:warlock"
-
-
-def _class_level(features: Any, character: Mapping[str, Any] | None) -> int:
+def _class_level(
+    features: Any, character: Mapping[str, Any] | None, owner_class_ref: str,
+) -> int:
     """The Warlock level, or 0 when this is not a Warlock character.
 
     ``class_state`` deliberately answers ``None`` for a multiclass card, and a
@@ -33,7 +32,7 @@ def _class_level(features: Any, character: Mapping[str, Any] | None) -> int:
     if state is None:
         return 0
     class_id, level = state
-    return int(level) if f"class:{class_id}" == WARLOCK else 0
+    return int(level) if f"class:{class_id}" == owner_class_ref else 0
 
 
 def _carrier(
@@ -104,7 +103,7 @@ def spear_range_bonus(
     )
     if not per_level:
         return 0
-    return per_level * _class_level(features, character)
+    return per_level * _class_level(features, character, definition.owner)
 
 
 def concentration_advantage(

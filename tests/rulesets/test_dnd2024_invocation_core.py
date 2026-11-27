@@ -1088,3 +1088,106 @@ def test_the_pool_record_survives_save_and_replay() -> None:
     assert resolver.owns_binding(
         advanced["ruleset_character"], "agonizing_blast", "spell:eldritch_blast",
     )
+
+
+def test_fillable_refs_does_not_count_option_with_unfillable_prerequisite() -> None:
+    """Unfillable prerequisite must prevent dependent option from counting toward capacity."""
+
+    from types import SimpleNamespace
+    from src.rulesets.dnd2024.features import option_pool
+
+    opt_a = SimpleNamespace(parameters={"invocation_requires_invocations": ()})
+    opt_b = SimpleNamespace(parameters={"invocation_requires_invocations": ("feature:a",)})
+    projected_blocked = [
+        {"value": "feature:a", "unavailable_reasons": ["effect_not_implemented"]},
+        {"value": "feature:b", "unavailable_reasons": ["prerequisite_invocation"]},
+    ]
+    assert option_pool._fillable_refs(
+        projected_blocked, {"feature:a": opt_a, "feature:b": opt_b},
+    ) == set()
+
+    projected_fillable = [
+        {"value": "feature:a", "unavailable_reasons": []},
+        {"value": "feature:b", "unavailable_reasons": ["prerequisite_invocation"]},
+    ]
+    assert option_pool._fillable_refs(
+        projected_fillable, {"feature:a": opt_a, "feature:b": opt_b},
+    ) == {"feature:a", "feature:b"}
+
+
+def test_batch_prerequisite_validation_is_order_independent() -> None:
+    """Submitting [dependent, prerequisite] in reverse order within one batch must succeed."""
+
+    from types import SimpleNamespace
+    from src.rulesets.dnd2024.features import option_pool
+
+    opt_a = SimpleNamespace(
+        id="prereq_a", minimum_level=1,
+        parameters={"invocation_effect_status": "complete"},
+    )
+    opt_b = SimpleNamespace(
+        id="dep_b", minimum_level=1,
+        parameters={
+            "invocation_effect_status": "complete",
+            "invocation_requires_invocations": ("feature:prereq_a",),
+        },
+    )
+    definition = SimpleNamespace(
+        owner="class:warlock", id="eldritch_invocations",
+        choice=SimpleNamespace(
+            id="invocations", count_track="eldritch_invocations",
+            enabled_options=("feature:prereq_a", "feature:dep_b"),
+            replace_per_level=1,
+        ),
+    )
+    resolver = SimpleNamespace(
+        catalog=SimpleNamespace(
+            features_by_key={
+                ("class:warlock", "prereq_a"): opt_a,
+                ("class:warlock", "dep_b"): opt_b,
+            },
+            label=lambda key, default="": default,
+        ),
+    )
+    plan = option_pool.plan_pool(
+        resolver=resolver, definition=definition, character={},
+        target_level=2, track_total=2,
+        submitted=["feature:dep_b", "feature:prereq_a"],
+        replacement=None, spells={}, spell_effects={},
+    )
+    assert plan.ok, plan.errors
+    assert plan.record is not None
+    assert plan.record["selected_refs"] == ["feature:dep_b", "feature:prereq_a"]
+
+
+def test_level_four_invocation_can_bind_to_cantrip_learned_at_same_level() -> None:
+    """At level 4, an invocation replacement can bind to a cantrip learned at the same level."""
+
+    runtime, sheet = _sheet()
+    for level in (2, 3):
+        preview, choices = _plan(
+            runtime, sheet,
+            picks=LEVEL_TWO_PICKS if level == 2 else None,
+        )
+        assert preview["ok"] is True, (level, preview["errors"])
+        sheet = runtime.apply_advancement(None, sheet, choices)
+
+    preview_base, choices_l4 = _plan(runtime, sheet)
+    assert preview_base["ok"] is True, preview_base["errors"]
+    current_cantrips = list(sheet["ruleset_character"]["spellcasting"]["class"]["cantrip_refs"])
+    new_cantrip = next(
+        ref for ref in ("spell:chill_touch", "spell:poison_spray", "spell:toll_the_dead")
+        if ref not in current_cantrips
+    )
+    choices_l4["class_spell_choices"]["cantrip_refs"] = [*current_cantrips, new_cantrip]
+    choices_l4["feature_choice_replace"] = {
+        "drop": "feature:eldritch_mind",
+        "add": {"ref": "feature:agonizing_blast", "object_ref": new_cantrip},
+    }
+    preview_l4 = runtime.preview_advancement(None, sheet, choices_l4)
+    assert preview_l4["ok"] is True, preview_l4["errors"]
+    advanced = runtime.apply_advancement(None, sheet, choices_l4)
+    resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle(LOCALE))
+    assert resolver.owns_binding(
+        advanced["ruleset_character"], "agonizing_blast", new_cantrip,
+    )
