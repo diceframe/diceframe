@@ -519,6 +519,10 @@ class CombatReactionSpellsMixin:
             })
             if not hit:
                 return events
+        if isinstance(decision.get("redirect"), dict):
+            # 重定向窗口被放弃：这次攻击的伤害**已经在第一段被减到 0**，反应
+            # 也已经花掉。走到下面的"提交基础伤害"会把原始伤害重新打一次。
+            return events
         next_decision = decision.get("next_decision")
         if isinstance(next_decision, dict):
             events.append({"type": "dnd2024.decision.pending", **deepcopy(next_decision)})

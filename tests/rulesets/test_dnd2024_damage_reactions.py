@@ -335,15 +335,19 @@ def test_no_focus_means_the_redirect_is_never_offered() -> None:
 def test_declining_the_redirect_costs_nothing() -> None:
     engine, instance, _sheet = _instance(level=3, focus=3, enemy=[goblin(), _second_goblin()])
     focus_before = int(focus_state(instance).get("current", 0) or 0)
+    hp_before = _hp(engine, instance)
 
     _hit(engine, instance, [15, 4])
     _resolve(engine, instance, {
         "option": "feature", "feature_id": "deflect_attacks",
     }, SequenceRng([10]))
-    _resolve(engine, instance, {"option": "decline"})
+    resolved = _resolve(engine, instance, {"option": "decline"})
 
     assert int(focus_state(instance).get("current", 0) or 0) == focus_before
     assert _pending(instance) is None
+    # 放弃重定向不等于放弃拨挡：伤害已经在第一段减到 0，不能重新打一次。
+    assert not any(item.get("type") == "resource.changed" for item in resolved)
+    assert _hp(engine, instance) == hp_before
 
 
 def test_the_owner_sees_the_redirect_targets_in_their_own_window() -> None:
