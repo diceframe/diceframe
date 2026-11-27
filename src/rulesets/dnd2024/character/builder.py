@@ -119,6 +119,7 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
         )
         skill_choices = self._present_skill_choices(draft, background, class_ref)
         language_choices = self._present_language_choices(draft, class_ref)
+        option_choices = self._present_feature_options(draft, class_ref)
         return {
             "ability_methods": [
                 {
@@ -192,6 +193,7 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             "feat_choices": feat_choices,
             "skill_choices": skill_choices,
             "language_choices": language_choices,
+            "feature_option_choices": option_choices,
             "class_tools": [present(item, "tool") for item in class_tools],
             "class_tool_count": int(class_tool_choice.get("count", 0) or 0),
             "quick_presets": quick_presets,
@@ -372,6 +374,52 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             level=int(draft.get("level", 1) or 1),
         )
         return [*errors, *choice_errors]
+
+    def _present_feature_options(
+        self, draft: dict[str, Any], class_ref: str,
+    ) -> list[dict[str, Any]]:
+        """The mutually exclusive branches a level-1 build still has to answer.
+
+        Divine Order and Primal Order are available at level 1, so creation can
+        commit to one; without this projection the player picks nothing and the
+        branch's grants never apply.
+        """
+
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        if not class_ref:
+            return []
+        proxy = self._skill_choice_proxy(draft, class_ref)
+        result: list[dict[str, Any]] = []
+        for definition in features.features_for(proxy):
+            choice = definition.choice
+            if choice is None or choice.kind != "feature_option":
+                continue
+            options: list[dict[str, Any]] = []
+            for ref in choice.enabled_options:
+                option_id = str(ref).removeprefix("feature:")
+                option = features.catalog.features_by_key.get(
+                    (definition.owner, option_id),
+                )
+                if option is None:  # pragma: no cover - loader guarantees it
+                    continue
+                options.append({
+                    "value": str(ref),
+                    "name": str(
+                        features.catalog.labels.get(option_id) or _humanize_id(option_id)
+                    ),
+                    "summary": option.summary,
+                    "source_ref": option.source_ref,
+                    "available": True,
+                    "unavailable_reasons": [],
+                })
+            result.append({
+                "owner": definition.owner,
+                "feature_id": definition.id,
+                "choice_id": choice.id,
+                "count": choice.count,
+                "options": options,
+            })
+        return result
 
     def _present_language_choices(
         self, draft: dict[str, Any], class_ref: str,
@@ -560,6 +608,22 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             ),
             "language_refs": deepcopy(build.get("language_refs") or []),
             "class_spell_choices": deepcopy(build.get("class_spell_choices")),
+            # 选择槽必须一起搬回来，否则重建会静默丢掉玩家答过的槽：Expertise、
+            # 二选一（Divine Order）与语言选择都不在 draft 的其它字段里。
+            # 只搬提交格式的四个字段——canonical 的记录还带 `granted_level`
+            # 与 `grants`，那是落地信息，提交契约不接受。
+            "feature_choices": [
+                {
+                    "owner": record.get("owner"),
+                    "feature_id": record.get("feature_id"),
+                    "choice_id": record.get("choice_id"),
+                    "selected_refs": deepcopy(record.get("selected_refs") or []),
+                }
+                for record in (canonical.get("features") or {}).get(
+                    "feature_choices",
+                ) or []
+                if isinstance(record, dict)
+            ],
         }
         return self.finalize(draft)
 

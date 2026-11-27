@@ -300,7 +300,9 @@ def plan_feature_choices(
     slots = [
         definition for definition in features.features_for(dict(proxy))
         if definition.choice is not None
-        and definition.choice.kind in {"skill_proficiency", "language"}
+        and definition.choice.kind in {
+            "skill_proficiency", "language", "feature_option",
+        }
     ]
     # 语言槽只能选 Standard：罕见的留给 DM，秘密语言只能由特性固定授予。
     # 空 `enabled_options` 因此不是"全集"，而是"建卡可选的那一批"。
@@ -357,7 +359,15 @@ def plan_feature_choices(
             continue
         allowed = set(choice.enabled_options)
         slot_refs: list[str] = []
-        if choice.kind == "language":
+        if choice.kind == "feature_option":
+            # 二选一（Divine Order / Primal Order）：建卡时就可能答，必须收，
+            # 否则玩家在建卡界面选了却在提交时被判"没有这个槽"。
+            for ref in raw_refs:
+                if ref not in allowed:
+                    errors.append(f"{ref} is not a declared option of {definition.id}")
+                    continue
+                slot_refs.append(ref)
+        elif choice.kind == "language":
             for ref in raw_refs:
                 # 空清单 = 建卡可选的 Standard 全集；显式列出的按声明来。
                 admissible = allowed or standard_languages
@@ -766,14 +776,6 @@ class CharacterDerivationMixin:
             + (prof if f"ability:{ability_id}" in save_refs else 0)
             for ability_id in ABILITY_IDS
         }
-        saving_throw_parts = {
-            ability_id: {
-                "ability": ability_id,
-                "ability_modifier": ability_modifier(abilities[ability_id]),
-                "contribution": prof if f"ability:{ability_id}" in save_refs else 0,
-            }
-            for ability_id in ABILITY_IDS
-        }
         # 职业表之外还有特性授予的训练（Divine Order: Protector 的重甲、
         # Primal Order: Warden 的中甲）。不并进来的话，这两个选项只是把
         # "Heavy" 写进内容，穿甲时仍然算未受训。
@@ -930,13 +932,15 @@ class CharacterDerivationMixin:
                 "class_feature_feat_choices": class_feature_feat_choices,
                 "feat_choice_answers": feat_choice_answers,
                 "class_tool_refs": list(draft.get("class_tool_refs") or []),
-                "language_refs": language_refs,
+                # **建卡原件**，不是推导结果：这一份是三选那三个，供
+                # ``normalize_submission`` 重建；合并后的语言在
+                # ``proficiencies.language_refs``。
+                "language_refs": list(draft.get("language_refs") or []),
                 "grants_with_sources": grants_with_sources,
             },
             "abilities": abilities,
             "proficiencies": {
                 "saving_throw_refs": save_refs,
-                "saving_throw_parts": saving_throw_parts,
                 "armor_category_refs": armor_category_refs,
                 "weapon_category_refs": list(dict.fromkeys([
                     *[

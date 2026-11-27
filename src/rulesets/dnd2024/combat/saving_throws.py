@@ -279,6 +279,17 @@ class CombatSavingThrowsMixin:
         })
         return events
 
+    def _skill_default_ability(self, skill: str) -> str:
+        """The ability a skill's check normally uses, read from content.
+
+        Reads the bundle's loaded map rather than ``bundle.list`` (which
+        deep-copies every skill on every call) -- a skill check happens on the
+        hot path of Hide, Search and several features.
+        """
+
+        entity = self.features.bundle.entities.get("skill", {}).get(skill) or {}
+        return str(entity.get("ability_ref") or "").removeprefix("ability:")
+
     def _skill_check_bonus(
         self, actor: dict[str, Any], skill: str, base: int,
     ) -> tuple[int, str, list[str]]:
@@ -291,7 +302,10 @@ class CombatSavingThrowsMixin:
         character = self._feature_character(actor)
         parts = (character.get("proficiencies") or {}).get("skill_parts") or {}
         part = parts.get(skill) if isinstance(parts, dict) else None
-        default_ability = str((part or {}).get("ability") or "")
+        # 默认属性必须从**内容**读，不能只依赖 `skill_parts`：战斗 actor 视图
+        # 不带 proficiencies，投影里的 parts 永远是空的。读内容还能让旧卡
+        # （没有 parts）走反推路径时算出正确的熟练部分。
+        default_ability = self._skill_default_ability(skill)
         rows = active_modifiers(
             self.features.check_modifiers(character, "skill_check"),
             skill=skill,

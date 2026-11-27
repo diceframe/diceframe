@@ -56,9 +56,10 @@ FEATURE_CHOICE_KINDS = frozenset({
 #: （Primal Knowledge / Bonus Proficiencies 那种"再选一个技能"）。
 SKILL_CHOICE_GRANTS = frozenset({"expertise", "proficiency"})
 
-#: 修正能作用的三类掷骰。攻击与伤害**故意不在**这里：枚举值一旦存在，
-#: 内容写了就会静默无效。
-CHECK_MODIFIER_SURFACES = frozenset({"ability_check", "skill_check", "saving_throw"})
+#: 修正能作用的掷骰。**只有 skill_check**：这是本片唯一有消费者的面。
+#: 攻击、伤害、裸属性检定与豁免都还没有声明用到它们，而一个没有消费者的
+#: 枚举值等于"内容能写、引擎静默丢弃"的假契约——等真有特性要用时再加。
+CHECK_MODIFIER_SURFACES = frozenset({"skill_check"})
 _CHECK_MODIFIER_KEYS = frozenset({
     "surface", "skills", "abilities", "when_condition",
     "replace_ability", "add",

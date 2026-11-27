@@ -190,7 +190,9 @@ git diff --check
 
 #### 10.3.1 存档存分解
 
-`skill_values` 之外，推导同时输出**分解字段**（每个技能的 `ability_modifier` 与 `contribution`）与豁免的同形分解。旧存档缺这些字段时回退到 `合并值 - mod(默认属性)` 反推，且反推结果必须与分解一致（用例覆盖）。
+`skill_values` 之外，推导同时输出**技能**的分解字段（`proficiencies.skill_parts`，每个技能的 `ability` / `ability_modifier` / `contribution`）。旧存档缺这些字段时回退到 `合并值 - mod(默认属性)` 反推，且反推结果必须与分解一致（用例覆盖）。
+
+**豁免的分解不输出**：本片没有消费者（surface 只剩 `skill_check`），多存一份没人读的结构就是下一处"声明了但没人看"。等真有特性要替换豁免属性时再加，那时它才有断言。
 
 不做"永久反推"的理由不是性能：`components` 是上游已经知道的权威产物，丢掉再反推等于让下游重推一遍；一旦某个面将来引入非线性项（例如"取较高者"的加值），反推会静默算错。
 
@@ -200,7 +202,7 @@ git diff --check
 
 ```
 check_modifier:
-  surface: ability_check | skill_check | saving_throw     # 本片只实现这三种
+  surface: skill_check        # 本片只有这一个面有消费者
   scope:   {abilities: [...], skills: [...]}               # 可只给一边，也可两边同时给
   when:    {condition: raging}                             # 可选，缺省 = 总是生效
   replace: {ability: str}                                  # 可选
@@ -222,6 +224,8 @@ check_modifier:
 `minimum` 是**参数不是通用行为**：`max(1, Wis)` 是 Otherworldly Glamour 与 Thaumaturge 各自的原文，Elegant Courtier 没有。`class_level` 原语**不实现**——没有消费者，按"不靠猜测创造字段"留空。
 
 装载期校验：未知原语、未知属性、空 scope、`minimum > maximum`、`replace.ability` 不在六项、`surface` 不在已实现集合——全部拒绝。
+
+**为什么只有 `skill_check`**：攻击、伤害、裸属性检定与豁免都还没有声明用到修正。枚举值一旦存在，内容就能写，而引擎会静默丢弃——那是"内容声明了但没人读"的假契约。真到要用的那天（例如 Otherworldly Glamour 用 `ability_check`、刃契锁用 `attack_roll`），加的是枚举值 + 一个默认属性选择函数，而不是改结构。
 
 #### 10.3.4 有效属性优先于算术替换
 
@@ -282,3 +286,17 @@ check_modifier:
 7. 若"分解输出"需要改 `ruleset_character` 的存档形状且没有向后兼容读取路径 → 停止，先与维护者确认迁移口径。
 8. 若实现 `scope.abilities` 必须改动 `skill_values` 的静态语义（把运行时修正烧进推导产物）→ 停止，那说明形状选错了。
 9. 若怪物语言 ref 化需要改动 stat block 的既有字段名或存档形状（而不只是值的形式）→ 停止并先与维护者确认。
+
+### 10.7 独立审查（2026-11-27）
+
+审查按"必须修 / 应该修 / 可以留"三档给结论，五条必须修全部是行为缺陷，且四条是我的用例**看不见的**：
+
+1. **德鲁伊无法保存**：`build.language_refs` 写了合并后的列表，而 `normalize_character_submission` 要求它恰好是建卡那三个（含 Common）——每次重放都抛。改成建卡原件，合并结果只留在 `proficiencies`。
+2. **升级时"新增熟练"不落地**：`grants: "proficiency"` 的槽只记进 `feature_choices`，没并入 `skill_refs`，升级后加值是 0。建卡路径做了，升级路径漏了。
+3. **Divine Order 建卡完全选不了**：`plan_feature_choices` 只收 skill/language 槽，`feature_option` 提交被判"这个角色没有这个槽"；`builder` 也没有投影二选一。
+4. **修正层在真实路径上恒空**：`_feature_character` 不带 `proficiencies`，`skill_parts` 永远是空，于是每次技能检定都落到"没有声明"的快路径。修法是把默认属性改从**内容**读（`skill.ability_ref`），分解缺失时反推——而不是给 actor 视图加字段。
+5. **`saving_throw` / `ability_check` 两个 surface 没有消费者**，正是 §10.3.3 自己禁止的事。收窄到 `skill_check`，并删掉没人读的 `saving_throw_parts`。
+
+另修两处：`normalize_submission` 重建 draft 时**根本没有搬 `feature_choices`**（语言、Expertise、二选一三种槽保存后全丢）；搬回来时只取提交格式的四个字段，canonical 里的 `granted_level` / `grants` 是落地信息，提交契约不接受。
+
+**为什么全量门禁没抓到**：`test_dnd2024_simple_grants.py` 的 26 条全部绕过"从视图到掷骰"的边（手搓 canonical、直接断言内容声明），而那些真正走完整链路的既有套件（`spell_grants`、`retaliation`、战斗类）没有一条德鲁伊或牧师建卡用例。补的四条用例（保存往返、升级发放、二选一投影与提交、升级后加值）专门覆盖这四条边。

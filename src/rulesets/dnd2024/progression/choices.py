@@ -850,6 +850,8 @@ class AdvancementChoicesMixin:
             "choice_id": choice.id,
             "selected_refs": list(raw_refs),
             "granted_level": target_level,
+            # 落地时要区分"加倍"与"新增熟练"：只看 ref 分不出来。
+            "grants": choice.grants,
         }]
 
     def _feat_options(

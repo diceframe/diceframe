@@ -505,3 +505,114 @@ def test_an_order_adds_one_cantrip_to_the_capacity() -> None:
     # 只加戏法位：准备法术数与法术位不变。
     assert with_order["prepared_spell_count"] == plain["prepared_spell_count"]
     assert with_order["spell_slots"] == plain["spell_slots"]
+
+
+# --- The paths that used to be wrong --------------------------------------
+
+def test_a_druid_survives_the_wire_format_round_trip() -> None:
+    """`build.language_refs` is the creation three, not the merged list.
+
+    Writing the merged list there made `normalize_character_submission` reject
+    every druid (it insists on exactly three picks including Common), so a
+    druid could not be saved at all.
+    """
+
+    runtime = Dnd2024Runtime()
+    draft = _draft_for(runtime, "class:druid", ["skill:nature", "skill:perception"])
+    sheet = runtime.finalize_character(None, draft)
+
+    normalized = runtime.normalize_character_submission(None, sheet)
+    canonical = normalized["ruleset_character"]
+
+    assert canonical["build"]["language_refs"] == [
+        "language:common", "language:dwarvish", "language:elvish",
+    ]
+    assert "language:druidic" in canonical["proficiencies"]["language_refs"]
+
+
+def test_the_wire_format_keeps_three_picks_even_with_two_extra_languages() -> None:
+    runtime = Dnd2024Runtime()
+    draft = _draft_for(
+        runtime, "class:rogue",
+        ["skill:acrobatics", "skill:stealth", "skill:deception", "skill:persuasion"],
+        feature_choices=[{
+            "owner": "class:rogue", "feature_id": "thieves_cant",
+            "choice_id": "thieves_cant_language", "selected_refs": ["language:gnomish"],
+        }],
+    )
+    sheet = runtime.finalize_character(None, draft)
+
+    normalized = runtime.normalize_character_submission(None, sheet)
+    canonical = normalized["ruleset_character"]
+
+    assert len(canonical["build"]["language_refs"]) == 3
+    assert len(canonical["proficiencies"]["language_refs"]) == 5
+
+
+def test_a_new_proficiency_from_a_level_up_really_raises_the_skill() -> None:
+    """`grants: "proficiency"` must land in `skill_refs`, or it grants nothing."""
+
+    runtime = Dnd2024Runtime()
+    draft = _draft_for(runtime, "class:barbarian", ["skill:athletics", "skill:survival"])
+    sheet = runtime.finalize_character(None, draft)
+    before = sheet["ruleset_character"]["proficiencies"]["skill_values"]["intimidation"]
+
+    while int(sheet["ruleset_character"]["build"]["level"]) < 3:
+        answers: dict = {}
+        preview = runtime.preview_advancement(None, sheet, {})
+        picks = []
+        for requirement in preview.get("requirements") or []:
+            if requirement.get("id") == "subclass_ref":
+                answers["subclass_ref"] = str(requirement["options"][0]["value"])
+                continue
+            if requirement.get("kind") != "feature_choice":
+                continue
+            picks.append({
+                "owner": str(requirement["owner"]),
+                "feature_id": str(requirement["feature_id"]),
+                "choice_id": str(requirement["choice_id"]),
+                "selected_refs": ["skill:intimidation"],
+            })
+        if picks:
+            answers["feature_choices"] = picks
+        preview = runtime.preview_advancement(None, sheet, answers)
+        assert preview["ok"] is True, preview["errors"]
+        sheet = runtime.apply_advancement(None, sheet, answers)
+
+    after = sheet["ruleset_character"]["proficiencies"]["skill_values"]["intimidation"]
+
+    # 熟练值 = 力量调整值 + PB；力量 12 (+1) 时从 +1 涨到 +1+2。
+    assert after == before + int(
+        sheet["ruleset_character"]["derived"]["proficiency_bonus"],
+    )
+
+
+def test_creation_offers_the_divine_order_branches() -> None:
+    runtime = Dnd2024Runtime()
+    draft = _draft_for(runtime, "class:cleric", ["skill:medicine", "skill:history"])
+
+    choices = runtime.builder_choices(None, draft)
+
+    slot = next(
+        row for row in choices["feature_option_choices"]
+        if row["feature_id"] == "divine_order"
+    )
+    assert [option["value"] for option in slot["options"]] == [
+        "feature:divine_order_protector",
+        "feature:divine_order_thaumaturge",
+    ]
+
+
+def test_creation_accepts_a_committed_divine_order() -> None:
+    runtime = Dnd2024Runtime()
+    draft = _draft_for(runtime, "class:cleric", ["skill:medicine", "skill:history"])
+
+    draft["feature_choices"] = [{
+        "owner": "class:cleric", "feature_id": "divine_order",
+        "choice_id": "divine_order_option",
+        "selected_refs": ["feature:divine_order_protector"],
+    }]
+
+    assert runtime.validate_character(None, draft) == []
+    canonical = _canonical(runtime, draft)
+    assert "armor_category:heavy" in canonical["proficiencies"]["armor_category_refs"]

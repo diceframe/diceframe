@@ -1289,6 +1289,14 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
                 # 来源单独记一笔：集合本身只说明"有这个熟练"，看不出谁给的。
                 derived["saving_throw_proficiency_sources"] = dict(specific_saves)
         skill_refs = set(proficiencies.get("skill_refs") or [])
+        # `grants: "proficiency"` 的槽选中的技能必须真的变成熟练，否则只是
+        # 一个记下来的名字、加值是 0。（建卡路径在 derivation 里做同一件事。）
+        for record in (character.get("features") or {}).get("feature_choices") or []:
+            if record.get("grants") != "proficiency":
+                continue
+            for ref in record.get("selected_refs") or []:
+                if str(ref).startswith("skill:"):
+                    skill_refs.add(str(ref))
         saving_throws = {
             ability: ability_modifier(abilities[ability])
             + (proficiency if f"ability:{ability}" in saving_refs else 0)
