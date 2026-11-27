@@ -255,3 +255,253 @@ def test_a_fighter_learns_neither_secret_language() -> None:
 
     assert "language:druidic" not in refs
     assert "language:thieves_cant" not in refs
+
+
+# --- The check-modifier layer (§10.3) -------------------------------------
+
+def test_a_replacement_reads_the_new_ability_and_keeps_the_proficiency() -> None:
+    from src.rulesets.dnd2024.combat.check_modifiers import check_total
+
+    parts = {"ability": "dex", "ability_modifier": 2, "contribution": 2}
+    abilities = {"str": 18, "dex": 14, "wis": 10}
+    rows = [{"replace_ability": "str", "feature_id": "primal_knowledge"}]
+
+    total, effective, modifier, sources = check_total(
+        parts, abilities, default_ability="dex", fallback_total=4, rows=rows,
+    )
+
+    # 熟练部分（+2）保留，属性部分换成力量（+4）。
+    assert (total, effective, modifier) == (6, "str", 4)
+    assert sources == []
+
+
+def test_an_added_bonus_honours_its_own_floor() -> None:
+    from src.rulesets.dnd2024.combat.check_modifiers import check_total
+
+    parts = {"ability": "int", "ability_modifier": 1, "contribution": 2}
+    abilities = {"int": 12, "wis": 8}
+    rows = [{
+        "add": {"source": "ability_modifier", "ability": "wis", "minimum": 1},
+        "feature_id": "thaumaturge",
+    }]
+
+    total, _effective, _modifier, sources = check_total(
+        parts, abilities, default_ability="int", fallback_total=3, rows=rows,
+    )
+
+    # 感知 8 -> -1，但特性写了至少 +1。
+    assert total == 1 + 2 + 1
+    assert sources == ["thaumaturge"]
+
+
+def test_an_added_bonus_without_a_floor_can_be_negative() -> None:
+    from src.rulesets.dnd2024.combat.check_modifiers import check_total
+
+    parts = {"ability": "cha", "ability_modifier": 3, "contribution": 0}
+    abilities = {"cha": 16, "wis": 8}
+    rows = [{
+        "add": {"source": "ability_modifier", "ability": "wis"},
+        "feature_id": "elegant_courtier",
+    }]
+
+    total, *_ = check_total(
+        parts, abilities, default_ability="cha", fallback_total=3, rows=rows,
+    )
+
+    # Elegant Courtier 的原文没有 "at least +1"，所以 -1 就是 -1。
+    assert total == 3 - 1
+
+
+def test_a_sheet_without_the_split_falls_back_to_the_total() -> None:
+    from src.rulesets.dnd2024.combat.check_modifiers import check_total
+
+    abilities = {"str": 18, "dex": 14}
+    rows = [{"replace_ability": "str", "feature_id": "primal_knowledge"}]
+
+    # 旧卡没有 skill_parts：用总量减去默认属性的调整值得出熟练部分。
+    total, effective, _modifier, _sources = check_total(
+        None, abilities, default_ability="dex", fallback_total=6, rows=rows,
+    )
+
+    assert effective == "str"
+    assert total == (6 - 2) + 4
+
+
+def test_a_condition_gated_modifier_stays_off_without_the_condition() -> None:
+    from src.rulesets.dnd2024.combat.check_modifiers import active_modifiers
+
+    rows = [{
+        "skills": ["skill:acrobatics"],
+        "when_condition": "rage",
+        "replace_ability": "str",
+        "feature_id": "primal_knowledge",
+    }]
+
+    assert active_modifiers(rows, skill="acrobatics", ability="dex") == []
+    assert active_modifiers(
+        rows, skill="acrobatics", ability="dex", conditions={"rage": {"source": "test"}},
+    )
+    # 作用域之外一个都不生效。
+    assert active_modifiers(
+        rows, skill="arcana", ability="int", conditions={"rage": {"source": "test"}},
+    ) == []
+
+
+def test_the_declaration_reaches_the_resolver_with_its_source() -> None:
+    runtime = Dnd2024Runtime()
+    resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle())
+    # 3 级才拥有 Primal Knowledge；这里直接给 canonical 的等级结构，不建整张卡。
+    character = {
+        "build": {"class_levels": [{"class_ref": "class:barbarian", "level": 3}]},
+    }
+
+    rows = resolver.check_modifiers(character, "skill_check")
+
+    assert [row["feature_id"] for row in rows] == ["primal_knowledge"]
+    assert rows[0]["replace_ability"] == "str"
+
+
+def test_the_resolver_does_not_hand_out_another_surface_s_modifiers() -> None:
+    runtime = Dnd2024Runtime()
+    resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle())
+    character = {
+        "build": {"class_levels": [{"class_ref": "class:barbarian", "level": 3}]},
+    }
+
+    # surface 不串：技能修正不会跑到豁免或裸属性检定上。
+    assert resolver.check_modifiers(character, "saving_throw") == []
+    assert resolver.check_modifiers(character, "ability_check") == []
+
+
+def test_primal_knowledge_only_offers_barbarian_skills() -> None:
+    bundle = Dnd2024Runtime().load_bundle()
+    catalog = bundle.get("class_feature_catalog", "srd_class_features")
+    feature = next(
+        row for row in catalog["classes"]["barbarian"]["features"]
+        if row["id"] == "primal_knowledge"
+    )
+
+    offered = set(feature["choice"]["enabled_options"])
+
+    assert offered == {
+        "skill:animal_handling", "skill:athletics", "skill:intimidation",
+        "skill:nature", "skill:perception", "skill:survival",
+    }
+    assert feature["choice"]["grants"] == "proficiency"
+    assert feature["choice"]["requires_proficiency"] is False
+
+
+def test_bonus_proficiencies_is_three_skills_from_anywhere() -> None:
+    runtime = Dnd2024Runtime()
+    draft = _draft_for(runtime, "class:bard", ["skill:persuasion", "skill:deception", "skill:performance"])
+    draft["features"] = {"subclass_ref": "subclass:college_of_lore"}
+    draft["level"] = 3
+
+    slot = next(
+        row for row in runtime.builder_choices(None, draft)["skill_choices"]
+        if row["feature_id"] == "bonus_proficiencies"
+    )
+
+    assert slot["count"] == 3
+    offered = [option["value"] for option in slot["options"]]
+    assert "skill:arcana" in offered
+    assert "skill:medicine" in offered
+
+
+# --- The two Orders --------------------------------------------------------
+
+def _cleric(level: int = 1, option: str = "") -> dict:
+    # 选择记录挂在 canonical 的 features.feature_choices 下，与存档一致。
+    features: dict = {}
+    if option:
+        features["feature_choices"] = [{
+            "owner": "class:cleric", "feature_id": "divine_order",
+            "choice_id": "divine_order_option",
+            "selected_refs": [f"feature:{option}"],
+        }]
+    return {
+        "build": {"class_levels": [{"class_ref": "class:cleric", "level": level}]},
+        "features": features,
+    }
+
+
+def test_divine_order_protector_grants_heavy_and_martial_training() -> None:
+    runtime = Dnd2024Runtime()
+    resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle())
+
+    protector = _cleric(option="divine_order_protector")
+    thaumaturge = _cleric(option="divine_order_thaumaturge")
+
+    assert resolver.category_sources(protector, "armor_category_grants") == {"heavy": "divine_order_protector"}
+    assert resolver.category_sources(protector, "weapon_category_grants") == {"martial": "divine_order_protector"}
+    # 二选一：选了 Thaumaturge 就一无训练。
+    assert resolver.category_sources(thaumaturge, "armor_category_grants") == {}
+    assert resolver.category_sources(thaumaturge, "weapon_category_grants") == {}
+
+
+def test_divine_order_thaumaturge_grants_a_cantrip_and_an_intelligence_bonus() -> None:
+    runtime = Dnd2024Runtime()
+    resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle())
+
+    thaumaturge = _cleric(option="divine_order_thaumaturge")
+    protector = _cleric(option="divine_order_protector")
+
+    rows = resolver.check_modifiers(thaumaturge, "skill_check")
+    assert [row["feature_id"] for row in rows] == ["divine_order_thaumaturge"]
+    assert rows[0]["add"] == {"source": "ability_modifier", "ability": "wis", "minimum": 1}
+    # 选了 Protector 就没有这条加值。
+    assert resolver.check_modifiers(protector, "skill_check") == []
+
+
+def test_an_unchosen_order_grants_nothing() -> None:
+    runtime = Dnd2024Runtime()
+    resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle())
+
+    undecided = _cleric()
+
+    assert resolver.category_sources(undecided, "armor_category_grants") == {}
+    assert resolver.category_sources(undecided, "weapon_category_grants") == {}
+    assert resolver.check_modifiers(undecided, "skill_check") == []
+
+
+def test_primal_order_warden_and_magician_are_mutually_exclusive_too() -> None:
+    runtime = Dnd2024Runtime()
+    resolver = Dnd2024ClassFeatureResolver(runtime.load_bundle())
+
+    def druid(option: str) -> dict:
+        return {
+            "build": {"class_levels": [{"class_ref": "class:druid", "level": 1}]},
+            "features": {"feature_choices": [{
+                "owner": "class:druid", "feature_id": "primal_order",
+                "choice_id": "primal_order_option",
+                "selected_refs": [f"feature:{option}"],
+            }]},
+        }
+
+    warden = druid("primal_order_warden")
+    magician = druid("primal_order_magician")
+
+    assert resolver.category_sources(warden, "armor_category_grants") == {"medium": "primal_order_warden"}
+    assert resolver.category_sources(warden, "weapon_category_grants") == {"martial": "primal_order_warden"}
+    assert resolver.check_modifiers(warden, "skill_check") == []
+
+    assert resolver.category_sources(magician, "armor_category_grants") == {}
+    rows = resolver.check_modifiers(magician, "skill_check")
+    assert [row["feature_id"] for row in rows] == ["primal_order_magician"]
+
+
+def test_an_order_adds_one_cantrip_to_the_capacity() -> None:
+    runtime = Dnd2024Runtime()
+    bundle = runtime.load_bundle()
+    from src.rulesets.dnd2024.spells.selection import Dnd2024SpellSelection
+
+    selection = Dnd2024SpellSelection(bundle)
+    plain = selection.requirements("class:cleric", 1)
+    with_order = selection.requirements(
+        "class:cleric", 1, _cleric(option="divine_order_thaumaturge"),
+    )
+
+    assert with_order["cantrip_count"] == plain["cantrip_count"] + 1
+    # 只加戏法位：准备法术数与法术位不变。
+    assert with_order["prepared_spell_count"] == plain["prepared_spell_count"]
+    assert with_order["spell_slots"] == plain["spell_slots"]
