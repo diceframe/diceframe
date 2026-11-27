@@ -108,6 +108,9 @@ def _companion(
 def _goblin(enemy_id: str = "goblin-1", *, position: int = 5, hp: int = 40) -> dict:
     return {
         "id": enemy_id, "name": "Goblin", "hp": hp, "armor_class": 12,
+        # 真实 stat block 都带体型；Push 的"Large 或更小"按它判，缺省是
+        # fail closed（不推），所以夹具必须给出这个事实。
+        "size": "small",
         "speed": 30, "position": position, "initiative_modifier": 2,
         "abilities": {"str": 8, "dex": 14, "con": 10, "int": 10, "wis": 8, "cha": 8},
         "saving_throws": {"dex": 2, "wis": -1, "con": 0},
@@ -670,10 +673,7 @@ def test_uncanny_dodge_halves_the_hit_but_keeps_the_mastery_condition() -> None:
     assert applied["source_actor_id"] == "player:gm"
 
 
-@pytest.mark.parametrize(
-    ("weapon", "mastery"),
-    [("item:greataxe", "cleave"), ("item:quarterstaff", "topple")],
-)
+@pytest.mark.parametrize(("weapon", "mastery"), [("item:greataxe", "cleave")])
 def test_unimplemented_properties_fail_closed(weapon: str, mastery: str) -> None:
     _runtime, engine, instance = _instance(equipment=[weapon])
 
@@ -718,3 +718,376 @@ def test_the_five_weapon_classes_own_the_weapon_mastery_feature() -> None:
         "build": {"class_levels": [{"class_ref": "class:wizard", "level": 1}]},
     }
     assert resolver.has_feature(wizard, "weapon_mastery") is False
+
+
+# --------------------------------------------------------------------------
+# S0-F7R：push / topple / nick
+# --------------------------------------------------------------------------
+
+
+def test_push_moves_the_target_ten_feet_away() -> None:
+    _runtime, engine, instance = _instance(equipment=["item:greatclub"])
+
+    events = _attack(engine, instance, weapon="item:greatclub", rolls=[15, 4, 5])
+
+    push = next(
+        (event for event in events if event["type"] == "dnd2024.position.changed"),
+        None,
+    )
+    assert push is not None, [event["type"] for event in events]
+    assert push["feet"] == 10
+    assert push["away_from"] == "player:gm"
+    assert push["forced"] is True
+    # 过渡期双写：方向仍是远离攻击者的符号。
+    assert push["distance"] == 10
+    # 位置权威读的是 feet/away_from，不是发射点算好的符号。
+    assert ruleset_runtime.state(instance)["combat"]["positions"]["enemy:goblin-1"] == 15
+
+
+def test_push_leaves_a_huge_target_in_place() -> None:
+    _runtime, engine, instance = _instance(equipment=["item:greatclub"])
+    ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"]["size"] = "huge"
+
+    events = _attack(engine, instance, weapon="item:greatclub", rolls=[15, 4, 5])
+
+    assert not [
+        event for event in events if event["type"] == "dnd2024.position.changed"
+    ]
+    assert _damage_to(events, "enemy:goblin-1")["amount"] > 0
+
+
+def test_topple_forces_a_constitution_save_then_prone() -> None:
+    _runtime, engine, instance = _instance(equipment=["item:battleaxe"], abilities={"str": 16})
+
+    events = _attack(engine, instance, weapon="item:battleaxe", rolls=[15, 4, 2])
+
+    save = _check(events, kind="saving_throw")
+    assert save["ability"] == "con"
+    # 8 + PB(2) + Str(+3)
+    assert save["target"] == 13
+    assert save["success"] is False
+    assert _applied(events, "prone")["duration"] == "until_stand"
+
+
+def test_topple_applies_nothing_when_the_save_succeeds() -> None:
+    _runtime, engine, instance = _instance(equipment=["item:battleaxe"], abilities={"str": 16})
+
+    events = _attack(engine, instance, weapon="item:battleaxe", rolls=[15, 4, 20])
+
+    assert _check(events, kind="saving_throw")["success"] is True
+    assert not [event for event in events if event["type"] == "condition.applied"]
+
+
+@pytest.mark.parametrize(("level", "proficiency"), [(1, 2), (5, 3)])
+def test_topple_dc_tracks_proficiency_and_ability(
+    level: int, proficiency: int,
+) -> None:
+    """DC = 8 + 熟练加值 + 这次攻击用的属性调整，不写死。"""
+
+    _runtime, engine, instance = _instance(
+        equipment=["item:battleaxe"], level=level,
+    )
+    sheet = instance.players["gm"]["character_sheet"]["ruleset_character"]
+    modifier = (int(sheet["abilities"]["str"]) - 10) // 2
+
+    events = _attack(engine, instance, weapon="item:battleaxe", rolls=[15, 4, 20])
+
+    assert _check(events, kind="saving_throw")["target"] == 8 + proficiency + modifier
+
+
+# --------------------------------------------------------------------------
+# S0-F7R：Nick 与 Light 追加攻击的入口
+# --------------------------------------------------------------------------
+
+
+def _light_pair(*, nick: bool) -> tuple:
+    """两把 Light 武器；``nick`` 决定追加攻击那一把带不带 Nick。
+
+    ``_instance`` 起手就把回合交给玩家，所以这里不需要再"开始回合"。
+    """
+
+    _, engine, instance = _instance(
+        equipment=["item:club", "item:dagger" if nick else "item:shortsword"],
+    )
+    return engine, instance
+
+
+def _attack_with(engine, instance, weapon: str, *, rolls, light_extra: bool = False,
+                 target_id: str = "enemy:goblin-1"):
+    version = ruleset_runtime.state(instance)["version"]
+    intent = {
+        "intent_id": f"nick-{version}", "type": "attack",
+        "expected_version": version, "submitted_by": "gm",
+        "actor_id": "player:gm", "target_id": target_id,
+        "weapon_ref": f"item:{weapon}",
+    }
+    if light_extra:
+        intent["light_extra_attack"] = True
+    resolved = engine.resolve_intent(instance, intent, SequenceRng(rolls))
+    if resolved.get("ok"):
+        engine.apply_batch(instance, resolved["event_batch"])
+    return resolved
+
+
+def test_nick_makes_the_extra_attack_free() -> None:
+    engine, instance = _light_pair(nick=True)
+
+    first = _attack_with(engine, instance, "club", rolls=[15, 4])
+    assert first["ok"] is True, first
+    before = ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"]
+
+    extra = _attack_with(engine, instance, "dagger", rolls=[15, 4], light_extra=True)
+    assert extra["ok"] is True, extra
+    # 不花附赠动作：额度一点没动。
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == before
+
+
+def test_nick_is_once_per_turn() -> None:
+    engine, instance = _light_pair(nick=True)
+
+    _attack_with(engine, instance, "club", rolls=[15, 4])
+    assert _attack_with(engine, instance, "dagger", rolls=[15, 4], light_extra=True)["ok"]
+
+    ledger = ruleset_runtime.state(instance)["combat"]["light_attacks"]
+    assert ledger["player:gm"].get("nick_used") is True, ledger
+    again = _attack_with(engine, instance, "dagger", rolls=[15, 4], light_extra=True)
+    assert again["ok"] is False
+    assert "Nick" in again["error"]
+
+
+def test_without_nick_the_extra_attack_still_costs_the_bonus_action() -> None:
+    engine, instance = _light_pair(nick=False)
+
+    _attack_with(engine, instance, "club", rolls=[15, 4])
+    extra = _attack_with(engine, instance, "shortsword", rolls=[15, 4], light_extra=True)
+
+    assert extra["ok"] is True, extra
+    assert ruleset_runtime.state(instance)["combat"]["economy"]["bonus_action"] == 0
+
+
+def test_the_action_list_offers_the_light_extra_attack() -> None:
+    engine, instance = _light_pair(nick=True)
+
+    assert not [
+        action for action in engine.available_intents(instance, instance.gm_uid)
+        if action["type"] == "light_attack"
+    ], "没有 Light 攻击账本之前不该出现入口"
+
+    _attack_with(engine, instance, "club", rolls=[15, 4])
+
+    rows = [
+        action for action in engine.available_intents(instance, instance.gm_uid)
+        if action["type"] == "light_attack"
+    ]
+    ledger = ruleset_runtime.state(instance)["combat"]["light_attacks"]
+    assert len(rows) == 1, (ledger, rows)
+    row = rows[0]
+    # Nick 那一把：不花附赠动作，且只列出"另一把" Light 武器。
+    assert row["cost"] == ""
+    assert row["nick"] is True
+    assert {weapon["weapon_ref"] for weapon in row["weapons"]} == {"item:dagger"}
+    assert row["targets"]
+
+
+# --------------------------------------------------------------------------
+# S0-F7C：Cleave
+# --------------------------------------------------------------------------
+
+
+def _greataxe_fight(*, rolls) -> tuple:
+    """持巨斧（cleave）攻击哥布林，返回引擎、实例与第一击结果。"""
+
+    _, engine, instance = _instance(equipment=["item:greataxe"])
+    first = _attack_with(engine, instance, "greataxe", rolls=rolls)
+    return engine, instance, first
+
+
+def test_cleave_makes_a_free_second_attack() -> None:
+    engine, instance, first = _greataxe_fight(rolls=[15, 4])
+    assert first["ok"] is True, first
+    before = dict(ruleset_runtime.state(instance)["combat"]["economy"])
+
+    # 第二只哥布林站在第一只旁边，做第二击的目标。
+    state = ruleset_runtime.state(instance)
+    state["combat"]["enemies"]["goblin-2"] = {
+        **state["combat"]["enemies"]["goblin-1"], "id": "goblin-2", "name": "Goblin 2",
+        "position": 5,
+    }
+
+    version = state["version"]
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": f"cleave-{version}", "type": "attack",
+        "expected_version": version, "submitted_by": "gm",
+        "actor_id": "player:gm", "target_id": "enemy:goblin-2",
+        "weapon_ref": "item:greataxe", "cleave_from": "enemy:goblin-1",
+    }, SequenceRng([15, 4]))
+    assert resolved["ok"] is True, resolved
+    engine.apply_batch(instance, resolved["event_batch"])
+
+    after = ruleset_runtime.state(instance)["combat"]["economy"]
+    # 不付动作，也不动 Attack action 的额度。
+    assert after["action"] == before["action"]
+    assert after["attacks_remaining"] == before["attacks_remaining"]
+    assert ruleset_runtime.state(instance)["combat"]["granted_attacks"]["player:gm"]["cleave"]
+
+
+def test_cleave_damage_has_no_ability_modifier() -> None:
+    engine, instance, first = _greataxe_fight(rolls=[15, 4])
+    assert first["ok"] is True
+    state = ruleset_runtime.state(instance)
+    state["combat"]["enemies"]["goblin-2"] = {
+        **state["combat"]["enemies"]["goblin-1"], "id": "goblin-2", "position": 5,
+    }
+
+    version = state["version"]
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": f"cleave-dmg-{version}", "type": "attack",
+        "expected_version": version, "submitted_by": "gm",
+        "actor_id": "player:gm", "target_id": "enemy:goblin-2",
+        "weapon_ref": "item:greataxe", "cleave_from": "enemy:goblin-1",
+    }, SequenceRng([15, 4]))
+    assert resolved["ok"] is True, resolved
+    engine.apply_batch(instance, resolved["event_batch"])
+
+    damage = next(
+        event for event in resolved["event_batch"]["events"]
+        if event["type"] == "resource.changed" and event.get("resource") == "hp"
+        and event.get("target_id") == "enemy:goblin-2"
+    )
+    # 骰面之和就是伤害：属性调整值被压掉（正数）。
+    assert damage["amount"] == sum(damage["rolls"])
+
+
+def test_cleave_needs_a_hit_with_this_weapon_earlier_in_the_turn() -> None:
+    _, engine, instance = _instance(equipment=["item:greataxe"])
+    version = ruleset_runtime.state(instance)["version"]
+
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": f"cleave-nohit-{version}", "type": "attack",
+        "expected_version": version, "submitted_by": "gm",
+        "actor_id": "player:gm", "target_id": "enemy:goblin-1",
+        "weapon_ref": "item:greataxe", "cleave_from": "enemy:goblin-1",
+    }, SequenceRng([15, 4]))
+
+    assert resolved["ok"] is False
+    assert "earlier this turn" in resolved["error"]
+
+
+def test_cleave_refuses_a_weapon_without_the_property() -> None:
+    _, engine, instance = _instance(equipment=["item:club"])
+    _attack(engine, instance, weapon="item:club", rolls=[15, 4])
+    version = ruleset_runtime.state(instance)["version"]
+
+    resolved = engine.resolve_intent(instance, {
+        "intent_id": f"cleave-noprop-{version}", "type": "attack",
+        "expected_version": version, "submitted_by": "gm",
+        "actor_id": "player:gm", "target_id": "enemy:goblin-1",
+        "weapon_ref": "item:club", "cleave_from": "enemy:goblin-1",
+    }, SequenceRng([15, 4]))
+
+    assert resolved["ok"] is False
+    assert "does not have Cleave" in resolved["error"]
+
+
+def test_cleave_is_once_per_turn() -> None:
+    engine, instance, first = _greataxe_fight(rolls=[15, 4])
+    assert first["ok"] is True
+    state = ruleset_runtime.state(instance)
+    state["combat"]["enemies"]["goblin-2"] = {
+        **state["combat"]["enemies"]["goblin-1"], "id": "goblin-2", "position": 5,
+    }
+
+    version = state["version"]
+    payload = {
+        "intent_id": f"cleave-once-{version}", "type": "attack",
+        "expected_version": version, "submitted_by": "gm",
+        "actor_id": "player:gm", "target_id": "enemy:goblin-2",
+        "weapon_ref": "item:greataxe", "cleave_from": "enemy:goblin-1",
+    }
+    first_cleave = engine.resolve_intent(instance, payload, SequenceRng([15, 4]))
+    assert first_cleave["ok"] is True, first_cleave
+    engine.apply_batch(instance, first_cleave["event_batch"])
+
+    version = ruleset_runtime.state(instance)["version"]
+    again = engine.resolve_intent(instance, {
+        **payload, "intent_id": f"cleave-once2-{version}", "expected_version": version,
+    }, SequenceRng([15, 4]))
+
+    assert again["ok"] is False
+    assert "already used this turn" in again["error"]
+
+
+def test_attack_history_records_the_hit_and_the_weapon() -> None:
+    engine, instance, first = _greataxe_fight(rolls=[15, 4])
+    assert first["ok"] is True
+
+    row = ruleset_runtime.state(instance)["combat"]["attack_history"][-1]
+    assert row["hit"] is True
+    assert row["weapon_ref"] == "item:greataxe"
+    assert row["target_id"] == "enemy:goblin-1"
+
+
+def test_cleave_resets_on_next_turn_and_filters_out_of_reach_or_untrained() -> None:
+    """Cleave is once per turn (not once per combat) and respects mastery + reach in availability."""
+
+    _, engine, instance = _instance(
+        equipment=["item:greataxe"],
+        enemies=[
+            _goblin("goblin-1", position=5, hp=40),
+            _goblin("goblin-2", position=5, hp=40),
+            _goblin("goblin-far", position=10, hp=40),
+        ],
+    )
+    first = _attack_with(engine, instance, "greataxe", rolls=[15, 6], target_id="enemy:goblin-1")
+    assert first["ok"] is True, first
+
+    # Availability only offers targets within reach (goblin-2 at 5ft, not goblin-far at 10ft)
+    cleave_rows = [
+        row for row in engine.available_intents(instance, "gm")
+        if row.get("type") == "cleave"
+    ]
+    assert len(cleave_rows) == 1
+    assert [t["actor_id"] for t in cleave_rows[0]["targets"]] == ["enemy:goblin-2"]
+
+    # Use Cleave on round 1
+    version = ruleset_runtime.state(instance)["version"]
+    cleave_r1 = engine.resolve_intent(instance, {
+        "intent_id": f"cleave-r1-{version}", "type": "attack",
+        "expected_version": version, "submitted_by": "gm",
+        "actor_id": "player:gm", "target_id": "enemy:goblin-2",
+        "weapon_ref": "item:greataxe", "cleave_from": "enemy:goblin-1",
+    }, SequenceRng([15, 6]))
+    assert cleave_r1["ok"] is True, cleave_r1
+    engine.apply_batch(instance, cleave_r1["event_batch"])
+
+    # Advance to next turn (round 2) and hit again -> Cleave must be available again
+    combat = ruleset_runtime.state(instance)["combat"]
+    combat["round"] = int(combat.get("round", 1)) + 1
+    combat["economy"]["action"] = 1
+    combat["economy"]["attacks_remaining"] = 0
+    second_hit = _attack_with(engine, instance, "greataxe", rolls=[15, 6], target_id="enemy:goblin-1")
+    assert second_hit["ok"] is True, second_hit
+
+    version = ruleset_runtime.state(instance)["version"]
+    cleave_r2 = engine.resolve_intent(instance, {
+        "intent_id": f"cleave-r2-{version}", "type": "attack",
+        "expected_version": version, "submitted_by": "gm",
+        "actor_id": "player:gm", "target_id": "enemy:goblin-2",
+        "weapon_ref": "item:greataxe", "cleave_from": "enemy:goblin-1",
+    }, SequenceRng([15, 6]))
+    assert cleave_r2["ok"] is True, cleave_r2
+
+    # Character without weapon_mastery (Wizard) must not be offered Cleave in availability
+    _, wiz_engine, wiz_instance = _instance(
+        equipment=["item:greataxe"],
+        enemies=[_goblin("goblin-1", position=5, hp=40), _goblin("goblin-2", position=5, hp=40)],
+    )
+    wiz_instance.players["gm"]["character_sheet"]["ruleset_character"]["build"]["class_levels"] = [
+        {"class_ref": "class:wizard", "level": 1},
+    ]
+    wiz_hit = _attack_with(wiz_engine, wiz_instance, "greataxe", rolls=[18, 6], target_id="enemy:goblin-1")
+    assert wiz_hit["ok"] is True, wiz_hit
+    assert not [
+        row for row in wiz_engine.available_intents(wiz_instance, "gm")
+        if row.get("type") == "cleave"
+    ]

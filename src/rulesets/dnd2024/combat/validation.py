@@ -1146,6 +1146,20 @@ class CombatValidationMixin(
                 # 两次吐息"。
                 if intent.get("second_target_of"):
                     pass
+                elif intent_type == "attack" and intent.get("cleave_from"):
+                    # Cleave 的第二击与 Horde Breaker 同构：不付动作、不占
+                    # `attacks_remaining`，前提与额度由各自的校验回答。
+                    pass
+                elif (
+                    intent_type == "attack"
+                    and declaration_value(intent, LIGHT_EXTRA_ATTACK) is True
+                ):
+                    # Light 追加攻击不是 Attack action 的一击，也不是靠
+                    # ``attacks_remaining`` 兑现的那几次：它的成本是附赠动作
+                    # （或 Nick 的"每回合一次"），由 `_validate_light_extra_attack`
+                    # 单独结账。留在这道门里会让它在真实回合里永远不可达——
+                    # 动作已经花掉了。
+                    pass
                 elif not has_action and not (
                     intent_type == "attack"
                     and int(economy.get("attacks_remaining", 0) or 0) >= 1

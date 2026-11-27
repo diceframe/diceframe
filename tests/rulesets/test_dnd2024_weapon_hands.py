@@ -271,9 +271,11 @@ class _Inputs:
 
 
 def _two_light_weapons(runtime, *, style: bool) -> _Inputs:
+    # 两把都**不带 Nick** 的 Light 武器：这一组用例测的是"追加攻击花附赠动作"
+    # 这条基线，Nick 的免付情形在 `test_dnd2024_weapon_mastery.py` 里单独测。
     engine, instance = _start(
         runtime,
-        _sheet(runtime, equipment=["dagger", "shortsword"], two_weapon_fighting=style),
+        _sheet(runtime, equipment=["club", "shortsword"], two_weapon_fighting=style),
     )
     _turn(engine, instance)
     return _Inputs(engine, instance)
@@ -299,7 +301,7 @@ def test_light_extra_attack_damage_follows_the_fighting_style(runtime, style: bo
     _turn(engine, instance)
     result = _resolve(
         engine, instance,
-        _attack_intent(instance, weapon="dagger", **selection),
+        _attack_intent(instance, weapon="club", **selection),
     )
     _apply(engine, instance, result)
     damage = _damage_event(result["event_batch"])
@@ -389,7 +391,7 @@ def test_a_light_weapon_is_a_valid_reference_for_the_other_one(runtime) -> None:
 
     result = _resolve(
         engine, instance,
-        _attack_intent(instance, weapon="dagger", light_extra_attack=True),
+        _attack_intent(instance, weapon="club", light_extra_attack=True),
     )
 
     assert result["ok"] is True, result
@@ -411,7 +413,7 @@ def test_a_previous_turns_light_attack_does_not_enable_this_one(runtime) -> None
 
     result = _resolve(
         engine, instance,
-        _attack_intent(instance, weapon="dagger", light_extra_attack=True),
+        _attack_intent(instance, weapon="club", light_extra_attack=True),
     )
 
     assert result["ok"] is False
@@ -582,7 +584,7 @@ def test_light_extra_attack_needs_an_unspent_bonus_action(runtime) -> None:
 
     result = _resolve(
         engine, instance,
-        _attack_intent(instance, weapon="dagger", light_extra_attack=True),
+        _attack_intent(instance, weapon="club", light_extra_attack=True),
     )
 
     assert result["ok"] is False

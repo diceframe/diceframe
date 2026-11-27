@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 from ..character.attunement import AttunementError, canonical_item_ref, inventory_ref_counts, owned_ref_counts
+from .weapon_masteries import WEAPON_MASTERY_FEATURE_ID, cleave_grant, nick_active
 from ..features.attack_declarations import BRUTAL_STRIKE, CUNNING_STRIKE_EFFECTS_KEY, LIGHT_EXTRA_ATTACK, STUNNING_STRIKE, declaration_value, validate_cunning_strike, validate_uses, validate_weapon_selection
 from .primitives import CombatIntentError, rider_attack_kind, world_minutes
 from .check_modes import effective_speed, marked_target_id
@@ -238,10 +239,77 @@ class CombatValidationAttackMixin:
         economy = combat.get("economy") or {}
         if str(economy.get("actor_id") or "") != str(actor["actor_id"]):
             raise CombatIntentError("the extra attack can only be made on your own turn")
+        if nick_active(self.features, self._feature_character(actor), weapon):
+            # Nick：这一次属于 Attack action，不花附赠动作，但每回合只有一次。
+            # "另一把 Light 武器"这条不受影响，所以放在它之后判。
+            if bool(record.get("nick_used")):
+                raise CombatIntentError(
+                    "Nick already gave its extra attack this turn"
+                )
+            return
         if int(economy.get("bonus_action", 0) or 0) < 1:
             raise CombatIntentError(
                 "the extra attack costs a Bonus Action that is already spent"
             )
+
+    def _validate_cleave(
+        self, combat: dict[str, Any], actor: dict[str, Any], intent: dict[str, Any],
+        weapon: dict[str, Any],
+    ) -> None:
+        """Cleave: a second attack after a hit, five feet from the first target.
+
+        The prerequisite is a fact about the *previous* attack, so it comes out
+        of ``attack_history`` -- which is why that ledger now records whether the
+        attack hit and which weapon it used.  Everything else is the same shape
+        as Horde Breaker's second attack: it does not pay the action, it rolls
+        its own d20, and it may not be repeated this turn.
+        """
+
+        original_id = str(intent.get("cleave_from") or "")
+        if not original_id:
+            return
+        actor_id = str(actor["actor_id"])
+        if cleave_grant(weapon) is None:
+            raise CombatIntentError("this weapon does not have Cleave")
+        if not self.features.has_feature(
+            self._feature_character(actor), WEAPON_MASTERY_FEATURE_ID,
+        ):
+            raise CombatIntentError("this character has not unlocked weapon masteries")
+        round_index = int(combat.get("round", 0) or 0)
+        turn_index = int(combat.get("turn_index", 0) or 0)
+        granted = (combat.get("granted_attacks") or {}).get(actor_id) or {}
+        if (
+            granted.get("cleave")
+            and int(granted.get("round", -1)) == round_index
+            and int(granted.get("turn_index", -1)) == turn_index
+        ):
+            raise CombatIntentError("Cleave is already used this turn")
+        weapon_ref = str(weapon.get("weapon_ref") or "")
+        hit_before = any(
+            str(row.get("actor_id") or "") == actor_id
+            and str(row.get("target_id") or "") == original_id
+            and int(row.get("round", 0) or 0) == round_index
+            and int(row.get("turn_index", 0) or 0) == turn_index
+            and bool(row.get("hit"))
+            and str(row.get("weapon_ref") or "") == weapon_ref
+            for row in combat.get("attack_history") or []
+        )
+        if not hit_before:
+            raise CombatIntentError(
+                "Cleave needs a hit with this weapon earlier this turn"
+            )
+        target_id = str(intent.get("target_id") or "")
+        if target_id == original_id:
+            raise CombatIntentError("Cleave must pick a different target")
+        grant = cleave_grant(weapon) or {}
+        limit = int(grant.get("target_within_ft") or 0)
+        if self._distance(combat, target_id, original_id) > limit:
+            raise CombatIntentError(
+                f"Cleave's target must be within {limit} feet of the first target"
+            )
+        reach = int(weapon.get("long_range") or weapon.get("range", 5) or 5)
+        if self._distance(combat, actor_id, target_id) > reach:
+            raise CombatIntentError("Cleave's target is out of your reach")
 
     def _validate_grip(
         self, actor: dict[str, Any], weapon: dict[str, Any],
@@ -378,6 +446,7 @@ class CombatValidationAttackMixin:
         self._validate_ammunition(instance, actor, weapon)
         self._validate_two_handed(actor, intent, weapon, hands=swap_hands)
         self._validate_light_extra_attack(combat, actor, intent, weapon)
+        self._validate_cleave(combat, actor, intent, weapon)
         self._validate_loading(combat, actor, intent, weapon)
         self._validate_lucky_spend(instance, intent, actor)
         self._validate_sacred_weapon(intent, actor, weapon, combat)

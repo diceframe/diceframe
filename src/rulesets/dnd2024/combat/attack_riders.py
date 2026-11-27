@@ -351,6 +351,8 @@ class CombatAttackRidersMixin:
             )
             events = [{
                 "type": "dnd2024.position.changed", "actor_id": target_id,
+                # 过渡期双写：distance 给旧消费者，feet/away_from 是 2D 的输入。
+                "feet": distance, "away_from": attacker_id,
                 "distance": direction * distance, "forced": True,
                 "source_feature": "brutal_strike",
             }]

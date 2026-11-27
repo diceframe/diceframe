@@ -485,7 +485,10 @@ class CombatReactionSpellsMixin:
                 return events
             damage_event["amount"] = amount
             damage_event["delta"] = -amount
-            events.extend(self._submit_hit_damage(damage_event))
+            events.extend(self._commit_hit_damage(
+                instance, combat, damage_event, rng,
+                attacker_id=str(decision["attacker_id"]),
+            ))
             defender = self._actor_view(instance, combat, defender_id)
             events.extend(self._multiattack_mark_events(
                 self._actor_view(instance, combat, str(decision["attacker_id"])), defender,
@@ -553,7 +556,10 @@ class CombatReactionSpellsMixin:
         # Shield 没有改变结果（或只是被放弃）：命中成立，最终提交基础伤害，
         # 连同延迟记录的特性使用。
         damage_event = deepcopy(decision["damage_event"])
-        events.extend(self._submit_hit_damage(damage_event))
+        events.extend(self._commit_hit_damage(
+            instance, combat, damage_event, rng,
+            attacker_id=str(decision.get("attacker_id") or ""),
+        ))
         defender = self._actor_view(instance, combat, defender_id)
         events.extend(self._multiattack_mark_events(
             self._actor_view(instance, combat, str(decision["attacker_id"])), defender,
@@ -636,7 +642,10 @@ class CombatReactionSpellsMixin:
         damage_event["amount"] = final
         damage_event["delta"] = -final
         if final > 0:
-            events.extend(self._submit_hit_damage(damage_event))
+            events.extend(self._commit_hit_damage(
+                instance, combat, damage_event, rng,
+                attacker_id=str(decision["attacker_id"]),
+            ))
         defender = self._actor_view(instance, combat, defender_id)
         tail_events, tail_damage = self._hit_tail_events(
             instance, combat, attacker_id, defender, damage_event, rng,
@@ -832,7 +841,10 @@ class CombatReactionSpellsMixin:
         attacker_id = str(decision["attacker_id"])
         damage_event = deepcopy(decision["damage_event"])
         amount = int(damage_event["amount"])
-        events.extend(self._submit_hit_damage(damage_event))
+        events.extend(self._commit_hit_damage(
+            instance, combat, damage_event, rng,
+            attacker_id=str(decision.get("attacker_id") or ""),
+        ))
         defender = self._actor_view(instance, combat, defender_id)
         events.extend(self._multiattack_mark_events(
             self._actor_view(instance, combat, attacker_id), defender,
