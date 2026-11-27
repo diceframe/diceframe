@@ -25,6 +25,7 @@ from .combat import (
     CombatContext,
     combat_capabilities as _project_capabilities,
     martial_arts_profile as _martial_arts_profile,
+    relaxed_bonus_action_targets,
 )
 from .equipment import Dnd2024EquipmentCatalog
 from .feat_capabilities import capability_labels, owned_capability_feats
@@ -1659,6 +1660,21 @@ class Dnd2024ClassFeatureResolver:
             feature_owner_ids=frozenset(definition.id for definition in active),
         )
 
+    def relaxed_bonus_action_targets_for(
+        self, character: Mapping[str, Any] | None,
+    ) -> dict[str, str]:
+        """Which capabilities a declared relaxation covers, features and feats both.
+
+        Combat asks this in three places (the projection, the grant event, the
+        forgery gate).  Answering it here keeps them from each scanning a
+        different owner set -- the asymmetry the review flagged.
+        """
+
+        return relaxed_bonus_action_targets(
+            (*self.active_features_for(character),
+             *self._owned_feat_capability_owners(character))
+        )
+
     def declared_capability(
         self, character: Mapping[str, Any] | None, capability_id: str,
     ) -> FeatureCapability | None:
@@ -1724,22 +1740,19 @@ class Dnd2024ClassFeatureResolver:
             return 0
         features = character.get("features")
         feat_refs = features.get("feat_refs") if isinstance(features, Mapping) else None
-        if not isinstance(feat_refs, list):
+        if not isinstance(feat_refs, list) or not feat_refs:
             return 0
-        catalog = self.bundle.get("advancement_feat_catalog", "srd_advancement_feats")
-        feats = catalog.get("feats") if isinstance(catalog, Mapping) else None
-        if not isinstance(feats, Mapping):
-            return 0
+        # 读已校验的声明，不读原始目录：直接摸 ``bundle.get("advancement_feat_catalog")``
+        # 会绕开参数注册表，"值域写错"要到战斗里才表现为一个怪数字。
+        definitions = self.feat_definitions
         total = 0
         for ref in feat_refs:
             if not isinstance(ref, str):
                 continue
-            feat = feats.get(ref.removeprefix("feat:"))
-            parameters = feat.get("parameters") if isinstance(feat, Mapping) else None
-            bonus = (
-                parameters.get("ranged_attack_bonus")
-                if isinstance(parameters, Mapping) else None
-            )
+            definition = definitions.get(ref.removeprefix("feat:"))
+            if definition is None:
+                continue
+            bonus = definition.parameters.get("ranged_attack_bonus")
             if isinstance(bonus, int) and not isinstance(bonus, bool):
                 total += bonus
         return total
@@ -1758,20 +1771,16 @@ class Dnd2024ClassFeatureResolver:
             return False
         features = character.get("features")
         feat_refs = features.get("feat_refs") if isinstance(features, Mapping) else None
-        if not isinstance(feat_refs, list):
+        if not isinstance(feat_refs, list) or not feat_refs:
             return False
-        catalog = self.bundle.get("advancement_feat_catalog", "srd_advancement_feats")
-        feats = catalog.get("feats") if isinstance(catalog, Mapping) else None
-        if not isinstance(feats, Mapping):
-            return False
+        definitions = self.feat_definitions
         for ref in feat_refs:
             if not isinstance(ref, str):
                 continue
-            feat = feats.get(ref.removeprefix("feat:"))
-            parameters = feat.get("parameters") if isinstance(feat, Mapping) else None
+            definition = definitions.get(ref.removeprefix("feat:"))
             if (
-                isinstance(parameters, Mapping)
-                and parameters.get("light_extra_attack_ability_damage") is True
+                definition is not None
+                and definition.parameters.get("light_extra_attack_ability_damage") is True
             ):
                 return True
         return False

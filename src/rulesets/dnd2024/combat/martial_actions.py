@@ -12,7 +12,6 @@ from ..character.builder import ability_modifier
 from ..features.attack_declarations import (
     STUNNING_STRIKE, HitConditionContext, granted_strike_selection, plan_hit_conditions,
 )
-from ..features.combat import relaxed_bonus_action_targets
 from ..features.models import FeatureCapability, ResourceCost
 from .action_adapter import formula_node_from_dice_formula, roll_damage_node
 from .check_modes import effective_speed
@@ -645,10 +644,9 @@ class CombatMartialActionsMixin:
 
         character = self._feature_character(actor)
         # 谁被放宽由声明说了算：``free_step_after_bonus_action_for`` 写在
-        # 放宽者（Fleet Step）身上，被放宽的能力不需要知道它存在。
-        relaxed = relaxed_bonus_action_targets(
-            self.features.active_features_for(character)
-        )
+        # 放宽者（Fleet Step）身上，被放宽的能力不需要知道它存在。扫描面由
+        # resolver 统一（特性 + 专长），与投影走同一份答案。
+        relaxed = self.features.relaxed_bonus_action_targets_for(character)
         if not relaxed:
             return []
         if capability.feature_id in relaxed:

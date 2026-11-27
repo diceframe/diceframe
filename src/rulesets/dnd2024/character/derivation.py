@@ -9,6 +9,7 @@ from typing import Any
 from src.rulesets.dnd2024.binding import rule_binding
 from src.rulesets.dnd2024.features import (
     Dnd2024ClassFeatureResolver,
+    FeatDefinition,
     load_feat_definitions,
 )
 
@@ -76,17 +77,26 @@ def _feature_proxy(
     return proxy
 
 
-def _passive_armor_class_bonus(bundle: Any, feat_refs: Collection[str]) -> int:
+def _passive_armor_class_bonus(
+    bundle: Any,
+    feat_refs: Collection[str],
+    definitions: Mapping[str, FeatDefinition] | None = None,
+) -> int:
     """The flat AC bonus owned advancement feats declare for worn armor.
 
     Every number comes from the feat's own ``passive_effects`` declaration, so
     the formula holds no magic constant.  A duplicated ref adds its value once,
     and an effect without ``requires_armor`` never lands here at all.
+
+    Callers that already parsed the declarations pass them in: deriving one
+    character reads three of these fields, and parsing the whole feat catalog
+    three times per character is a cost with no upside.
     """
 
     if not feat_refs:
         return 0
-    definitions = load_feat_definitions(bundle)
+    if definitions is None:
+        definitions = load_feat_definitions(bundle)
     total = 0
     for ref in {str(raw) for raw in feat_refs}:
         definition = definitions.get(ref.removeprefix("feat:"))
@@ -103,7 +113,10 @@ def _passive_armor_class_bonus(bundle: Any, feat_refs: Collection[str]) -> int:
 
 
 def feat_initiative_bonus(
-    bundle: Any, feat_refs: Collection[str], proficiency_bonus: int,
+    bundle: Any,
+    feat_refs: Collection[str],
+    proficiency_bonus: int,
+    definitions: Mapping[str, FeatDefinition] | None = None,
 ) -> int:
     """The initiative bonus feats declare, read from the parameter registry.
 
@@ -114,7 +127,8 @@ def feat_initiative_bonus(
 
     if not feat_refs:
         return 0
-    definitions = load_feat_definitions(bundle)
+    if definitions is None:
+        definitions = load_feat_definitions(bundle)
     total = 0
     for ref in {str(raw) for raw in feat_refs}:
         definition = definitions.get(ref.removeprefix("feat:"))
@@ -135,6 +149,7 @@ def derive_armor_class(
     unarmored_ability_bonuses: Iterable[str] = (),
     attuned_refs: Collection[str] = (),
     feat_refs: Collection[str] = (),
+    feat_definitions: Mapping[str, FeatDefinition] | None = None,
 ) -> int:
     """The one and only D&D 2024 armor class formula.
 
@@ -230,7 +245,7 @@ def derive_armor_class(
     if best_armor is not None:
         # "While you're wearing Light, Medium, or Heavy armor" 是硬前提：没有
         # 选中任何护甲时，被动加值一律不加，也不看是否持盾。
-        base += _passive_armor_class_bonus(bundle, feat_refs)
+        base += _passive_armor_class_bonus(bundle, feat_refs, feat_definitions)
     return base + shield_bonus
 
 
@@ -635,6 +650,9 @@ class CharacterDerivationMixin:
         feat_refs = list(dict.fromkeys([
             *background_feat_refs, *species_feat_refs, *class_feature_feat_refs,
         ]))
+        # 一次派生要读三处专长声明（AC 被动、先攻、Magic Initiate）。解析一次
+        # 传下去，而不是让三个读取点各自 depth-copy 整份目录重跑校验。
+        feat_definitions = load_feat_definitions(self.bundle) if feat_refs else {}
         feat_choice_answers = deepcopy(draft.get("feat_choice_answers") or {})
         skilled_refs = list(
             (feat_choice_answers.get("feat:skilled") or {}).get("proficiencies") or []
@@ -743,6 +761,7 @@ class CharacterDerivationMixin:
             # 路径必须与 live 协调一致：否则同一张卡在建卡时有 +1、换装后
             # 才出现，等于两套公式。
             feat_refs=feat_refs,
+            feat_definitions=feat_definitions,
         )
         armor_training = derive_armor_training_state(
             abilities, item_refs, armor_category_refs, self.bundle,
@@ -766,7 +785,9 @@ class CharacterDerivationMixin:
         passive_perception = 10 + int(skill_values.get("perception", 0) or 0)
 
         initiative = ability_modifier(abilities["dex"])
-        initiative += feat_initiative_bonus(self.bundle, feat_refs, prof)
+        initiative += feat_initiative_bonus(
+            self.bundle, feat_refs, prof, feat_definitions,
+        )
         size_options = list(species.get("size_options") or [])
         selected_size = str(draft.get("species_size") or (size_options[0] if size_options else "medium"))
         language_refs = list(draft.get("language_refs") or [])
@@ -779,7 +800,6 @@ class CharacterDerivationMixin:
             *background_tool_refs, *class_tool_refs, *skilled_tool_refs,
         ]))
 
-        feat_definitions = load_feat_definitions(self.bundle) if feat_refs else {}
         magic_initiate = []
         for feat_ref in feat_refs:
             definition = feat_definitions.get(_ref_id(feat_ref, "feat"))

@@ -1370,7 +1370,9 @@ def _validate_capability_ids_are_unique(
         # 专长声明本身非法时，报错应由真正消费它的组件给出（升级引擎会把它
         # 转成 ProgressionCatalogError）。这里只问"能力 id 是否唯一"，不该
         # 抢在前面用另一种错误类型回答同一个问题。
-        return
+        # 但不能直接 return：下面还要查职业特性之间的重名，一条坏专长不该
+        # 让那项检查静默消失。
+        feat_definitions = {}
 
     seen: dict[str, str] = {}
 

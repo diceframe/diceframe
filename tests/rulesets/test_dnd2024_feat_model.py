@@ -309,3 +309,58 @@ def test_legacy_fields_stay_a_bounded_set() -> None:
 def test_unread_registry_is_empty_today() -> None:
     # 这条断言是"棘轮"的起点：加一条未读参数就必须改它，并解释为什么。
     assert unread_parameters() == ()
+
+
+def test_labels_must_be_an_object() -> None:
+    # 同文件其余字段一律 fail closed。labels 写坏成数组时静默当空，界面上
+    # 只会少一个名字，没人会回头查声明。
+    with pytest.raises(FeatDefinitionError) as captured:
+        parse_feat(_feat(labels=["Probe Step"]))
+    assert "labels" in str(captured.value)
+
+
+def test_a_broken_feat_does_not_hide_a_class_feature_clash(bundle) -> None:
+    """The uniqueness check spans two catalogs; one bad feat may not disable half.
+
+    Skipping the whole check when the feat catalog cannot be parsed would let two
+    class features share a capability id -- a clash that has nothing to do with
+    feats and that the check used to catch before feats entered the id space.
+    """
+
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from src.rulesets.dnd2024.features.models import (
+        ClassFeatureError,
+        Dnd2024ClassFeatureCatalog,
+    )
+    from src.rulesets.dnd2024.features.validation import (
+        _validate_capability_ids_are_unique,
+    )
+
+    catalog = Dnd2024ClassFeatureCatalog.from_bundle(bundle)
+    source = next(
+        definition
+        for definition in catalog.features_by_key.values()
+        if definition.capabilities
+    )
+    twin = replace(source, id=f"{source.id}_twin")
+    clashing = SimpleNamespace(features_by_key={
+        ("probe", source.id): source,
+        ("probe", twin.id): twin,
+    })
+
+    class _UnparseableFeats:
+        """A bundle whose only feat cannot be parsed (no ``category``)."""
+
+        def list(self, kind):
+            if kind == "feat":
+                return [{"schema_version": 1, "kind": "feat", "id": "broken"}]
+            return []
+
+        def get(self, kind, ident=None):
+            return None
+
+    with pytest.raises(ClassFeatureError) as captured:
+        _validate_capability_ids_are_unique(clashing, _UnparseableFeats())
+    assert source.capabilities[0].id in str(captured.value)

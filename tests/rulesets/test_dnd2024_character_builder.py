@@ -151,6 +151,33 @@ def test_derives_first_level_fighter_deterministically(runtime, valid_draft) -> 
     assert character["proficiencies"]["skill_values"]["perception"] == 3
 
 
+def test_derive_parses_the_feat_catalog_once(runtime, valid_draft, monkeypatch) -> None:
+    """One character, one parse.
+
+    Derivation reads three feat-declared facts (worn-armor AC, initiative, the
+    Magic Initiate spell list).  Each reader used to parse the whole catalog --
+    a deep copy of every feat plus a full validation pass -- so building one
+    character paid for it three times.  The count is asserted rather than the
+    timing: a wall-clock threshold would make this flaky and would not say what
+    changed.
+    """
+
+    from src.rulesets.dnd2024.character import derivation
+
+    calls: list[str] = []
+    real = derivation.load_feat_definitions
+
+    def counting(bundle):
+        calls.append("parse")
+        return real(bundle)
+
+    monkeypatch.setattr(derivation, "load_feat_definitions", counting)
+    runtime.derive_character(None, valid_draft)
+
+    # 背景给了 feat:savage_attacker，所以这次派生确实会读专长。
+    assert len(calls) == 1
+
+
 def test_finalize_adds_legacy_projection_without_replacing_canonical_state(
     runtime, valid_draft,
 ) -> None:

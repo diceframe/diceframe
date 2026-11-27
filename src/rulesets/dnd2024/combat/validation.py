@@ -17,7 +17,6 @@ from ..character.attunement import (
     owned_ref_counts,
 )
 from .action_adapter import is_supported_damage_formula
-from ..features.combat import relaxed_bonus_action_targets
 from ..features.attack_declarations import (
     BRUTAL_STRIKE, CUNNING_STRIKE_EFFECTS_KEY, LIGHT_EXTRA_ATTACK, SELECTION_KEY,
     STUNNING_STRIKE, declaration_value, selection_error, validate_cunning_strike,
@@ -1227,7 +1226,7 @@ class CombatValidationMixin(
 
         character = self._feature_character(actor)
         owned = self.features.active_features_for(character)
-        relaxed = relaxed_bonus_action_targets(owned)
+        relaxed = self.features.relaxed_bonus_action_targets_for(character)
         return frozenset(
             capability.id
             for definition in owned

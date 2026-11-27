@@ -197,8 +197,12 @@ def parse_feat(raw: Mapping[str, Any]) -> FeatDefinition:
 
 
 def _parse_labels(raw: Any) -> dict[str, str]:
-    if not isinstance(raw, Mapping):
+    if raw is None:
         return {}
+    if not isinstance(raw, Mapping):
+        # 同文件其余字段一律 fail closed：``labels`` 写坏成数组时静默当空，
+        # 界面上只会少一个名字，没人会去查声明。
+        raise FeatDefinitionError("feat.labels must be an object")
     return {str(key): str(value) for key, value in raw.items()}
 
 

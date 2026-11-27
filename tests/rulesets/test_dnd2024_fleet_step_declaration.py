@@ -60,3 +60,19 @@ def test_no_combat_module_branches_on_the_capability_name_any_more() -> None:
         if '"step_of_the_wind"' in path.read_text(encoding="utf-8")
     ]
     assert not offenders, offenders
+
+
+def test_every_caller_asks_the_resolver_for_the_relaxation() -> None:
+    """One answer, one place.
+
+    The projection reads relaxation from ``(*active_features, *feat_owners)``.
+    Two combat call sites scanned ``active_features`` only, so the day a feat
+    grants a relaxation the three answers would drift apart.  They now call the
+    resolver, which is the same owner set the projection uses.
+    """
+
+    combat = ROOT / "src" / "rulesets" / "dnd2024" / "combat"
+    for name in ("martial_actions.py", "validation.py"):
+        text = (combat / name).read_text(encoding="utf-8")
+        assert "relaxed_bonus_action_targets(" not in text, name
+        assert "relaxed_bonus_action_targets_for(" in text, name

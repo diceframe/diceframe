@@ -1243,6 +1243,7 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
                 self.bundle,
                 set(character.get("features", {}).get("feat_refs") or []),
                 proficiency,
+                self._feature_resolver.feat_definitions,
             ),
             "passive_perception": 10 + perception,
             "saving_throws": saving_throws,
@@ -1267,6 +1268,7 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
             ),
             attuned_refs=attuned_refs(character),
             feat_refs=owned_refs if isinstance(owned_refs, list) else (),
+            feat_definitions=self._feature_resolver.feat_definitions,
         )
         # 速度与 AC 同源：升级当次就按当前装备与等级重算，不等下一次换装。
         # 力量不足的 -10 也在这里重新判，因为 abilities 可能刚被 ASI 改过。
