@@ -45,6 +45,11 @@ class RulesetBundleManifest:
     supported_locales: tuple[str, ...]
     license_id: str
     attribution_path: str
+    # 这个 bundle 里允许出现的"内容包"标识。``primary`` 是缺省：一个实体
+    # 不声明 ``content_pack`` 就属于它。其余的值让同一份 bundle 能装下
+    # 非主来源的内容（例如 PHB 独有的专长），而不必假装它们是 SRD。
+    primary_content_pack: str = ""
+    content_packs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,7 +144,7 @@ class RulesetBundleLoader:
             raise RulesetBundleError(f"ruleset bundle does not exist: {directory_id}")
 
         manifest = self._load_manifest(root)
-        entities = self._load_entities(root)
+        entities = self._load_entities(root, manifest)
         self._validate_references(entities)
         active_locale = self._select_locale(manifest, locale)
         materialized = deepcopy(entities)
@@ -175,6 +180,27 @@ class RulesetBundleLoader:
         attribution = (root / attribution_path).resolve()
         if not attribution.is_relative_to(root) or not attribution.is_file():
             raise RulesetBundleError("license.attribution must reference a file inside the bundle")
+        primary_pack = ''
+        packs: tuple[str, ...] = ()
+        raw_packs = raw.get("content_packs")
+        if raw_packs is not None:
+            if not isinstance(raw_packs, dict):
+                raise RulesetBundleError("content_packs must be an object")
+            primary_pack = _required_text(
+                raw_packs.get("primary"), "content_packs.primary",
+            )
+            declared = raw_packs.get("declared")
+            if not isinstance(declared, list) or not declared:
+                raise RulesetBundleError("content_packs.declared must be a non-empty array")
+            packs = tuple(
+                _required_text(item, "content_packs.declared[]") for item in declared
+            )
+            if len(set(packs)) != len(packs):
+                raise RulesetBundleError("content_packs.declared must not contain duplicates")
+            if primary_pack not in packs:
+                raise RulesetBundleError(
+                    "content_packs.primary must be listed in content_packs.declared"
+                )
         return RulesetBundleManifest(
             schema_version=schema_version,
             bundle_id=bundle_id,
@@ -185,9 +211,13 @@ class RulesetBundleLoader:
             supported_locales=supported_locales,
             license_id=license_id,
             attribution_path=attribution_path,
+            primary_content_pack=primary_pack,
+            content_packs=packs,
         )
 
-    def _load_entities(self, root: Path) -> dict[str, dict[str, dict[str, Any]]]:
+    def _load_entities(
+        self, root: Path, manifest: RulesetBundleManifest,
+    ) -> dict[str, dict[str, dict[str, Any]]]:
         content_root = root / "content"
         if not content_root.is_dir():
             raise RulesetBundleError("ruleset bundle content directory is missing")
@@ -216,6 +246,18 @@ class RulesetBundleLoader:
                     )
                 _validate_no_executable_content(entity, path)
                 _validate_effects(entity, path)
+                # 来源写在实体上而不是靠目录布局：同一条目录（feats/）里可以
+                # 同时装 SRD 与 PHB 的内容，只靠"文件放在哪"是分不出来的。
+                # 缺省归属主包，所以只有非主来源的内容需要显式声明。
+                pack = str(entity.get("content_pack") or "")
+                if not pack:
+                    pack = manifest.primary_content_pack
+                    entity["content_pack"] = pack
+                elif pack not in manifest.content_packs:
+                    raise RulesetBundleError(
+                        f"entity {kind}:{entity_id} declares an undeclared "
+                        f"content_pack: {pack!r}"
+                    )
                 by_kind = entities.setdefault(kind, {})
                 if entity_id in by_kind:
                     raise RulesetBundleError(f"duplicate entity {kind}:{entity_id}")

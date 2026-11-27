@@ -32,30 +32,34 @@ LOCALE = "en"
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 
-#: 7 个 origin 实体 + 13 条成长专长。改名或增删条目时这张表要一起改，
-#: 因为它是"专长池到底有多少条"的唯一机械答案。
-EXPECTED_FEAT_IDS = frozenset({
-    "alert",
-    "lucky",
-    "skilled",
-    "savage_attacker",
-    "magic_initiate_cleric",
-    "magic_initiate_druid",
-    "magic_initiate_wizard",
-    "ability_score_improvement",
-    "grappler",
-    "archery",
-    "defense",
-    "great_weapon_fighting",
-    "two_weapon_fighting",
-    "boon_of_combat_prowess",
-    "boon_of_dimensional_travel",
-    "boon_of_fate",
-    "boon_of_irresistible_offense",
-    "boon_of_spell_recall",
-    "boon_of_the_night_spirit",
-    "boon_of_truesight",
-})
+#: 每个内容包各自的专长实体。分组不是为了好看：``srd-5.2.1`` 的数字（17 条
+#: 规则条目 / 19 个实体，Magic Initiate 三变体各占一个实体）来自三份独立的
+#: SRD 索引，而不是"我们声明了多少"。``phb-2024`` 只有 Lucky —— 它有完整
+#: 实现却不在 SRD 里，pack 字段就是为了让这件事可查，而不是靠人记得。
+EXPECTED_FEAT_IDS_BY_PACK: dict[str, frozenset[str]] = {
+    "srd-5.2.1": frozenset({
+        "alert",
+        "skilled",
+        "savage_attacker",
+        "magic_initiate_cleric",
+        "magic_initiate_druid",
+        "magic_initiate_wizard",
+        "ability_score_improvement",
+        "grappler",
+        "archery",
+        "defense",
+        "great_weapon_fighting",
+        "two_weapon_fighting",
+        "boon_of_combat_prowess",
+        "boon_of_dimensional_travel",
+        "boon_of_fate",
+        "boon_of_irresistible_offense",
+        "boon_of_spell_recall",
+        "boon_of_the_night_spirit",
+        "boon_of_truesight",
+    }),
+    "phb-2024": frozenset({"lucky"}),
+}
 
 
 @pytest.fixture(scope="module")
@@ -83,7 +87,57 @@ def _feat(**overrides):
 
 def test_every_declared_feat_goes_through_the_model(bundle) -> None:
     definitions = load_feat_definitions(bundle)
-    assert set(definitions) == EXPECTED_FEAT_IDS
+    expected = frozenset().union(*EXPECTED_FEAT_IDS_BY_PACK.values())
+    assert set(definitions) == expected
+
+
+def test_each_feat_reports_the_pack_it_came_from(bundle) -> None:
+    actual: dict[str, set[str]] = {}
+    for definition in load_feat_definitions(bundle).values():
+        actual.setdefault(definition.content_pack, set()).add(definition.id)
+    assert {pack: frozenset(ids) for pack, ids in actual.items()} ==         EXPECTED_FEAT_IDS_BY_PACK
+
+
+def test_the_srd_pack_is_exactly_the_srd(bundle) -> None:
+    """The SRD pack's contents must match the published index, not our count.
+
+    17 rule entries live in the SRD (4 Origin, 2 General, 4 Fighting Style,
+    7 Epic Boon).  A pack that quietly grows is how "we implemented the SRD"
+    stops meaning anything.
+    """
+
+    srd = [
+        definition
+        for definition in load_feat_definitions(bundle).values()
+        if definition.content_pack == "srd-5.2.1"
+    ]
+    assert len(srd) == 19  # 17 条规则条目，Magic Initiate 的三个变体各一个实体
+    by_category: dict[str, int] = {}
+    for definition in srd:
+        by_category[definition.category] = by_category.get(definition.category, 0) + 1
+    assert by_category == {
+        "origin": 6,          # Alert / Savage Attacker / Skilled + 3 × Magic Initiate
+        "general": 2,
+        "fighting_style": 4,
+        "epic_boon": 7,
+    }
+
+
+def test_source_ref_agrees_with_the_pack(bundle) -> None:
+    """A feat may not claim one book in its pack and another in its anchor.
+
+    This is a test rather than a load-time rule: the repository has older
+    anchors that would fail it, and a hard gate would block content that is
+    otherwise correct.  Written here, it turns "the anchor is made up" from
+    something nobody notices into a red test.
+    """
+
+    mismatched = [
+        f"{d.id}: pack={d.content_pack} ref={d.source_ref}"
+        for d in load_feat_definitions(bundle).values()
+        if d.content_pack and not d.source_ref.startswith(f"{d.content_pack}:")
+    ]
+    assert not mismatched, mismatched
 
 
 def test_an_unknown_top_level_field_fails_at_load() -> None:
@@ -217,6 +271,9 @@ def test_skilled_declares_its_choice_once(bundle) -> None:
     assert choice.grants == "proficiency"
     assert choice.requires_proficiency is False
     assert choice.exclude_expertise is False
+    # SRD: "Repeatable. You can take this feat more than once." 声明成可重复；
+    # 取得侧的合并（feat_refs 去重）还没读它，属 FD2a。
+    assert definition.repeatable is True
 
 
 def test_proficiency_choice_no_longer_exists() -> None:

@@ -51,6 +51,7 @@ FEAT_FIELDS = frozenset({
     "category",
     "source_ref",
     "automation_level",
+    "content_pack",
     "minimum_level",
     "repeatable",
     "parameters",
@@ -105,6 +106,9 @@ class FeatDefinition:
     category: str
     source_ref: str
     automation_level: str
+    # 这条内容属于哪个内容包（``srd-5.2.1`` / ``phb-2024`` / …）。空值表示
+    # 所属 bundle 没有声明来源体系（极简测试夹具就是这样）。
+    content_pack: str = ""
     minimum_level: int = 1
     repeatable: bool = False
     parameters: Mapping[str, Any] = field(default_factory=dict)
@@ -169,6 +173,7 @@ def parse_feat(raw: Mapping[str, Any]) -> FeatDefinition:
         category=category,
         source_ref=source_ref,
         automation_level=automation,
+        content_pack=str(raw.get("content_pack") or ""),
         minimum_level=minimum_level,
         repeatable=repeatable,
         parameters=parameters,
@@ -277,6 +282,9 @@ def load_feat_definitions(bundle: LoadedRulesetBundle) -> dict[str, FeatDefiniti
             row.setdefault("kind", "feat")
             row.setdefault("source_ref", str(catalog.get("source_ref") or ""))
             row.setdefault("automation_level", str(catalog.get("automation_level") or ""))
+            # 目录里的 13 条没有各自的 content_pack，继承目录实体的（bundle 已按
+            # manifest 的 primary 填好）。不继承的话它们会落进"来源未知"那一组。
+            row.setdefault("content_pack", str(catalog.get("content_pack") or ""))
             definition = parse_feat(row)
             if definition.id in definitions:
                 raise FeatDefinitionError(
