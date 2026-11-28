@@ -1278,9 +1278,25 @@ class CombatSpellResolutionMixin:
                 condition = candidates[index] if 0 <= index < len(candidates) else ""
             else:
                 condition = str(declared or "")
+            # S0-SP3：成功豁免后仍有后果的法术（`ray_of_enfeeblement` 的"下次
+            # 攻击劣势"）。成功分支的条件与失败分支**不是同一个**，时长也不同，
+            # 所以声明是对象而不是开关。
+            success_condition = effect.get("condition_on_success")
+            success_applies = (
+                mode == "saving_throw" and succeeded and isinstance(success_condition, dict)
+            )
+            applied_success: dict[str, Any] = (
+                success_condition if isinstance(success_condition, dict) else {}
+            )
+            if success_applies:
+                condition = str(applied_success.get("condition") or "")
+            success_duration = (
+                str(applied_success.get("duration") or "") if success_applies else ""
+            )
             condition_applies = (
                 (mode in {"spell_attack", "automatic_damage"} and succeeded)
                 or (mode == "saving_throw" and not succeeded)
+                or success_applies
                 or mode in {"buff", "debuff"}
             )
             # 条件免疫：命中则根本不产生 condition.applied，并把拦截来源写回
@@ -1326,7 +1342,9 @@ class CombatSpellResolutionMixin:
                 applied = {
                     "type": "condition.applied", "target_id": target_id,
                     "condition": condition,
-                    "duration": self._duration_for(
+                    # 成功分支用自己的时长码（这里没有"施法者下回合结束"以外的
+                    # 语义，所以直接写字面量）；失败分支仍走法术时长。
+                    "duration": success_duration or self._duration_for(
                         effect, spell, slot_level, metamagic_plan,
                     ).as_condition_text(),
                     "source_actor_id": actor_id,

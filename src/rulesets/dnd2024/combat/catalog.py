@@ -288,6 +288,26 @@ class Dnd2024CombatCatalog:
                 raise CombatCatalogError(
                     f"combat spell condition is invalid: {spell_id}"
                 )
+            # S0-SP3：成功豁免后仍施加的条件。只接受对象——成功分支的时长
+            # 几乎总与失败分支不同，裸字符串会逼出"时长从哪来"的猜测。
+            success_condition = effect.get("condition_on_success")
+            if success_condition is not None:
+                if (
+                    not isinstance(success_condition, dict)
+                    or set(success_condition) != {"condition", "duration"}
+                ):
+                    raise CombatCatalogError(
+                        f"combat spell condition_on_success must be "
+                        f"{{condition, duration}}: {spell_id}"
+                    )
+                if not str(success_condition.get("condition") or ""):
+                    raise CombatCatalogError(
+                        f"combat spell condition_on_success names no condition: {spell_id}"
+                    )
+                if not str(success_condition.get("duration") or ""):
+                    raise CombatCatalogError(
+                        f"combat spell condition_on_success has no duration: {spell_id}"
+                    )
             ongoing = effect.get("ongoing")
             if ongoing is not None:
                 if not isinstance(ongoing, dict):

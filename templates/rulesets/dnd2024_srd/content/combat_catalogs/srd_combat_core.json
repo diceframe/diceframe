@@ -52,7 +52,7 @@
     "fog_cloud": {"mode": "obscuring_zone", "range": 120, "level": "heavily", "radius_ft": 20, "magical": false, "concentration": true, "duration_rounds": 10, "target_count": 1},
     "darkness": {"mode": "obscuring_zone", "range": 60, "level": "heavily", "radius_ft": 15, "magical": true, "concentration": true, "duration_rounds": 10, "target_count": 1},
     "eldritch_blast": {"mode": "spell_attack", "damage": "1d10", "damage_type": "force", "range": 120},
-    "ray_of_enfeeblement": {"mode": "saving_throw", "save": "con", "range": 60, "condition": "enfeebled", "condition_duration": "1_minute", "concentration": true, "save_repeat": "con"},
+    "ray_of_enfeeblement": {"mode": "saving_throw", "save": "con", "range": 60, "condition": "enfeebled", "condition_duration": "1_minute", "concentration": true, "save_repeat": "con", "condition_on_success": {"condition": "next_attack_disadvantage", "duration": "caster_next_turn_end"}},
     "ray_of_sickness": {"mode": "spell_attack", "damage": "2d8", "upcast_damage": "1d8", "damage_type": "poison", "range": 60, "condition": "poisoned", "condition_duration": "caster_next_turn_end"},
     "ray_of_frost": {"mode": "spell_attack", "damage": "1d8", "damage_type": "cold", "range": 60, "condition": "slowed_10", "condition_duration": "target_turn_start"},
     "sacred_flame": {"mode": "saving_throw", "save": "dex", "damage": "1d8", "damage_type": "radiant", "range": 60},
