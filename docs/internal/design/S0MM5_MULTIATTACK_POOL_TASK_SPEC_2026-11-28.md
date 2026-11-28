@@ -99,4 +99,8 @@
 
 已修（代码）：池的 `sequence` 只允许池形状（`view.py` 显式拒绝）；导入器不再吞 `replace` 子句。
 
-仍未做（登记）：池成员的引用**在契约层**核对（需要把 `attack_ids` 传进 `_validate_multiattack_action`）；`at_least`/`at_most` 的**聚合可行性**（`sum(at_least) <= count`、同一攻击上下界互斥）。
+第二轮把这两条也做完了：
+
+- **引用在契约层核对**：四种形状统一核对，键集与 `resolve_attack_ref` 一致（id / 别名 / 名字，后两者不分大小写），所以别名不会被误拒、`ghost-0` 也不会被放行。为此把攻击校验提到动作校验之前。
+- **聚合可行性**：`sum(at_least) <= count` 与"同一攻击下界 ≤ 上界"，否则这个池没有任何合法 sequence。
+- 校验函数搬进 `primitives.py`（`validation.py` 又顶到体积棘轮）。

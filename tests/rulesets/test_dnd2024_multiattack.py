@@ -251,22 +251,15 @@ def test_choice_without_a_branch_is_refused() -> None:
 
 def test_an_unknown_attack_reference_is_refused() -> None:
     engine, instance = _instance()
-    _start(engine, instance, _enemy(
-        [_attack("claw-0", "Claw")],
-        [{"id": "multiattack-0", "name": "Multiattack", "kind": "multiattack",
-          "repeat": {"attack_id": "ghost-0", "count": 2}}],
-    ))
-    intent = {
-        "intent_id": "multi-1", "type": "multiattack",
-        "expected_version": int(ruleset_runtime.state(instance)["version"]),
-        "submitted_by": "gm", "actor_id": "enemy:beast-1",
-        "target_id": "player:gm", "action_id": "multiattack-0",
-    }
 
-    resolved = engine.resolve_intent(instance, intent, SequenceRng([15]))
-
-    assert resolved["ok"] is False
-    assert "does not have" in str(resolved["error"])
+    # S0-MM5 修复后，引用在**加载期**就核对：一只"招牌动作永远打不出来"的怪
+    # 不该进战斗，更不该进目录。
+    with pytest.raises(Exception):
+        _start(engine, instance, _enemy(
+            [_attack("claw-0", "Claw")],
+            [{"id": "multiattack-0", "name": "Multiattack", "kind": "multiattack",
+              "repeat": {"attack_id": "ghost-0", "count": 2}}],
+        ))
 
 
 # 5. 别名限定在生物内 --------------------------------------------------------
@@ -550,10 +543,10 @@ def test_a_pool_naming_an_attack_it_does_not_have_is_refused() -> None:
           "pool": {"attacks": ["bite-0", "tail-0"], "count": 2}}],
     )
 
-    # 动作契约只能查 id 形状，看不到该生物的攻击表；引用是否成立在展开时回答。
-    _start(engine, instance, bad)
+    # 引用在加载期核对：池里有不存在的攻击，这只怪不该进战斗。
     with pytest.raises(Exception):
-        _pool(engine, instance, sequence=["bite-0", "tail-0"], rolls=[15, 2, 15, 2])
+        _start(engine, instance, bad)
+    del engine, instance
 
 
 # ---------------------------------------------------------------------------

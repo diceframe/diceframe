@@ -184,6 +184,11 @@ class CombatReactionSpellsMixin:
             return []
         if "shield" in defender["conditions"]:
             return []
+        # 规则要求"能看见攻击者"。敌人侧没有视野模型，用条件层能表达的部分
+        # 兜住：目盲 / 失能 / 昏迷时不提供。这是 fail closed 的一半，另一半
+        # （黑暗中看不见、手持武器）登记为未建模。
+        if {"blinded", "incapacitated", "unconscious", "dead"} & set(defender["conditions"]):
+            return []
         if not self._reaction_eligible(combat, defender):
             return []
         bonus = int(defender.get("proficiency_bonus", 0) or 0)

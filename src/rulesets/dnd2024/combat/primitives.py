@@ -523,8 +523,10 @@ def validate_reactions(raw: Any, label: str) -> None:
 
     if raw is None:
         return
-    if not isinstance(raw, list) or not 1 <= len(raw) <= 2:
-        raise CombatIntentError(f"{label} reactions must list 1 or 2 entries")
+    # 目前只有一种反应形状，而且窗口只会用第一条：允许两条等于允许一条
+    # 被静默忽略。等出现第二种 kind 再放宽。
+    if not isinstance(raw, list) or len(raw) != 1:
+        raise CombatIntentError(f"{label} reactions must list exactly 1 entry")
     seen: set[str] = set()
     for row in raw:
         if not isinstance(row, dict) or set(row) - {"id", "kind", "bonus"}:
@@ -537,3 +539,72 @@ def validate_reactions(raw: Any, label: str) -> None:
             raise CombatIntentError(f"{label} reaction kind is unknown")
         if str(row.get("bonus") or "") not in REACTION_BONUSES:
             raise CombatIntentError(f"{label} reaction bonus is unknown")
+
+
+def validate_multiattack_pool(
+    pool: Any, attack_ids: set[str], label: str,
+) -> None:
+    """S0-MM5：池形状的契约，含"有解"检查。
+
+    逐行合法不等于有解：下界总和超过总次数、或同一攻击下界高于上界，都会让
+    这个池没有任何合法 sequence —— 那是招牌动作永远打不出来的怪。
+    """
+
+    # S0-MM5："N 次攻击，从这几把里任意挑"。约束是可选的两条：
+    # ``at_least``（至少几次是哪种）与 ``at_most``（最多几次，用来表达
+    # "可以把一次换成另一种"）。证明不了约束的文本一律不导入。
+    if not isinstance(pool, dict):
+        raise CombatIntentError(f"{label} multiattack pool is invalid")
+    if set(pool) - {"attacks", "count", "at_least", "at_most"}:
+        raise CombatIntentError(f"{label} multiattack pool has unknown field(s)")
+    ids = pool.get("attacks")
+    if not isinstance(ids, list) or not 2 <= len(ids) <= 4:
+        raise CombatIntentError(f"{label} multiattack pool needs 2 to 4 attacks")
+    for attack_id in ids:
+        if not isinstance(attack_id, str) or not re.fullmatch(
+            r"[a-z0-9][a-z0-9_.-]{0,63}", attack_id
+        ):
+            raise CombatIntentError(f"{label} multiattack pool attack id is invalid")
+    if len(set(ids)) != len(ids):
+        raise CombatIntentError(f"{label} multiattack pool repeats an attack")
+    for attack_id in ids:
+        if attack_id.lower() not in attack_ids:
+            raise CombatIntentError(
+                f"{label} multiattack pool names an attack this creature does not have"
+            )
+    count = pool.get("count")
+    if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= MULTIATTACK_MAX_ATTACKS:
+        raise CombatIntentError(f"{label} multiattack pool count is invalid")
+    for key in ("at_least", "at_most"):
+        rows = pool.get(key)
+        if rows is None:
+            continue
+        if not isinstance(rows, list) or not rows:
+            raise CombatIntentError(f"{label} multiattack pool {key} is invalid")
+        for row in rows:
+            if not isinstance(row, dict) or set(row) - {"attack_id", "count"}:
+                raise CombatIntentError(f"{label} multiattack pool {key} row is invalid")
+            if str(row.get("attack_id")) not in ids:
+                raise CombatIntentError(
+                    f"{label} multiattack pool {key} names an attack outside the pool"
+                )
+            bound = row.get("count")
+            if isinstance(bound, bool) or not isinstance(bound, int) or not 1 <= bound <= count:
+                raise CombatIntentError(f"{label} multiattack pool {key} count is invalid")
+    # 跨行可行性：逐行合法不等于有解。下界总和超过总次数、或同一攻击
+    # 的下界高于上界，会让这个池**没有任何**合法 sequence —— 那是一只
+    # 招牌动作永远打不出来的怪，必须在加载期拒绝。
+    floors = {
+        str(row["attack_id"]): int(row["count"])
+        for row in pool.get("at_least") or []
+    }
+    if sum(floors.values()) > count:
+        raise CombatIntentError(
+            f"{label} multiattack pool cannot satisfy its at_least rules"
+        )
+    for row in pool.get("at_most") or []:
+        attack_id = str(row["attack_id"])
+        if attack_id in floors and floors[attack_id] > int(row["count"]):
+            raise CombatIntentError(
+                f"{label} multiattack pool has an impossible at_least/at_most pair"
+            )

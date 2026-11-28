@@ -64,6 +64,7 @@ from .obscurement import (
     sanctuary_zone_id,
 )
 from .primitives import (
+    validate_multiattack_pool,
     validate_reactions,
     slot_available,
     CONDITION_CODES,
@@ -326,7 +327,28 @@ def validate_enemy_profiles(enemies: Any) -> None:
         _validate_condition_immunities(enemy, f"enemy {enemy_id}")
         _normalize_speeds(enemy, f"enemy {enemy_id}")
         _validate_statblock_extras(enemy, f"enemy {enemy_id}")
-        _validate_enemy_actions(enemy, f"enemy {enemy_id}")
+        # 攻击必须先校验：Multiattack 的四种形状都要核对"引用的是本生物
+        # 真的拥有的攻击"，没有这份 id 集就只能在校验层放行、到展开时才炸。
+        attacks = enemy.get("attacks")
+        # 0 是合法形状：Giant Fly / Seahorse 在 SRD 里本来就没有攻击，
+        # 但它们是合法形态（德鲁伊能变成海马）。没有攻击的敌人只是永远
+        # 没有 attack 意图，而不是数据错误。
+        if not isinstance(attacks, list) or not 0 <= len(attacks) <= 20:
+            raise CombatIntentError("enemy requires 0 to 20 attacks")
+        attack_ids: set[str] = set()
+        for attack in attacks:
+            if not isinstance(attack, dict):
+                raise CombatIntentError("enemy attack profile is invalid")
+            _validate_attack_profile(attack, attack_ids)
+        # Multiattack 的引用可以写 id、别名或名字（`resolve_attack_ref` 就是这么
+        # 找的），所以校验用的键集必须与它一致，否则合法的别名会被误拒。
+        known_refs = set(attack_ids)
+        for attack in attacks:
+            known_refs.update(str(alias).lower() for alias in attack.get("aliases") or [])
+            name = str(attack.get("name") or "").lower()
+            if name:
+                known_refs.add(name)
+        _validate_enemy_actions(enemy, f"enemy {enemy_id}", known_refs)
         _validate_enemy_traits(enemy, f"enemy {enemy_id}")
         if not isinstance(enemy.get("creature_type", ""), str) or (enemy.get("creature_type") and enemy["creature_type"] not in CREATURE_TYPES):
             raise CombatIntentError("enemy creature_type must be a canonical creature type")
@@ -347,17 +369,6 @@ def validate_enemy_profiles(enemies: Any) -> None:
             value = enemy.get(field_name, default)
             if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
                 raise CombatIntentError(f"enemy {field_name} is invalid")
-        attacks = enemy.get("attacks")
-        # 0 是合法形状：Giant Fly / Seahorse 在 SRD 里本来就没有攻击，
-        # 但它们是合法形态（德鲁伊能变成海马）。没有攻击的敌人只是永远
-        # 没有 attack 意图，而不是数据错误。
-        if not isinstance(attacks, list) or not 0 <= len(attacks) <= 20:
-            raise CombatIntentError("enemy requires 0 to 20 attacks")
-        attack_ids: set[str] = set()
-        for attack in attacks:
-            if not isinstance(attack, dict):
-                raise CombatIntentError("enemy attack profile is invalid")
-            _validate_attack_profile(attack, attack_ids)
 
 
 def _validate_damage_formula(formula: Any) -> None:
@@ -524,7 +535,9 @@ def _validate_attack_profile(attack: dict[str, Any], attack_ids: set[str]) -> No
     attack_ids.add(attack_id)
 
 
-def _validate_multiattack_action(action: dict[str, Any], label: str) -> None:
+def _validate_multiattack_action(
+    action: dict[str, Any], label: str, attack_ids: set[str],
+) -> None:
     """S0-MM3b: repeat / combo / choice, and nothing else."""
 
     shapes = [key for key in ("repeat", "combo", "choice", "pool") if key in action]
@@ -550,6 +563,10 @@ def _validate_multiattack_action(action: dict[str, Any], label: str) -> None:
                 r"[a-z0-9][a-z0-9_.-]{0,63}", attack_id
             ):
                 raise CombatIntentError(f"{label} {where} attack id is invalid")
+            if attack_id.lower() not in attack_ids:
+                raise CombatIntentError(
+                    f"{label} {where} names an attack this creature does not have"
+                )
             if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 6:
                 raise CombatIntentError(f"{label} {where} attack count is invalid")
             total += count
@@ -567,43 +584,7 @@ def _validate_multiattack_action(action: dict[str, Any], label: str) -> None:
         parts_of(action.get("combo"), "combo")
         return
     if shape == "pool":
-        # S0-MM5："N 次攻击，从这几把里任意挑"。约束是可选的两条：
-        # ``at_least``（至少几次是哪种）与 ``at_most``（最多几次，用来表达
-        # "可以把一次换成另一种"）。证明不了约束的文本一律不导入。
-        pool = action.get("pool")
-        if not isinstance(pool, dict):
-            raise CombatIntentError(f"{label} multiattack pool is invalid")
-        if set(pool) - {"attacks", "count", "at_least", "at_most"}:
-            raise CombatIntentError(f"{label} multiattack pool has unknown field(s)")
-        ids = pool.get("attacks")
-        if not isinstance(ids, list) or not 2 <= len(ids) <= 4:
-            raise CombatIntentError(f"{label} multiattack pool needs 2 to 4 attacks")
-        for attack_id in ids:
-            if not isinstance(attack_id, str) or not re.fullmatch(
-                r"[a-z0-9][a-z0-9_.-]{0,63}", attack_id
-            ):
-                raise CombatIntentError(f"{label} multiattack pool attack id is invalid")
-        if len(set(ids)) != len(ids):
-            raise CombatIntentError(f"{label} multiattack pool repeats an attack")
-        count = pool.get("count")
-        if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= MULTIATTACK_MAX_ATTACKS:
-            raise CombatIntentError(f"{label} multiattack pool count is invalid")
-        for key in ("at_least", "at_most"):
-            rows = pool.get(key)
-            if rows is None:
-                continue
-            if not isinstance(rows, list) or not rows:
-                raise CombatIntentError(f"{label} multiattack pool {key} is invalid")
-            for row in rows:
-                if not isinstance(row, dict) or set(row) - {"attack_id", "count"}:
-                    raise CombatIntentError(f"{label} multiattack pool {key} row is invalid")
-                if str(row.get("attack_id")) not in ids:
-                    raise CombatIntentError(
-                        f"{label} multiattack pool {key} names an attack outside the pool"
-                    )
-                bound = row.get("count")
-                if isinstance(bound, bool) or not isinstance(bound, int) or not 1 <= bound <= count:
-                    raise CombatIntentError(f"{label} multiattack pool {key} count is invalid")
+        validate_multiattack_pool(action.get("pool"), attack_ids, label)
         return
     branches = action.get("choice")
     if not isinstance(branches, list) or not 2 <= len(branches) <= 4:
@@ -741,7 +722,9 @@ def _validate_enemy_traits(enemy: dict[str, Any], label: str) -> None:
                 )
 
 
-def _validate_enemy_actions(enemy: dict[str, Any], label: str) -> None:
+def _validate_enemy_actions(
+    enemy: dict[str, Any], label: str, attack_ids: set[str],
+) -> None:
     """S0-MM3b: the stat block's ``actions[]`` container.
 
     Only Multiattack is expressible today; a save-based action is the next
@@ -764,7 +747,7 @@ def _validate_enemy_actions(enemy: dict[str, Any], label: str) -> None:
         seen.add(action_id)
         kind = str(action.get("kind") or "")
         if kind == "multiattack":
-            _validate_multiattack_action(action, f"{label} {action_id}")
+            _validate_multiattack_action(action, f"{label} {action_id}", attack_ids)
             continue
         if kind == "save_action":
             _validate_save_action(action, f"{label} {action_id}")
