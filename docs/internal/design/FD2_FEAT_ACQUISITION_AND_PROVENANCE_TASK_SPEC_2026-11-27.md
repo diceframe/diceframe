@@ -400,3 +400,13 @@ boon_of_spell_recall   → requires: [...]
 - 矩阵 #9 改为同一 runtime 派生两次比较（原 dict 顺序用例保留）；
 - `derivation` 守卫改为同时断言 `feat_grants = feat_provenance(` 与 `owned_feat_refs(feat_grants)`，
   且旧的 `dict.fromkeys([*background_feat_refs` 不再出现。
+
+### 10.5 审核修复后的验证
+
+- 新文件 16 例通过（新增"纯 ASI 伪专长不是 grant"一条）；
+- `feature_choices` + `character_builder` + `advancement_records` + `feat_requirements`：123 passed；
+- `ruff check src/ tests/`：干净；`mypy`：149 文件 0 错；
+- 全量 `pytest tests/ -n 6 --dist loadfile`：**11541 passed / 10 failed / 3 errors**。
+  10 条全是本机既有基线（updater MAX_PATH 1、docker launcher 6、docker data generation 1、
+  docker self-update reentry 1、runtime dependencies 1），3 errors 是 docker 升级路径；
+  Linux CI 不复现。没有新增失败。
