@@ -10,7 +10,6 @@ from src.rulesets.dnd2024.features.resources import (
     USAGE_SCOPE_LONG_REST,
     feature_usage_count,
 )
-from .effect_items import legacy_label, normalize_effect_items
 from .action_adapter import (
     attack_damage_node,
     dice_count,
@@ -985,24 +984,21 @@ class CombatHitResolutionMixin:
         riders = damage_event.get("statblock_riders")
         if not isinstance(riders, list) or not riders:
             return []
-        # S0-EFFECT1：先用统一的词汇读，再按项结算。P1 的验收是"行为与事件
-        # 逐字节不变"，所以这里只换读取方式，不改任何一条事件的形状。
-        items = normalize_effect_items(riders)
-        if not items:
-            return []
         target_id = str(target["actor_id"])
         applied: list[dict[str, Any]] = []
-        for item in items:
-            limit = str(item.get("max_target_size") or "")
+        for rider in riders:
+            if not isinstance(rider, dict):
+                continue
+            limit = str(rider.get("max_target_size") or "")
             if limit and not size_at_most(str(target.get("size") or ""), limit):
                 applied.append({
                     "type": "dnd2024.rider.skipped", "target_id": target_id,
                     "source_actor_id": attacker_id,
-                    "kind": legacy_label(item),
+                    "kind": str(rider.get("kind") or ""),
                     "reason": "size_gate",
                 })
                 continue
-            save = item.get("save")
+            save = rider.get("save")
             if isinstance(save, dict) and save.get("ability"):
                 check = self._saving_throw_check(
                     instance, combat, target, target_id,
@@ -1011,37 +1007,46 @@ class CombatHitResolutionMixin:
                 )
                 applied.append(check)
                 if check["success"]:
+                    # 失败才吃效果：成功就等于这条 rider 没有发生，不必再
+                    # 发一条空事件，`check.resolved` 已经把掷骰留在日志里。
                     continue
-            if "push" in item:
+            kind = str(rider.get("kind") or "")
+            if kind == "push":
                 direction = (
                     1 if self._position(combat, target_id)
                     >= self._position(combat, attacker_id) else -1
                 )
                 applied.append({
                     "type": "dnd2024.position.changed", "actor_id": target_id,
-                    "distance": direction * int(item["push"]),
+                    "distance": direction * int(rider.get("distance") or 0),
                     "forced": True,
                     "source_rider": "push",
                 })
                 continue
-            condition = str(item.get("condition") or "")
+            condition = rider_condition(rider)
             if not condition:
                 continue
-            label = legacy_label(item)
             meta: dict[str, Any] = {
                 "type": "condition.applied", "target_id": target_id,
                 "condition": condition,
                 "source_actor_id": attacker_id,
-                "source_rider": label,
-                "duration": str(item.get("duration") or "combat"),
+                "source_rider": kind,
+                # 缺省按遭遇计时。没有"起身""挣脱"这两个动作时，一条没有
+                # 时限的击倒会跟着角色卡活到下一场战斗——那是数据泄漏，不是
+                # 规则。登记 GAP-38。
+                "duration": str(rider.get("duration") or "combat"),
             }
             if (
                 meta["duration"] == "target_turn_end"
                 and str((combat.get("economy") or {}).get("actor_id") or "") == target_id
             ):
+                # 在目标自己的回合里给它"到其下个回合结束"：这一次回合结束
+                # 不是"下个"，所以要多撑一个回合边界。
                 meta["expires_after"] = 2
-            if item.get("escape_dc"):
-                meta["escape_dc"] = int(item["escape_dc"])
+            if kind == "grapple":
+                # 挣脱 DC 是擒抱的一部分事实，跟着条件走；挣脱本身是一个
+                # 技能检定动作（下一片的消费者），这里只把数字留下。
+                meta["escape_dc"] = int(rider.get("escape_dc") or 0)
             applied.append(meta)
         return applied
 

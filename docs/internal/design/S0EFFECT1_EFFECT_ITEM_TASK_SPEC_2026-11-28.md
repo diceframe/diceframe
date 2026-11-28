@@ -5,7 +5,7 @@
 | 切片 | S0-EFFECT1（P1：只定契约与适配器，不产出任何内容） |
 | 性质 | 重构的前置片。本片**不改变任何行为** |
 | 基线 | `f6614d23` |
-| 状态 | P1 已实现（契约 + 归一 + rider 走新路径，行为不变） |
+| 状态 | P1 已实现并通过独立审核修订：**只有契约 + 归一 + 三档判据，没有消费方接入** |
 | 后续 | P2 rider 句式（A 类）、P3 `on_fail` 扩展（B1/B2）、P4 法术收敛、P5 handler 长尾 |
 
 ## 1. 问题陈述（只列代码事实）
@@ -46,7 +46,9 @@
 
 1. 定义效果项（effect item）的字段闭集；
 2. 提供读时归一（`normalize_effect_item`），把三种旧拼写折成效果项；
-3. 提供单一应用点（`apply_effect_items`）的**接口与测试**，本片先只服务攻击 rider 一条路径，行为与今天逐字节一致。
+3. **不**提供应用点（见 §6.6 的修订说明）。P1 的交付止于"形状"，
+   `apply_effect_items` 归 P2——因为一旦接上 rider 路径，"事件一字不动"就要求
+   归一是旧 `kind` 的逆函数，而它不是。
 
 **不做**：
 
@@ -158,12 +160,31 @@ apply_effect_items(instance, combat, source, target, items, rng, *, dc) -> list[
   （`source_rider` 由 `legacy_label` 还原成今天会写的词）。
 - 8 条新用例（五种旧形状归一、未知 kind 不猜、标签还原、三档寿命）+ 既有 57 条 rider 主路径用例全绿。
 
+## 6.6 独立审核后的修订（2026-11-28）
+
+审核有三条硬结论，全部确认并已改：
+
+1. **"行为不变"不成立**。`{"kind":"condition","condition":"prone"}` 在旧代码里
+   `source_rider` 写 `"condition"`，而按条件名反推会写成 `"prone"`；两者归一后不可区分。
+   → **撤销 rider 路径的接入**（`hit_resolution.py` 回到 `8aa98926` 的实现），
+   P1 不再有消费方；`legacy_label` 删除（它是死代码，且不是旧 `kind` 的逆函数）。
+2. **`apply_effect_items` 不存在**，§3.4 与 §7 验收 1 属过度声明。→ 从 P1 移出，归 P2；
+   本片的成功判据改为"形状 + 归一覆盖"。
+3. **`concentration` 不在闭集却被 `lifetime_of` 读取** → 删除该分支（它是 casting-shape，
+   §2 已经这么定了），`maintained` 只看 `save_repeat`。
+
+另外修掉：`validate_effect_item` 曾是死代码（现在 `normalize_effect_item` 遇到未知字段
+**拒绝**而不是静默丢弃）；`effect_items.py` 补进 `pyproject.toml` 的 mypy 清单；
+测试里 `save_repeat: "end_of_turn"` 是凭空造的词（真实取值是能力码）已改为 `"wis"`。
+
 ## 7. 验收指标
 
-1. **同一函数**：攻击 rider 路径调用 `apply_effect_items`（不是又包一层）；
-2. **行为不变**：`tests/rulesets` 全量通过，事件序列逐条相同（用现有用例兜底）；
-3. **旧拼写残余计数**：本片结束时等于今天的数量（P1 不消除旧拼写，只建立归一）；
-4. **归一覆盖**：§4 五种旧形状各有一条"读时归一"测试。
+1. **形状**：`effect_items.py` 提供字段闭集、`normalize_effect_item(s)`、`lifetime_of`、
+   `validate_effect_item`；未知字段被拒绝而不是丢弃；
+2. **不接消费方**：`git diff 8aa98926..HEAD -- src/rulesets/dnd2024/combat/hit_resolution.py` 为空——
+   "行为不变"用"没有改动"来保证，而不是用测试来赌；
+3. **归一覆盖**：§4 五种旧形状各有一条用例，另有一条把"归一有损"这个限制固定下来；
+4. **三档寿命**：`instant` / `expiring` / `maintained` 各一条。
 
 ## 8. 未决
 

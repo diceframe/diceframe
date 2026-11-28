@@ -30,8 +30,9 @@ EFFECT_ITEM_FIELDS = frozenset({
 #: 旧 rider 的四种 kind。P2/P4 会逐步停止产出它们，但读的一方要一直认识。
 LEGACY_RIDER_KINDS = frozenset({"condition", "prone", "grapple", "push"})
 
-#: 寿命三档。``save_repeat`` 是第三档的标志：需要维护的效果一定有重掷或专注，
-#: 而"带过期"的条件没有维护者。
+#: 寿命三档。``save_repeat`` 是第三档的标志：需要维护的效果一定有重掷，
+#: 而"带过期"的条件没有维护者。专注（concentration）是 casting-shape，
+#: 由施法侧回答，不进载荷。
 LIFETIME_INSTANT = "instant"
 LIFETIME_EXPIRING = "expiring"
 LIFETIME_MAINTAINED = "maintained"
@@ -47,6 +48,10 @@ def normalize_effect_item(raw: Any) -> dict[str, Any] | None:
 
     if not isinstance(raw, dict):
         return None
+    unknown = sorted(set(raw) - EFFECT_ITEM_FIELDS - {"kind", "distance"})
+    if unknown:
+        # 静默丢弃未知字段等于把数据错误藏起来：调用方以为施加了，其实没有。
+        raise CombatIntentError(f"effect item has unknown field(s): {unknown[0]}")
     kind = raw.get("kind")
     if kind is not None and kind not in LEGACY_RIDER_KINDS:
         return None
@@ -87,27 +92,10 @@ def normalize_effect_items(raw_items: Any) -> list[dict[str, Any]]:
     return items
 
 
-def legacy_label(item: dict[str, Any]) -> str:
-    """归一后的项 → 旧事件里的 ``source_rider``。
-
-    事件是存档与 replay 的一部分，P1 不允许它变形；这个标签把归一后的形状
-    映射回今天会写进事件的那个字符串。
-    """
-
-    if "push" in item:
-        return "push"
-    condition = str(item.get("condition") or "")
-    if item.get("escape_dc"):
-        return "grapple"
-    if condition == "prone":
-        return "prone"
-    return "condition"
-
-
 def lifetime_of(item: dict[str, Any]) -> str:
     """三档寿命。``save_repeat``/专注就是"需维护"，其余按有没有 duration 分。"""
 
-    if item.get("save_repeat") or item.get("concentration"):
+    if item.get("save_repeat"):
         return LIFETIME_MAINTAINED
     if item.get("duration"):
         return LIFETIME_EXPIRING
