@@ -42,6 +42,7 @@ from src.webui.routes.games import register_games
 from src.webui.routes.generated_images import register_generated_images
 from src.webui.routes.embedding_models import register_embedding_models
 from src.webui.routes.generation import register_generation
+from src.webui.routes.honors import HONORS_SERVICE_KEY, register_honors
 from src.webui.routes.hub import register_hub
 from src.webui.routes.launcher import LAUNCHER_DATA_DIR_KEY, register_launcher
 from src.webui.routes.legal import register_legal
@@ -62,6 +63,7 @@ from src.webui.routes.tunnel import register_tunnel
 from src.webui.routes.updater import register_updater
 from src.webui.routes.ui_actions import register_ui_actions
 from src.webui.routes.worlds import register_worlds
+from src.webui.services.honors import HonorsService
 from src.webui.services.security import SecurityTransportService
 from src.webui.session import SessionManager, session_middleware
 from src.webui.update_admission import update_admission
@@ -144,6 +146,7 @@ def create_app(dependencies: ApplicationDependencies) -> web.Application:
         host_data,
         dependencies.transport,
     )
+    application[HONORS_SERVICE_KEY] = HonorsService(host_data)
     register_routes(application, dependencies)
     return application
 
@@ -162,6 +165,7 @@ def register_routes(
     register_security(application)
     register_announcements(application)
     register_hub(application)
+    register_honors(application)
     register_legal(application)
     register_assistant(application)
     register_tunnel(application)

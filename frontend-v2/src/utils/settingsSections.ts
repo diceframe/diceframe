@@ -1,4 +1,4 @@
-export type SettingsSectionId = 'general' | 'game' | 'api' | 'connection' | 'models' | 'network' | 'sharing' | 'botapi' | 'appearance' | 'security' | 'access' | 'about'
+export type SettingsSectionId = 'general' | 'game' | 'api' | 'connection' | 'models' | 'network' | 'sharing' | 'botapi' | 'appearance' | 'security' | 'access' | 'honors' | 'about'
 
 const SETTINGS_SECTION_IDS = new Set<SettingsSectionId>([
   'api',
@@ -12,6 +12,7 @@ const SETTINGS_SECTION_IDS = new Set<SettingsSectionId>([
   'appearance',
   'security',
   'access',
+  'honors',
   'about',
 ])
 

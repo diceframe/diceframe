@@ -8,7 +8,7 @@ import {
   KeyOutline, CopyOutline, EyeOutline, RefreshOutline, ColorPaletteOutline,
   ImageOutline, PowerOutline,
   TrashOutline, CheckmarkCircleOutline, AlertCircleOutline, SparklesOutline,
-  VolumeHighOutline, ShieldCheckmarkOutline, ChevronDownOutline,
+  VolumeHighOutline, ShieldCheckmarkOutline, ChevronDownOutline, TrophyOutline,
 } from '@vicons/ionicons5'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { useToast } from '@/composables/useToast'
@@ -53,6 +53,7 @@ import ContentPageHeader from '@/components/content/ContentPageHeader.vue'
 import LanguagePreferences from '@/features/admin/settings/LanguagePreferences.vue'
 import SettingsSearch from '@/features/admin/settings/SettingsSearch.vue'
 import GameDefaultsSettings from '@/features/admin/settings/GameDefaultsSettings.vue'
+import HonorsPanel from '@/features/honors/HonorsPanel.vue'
 import { revealSettingTarget, settingsSearchTarget, settingsGroupIds, settingsGroupName, settingsGroupFor, type SettingsSearchResult } from '@/features/admin/settings/settingsSearch'
 
 type StatusTone = 'default' | 'success' | 'warning' | 'error' | 'info'
@@ -300,6 +301,7 @@ const sections: SettingsSection[] = [
   { id: 'botapi', labelKey: 'settingsSectionBotApi', icon: KeyOutline },
   { id: 'access', labelKey: 'settingsSectionAccess', icon: LockClosedOutline },
   { id: 'security', labelKey: 'settingsSectionSecurity', icon: ShieldCheckmarkOutline },
+  { id: 'honors', labelKey: 'settingsSectionHonors', icon: TrophyOutline },
   { id: 'about', labelKey: 'settingsSectionAbout', icon: InformationCircleOutline },
 ]
 
@@ -2098,6 +2100,10 @@ function redownloadUpdatePackage() {
             @test-asr="testAsr(saveModelRouting)"
             @tts-voices-changed="loadTtsVoices"
           />
+          </div>
+
+          <div v-if="section === 'honors'" class="settings-pane">
+            <HonorsPanel />
           </div>
 
           <div v-show="section === 'about'" class="settings-pane about">
