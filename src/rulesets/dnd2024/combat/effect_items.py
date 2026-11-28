@@ -110,6 +110,26 @@ def normalize_rider_items(raw_items: Any) -> list[tuple[str, dict[str, Any]]]:
     return pairs
 
 
+def normalize_outcome_row(row: dict[str, Any]) -> list[dict[str, Any]]:
+    """一条 `save_action` 结果行 → 效果项列表。
+
+    旧行是 ``{"damage": [{"dice","type"}, ...]}``（一到两段、各自独立抗性），
+    新行直接是效果项。两种都收：旧数据零迁移是 §4 的承诺。
+    """
+
+    damage = row.get("damage")
+    if isinstance(damage, list):
+        items = [
+            {"damage": {"dice": part["dice"], "type": str(part.get("type") or ""),
+                        **({"half": True} if part.get("half") else {})}}
+            for part in damage
+            if isinstance(part, dict) and part.get("dice")
+        ]
+        return items
+    item = normalize_effect_item(row)
+    return [item] if item is not None else []
+
+
 def normalize_effect_items(raw_items: Any) -> list[dict[str, Any]]:
     if not isinstance(raw_items, list):
         return []

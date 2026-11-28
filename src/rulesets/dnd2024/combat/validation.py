@@ -63,6 +63,7 @@ from .obscurement import (
     SANCTUARY_RANGE_FT,
     sanctuary_zone_id,
 )
+from .effect_items import EFFECT_ITEM_FIELDS
 from .primitives import (
     validate_multiattack_pool,
     validate_reactions,
@@ -632,9 +633,22 @@ def _validate_save_action(action: dict[str, Any], label: str) -> None:
         if not isinstance(rows, list) or not 1 <= len(rows) <= 2:
             raise CombatIntentError(f"{label} save action {key} must list 1 to 2 outcomes")
         for row in rows:
-            if not isinstance(row, dict) or set(row) - {"damage"}:
+            # S0-EFFECT1 P3：结果行可以是效果项（条件 / 推挤），不只是伤害。
+            if not isinstance(row, dict) or set(row) - (
+                set(EFFECT_ITEM_FIELDS) | {"damage"}
+            ):
                 raise CombatIntentError(f"{label} save action {key} outcome is invalid")
             parts = row.get("damage")
+            if isinstance(parts, list):
+                # 旧形状（一到两段伤害）不能顺带别的字段：混写会让归一只能二选一，
+                # 丢掉的那一半没人知道。
+                if set(row) != {"damage"}:
+                    raise CombatIntentError(
+                        f"{label} save action {key} cannot mix damage parts with an effect item"
+                    )
+            if parts is None:
+                # 纯效果项（条件 / 推挤）：没有伤害段，交给效果项闭集管。
+                continue
             if not isinstance(parts, list) or not 1 <= len(parts) <= MAX_ATTACK_DAMAGE_PARTS:
                 raise CombatIntentError(
                     f"{label} save action {key} needs 1 or 2 damage parts"

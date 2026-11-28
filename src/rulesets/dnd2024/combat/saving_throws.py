@@ -9,6 +9,7 @@ from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 from src.rulesets.dnd2024.character.builder import ability_modifier
 from ..features.resources import long_effect_active
+from .effect_items import normalize_outcome_row
 from .primitives import world_minutes, CombatIntentError, LEGENDARY_RESISTANCE_DEFAULT_PER_DAY, trait_ids, trait_params
 from .check_modifiers import active_modifiers, check_total
 from .check_modes import condition_check_bonus_rolls, condition_flags, mode_from_sources
@@ -20,6 +21,9 @@ class CombatSavingThrowsMixin:
     """Saving throws, ability checks, death saves and the resource/repeat-save handling around them."""
 
     __slots__ = ()
+    # S0-EFFECT1 P3：唯一应用点定义在 hit_resolution 的 mixin 上，这里声明给
+    # 类型检查器；运行时同一个引擎实例上就有。
+    _apply_effect_items: Any
 
     if TYPE_CHECKING:
         _feature_character: Any
@@ -219,15 +223,21 @@ class CombatSavingThrowsMixin:
         for row in branch or []:
             if not isinstance(row, dict):
                 continue
-            for part in row.get("damage") or []:
-                if not isinstance(part, dict) or not part.get("dice"):
+            for item in normalize_outcome_row(row):
+                damage = item.get("damage")
+                if isinstance(damage, dict) and damage.get("dice"):
+                    event, _amount = self._damage_instance_event(
+                        str(damage["dice"]), str(damage.get("type") or ""), target,
+                        False, rng, half=bool(check["success"] and damage.get("half")),
+                    )
+                    if event is not None:
+                        events.append(event)
                     continue
-                event, _amount = self._damage_instance_event(
-                    str(part["dice"]), str(part.get("type") or ""), target,
-                    False, rng, half=bool(check["success"] and part.get("half")),
-                )
-                if event is not None:
-                    events.append(event)
+                # 非伤害项走唯一应用点：豁免已经掷过，所以不再逐项要 save。
+                events.extend(self._apply_effect_items(
+                    instance, combat, actor_id, target, [("save_action", item)], rng,
+                    events=events,
+                ))
         return events
 
     @staticmethod

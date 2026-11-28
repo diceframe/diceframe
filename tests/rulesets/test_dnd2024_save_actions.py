@@ -328,3 +328,30 @@ def test_usage_survives_a_save_and_load_round_trip() -> None:
     # 读档后仍然不可用：可用性不是现算的，它来自 reducer 记下的账。
     refused = _breathe(engine, loaded, rolls=[1], intent_id="after-load", expect_ok=False)
     assert refused["ok"] is False
+
+
+def test_a_save_outcome_may_apply_a_condition_not_just_damage() -> None:
+    """S0-EFFECT1 P3：结果行走同一套效果项——条件也是结果。
+
+    Constrictor Snake 的 "Failure: 7 (3d4) Bludgeoning damage, and the target has
+    the Grappled condition (escape DC 12)" 就是这种形状；它不需要新原语，
+    只需要结果行能装下条件。
+    """
+
+    engine, instance = _instance()
+    action = {
+        "id": "save-0", "name": "Constrict", "kind": "save_action",
+        "ability": "str", "dc": 12,
+        "on_fail": [
+            {"damage": [{"dice": "3d4", "type": "bludgeoning"}]},
+            {"condition": "grappled", "escape_dc": 12},
+        ],
+    }
+    _start(engine, instance, _enemy(action))
+
+    batch = _breathe(engine, instance, rolls=[1, 3, 1, 1, 1])
+
+    conditions = [row for row in _of_type(batch["events"], "condition.applied")]
+    assert [row["condition"] for row in conditions] == ["grappled"]
+    assert conditions[0]["escape_dc"] == 12
+    assert len(_hits(batch["events"])) == 1
