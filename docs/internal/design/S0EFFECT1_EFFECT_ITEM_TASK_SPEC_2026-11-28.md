@@ -90,7 +90,7 @@
 |---|---|---|---|
 | **瞬间** `instant` | 没有 `duration`、没有维护者 | 伤害、推挤 | 不记状态 |
 | **带过期** `expiring` | 有到期点，没有维护者 | "倒地直到其下回合结束"、`duration: target_turn_end` | 条件 + 到期点 |
-| **需维护** `maintained` | 有**维护者**（专注 / 每回合重掷） | `save_repeat`、`concentration` | 效果实例 + 维护者 + 终止条件 |
+| **需维护** `maintained` | 有**维护者**（专注 / 每回合重掷；数据上 `save_repeat` 或 `concentration`） | `save_repeat`、`concentration` | 效果实例 + 维护者 + 终止条件 |
 
 关于第三档要说清一句：**需维护的效果也有到期点**，所以它和"带过期"不是互斥事实，区别在于
 **有没有维护者**——维护者决定了"谁会再来问它一次"（回合结束的重掷、专注中断）。
@@ -279,7 +279,8 @@ def damage_node_for(
 | `triggered_spells.py:208` | 用 `damage_node_for(items[0], ...)`，`extra_damage`（对特定生物类型）仍留在站点内——它是这条法术独有的前提，不是载荷 |
 | `spell_resolution.py:876` | 同上；吟唱加值 / 超魔法 / 过载 / 抗性仍留在站点内 |
 
-**验收**：法术相关用例全绿；`grep spell_formula_node` 的站点数从 2 降到 0（只留在构造器里）。
+**验收**：法术相关用例全绿；**伤害**站点不再直接调 `spell_formula_node`（`healing` / `temp_hp`
+两处仍在，它们不是伤害树，本片未收）。
 
 ## 6.12 P5 盘点：combat 层知道多少个职业能力
 
@@ -338,3 +339,31 @@ def damage_node_for(
 1. `save_repeat` 的回合推进细节（与 concentration 同族，P3 时定）；
 2. `escape_dc` 是否也该由来源提供（今天写在数据里，与 `action.dc` 重复的可能）；
 3. `duration` 词表是否复用 `rider_duration` 的现有取值（`target_turn_end` 等）。
+
+## 9. 独立审核（2026-11-28）与修复
+
+审核结论：红线（rider / save / 法术伤害树的事件等价）在**合法数据**上成立，分片边界与
+守卫名单也干净；但三处声明过头，一处行为 bug。
+
+**已修**：
+
+1. **`attacker_next_turn_end` 提前整整一轮过期**（必须修）。到期分支原先在
+   `previous_actor_id == source` 就删，而那是来源**当前**回合的结束——"下个回合结束"
+   却在本回合就到期。现在与 `target_turn_end` 同款：施加在来源自己回合内时写
+   `expires_after: 2`，到期分支按计数递减。**注意：这条改动目前没有引擎级用例覆盖**
+   （只有导入器的字符串断言），下一片必须补一条"挂上→推进两轮→仍在/已除"的用例。
+
+2. 两处**失实注释**已改：`_apply_effect_items` 的"法术失败分支也过这里"（假的，
+   法术条件仍内联）、`effect_items` 头部的"本片不改变任何行为"（P2a 起已改行为）。
+
+3. 规范三处**自相矛盾**已订正：`maintained` 的判据（专注算不算）、§6.11 的
+   "站点降到 0"（实际 healing/temp_hp 仍用）、§6.6 与 §3.3 对 `concentration` 的相反说法。
+
+**未修（登记，下一片）**：
+
+- `save_action` 结果行的可接受字段过宽（`save` / `half_on_success` / `push+condition` 同项），
+  应用点兑现不了其中一部分；
+- `normalize_spell_effect` 对 `push` 有损（`thunderwave` 的 `push:10` 在拆分中消失），
+  "48 条一条不丢"只对 damage/condition 成立；
+- 无任何用例证明"应用点被复用"；
+- 半伤两种拼写（`damage.half` vs `half_on_success`）。

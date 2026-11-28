@@ -522,9 +522,14 @@ class CombatConditionsMixin:
                     value.get("duration") == "attacker_next_turn_end"
                     and value.get("source_actor_id") == previous_actor_id
                 ):
-                    # "Until the end of <来源>的 next turn"：到期时刻是来源自己
-                    # 那一回合结束，所以读 previous_actor_id——与 start 那支
-                    # 只差"边界在哪一侧"。
+                    # "Until the end of <来源>的 **next** turn"：若这条是在来源
+                    # 自己回合内挂上的，那么"这一回合结束"还不是"下个回合"，
+                    # 要像 target_turn_end 一样多撑一轮。缺了这一步会提前整整
+                    # 一轮过期（审核抓到的 bug）。
+                    remaining_turns = int(value.get("expires_after", 1) or 1)
+                    if remaining_turns > 1:
+                        value["expires_after"] = remaining_turns - 1
+                        continue
                     target_conditions.pop(condition_id, None)
                     continue
                 if (

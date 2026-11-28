@@ -1002,8 +1002,9 @@ class CombatHitResolutionMixin:
     ) -> list[dict[str, Any]]:
         """把效果项施加到一个目标上，按声明顺序。
 
-        这是**唯一**做这件事的地方：rider、`save_action.on_fail`（P3）与法术
-        的失败分支（P4）都从这里过，省得三处各写一遍"体型门 → 豁免 → 施加"。
+        目前的使用者：rider（P2a）与 `save_action` 的结果行（P3）。法术的
+        条件/推挤仍在 `spell_resolution` 内联（P4b 只统一了**伤害**），把它们
+        接过来是下一片的事——注释不要替未完成的工作作保。
         """
 
         target_id = str(target["actor_id"])
@@ -1054,6 +1055,12 @@ class CombatHitResolutionMixin:
                 meta["duration"] == "target_turn_end"
                 and str((combat.get("economy") or {}).get("actor_id") or "") == target_id
             ):
+                meta["expires_after"] = 2
+            if (
+                meta["duration"] == "attacker_next_turn_end"
+                and str((combat.get("economy") or {}).get("actor_id") or "") == attacker_id
+            ):
+                # 挂在来源自己回合内：那一次"回合结束"不是"下个回合"，多撑一轮。
                 meta["expires_after"] = 2
             if item.get("escape_dc"):
                 meta["escape_dc"] = int(item["escape_dc"])
