@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, getCurrentInstance, ref, watch } from 'vue'
+import type { Router } from 'vue-router'
 import { NIcon } from 'naive-ui'
 import {
   CheckmarkCircleOutline,
@@ -10,6 +11,7 @@ import {
   SparklesOutline,
 } from '@vicons/ionicons5'
 import { planRulesetTemporaryEncounter } from '@/features/rulesets/dnd2024/api'
+import { fetchActiveTacticalScene, type TacticalSceneProjection } from '@/api/tacticalScene'
 import type {
   JsonObject,
   RulesetGameplayResponse,
@@ -38,6 +40,20 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ navigate: [target: 'campaign'] }>()
 const { locale, t } = useLocale()
+const router = (getCurrentInstance()?.appContext.config.globalProperties as { $router?: Router } | undefined)?.$router
+const tacticalSceneTo = computed(() => ({
+  path: '/tactical-scene',
+  query: props.gameKey ? { game: props.gameKey } : undefined,
+}))
+const tacticalSceneHref = computed(() => {
+  if (router) return router.resolve(tacticalSceneTo.value).href
+  return props.gameKey ? `/tactical-scene?game=${encodeURIComponent(props.gameKey)}` : '/tactical-scene'
+})
+function openTacticalScene(event: MouseEvent): void {
+  if (!router) return
+  event.preventDefault()
+  void router.push(tacticalSceneTo.value)
+}
 const copy = computed(() => combatCopy(locale.value))
 const localizedTerm = (value: unknown): string => localizedTermFor(value, locale.value)
 
@@ -49,6 +65,58 @@ const action = (type: string) => actions.value.find(item => item.type === type)
 const selectedPresetId = ref('')
 const nextEncounterOpen = ref(false)
 const manualEncounterOpen = ref(false)
+const useGridCombat = ref(false)
+const activeTacticalScene = ref<TacticalSceneProjection | null>(null)
+let sceneQuerySeq = 0
+
+const gridSceneStatus = computed(() => {
+  const scene = activeTacticalScene.value
+  if (!scene) return { ready: false, reason: 'missing' as const, name: '', cols: 0, rows: 0, boundTokens: 0 }
+  const name = scene.display_name || scene.canonical_id
+  if (scene.grid.type !== 'square') {
+    return { ready: false, reason: 'notSquare' as const, name, cols: 0, rows: 0, boundTokens: 0 }
+  }
+  const size = Number(scene.grid.size) || 0
+  const cols = size > 0 ? Math.floor(Number(scene.dimensions.width || 0) / size) : 0
+  const rows = size > 0 ? Math.floor(Number(scene.dimensions.height || 0) / size) : 0
+  if (cols <= 0 || rows <= 0) {
+    return { ready: false, reason: 'noCells' as const, name, cols: 0, rows: 0, boundTokens: 0 }
+  }
+  const boundTokens = Object.values(scene.placeables.tokens || {}).filter(token => {
+    const refObj = token.actor_ref
+    if (!refObj) return false
+    const kind = String(refObj.kind || '')
+    const id = String(refObj.id || '')
+    return Boolean(id) && (kind === 'player' || kind === 'companion' || kind === 'enemy' || id.startsWith('player:') || id.startsWith('companion:') || id.startsWith('enemy:'))
+  }).length
+  return { ready: true, reason: 'ready' as const, name, cols, rows, boundTokens }
+})
+
+async function refreshActiveTacticalScene(): Promise<void> {
+  const key = props.gameKey
+  if (!props.isGm || !key || combat.value?.status === 'active') {
+    activeTacticalScene.value = null
+    useGridCombat.value = false
+    return
+  }
+  const seq = ++sceneQuerySeq
+  try {
+    const response = await fetchActiveTacticalScene(key)
+    if (seq !== sceneQuerySeq) return
+    activeTacticalScene.value = response?.scene || null
+    if (!gridSceneStatus.value.ready) useGridCombat.value = false
+  } catch {
+    if (seq !== sceneQuerySeq) return
+    activeTacticalScene.value = null
+    useGridCombat.value = false
+  }
+}
+
+watch(
+  () => [props.gameKey, props.isGm, combat.value?.status] as const,
+  () => { void refreshActiveTacticalScene() },
+  { immediate: true },
+)
 const selectableEncounterPresets = computed(() => (gameplay.value?.encounter_presets || []).filter(
   preset => String(preset.difficulty || '') !== 'tutorial',
 ))
@@ -331,14 +399,16 @@ async function confirmAiEncounter(): Promise<void> {
   if (!aiProposal.value) return
   const enemies = expandDraftEnemies(aiDraft.value)
   if (!enemies.length) return
-  const ok = await props.submit({
+  const payload: JsonObject = {
     intent_id: intentId(),
     type: 'combat.start',
     expected_version: gameplay.value?.state_version ?? 0,
     mode: 'sandbox',
     temporary_encounter: true,
     enemies,
-  })
+  }
+  if (useGridCombat.value && gridSceneStatus.value.ready) payload.position_mode = 'grid'
+  const ok = await props.submit(payload)
   if (ok) {
     aiProposal.value = null
     aiDraft.value = []
@@ -358,6 +428,7 @@ async function startCombat(): Promise<void> {
   }
   // 自由遭遇必须由 GM 明确声明，服务端据此拒绝把通用预设当成剧情绑定。
   if (sandboxFlow.value) payload.mode = 'sandbox'
+  if (useGridCombat.value && gridSceneStatus.value.ready) payload.position_mode = 'grid'
   await props.submit(payload)
 }
 
@@ -475,6 +546,36 @@ async function toggleReady(): Promise<void> {
       </template>
       <p v-if="!guidedCombatStep && !selectableEncounterPresets.length" class="combat-state">{{ copy.noEncounter }}</p>
       <p v-if="encounterReadiness?.required_count" class="combat-state">{{ copy.startHint }}</p>
+      <div
+        v-if="guidedCombatStep || requestedCombatPreset || manualEncounterOpen || sandboxDeclared"
+        class="grid-start-option"
+        data-testid="encounter-grid-option"
+      >
+        <label class="grid-start-toggle">
+          <input
+            v-model="useGridCombat"
+            type="checkbox"
+            :disabled="!gridSceneStatus.ready || busy"
+            data-testid="encounter-grid-checkbox"
+          />
+          <span>{{ copy.gridStartToggle }}</span>
+        </label>
+        <p class="grid-start-meta">
+          <template v-if="gridSceneStatus.ready">
+            {{ copy.gridSceneReady }}：<strong>{{ gridSceneStatus.name }}</strong> · {{ gridSceneStatus.cols }}×{{ gridSceneStatus.rows }} {{ copy.gridSceneCells }} · {{ copy.gridSceneBound }} {{ gridSceneStatus.boundTokens }}
+          </template>
+          <template v-else-if="gridSceneStatus.reason === 'notSquare'">{{ copy.gridSceneNotSquare }}</template>
+          <template v-else-if="gridSceneStatus.reason === 'noCells'">{{ copy.gridSceneNoCells }}</template>
+          <template v-else>{{ copy.gridSceneMissing }}</template>
+          <a
+            v-if="gameKey"
+            class="grid-scene-link"
+            data-testid="encounter-open-tactical-scene"
+            :href="tacticalSceneHref"
+            @click="openTacticalScene"
+          >{{ copy.gridSceneManage }}</a>
+        </p>
+      </div>
       <button
         v-if="guidedCombatStep || requestedCombatPreset || manualEncounterOpen || sandboxDeclared"
         class="combat-primary"
@@ -508,6 +609,24 @@ async function toggleReady(): Promise<void> {
           </select>
         </label>
         <p class="preset-description">{{ selectedPreset?.description }}</p>
+        <div class="grid-start-option" data-testid="next-encounter-grid-option">
+          <label class="grid-start-toggle">
+            <input
+              v-model="useGridCombat"
+              type="checkbox"
+              :disabled="!gridSceneStatus.ready || busy"
+              data-testid="next-encounter-grid-checkbox"
+            />
+            <span>{{ copy.gridStartToggle }}</span>
+          </label>
+          <p class="grid-start-meta">
+            <template v-if="gridSceneStatus.ready">
+              {{ copy.gridSceneReady }}：<strong>{{ gridSceneStatus.name }}</strong> · {{ gridSceneStatus.cols }}×{{ gridSceneStatus.rows }} {{ copy.gridSceneCells }} · {{ copy.gridSceneBound }} {{ gridSceneStatus.boundTokens }}
+            </template>
+            <template v-else>{{ copy.gridSceneMissing }}</template>
+            <a v-if="gameKey" class="grid-scene-link" :href="tacticalSceneHref" @click="openTacticalScene">{{ copy.gridSceneManage }}</a>
+          </p>
+        </div>
         <button class="combat-primary" :disabled="busy || !selectedPreset" @click="startCombat">
           <NIcon :component="PlayForwardOutline" />{{ copy.start }}
         </button>
@@ -528,6 +647,19 @@ async function toggleReady(): Promise<void> {
       </ul>
       <p v-if="!aiSummary.length" class="combat-state">{{ t('encounterNoEnemiesSelected') }}</p>
       <p class="combat-state">{{ copy.aiEncounterNote }}</p>
+      <div class="grid-start-option" data-testid="ai-encounter-grid-option">
+        <label class="grid-start-toggle">
+          <input v-model="useGridCombat" type="checkbox" :disabled="!gridSceneStatus.ready || busy" data-testid="ai-encounter-grid-checkbox" />
+          <span>{{ copy.gridStartToggle }}</span>
+        </label>
+        <p class="grid-start-meta">
+          <template v-if="gridSceneStatus.ready">
+            {{ copy.gridSceneReady }}：<strong>{{ gridSceneStatus.name }}</strong> · {{ gridSceneStatus.cols }}×{{ gridSceneStatus.rows }} {{ copy.gridSceneCells }} · {{ copy.gridSceneBound }} {{ gridSceneStatus.boundTokens }}
+          </template>
+          <template v-else>{{ copy.gridSceneMissing }}</template>
+          <a v-if="gameKey" class="grid-scene-link" :href="tacticalSceneHref" @click="openTacticalScene">{{ copy.gridSceneManage }}</a>
+        </p>
+      </div>
       <div class="unprepared-actions">
         <button type="button" class="ai-encounter-edit" @click="openEnemyEditor">
           {{ t('encounterEditEnemies') }}
@@ -655,6 +787,11 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
 .encounter-ended-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .encounter-ended-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .next-encounter-picker { margin-top: 4px; padding-top: 11px; border-top: 1px solid rgb(174 211 178 / 24%); }
+.grid-start-option { display: grid; gap: 6px; padding: 9px 11px; border: 1px solid rgb(161 123 63 / 45%); border-radius: 9px; background: rgb(14 20 24 / 45%); }
+.grid-start-toggle { display: flex !important; align-items: center; gap: 8px; cursor: pointer; font-size: 13px !important; color: #f2e6cf !important; }
+.grid-start-toggle input[type="checkbox"] { min-height: 0; width: 16px; height: 16px; accent-color: #c59443; }
+.grid-start-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; color: #c8c2b8; font-size: 12px; }
+.grid-scene-link { color: #f0c975; text-decoration: underline; }
 .encounter-start label { display: grid; gap: 5px; color: #c8c2b8; font-size: 12px; }
 .encounter-start select { width: 100%; min-height: 44px; padding-inline: 10px; border: 1px solid #4a5560; border-radius: 8px; background: #0d1319; color: #f3eee7; }
 :global(body.light .dnd-combat .story-bridge) { border-color: #aa8546; background: #fff7e7; }

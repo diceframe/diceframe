@@ -147,6 +147,12 @@ onBeforeUnmount(() => {
           data-testid="map-convert-tactical"
           @click="convertToTacticalScene"
         >{{ converting ? copy.convertBusy : copy.convertAction }}</button>
+        <RouterLink
+          v-if="gameKey"
+          class="map-back-link"
+          data-testid="map-open-tactical-scene"
+          :to="{ path: '/tactical-scene', query: { game: gameKey } }"
+        >{{ copy.openTacticalScenes }}</RouterLink>
         <RouterLink class="map-back-link" :to="{ name: 'play', query: gameKey ? { game: gameKey } : undefined }">{{ copy.backToPlay }}</RouterLink>
       </div>
     </header>

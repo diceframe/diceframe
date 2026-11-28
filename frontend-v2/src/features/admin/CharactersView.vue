@@ -955,7 +955,10 @@ async function onWizardChainCancel() {
       <template v-if="game">
       <div class="character-game-context">
         <span class="muted">{{ t('currentSave') }}: <strong>{{ game }}</strong></span>
-        <RouterLink class="content-button" :to="{ name: 'play', query: playQuery }">{{ journeyCopy.returnToPlay }}</RouterLink>
+        <div class="actions">
+          <RouterLink class="content-button" data-testid="characters-dnd5e-import" :to="{ path: '/dnd5e-import', query: { game } }">{{ journeyCopy.importDnd5e }}</RouterLink>
+          <RouterLink class="content-button" :to="{ name: 'play', query: playQuery }">{{ journeyCopy.returnToPlay }}</RouterLink>
+        </div>
       </div>
       <header class="character-section-head"><h2>{{ t('currentGameCharacters') }}</h2><span>{{ data?.players?.length || 0 }}</span></header>
       <div class="current-character-grid">
@@ -1054,7 +1057,7 @@ async function onWizardChainCancel() {
         <input v-model="characterSearch" type="search" :placeholder="t('characterLibrarySearch')">
         <select v-model="characterSort"><option value="name">{{ t('characterSortName') }}</option><option value="rule">{{ t('characterSortRule') }}</option></select>
         <div class="character-view-switch"><button type="button" :aria-label="journeyCopy.gridView" :class="{ active: libraryView === 'grid' }" @click="libraryView = 'grid'">▦</button><button type="button" :aria-label="journeyCopy.listView" :class="{ active: libraryView === 'list' }" @click="libraryView = 'list'">☷</button></div>
-        <div class="actions character-import-actions"><template v-if="selectedCardIds.size"><button :disabled="busy" @click="exportSelected">{{ t('exportSelected') }}</button><button class="danger" :disabled="busy" @click="deleteSelectedCards">{{ t('deleteSelectedCards') }}</button></template><button class="primary" :disabled="busy" @click="diceframeInput?.click()">{{ t('importDiceframeCard') }}</button><button :disabled="busy" @click="openTavernImport">{{ t('importTavernCard') }}</button></div>
+        <div class="actions character-import-actions"><template v-if="selectedCardIds.size"><button :disabled="busy" @click="exportSelected">{{ t('exportSelected') }}</button><button class="danger" :disabled="busy" @click="deleteSelectedCards">{{ t('deleteSelectedCards') }}</button></template><button class="primary" :disabled="busy" @click="diceframeInput?.click()">{{ t('importDiceframeCard') }}</button><button :disabled="busy" @click="openTavernImport">{{ t('importTavernCard') }}</button><RouterLink class="content-button" data-testid="library-dnd5e-import" :to="{ path: '/dnd5e-import', query: game ? { game } : undefined }">{{ journeyCopy.importDnd5e }}</RouterLink></div>
       </div>
     <div class="card-grid character-library-grid" :class="`view-${libraryView}`">
       <article v-for="c in filteredCards" :key="c.card_id || c.id" class="char-card library-character-card">

@@ -51,6 +51,7 @@ DEFAULT_GRID: dict[str, Any] = {
     "alpha": 0.25,
     "distance": 5.0,
 }
+DEFAULT_DIMENSIONS: dict[str, int] = {"width": 1600, "height": 1200}
 _SOURCE_DIRS = {"upload": "map-backgrounds", "generated": "generated-images"}
 
 ResolveBackgroundFile = Callable[[Any], Path | None]
@@ -89,13 +90,33 @@ def _requested_grid(intent: Mapping[str, Any]) -> dict[str, Any]:
     return dict(DEFAULT_GRID)
 
 
-def _scene_payload(scene_id: str, asset: dict[str, str], grid: dict[str, Any]) -> dict[str, Any]:
+def _image_dimensions(path: Path) -> dict[str, int]:
+    """Read stored image pixel size when Pillow can decode it; otherwise default."""
+
+    try:
+        from PIL import Image  # type: ignore[import-not-found]
+        with Image.open(path) as image:
+            width, height = image.size
+            if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
+                return {"width": width, "height": height}
+    except Exception:
+        pass
+    return dict(DEFAULT_DIMENSIONS)
+
+
+def _scene_payload(
+    scene_id: str,
+    asset: dict[str, str],
+    grid: dict[str, Any],
+    dimensions: dict[str, int],
+) -> dict[str, Any]:
     return {
         "schema_version": SCENE_SCHEMA_VERSION,
         "kind": "scene",
         "canonical_id": scene_id,
         "display_name": SCENE_DISPLAY_NAME,
         "background": asset,
+        "dimensions": dimensions,
         "grid": grid,
         "placeables": {},
     }
@@ -177,7 +198,7 @@ async def convert_map_background_to_scene(
         expected_revision = slot_revision
     op = {
         "kind": "tactical_scene_create",
-        "scene": _scene_payload(scene_id, asset, _requested_grid(intent)),
+        "scene": _scene_payload(scene_id, asset, _requested_grid(intent), _image_dimensions(path)),
     }
     result = await apply_tactical_scene_op(
         scene_dependencies, game_key, viewer, op,

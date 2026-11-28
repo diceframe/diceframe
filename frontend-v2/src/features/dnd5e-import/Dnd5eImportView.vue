@@ -199,6 +199,10 @@ onMounted(loadGames)
 <template>
   <main class="dnd5e-import-page" data-testid="dnd5e-import-page">
     <header class="dnd5e-import-head">
+      <div class="dnd5e-import-nav">
+        <RouterLink data-testid="dnd5e-back-characters" :to="{ path: '/characters', query: gameKey ? { game: gameKey, pane: 'current' } : undefined }">{{ copy.backCharacters }}</RouterLink>
+        <RouterLink v-if="gameKey" data-testid="dnd5e-back-play" :to="{ path: '/play', query: { game: gameKey } }">{{ copy.openPlay }}</RouterLink>
+      </div>
       <h1>{{ copy.title }}</h1>
       <p>{{ copy.hint }}</p>
       <p class="dnd5e-import-limits">{{ copy.gmOnly }} {{ copy.rulesetHint }}</p>
@@ -312,6 +316,9 @@ onMounted(loadGames)
 
 <style scoped>
 .dnd5e-import-page { display: grid; gap: .8rem; width: min(880px, 100%); margin: 0 auto; padding: 1.2rem 1rem 2rem; min-width: 0; overflow-wrap: anywhere; }
+.dnd5e-import-nav { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: .35rem; font-size: .82rem; }
+.dnd5e-import-nav a { color: var(--df-interactive-strong); text-decoration: none; }
+.dnd5e-import-nav a:hover { text-decoration: underline; }
 .dnd5e-import-head h1 { margin: 0 0 .3rem; font-size: 1.4rem; color: var(--df-text); }
 .dnd5e-import-head p { margin: 0; color: var(--df-text-secondary); font-size: .88rem; }
 .dnd5e-import-limits { margin-top: .3rem !important; color: var(--df-text-muted) !important; font-size: .78rem !important; }

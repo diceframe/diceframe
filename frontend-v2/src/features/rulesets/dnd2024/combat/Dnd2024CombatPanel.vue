@@ -1361,7 +1361,7 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
         <section class="battlefield" :aria-label="copy.tacticalTrack">
           <div class="battlefield-body">
             <Battlefield
-              :position-mode="combat.position_mode"
+              :game-key="gameKey" :position-mode="combat.position_mode"
               :tokens="battleTokens"
               :movement-remaining="Number(moveAction?.movement_remaining || 0)"
               :target-id="focusId"

@@ -243,6 +243,7 @@ watch(() => props.sceneId, () => {
     <div v-else-if="editor.draft.value" class="editor-body">
       <EditorBoard
         :scene="editor.draft.value"
+        :game-key="gameKey"
         :tool="editor.tool.value"
         :selection="editor.selection.value"
         @select="(ref, additive) => editor.select(ref, additive)"

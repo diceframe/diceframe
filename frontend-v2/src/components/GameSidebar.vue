@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, getCurrentInstance } from 'vue'
+import type { Router } from 'vue-router'
 import { NIcon } from 'naive-ui'
 import { ChevronBack, ChevronForward } from '@vicons/ionicons5'
 import { Activity, Eye, MapIcon, ScrollText } from 'lucide-vue-next'
@@ -16,7 +17,32 @@ interface PlotTracker { quests?: Record<string, Quest>; relations?: Record<strin
 
 const props = defineProps<{ detail: GameDetail; player?: Player; privateMessages: PrivateMessage[]; map?: MapData | null; ruleMeta?: RuleMeta | null; collapsed?: boolean; docked?: boolean; portraitEditable?: boolean; showAdvancedCenter?: boolean }>()
 const emit = defineEmits<{ 'lore-click': [name: string]; 'open-map': []; 'toggle-sidebar': []; 'portrait-click': []; 'allocate-level-up': [attrs: Record<string, number>]; 'open-character-center': [] }>()
-const { t } = useLocale()
+const { locale, t } = useLocale()
+const router = (getCurrentInstance()?.appContext.config.globalProperties as { $router?: Router } | undefined)?.$router
+const tacticalSceneLabel = computed(() => {
+  const map: Record<string, string> = {
+    'zh-CN': '战术场景',
+    en: 'Tactical scenes',
+    ja: '戦術シーン',
+    de: 'Taktische Szenen',
+    ru: 'Тактические сцены',
+  }
+  return map[String(locale?.value || '')] || map.en
+})
+const tacticalSceneTo = computed(() => ({
+  path: '/tactical-scene',
+  query: props.detail.game_key ? { game: props.detail.game_key } : undefined,
+}))
+const tacticalSceneHref = computed(() => {
+  if (router) return router.resolve(tacticalSceneTo.value).href
+  const key = props.detail.game_key
+  return key ? `/tactical-scene?game=${encodeURIComponent(key)}` : '/tactical-scene'
+})
+function openTacticalScene(event: MouseEvent): void {
+  if (!router) return
+  event.preventDefault()
+  void router.push(tacticalSceneTo.value)
+}
 const toggleLabel = computed(() => props.docked === false ? t('close') : props.collapsed ? t('expandSidebar') : t('collapseSidebar'))
 
 const pt = computed<PlotTracker>(() => (props.detail.plot_tracker && typeof props.detail.plot_tracker === 'object' ? props.detail.plot_tracker as PlotTracker : {}))
@@ -86,7 +112,10 @@ function perceptionKey(m: PrivateMessage | string, i: number) {
     <details class="panel sidebar-disclosure sidebar-map">
       <summary><SidebarRowIcon :icon="MapIcon" /><strong>{{ t('mapTitle') }}</strong></summary>
       <div class="sidebar-disclosure-body">
-        <button class="sidebar-map-open" @click="emit('open-map')">{{ t('mapOpenLarge') }}</button>
+        <div class="sidebar-map-actions">
+          <button class="sidebar-map-open" @click="emit('open-map')">{{ t('mapOpenLarge') }}</button>
+          <a class="sidebar-map-open sidebar-tactical-link" data-testid="sidebar-open-tactical-scene" :href="tacticalSceneHref" @click="openTacticalScene">{{ tacticalSceneLabel }}</a>
+        </div>
         <MapGraph :map="map" :current-scene="detail.scene" :show-header="false" @lore-click="emit('lore-click', $event)" />
       </div>
     </details>
@@ -121,3 +150,18 @@ function perceptionKey(m: PrivateMessage | string, i: number) {
     </details>
   </aside>
 </template>
+
+<style scoped>
+.sidebar-map-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.sidebar-tactical-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+</style>

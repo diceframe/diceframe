@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from src.engine.module_state import ModuleStateError
 from src.engine.modules import tactical_scene
 from src.engine.participant_view import Viewer
 from src.tactical_scene.codec import decode_tactical_scene_document
@@ -41,6 +42,13 @@ def _forbidden() -> dict[str, Any]:
 def _invalid() -> dict[str, Any]:
     return error_payload(
         "webui.services.tactical_scene_read.tactical_scene_invalid_payload", code="tactical_scene_invalid_payload",
+    )
+
+
+def _unsupported_schema() -> dict[str, Any]:
+    return error_payload(
+        "webui.services.tactical_scene_read.tactical_scene_unsupported_schema",
+        code="tactical_scene_unsupported_schema",
     )
 
 
@@ -87,10 +95,15 @@ def tactical_scene_read(
         return _not_found()
     if not viewer.is_member:
         return _forbidden()
-    ref = _resolve_scene_id(instance, scene_id)
-    if ref is None:
-        return _not_found()
-    scenes = tactical_scene.scenes(instance)
+    try:
+        ref = _resolve_scene_id(instance, scene_id)
+        if ref is None:
+            return _not_found()
+        scenes = tactical_scene.scenes(instance)
+        active_ref = tactical_scene.active_scene_ref(instance)
+        slot_revision = tactical_scene.revision(instance)
+    except ModuleStateError:
+        return _unsupported_schema()
     raw = scenes.get(ref)
     if not isinstance(raw, dict):
         return _not_found()
@@ -102,8 +115,8 @@ def tactical_scene_read(
         "ok": True,
         "scene_id": document["canonical_id"],
         "scene": _project(dependencies, instance, viewer, document),
-        "active_scene_ref": tactical_scene.active_scene_ref(instance),
-        "revision": tactical_scene.revision(instance),
+        "active_scene_ref": active_ref,
+        "revision": slot_revision,
     }
 
 
@@ -119,7 +132,12 @@ def tactical_scene_list(
         return _not_found()
     if not viewer.is_member:
         return _forbidden()
-    scenes = tactical_scene.scenes(instance)
+    try:
+        scenes = tactical_scene.scenes(instance)
+        active_ref = tactical_scene.active_scene_ref(instance)
+        slot_revision = tactical_scene.revision(instance)
+    except ModuleStateError:
+        return _unsupported_schema()
     projected: list[dict[str, Any]] = []
     for ref in sorted(scenes, key=str):
         if not isinstance(ref, str) or not is_canonical_id(ref):
@@ -136,8 +154,8 @@ def tactical_scene_list(
     return {
         "ok": True,
         "scenes": projected,
-        "active_scene_ref": tactical_scene.active_scene_ref(instance),
-        "revision": tactical_scene.revision(instance),
+        "active_scene_ref": active_ref,
+        "revision": slot_revision,
     }
 
 

@@ -3,3 +3,4 @@
   tactical_scene_not_found: "场景不存在"
   tactical_scene_forbidden: "无权查看该场景"
   tactical_scene_invalid_payload: "场景数据无法安全读取"
+  tactical_scene_unsupported_schema: "场景数据版本不受支持，无法读取"

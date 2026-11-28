@@ -15,6 +15,7 @@ import type { BattlefieldLabels } from './labels'
  * board; otherwise the roster shows who is present without inventing geometry.
  */
 const props = defineProps<{
+  gameKey?: string
   positionMode?: string
   tokens: BattleToken[]
   movementRemaining: number
@@ -40,6 +41,7 @@ const showGrid = computed(() => layout.value === 'grid' && Boolean(props.grid?.b
 <template>
   <GridBoard
     v-if="showGrid && grid"
+    :game-key="gameKey"
     :board="grid.board!"
     :tokens="tokens"
     :movement-remaining="movementRemaining"

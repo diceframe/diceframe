@@ -122,6 +122,8 @@ async def test_conversion_creates_scene_with_background_and_default_grid(tmp_pat
     }
     assert scene["grid"] == map_scene_conversion.DEFAULT_GRID
     assert scene["grid"]["type"] == "square"
+    assert scene["dimensions"]["width"] == map_scene_conversion.DEFAULT_DIMENSIONS["width"]
+    assert scene["dimensions"]["height"] == map_scene_conversion.DEFAULT_DIMENSIONS["height"]
     assert scene["placeables"] == {
         "tokens": {}, "tiles": {}, "walls": {}, "lights": {}, "sounds": {},
         "notes": {}, "drawings": {}, "templates": {}, "regions": {},

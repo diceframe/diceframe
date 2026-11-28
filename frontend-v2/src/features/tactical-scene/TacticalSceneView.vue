@@ -272,6 +272,7 @@ function onEditorDeleted() {
         <div v-else-if="boardScene" class="tactical-board-layout">
           <Board
             :scene="boardScene"
+            :game-key="gameKey"
             :selected-token-id="selectedTokenId"
             @select-token="onSelectToken"
           />

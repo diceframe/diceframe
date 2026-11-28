@@ -13,6 +13,7 @@ import BoardGrid from './BoardGrid.vue'
 
 const props = defineProps<{
   scene: TacticalSceneDocument
+  gameKey?: string
   tool: EditorTool
   selection: PlaceableRef[]
 }>()
@@ -446,7 +447,7 @@ onBeforeUnmount(() => {
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
     >
-      <BoardBackground :background="scene.background" :rect="sceneRect" />
+      <BoardBackground :background="scene.background" :rect="sceneRect" :game-key="gameKey" />
       <BoardGrid :grid="scene.grid" :rect="sceneRect" :origin="gridOrigin" />
 
       <g data-testid="editor-lights">

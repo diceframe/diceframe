@@ -325,3 +325,18 @@ def test_scene_actions_are_discoverable_read_only_and_reuse_the_service():
         "viewer_kind": "seat", "full_projection": False,
     }
     assert tactical_scene.revision(instance) == 7
+
+
+def test_read_and_list_fail_closed_on_unknown_future_slot_schema():
+    instance = _instance()
+    instance.modules[tactical_scene.MODULE_NAME] = {"schema_version": 99, "scenes": {}}
+    deps = _dependencies(instance)
+    gm = _viewer(instance, "gm1")
+
+    read_res = tactical_scene_read_service.tactical_scene_read(deps, GAME_KEY, gm, "scene_castle")
+    list_res = tactical_scene_read_service.tactical_scene_list(deps, GAME_KEY, gm)
+
+    assert read_res["ok"] is False
+    assert read_res["error_code"] == "tactical_scene_unsupported_schema"
+    assert list_res["ok"] is False
+    assert list_res["error_code"] == "tactical_scene_unsupported_schema"

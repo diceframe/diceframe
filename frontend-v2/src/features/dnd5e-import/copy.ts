@@ -38,6 +38,7 @@ export function dnd5eImportCopy(locale: string) {
     receiptReused: text('同名角色已存在，本次复用了既有席位。', 'A character with this name already existed; the existing seat was reused.'),
     receiptUser: text('席位', 'Seat'),
     openPlay: text('回到对局查看', 'Back to the game'),
+    backCharacters: text('返回角色管理', 'Back to characters'),
     createdHint: text('数值已由 dnd2024 运行时重新计算；下方对账列出与源声明值的差异。', 'Values were recomputed by the dnd2024 runtime; the reconciliation below lists differences from the declared source values.'),
     display: {
       title: text('转换显示（只读，不执行源数据）', 'Converted display (read-only; source data is never executed)'),

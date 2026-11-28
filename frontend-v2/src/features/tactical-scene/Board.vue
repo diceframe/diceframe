@@ -9,7 +9,11 @@ import BoardLights from './BoardLights.vue'
 import BoardTokens from './BoardTokens.vue'
 import BoardWalls from './BoardWalls.vue'
 
-const props = defineProps<{ scene: TacticalSceneProjection; selectedTokenId?: string | null }>()
+const props = defineProps<{
+  scene: TacticalSceneProjection
+  gameKey?: string
+  selectedTokenId?: string | null
+}>()
 
 const emit = defineEmits<{
   'select-token': [id: string]
@@ -196,7 +200,7 @@ onBeforeUnmount(() => {
         @pointerup="onPointerUp"
         @pointercancel="onPointerUp"
       >
-        <BoardBackground :background="scene.background" :rect="sceneRect" />
+        <BoardBackground :background="scene.background" :rect="sceneRect" :game-key="gameKey" />
         <BoardGrid :grid="grid" :rect="sceneRect" :origin="gridOrigin" />
         <BoardLights :lights="scene.placeables.lights" />
         <BoardWalls :walls="scene.placeables.walls" />

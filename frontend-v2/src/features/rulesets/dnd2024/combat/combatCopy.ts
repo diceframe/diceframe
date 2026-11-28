@@ -97,6 +97,14 @@ export function combatCopy(locale: string) {
   chooseModeHint: '选择一个行动开始。', moveHint: '点击战场上的可达格，或在下方微调移动距离。',
   actionDock: '行动区', capabilityChoice: '职业能力', noTarget: '未选择目标',
   feedbackMiss: '未命中', feedbackHit: '命中', saveOk: '豁免成功', saveFail: '豁免失败', healBlocked: '无法恢复',
+  gridStartToggle: '使用当前战术场景（2D 网格战斗）',
+  gridSceneReady: '已激活方格场景',
+  gridSceneCells: '格',
+  gridSceneBound: '已绑定单位',
+  gridSceneMissing: '尚未激活方格战术场景（仅使用剧场模式）',
+  gridSceneNotSquare: '当前激活场景不是方格网格，暂不支持 2D 网格战斗',
+  gridSceneNoCells: '当前激活场景尚未设置有效画布尺寸与格距',
+  gridSceneManage: '配置战术场景',
 } : {
   title: 'Combat', authority: 'D&D 5E 2024 · Authoritative resolution', rulesNote: 'Resolution rules',
   conditionTitle: 'Adjudicate a condition', conditionTarget: 'Target', conditionPick: 'Condition',
@@ -194,5 +202,13 @@ export function combatCopy(locale: string) {
   chooseModeHint: 'Pick an action to begin.', moveHint: 'Click a reachable cell on the battlefield, or fine-tune the distance below.',
   actionDock: 'Actions', capabilityChoice: 'Class ability', noTarget: 'No target selected',
   feedbackMiss: 'Miss', feedbackHit: 'Hit', saveOk: 'Saved', saveFail: 'Failed save', healBlocked: 'No healing',
+  gridStartToggle: 'Use active tactical scene (2D grid combat)',
+  gridSceneReady: 'Active square scene',
+  gridSceneCells: 'cells',
+  gridSceneBound: 'bound tokens',
+  gridSceneMissing: 'No active square tactical scene (theater mode only)',
+  gridSceneNotSquare: 'Active scene is not a square grid; 2D grid combat is unavailable',
+  gridSceneNoCells: 'Active scene has no valid canvas size or grid size yet',
+  gridSceneManage: 'Configure tactical scene',
   }
 }

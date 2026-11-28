@@ -3,3 +3,4 @@
   tactical_scene_not_found: "Scene not found"
   tactical_scene_forbidden: "You are not allowed to view this scene"
   tactical_scene_invalid_payload: "The scene data cannot be read safely"
+  tactical_scene_unsupported_schema: "The scene schema version is not supported"

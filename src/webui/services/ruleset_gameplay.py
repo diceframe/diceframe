@@ -747,7 +747,8 @@ async def write_back_combat_positions(
     async with instance.authoritative_write() as entered:
         if not entered:
             return {"ok": False, "code": "rewrite_in_progress"}
-        if get_instance(instance.game_key) is not instance:
+        current = get_instance(instance.game_key)
+        if current is None or current is not instance:
             return {"ok": False, "code": "stale_run"}
         async with instance._lock:
             plan = _scene_write_plan(instance, requester_is_gm)

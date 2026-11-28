@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { RulesetGridBoard } from '@/api/types'
+import { fetchTacticalScene } from '@/api/tacticalScene'
+import { useSceneAssetUrl } from '@/features/tactical-scene/useSceneAssetUrl'
 import { useLocale } from '@/composables/useLocale'
 import { gridCellKey, type BattleToken, type GridCell } from './battleView'
 import type { Floater } from './feedback'
@@ -13,6 +15,7 @@ import type { BattlefieldLabels } from './labels'
  * never writes coordinates and never merges scene projections.
  */
 const props = defineProps<{
+  gameKey?: string
   board: RulesetGridBoard
   tokens: BattleToken[]
   movementRemaining: number
@@ -27,6 +30,31 @@ const props = defineProps<{
 const emit = defineEmits<{ selectToken: [id: string]; chooseCell: [cell: GridCell] }>()
 
 const { t } = useLocale()
+
+// Optional display-only backdrop from the bound tactical scene. Never affects
+// coordinates or rules; falls back silently to the clean grid if unavailable.
+const backdropPath = ref('')
+let backdropSeq = 0
+watch(
+  () => [props.gameKey || '', props.board.id || ''] as const,
+  async ([key, sceneId]) => {
+    const seq = ++backdropSeq
+    backdropPath.value = ''
+    if (!key || !sceneId) return
+    try {
+      const response = await fetchTacticalScene(key, sceneId)
+      if (seq !== backdropSeq) return
+      backdropPath.value = response?.scene?.background?.source_path || ''
+    } catch {
+      if (seq === backdropSeq) backdropPath.value = ''
+    }
+  },
+  { immediate: true },
+)
+const { resolvedUrl: backdropUrl, failed: backdropFailed, markFailed: markBackdropFailed } = useSceneAssetUrl(
+  backdropPath,
+  () => props.gameKey,
+)
 
 const CELL = 40
 const width = computed(() => props.board.width * CELL)
@@ -169,6 +197,18 @@ const ghost = computed(() => {
         @pointercancel="onPointerUp"
       >
         <rect class="grid-bg" :width="width" :height="height" />
+        <image
+          v-if="backdropUrl && !backdropFailed"
+          class="grid-backdrop"
+          :href="backdropUrl"
+          x="0"
+          y="0"
+          :width="width"
+          :height="height"
+          preserveAspectRatio="none"
+          data-testid="grid-board-backdrop"
+          @error="markBackdropFailed"
+        />
         <path class="grid-lines" :d="gridPath" />
 
         <rect
@@ -257,7 +297,8 @@ const ghost = computed(() => {
 .grid-board-frame { position: relative; width: 100%; max-height: 60vh; }
 .grid-board-svg { display: block; width: 100%; height: 100%; touch-action: none; }
 .grid-bg { fill: rgb(255 255 255 / 2%); }
-.grid-lines { stroke: rgb(255 255 255 / 8%); stroke-width: 1; fill: none; }
+.grid-backdrop { opacity: .68; pointer-events: none; }
+.grid-lines { stroke: rgb(255 255 255 / 14%); stroke-width: 1; fill: none; }
 .grid-cell-reachable { fill: rgb(228 183 94 / 22%); cursor: pointer; }
 .grid-cell-reachable:hover { fill: rgb(228 183 94 / 42%); }
 .grid-cell-reachable.selected { fill: rgb(228 183 94 / 55%); }
