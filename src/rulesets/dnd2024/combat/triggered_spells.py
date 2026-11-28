@@ -13,6 +13,8 @@ from typing import Any
 
 from src.engine.player_control import is_ai_controlled
 from src.rulesets.dnd2024.spells.casting import free_cast_resource, spell_cost_events
+from .effect_items import normalize_spell_effect
+from .spell_damage import damage_node_for
 from .action_adapter import (
     double_dice_counts,
     formula_node_from_dice_formula,
@@ -204,8 +206,11 @@ class CombatTriggeredSpellsMixin:
         spell = self.spells.get(intent["spell_ref"])
         effect = self.catalog.spell_effects[intent["spell_ref"].removeprefix("spell:")]
         slot = int(intent.get("slot_level", spell["level"]))
-        node = spell_formula_node(
-            effect["damage"], effect.get("upcast_damage"), spell, slot, actor
+        # S0-EFFECT1 P4b：从效果项造节点，不再直接读 `effect["damage"]`。
+        _, payload_items = normalize_spell_effect(effect)
+        node = damage_node_for(
+            payload_items[0], upcast_damage=effect.get("upcast_damage"),
+            spell=spell, slot_level=slot, actor=actor,
         )
         target = self._actor_view(instance, combat, decision["target_id"])
         if target.get("creature_type") in effect.get("extra_damage_creature_types", []):
@@ -214,6 +219,8 @@ class CombatTriggeredSpellsMixin:
                 "args": [node, formula_node_from_dice_formula(effect["extra_damage"])],
             }
         if decision["critical"]:
+            # 重击翻的是"整棵树"，而额外伤害段在上一行刚加进去——所以翻骰必须
+            # 发生在加完额外伤害之后，不能改从效果项重建（那会丢掉那一段）。
             node = double_dice_counts(node)
         damage, rolls = roll_damage_node(node, rng)
         events = self._spell_cost_events(actor, spell, slot)

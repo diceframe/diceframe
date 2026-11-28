@@ -253,6 +253,34 @@ apply_effect_items(instance, combat, source, target, items, rng, *, dc) -> list[
 结论：P4b 拆成两步——先抽出 `damage_node_for(item, *, spell, slot, actor, critical)`，
 再让三处调用它；`reaction_spells` 那一处确认不需要改（它读的不是载荷）。
 
+## 6.11 P4b 施工步骤（防漂移）
+
+**不做的事**（写在这里，防止越界）：不改法术内容、不改升环数值、不改暴击规则、
+不把 `reaction_spells` 拉进来（它读 `armor_class_bonus`，不是载荷）。
+
+**第一步：抽构造器**（本步）
+
+```python
+# combat/spell_damage.py
+def damage_node_for(
+    item: dict[str, Any], *, upcast_damage: Any, spell: dict[str, Any],
+    slot_level: int, actor: dict[str, Any], critical: bool = False,
+) -> Any: ...
+```
+
+- 入参是**效果项**（`{"damage": {"dice","type"}}`）+ 情境（升环骰、法术、环位、施法者、是否暴击）；
+- 内部就是今天两处各自写的两步：`spell_formula_node(...)` → `double_dice_counts(...)`；
+- **行为必须逐字节相同**，所以先只替换两处现有调用，不新增任何机制。
+
+**第二步：接两处**
+
+| 站点 | 改法 |
+|---|---|
+| `triggered_spells.py:208` | 用 `damage_node_for(items[0], ...)`，`extra_damage`（对特定生物类型）仍留在站点内——它是这条法术独有的前提，不是载荷 |
+| `spell_resolution.py:876` | 同上；吟唱加值 / 超魔法 / 过载 / 抗性仍留在站点内 |
+
+**验收**：法术相关用例全绿；`grep spell_formula_node` 的站点数从 2 降到 0（只留在构造器里）。
+
 ## 7. 验收指标
 
 1. **形状**：`effect_items.py` 提供字段闭集、`normalize_effect_item(s)`、`lifetime_of`、
