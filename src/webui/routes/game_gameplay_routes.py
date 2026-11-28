@@ -161,7 +161,7 @@ async def api_kp_question(request: web.Request) -> web.Response:
             {
                 "ok": False,
                 "code": "QUESTION_TOO_LONG",
-                "error": t("webui.routes.game_gameplay_routes.question_too_long", max_action_chars=MAX_ACTION_CHARS), "error_code": "route_game_gameplay_routes_question_too_long",
+                "error": t("webui.routes.game_gameplay_routes.question_too_long", max_action_chars=MAX_ACTION_CHARS), "error_code": "QUESTION_TOO_LONG",
             },
             status=400,
         )
@@ -172,7 +172,7 @@ async def api_kp_question(request: web.Request) -> web.Response:
             {
                 "ok": False,
                 "code": "PREVIEW_MODE_FORBIDDEN",
-                "error": "当前是房主预览模式，请先开启允许代操作", "error_code": "preview_mode_forbidden",
+                "error": "当前是房主预览模式，请先开启允许代操作", "error_code": "PREVIEW_MODE_FORBIDDEN",
             },
             status=403,
         )
@@ -256,7 +256,7 @@ async def api_ruleset_submit_intent(request: web.Request) -> web.Response:
             {
                 "ok": False,
                 "code": "PREVIEW_MODE_FORBIDDEN",
-                "error": "当前是房主预览模式，请先开启允许代操作", "error_code": "preview_mode_forbidden",
+                "error": "当前是房主预览模式，请先开启允许代操作", "error_code": "PREVIEW_MODE_FORBIDDEN",
             },
             status=403,
         )
@@ -265,7 +265,7 @@ async def api_ruleset_submit_intent(request: web.Request) -> web.Response:
         body = await request.json()
     except (json.JSONDecodeError, ValueError):
         return web.json_response(
-            {"ok": False, "code": "INVALID_JSON", "error": t("webui.routes.game_gameplay_routes.body_must_be_json_object"), "error_code": "route_game_gameplay_routes_body_must_be_json_object"},
+            {"ok": False, "code": "INVALID_JSON", "error": t("webui.routes.game_gameplay_routes.body_must_be_json_object"), "error_code": "INVALID_JSON"},
             status=400,
         )
     result = await api.ruleset_submit_intent(
@@ -301,7 +301,7 @@ async def api_ruleset_resolve_decision(request: web.Request) -> web.Response:
             {
                 "ok": False,
                 "code": "PREVIEW_MODE_FORBIDDEN",
-                "error": "当前是房主预览模式，请先开启允许代操作", "error_code": "preview_mode_forbidden",
+                "error": "当前是房主预览模式，请先开启允许代操作", "error_code": "PREVIEW_MODE_FORBIDDEN",
             },
             status=403,
         )

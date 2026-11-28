@@ -139,6 +139,38 @@ def test_no_new_upper_case_codes_appear_at_raise_sites() -> None:
     assert not offenders, f"新增错误码必须是 snake_case：{offenders}"
 
 
+def test_no_payload_declares_two_different_codes() -> None:
+    """One payload, one code. `code` and `error_code` may not disagree.
+
+    Routes whitelist the legacy UPPER spelling through `declared_error_code`,
+    which prefers `error_code`; a second, derived value silently turns a 403
+    into a 422. Stamping a code next to an existing `code` is therefore only
+    allowed when both say the same thing.
+    """
+
+    conflicts: list[str] = []
+    for path in sorted((ROOT / "src").rglob("*.py")):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = ast.parse(path.read_bytes().decode("utf-8-sig"))
+        rel = path.relative_to(ROOT).as_posix()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            keys = [k.value for k in node.keys if isinstance(k, ast.Constant)]
+            if "code" not in keys or "error_code" not in keys:
+                continue
+            code = node.values[keys.index("code")]
+            error_code = node.values[keys.index("error_code")]
+            if (
+                isinstance(code, ast.Constant) and isinstance(error_code, ast.Constant)
+                and isinstance(code.value, str) and isinstance(error_code.value, str)
+                and code.value != error_code.value
+            ):
+                conflicts.append(f"{rel}:{node.lineno}: {code.value!r} vs {error_code.value!r}")
+    assert not conflicts, "\n".join(conflicts)
+
+
 def test_the_legacy_code_list_matches_the_codebase() -> None:
     """The frozen UPPER list is the exact set still in use — no silent growth."""
 
