@@ -1602,6 +1602,9 @@ class CombatCheckWindowsMixin:
                 crit_on_hit=bool(settlement.get("crit_on_hit")),
                 exclude_bards=exclude_bards,
                 spent_reactions=spent_reactions,
+                # 这一击是否吃巨武器下限已在建立 settlement 时定下：窗口改判的
+                # 只是命中与否，不改变握法与武器。
+                die_floor=int(settlement.get("die_floor") or 0),
             ))
         elif settlement.get("miss_face"):
             # The straight-through miss of this attack would have applied the

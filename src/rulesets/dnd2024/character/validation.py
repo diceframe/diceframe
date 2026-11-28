@@ -5,6 +5,12 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from src.rulesets.dnd2024.features import load_feat_definitions
+from src.rulesets.dnd2024.features.feat_requirements import (
+    FeatContext,
+    feat_unavailable_reasons,
+)
+
 from .primitives import (
     ABILITY_IDS,
     ALIGNMENTS,
@@ -186,7 +192,9 @@ class CharacterValidationMixin:
             # 建卡期战斗风格可选：仅当客户端显式给出选择时才校验其合法性。
             # 引导/专家建卡尚无该控件，缺失时保持特性为未选择状态，不阻断建卡。
             if "fighting_style" in class_feat_choices:
-                self._validate_fighting_style_choice(class_feat_choices, errors)
+                self._validate_fighting_style_choice(
+                    class_feat_choices, draft, class_entity, background, errors,
+                )
         elif class_feat_choices:
             errors.append("class_feature_feat_choices is not available to this class")
 
@@ -269,26 +277,153 @@ class CharacterValidationMixin:
         return list(dict.fromkeys(errors))
 
     def _validate_fighting_style_choice(
-        self, choices: dict[str, Any], errors: list[str],
+        self,
+        choices: dict[str, Any],
+        draft: dict[str, Any],
+        class_entity: dict[str, Any] | None,
+        background: dict[str, Any] | None,
+        errors: list[str],
     ) -> None:
         """Validate a supplied level-1 fighting style feat choice.
 
-        The advancement feat catalog is the only authority: a reference it does
-        not declare, or one whose category / prerequisite does not match, is a
-        draft error rather than a silently inert choice. Omitting the choice is
-        allowed; the level-1 feature then stays unselected.
+        The parsed declaration is the authority, not the category: a feat is
+        accepted only if its own ``requires`` hold for *this* draft.  The
+        hand-written ``requires_feature`` test that used to live here was a
+        second implementation of the same predicate, and it disagreed with the
+        level-up one -- the slot could accept what the level-up path refused.
+        Omitting the choice is allowed; the level-1 feature then stays unselected.
         """
 
         ref = choices.get("fighting_style")
         if not isinstance(ref, str) or not ref:
             errors.append("fighting style feat choice must be a feat reference")
             return
-        catalog = self.bundle.get("advancement_feat_catalog", "srd_advancement_feats")
-        feats = catalog.get("feats") if isinstance(catalog, dict) else None
-        entry = (feats or {}).get(_ref_id(ref, "feat")) if isinstance(feats, dict) else None
+        slot = _fighting_style_slot(self.bundle, class_entity)
+        definition = load_feat_definitions(self.bundle).get(_ref_id(ref, "feat"))
         if (
-            not isinstance(entry, dict)
-            or entry.get("category") != "fighting_style"
-            or entry.get("requires_feature") != "fighting_style"
+            slot is None
+            or slot.choice is None
+            or definition is None
+            or definition.category != "fighting_style"
+            # 白名单是"可实现"而不是"属于该类别"：GWF 声明了类别却没有任何效果，
+            # 让它在建卡期通过，就会得到一个"选了什么都不会发生"的角色。
+            or ref not in slot.choice.enabled_options
         ):
             errors.append(f"fighting style feat choice is not an available fighting style: {ref}")
+            return
+        # 槽位只收战斗风格，而战斗风格不声明施法前置；真出现了再解析职业表，
+        # 免得每次建卡都为一条不会用到的谓词构造进度目录。
+        needs_slot_profile = any(
+            requirement.kind == "spellcasting" for requirement in definition.requires
+        )
+        context = FeatContext(
+            level=1,
+            abilities=_draft_abilities(draft),
+            owned_refs=_draft_feat_refs(draft, background),
+            slot_profile=(
+                _slot_profile_at(self.bundle, draft.get("class_ref"), 1)
+                if needs_slot_profile else ""
+            ),
+            feature_ids=frozenset((class_entity or {}).get("level_1_feature_ids") or []),
+            proficiency_refs=_draft_proficiencies(draft, class_entity, background),
+        )
+        if feat_unavailable_reasons(definition, context):
+            # 文案保持原样：这一串是跨层契约（前端按它做友好提示），
+            # 具体理由由升级路径的 ``unavailable_reasons`` 提供。
+            errors.append(f"fighting style feat choice is not an available fighting style: {ref}")
+
+
+def _draft_abilities(draft: dict[str, Any]) -> dict[str, int]:
+    """The draft's ability scores before anything is derived.
+
+    Same arithmetic derivation uses: base array plus the background's bonus.
+    Coercion is defensive because a malformed draft is reported by its own
+    errors; this helper must not raise while collecting them.
+    """
+
+    base = draft.get("base_abilities") or {}
+    bonuses = draft.get("background_ability_bonuses") or {}
+    abilities: dict[str, int] = {}
+    for ability in ABILITY_IDS:
+        try:
+            abilities[ability] = int(base.get(ability, 0) or 0) + int(
+                bonuses.get(ability, 0) or 0
+            )
+        except (TypeError, ValueError):
+            abilities[ability] = 0
+    return abilities
+
+
+def _draft_feat_refs(
+    draft: dict[str, Any], background: dict[str, Any] | None,
+) -> list[str]:
+    """Feats the draft already owns before the slot under validation.
+
+    The slot's own choice is excluded on purpose: ``already_owned`` is about a
+    duplicate acquisition, and the feat being chosen is not acquired yet.
+    """
+
+    refs: list[str] = []
+    background_ref = (background or {}).get("feat_ref")
+    if background_ref:
+        refs.append(str(background_ref))
+    refs.extend(str(ref) for ref in draft.get("species_feat_refs") or [])
+    return refs
+
+
+def _draft_proficiencies(
+    draft: dict[str, Any],
+    class_entity: dict[str, Any] | None,
+    background: dict[str, Any] | None,
+) -> frozenset[str]:
+    """Trained refs the finished character will carry, as far as the draft says.
+
+    This mirrors derivation's construction (armor and weapon refs from the
+    class, skills and tools from wherever they were chosen).  A test compares it
+    against the derived sheet for a real character, so the mirror cannot drift
+    quietly -- which is the failure mode of every "compute it again here" helper.
+    """
+
+    refs = {
+        *(f"armor_category:{item}" for item in (class_entity or {}).get("armor_proficiencies") or []),
+        *(f"weapon_category:{item}" for item in (class_entity or {}).get("weapon_proficiencies") or []),
+        *((background or {}).get("skill_refs") or []),
+        *(draft.get("class_skill_refs") or []),
+        *(draft.get("species_skill_refs") or []),
+        *((background or {}).get("tool_proficiency_refs") or []),
+        *((class_entity or {}).get("tool_proficiency_refs") or []),
+        *(draft.get("class_tool_refs") or []),
+    }
+    return frozenset(str(ref) for ref in refs)
+
+
+def _slot_profile_at(bundle: Any, class_ref: Any, level: int) -> str:
+    """The class's spellcasting profile at one level, or ``""``."""
+
+    from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
+
+    if not isinstance(class_ref, str) or not class_ref:
+        return ""
+    try:
+        snapshot = Dnd2024ProgressionCatalog.from_bundle(bundle).snapshot(class_ref, level)
+    except Exception:  # noqa: BLE001 - an unknown class is already a draft error
+        return ""
+    return str(snapshot.get("slot_profile") or "")
+
+
+def _fighting_style_slot(bundle: Any, class_entity: dict[str, Any] | None):
+    """The class's level-1 Fighting Style slot declaration, or ``None``.
+
+    The slot is a real ``ClassFeatureDefinition`` now, so the build path reads the
+    same declaration the level-up path does.  Before this, the gate was "is
+    ``fighting_style`` in ``level_1_feature_ids``", which could not express the
+    whitelist and could not see the two classes that gain it at level 2.
+    """
+
+    from src.rulesets.dnd2024.features.models import Dnd2024ClassFeatureCatalog
+
+    class_id = str((class_entity or {}).get("id") or "")
+    if not class_id:
+        return None
+    catalog = Dnd2024ClassFeatureCatalog.from_bundle(bundle)
+    return catalog.features_by_key.get((f"class:{class_id}", "fighting_style"))

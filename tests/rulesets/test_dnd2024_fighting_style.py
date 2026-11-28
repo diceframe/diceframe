@@ -381,6 +381,7 @@ def test_supplied_fighting_style_choice_fails_closed() -> None:
         runtime.validate_character(None, monk)
     )
 
+    # 两个都不该通过：类别不符、以及根本不存在。
     for ref in ("feat:grappler", "feat:not_a_feat"):
         draft = fighter_draft(runtime)
         draft["class_feature_feat_choices"] = {"fighting_style": ref}

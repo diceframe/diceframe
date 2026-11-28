@@ -472,8 +472,9 @@ def test_fighter_second_wind_declaration_and_capability_load() -> None:
         "class": {"second_wind": {"current": 2, "maximum": 2}},
     })
 
+    # 战斗风格现在是 1 级的特性（GAP-57），按目录顺序排在战士特性最前。
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "second_wind", "weapon_mastery",
+        "fighting_style", "second_wind", "weapon_mastery",
     ]
     capability = resolver.declared_capability(character, "second_wind")
 
@@ -505,7 +506,8 @@ def test_fighter_action_surge_declaration_and_capability_load() -> None:
     })
 
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "second_wind", "weapon_mastery", "action_surge", "tactical_mind",
+        "fighting_style", "second_wind", "weapon_mastery", "action_surge",
+        "tactical_mind",
     ]
     capability = resolver.declared_capability(character, "action_surge")
 
@@ -534,8 +536,9 @@ def test_level_one_fighter_does_not_own_action_surge() -> None:
         "class": {"second_wind": {"current": 2, "maximum": 2}},
     })
 
+    # 战斗风格现在是 1 级的特性（GAP-57），按目录顺序排在战士特性最前。
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "second_wind", "weapon_mastery",
+        "fighting_style", "second_wind", "weapon_mastery",
     ]
     assert resolver.declared_capability(character, "action_surge") is None
 
@@ -709,9 +712,11 @@ def test_rogue_uncanny_dodge_declares_no_capability_and_keeps_parameters() -> No
     _runtime, resolver = _resolver()
     character = _rogue(5)
 
+    # 4 级起 ASI 槽也是一条声明（它只带 choice，没有能力/参数）。
     assert [feature.id for feature in resolver.features_for(character)] == [
-        "thieves_cant", "expertise", "sneak_attack", "steady_aim", "cunning_action", "fast_hands",
-        "second_story_work", "uncanny_dodge", "cunning_strike", "weapon_mastery",
+        "thieves_cant", "expertise", "sneak_attack", "steady_aim",
+        "cunning_action", "fast_hands", "second_story_work", "uncanny_dodge",
+        "cunning_strike", "ability_score_improvement", "weapon_mastery",
     ]
     assert resolver.declared_capability(character, "uncanny_dodge") is None
     assert resolver.feature_value(character, "uncanny_dodge", "damage_multiplier") == 0.5
@@ -723,8 +728,9 @@ def test_uncanny_dodge_is_not_owned_below_level_five() -> None:
 
     # S0-F10A 把 Steady Aim 兑现成三级特性，清单随之变化。
     assert [feature.id for feature in resolver.features_for(_rogue(4))] == [
-        "thieves_cant", "expertise", "sneak_attack", "steady_aim", "cunning_action", "fast_hands",
-        "second_story_work", "weapon_mastery",
+        "thieves_cant", "expertise", "sneak_attack", "steady_aim",
+        "cunning_action", "fast_hands", "second_story_work",
+        "ability_score_improvement", "weapon_mastery",
     ]
     assert resolver.declared_capability(_rogue(4), "uncanny_dodge") is None
 

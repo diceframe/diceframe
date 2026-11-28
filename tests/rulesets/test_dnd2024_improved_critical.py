@@ -335,9 +335,11 @@ def test_existing_class_resources_and_capabilities_remain_intact() -> None:
             monk, {"action": 1, "bonus_action": 1},
         )
     } >= {"bonus_unarmed_strike", "flurry_of_blows"}
+    # Fighter 1 now also declares its Fighting Style slot (FD6a); the two
+    # original features must still be there and in the same order.
     assert [
         feature.id for feature in resolver.features_for(_direct_fighter(1))
-    ] == ["second_wind", "weapon_mastery"]
+    ] == ["fighting_style", "second_wind", "weapon_mastery"]
 
 
 # --- combat helpers ------------------------------------------------------

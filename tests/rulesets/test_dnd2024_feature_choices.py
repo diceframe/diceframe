@@ -5,14 +5,15 @@ ownership, Resolver projection, advancement history replay, armor class, and
 live equipment reconciliation -- because "a feat_ref can be submitted" is not
 the same thing as "the choice actually works".
 
-Only ``feat:defense`` and ``feat:archery`` have implemented effects.  The other
-two Fighting Style feats are projected, marked ``effect_not_implemented`` and
-rejected, so a selection that grants nothing can never look finished.
+All four Fighting Style feats now have implemented effects, so the slot's
+whitelist (derived from the declarations, not hand-written) contains all four.
+An option that grants nothing would still be projected as
+``effect_not_implemented`` and rejected: the whitelist is an executability
+list, not a category filter.
 
-Archery is in the whitelist because the engine already reads its
-``ranged_attack_bonus`` parameter.  Leaving it out made the required level-7
-slot impossible to fill for a Champion who took Defense at level 1: the only
-whitelisted option was already owned, and the other three were inert.
+The whitelist used to be written by hand as ``archery + defense``.  That made
+the required level-7 slot impossible to fill for a Champion who took Defense at
+level 1, and silently dropped Two-Weapon Fighting.
 """
 
 from __future__ import annotations
@@ -39,10 +40,10 @@ FEATURE_ID = "additional_fighting_style"
 CHOICE_ID = "fighting_style_feat"
 DEFENSE = "feat:defense"
 ARCHERY = "feat:archery"
-# 引擎真能兑现的两项：Defense 走 passive_effects，Archery 走参数投影。
-IMPLEMENTED_STYLES = (ARCHERY, DEFENSE)
-# 其余两项必须保持"可见但不可提交"：选了等于什么都没发生。
-UNIMPLEMENTED_STYLES = (
+# 四条都已兑现：Defense 走 passive_effects，其余三条走参数投影。
+IMPLEMENTED_STYLES = (
+    ARCHERY,
+    DEFENSE,
     "feat:great_weapon_fighting",
     "feat:two_weapon_fighting",
 )
@@ -189,7 +190,7 @@ def test_the_choice_slot_parses_without_touching_option_of() -> None:
     assert (choice.id, choice.kind, choice.category, choice.count) == (
         CHOICE_ID, "advancement_feat", "fighting_style", 1,
     )
-    assert choice.enabled_options == IMPLEMENTED_STYLES
+    assert set(choice.enabled_options) == set(IMPLEMENTED_STYLES)
     # option_of 仍是 Monk's Focus 的附属能力语义，与 choice 互不干扰。
     focus = resolver.catalog.features_by_key[("class:monk", "flurry_of_blows")]
     assert focus.option_of == "monks_focus"
@@ -202,7 +203,7 @@ _INVALID_CHOICES: dict[str, dict[str, object]] = {
     "missing-category": {"category": None},
     "unknown-category": {"category": "not_a_category"},
     "invalid-choice-id": {"id": "Not A Canonical Id"},
-    "empty-enabled": {"enabled_options": []},
+    # 空清单对 advancement_feat 是合法的：它表示"由声明的机械载荷推导"。
     "duplicate-enabled": {"enabled_options": [DEFENSE, DEFENSE]},
     "cross-category-ref": {"enabled_options": ["feat:grappler"]},
     "undeclared-ref": {"enabled_options": ["feat:nope"]},
@@ -294,7 +295,7 @@ def test_a_fighter_without_champion_gets_no_choice_requirement() -> None:
 
 
 def test_champion_level_seven_preview_offers_four_fighting_styles() -> None:
-    """7. Exactly one slot, four options, both locales, two of them usable."""
+    """7. Exactly one slot, four options, both locales, three of them usable."""
 
     runtime = _runtime()
     sheet = _sheet(runtime, 6)
@@ -314,15 +315,17 @@ def test_champion_level_seven_preview_offers_four_fighting_styles() -> None:
     assert slot["count"] == 1
 
     options = {option["value"]: option for option in slot["options"]}
-    assert set(options) == {DEFENSE, ARCHERY, *UNIMPLEMENTED_STYLES}
-    # 这张卡 1 级选的是 Archery，所以 7 级能用的是 Defense。
+    assert set(options) == set(IMPLEMENTED_STYLES)
+    # 这张卡 1 级选的是 Archery，所以 7 级能用的是另外三条。
     assert options[DEFENSE]["available"] is True
     assert options[DEFENSE]["name"] == "Defense"
     assert options[ARCHERY]["available"] is False
     assert "already_owned" in options[ARCHERY]["unavailable_reasons"]
-    for ref in UNIMPLEMENTED_STYLES:
-        assert options[ref]["available"] is False
-        assert "effect_not_implemented" in options[ref]["unavailable_reasons"]
+    for ref in IMPLEMENTED_STYLES:
+        if ref == ARCHERY:
+            continue
+        assert options[ref]["available"] is True, ref
+        assert "effect_not_implemented" not in options[ref]["unavailable_reasons"], ref
 
     zh_sheet = _sheet(_runtime(), 6)
     zh_preview = _runtime().preview_advancement(None, zh_sheet, {})
@@ -561,9 +564,9 @@ def test_applying_without_the_choice_raises_and_changes_nothing() -> None:
     assert sheet == before
 
 
-@pytest.mark.parametrize("ref", UNIMPLEMENTED_STYLES)
-def test_unimplemented_fighting_styles_cannot_be_selected(ref: str) -> None:
-    """16a. Visible but not selectable: no silent no-op feat."""
+@pytest.mark.parametrize("ref", ["feat:grappler", "feat:not_a_feat"])
+def test_a_feat_outside_the_slot_cannot_be_selected(ref: str) -> None:
+    """16a. A general feat or an unknown ref never satisfies a style slot."""
 
     runtime = _runtime()
     sheet = _sheet(runtime, 6)

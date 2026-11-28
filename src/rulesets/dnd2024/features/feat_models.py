@@ -10,16 +10,23 @@ This module closes that gap for the fields that have consumers today:
 
 * ``parameters`` -- validated against ``parameter_registry``;
 * ``passive_effects`` -- the closed kinds that derivation reads;
+* ``requires`` -- the printed prerequisite line, evaluated by exactly one
+  function (``feat_requirements.feat_unavailable_reasons``);
 * ``choice`` -- the same ``FeatureChoice`` subclass features use, so a skill
   choice means the same thing whichever side declares it.
 
-Two groups are deliberately *not* unified here, and are carried verbatim in
+Two shapes are deliberately *not* unified here, and are carried verbatim in
 ``legacy`` so nothing silently disappears:
 
-* ``ability_choice`` / ``any_ability_minimum`` / ``requires_feature`` /
-  ``requires_spellcasting`` -- FD2 turns these into a declared ``requires`` list;
+* ``ability_choice`` -- an ability increase is a choice, not a bag entry; it
+  moves to ``choice`` in its own slice;
 * ``choice_specs`` -- the spell-grant shape belongs to P4 (generalising spell
   grants), which is also where Magic Initiate's dedicated module retires.
+
+The three former prerequisite keys (``any_ability_minimum`` /
+``requires_feature`` / ``requires_spellcasting``) are not in the bag at all:
+they are rejected with a message pointing at ``requires``, because accepting
+them would silently strip a feat of its prerequisites.
 
 ``legacy`` is a bounded bag: the loader rejects any key outside a fixed set, so
 it can shrink but not quietly grow into "the model again, with no validation".
@@ -37,6 +44,12 @@ from src.rulesets.dnd2024.features.models import (
     FeatureChoice,
     parse_capability,
     parse_feature_choice,
+)
+from src.rulesets.dnd2024.character.primitives import ABILITY_IDS
+from src.rulesets.dnd2024.features.feat_requirements import (
+    FeatRequirement,
+    FeatRequirementError,
+    parse_requirements,
 )
 from src.rulesets.dnd2024.features.parameter_registry import (
     PARAMETERS,
@@ -60,6 +73,10 @@ FEAT_FIELDS = frozenset({
     "passive_effects",
     "capabilities",
     "choice",
+    # 先决：印刷在专长卡上的 Prerequisite 行，语义见 feat_requirements。
+    "requires",
+    # 属性提升的档位（点数、可选属性、上限、是否可拆）。
+    "ability_increase",
     # Display names live on the entity so a card can render without a locale
     # lookup; origin feats have always carried them.
     "labels",
@@ -68,17 +85,49 @@ FEAT_FIELDS = frozenset({
     "description",
 })
 
-#: Fields still read by their old name.  FD2 empties the first four, P4 empties
-#: ``choice_specs``.  Until then they are carried, not interpreted.
+#: Fields still read by their old name.  P4 empties ``choice_specs``; the
+#: ability increase is a choice and moves to ``choice`` separately.
 LEGACY_FEAT_FIELDS = frozenset({
-    "ability_choice",
-    "any_ability_minimum",
-    "requires_feature",
-    "requires_spellcasting",
     "choice_specs",
 })
 
+#: Prerequisite fields that ``requires`` replaced.  They are not accepted in any
+#: form: a bundle still using them would otherwise lose its prerequisites
+#: silently, and "the feat became freely selectable" is not a loud failure.
+RETIRED_PREREQUISITE_FIELDS = frozenset({
+    "any_ability_minimum",
+    "requires_feature",
+    "requires_spellcasting",
+})
+
+#: Fields that were renamed.  Accepting the old name would leave two spellings of
+#: one rule in the content, and the readers would have to check both.
+RETIRED_RENAMED_FIELDS = {"ability_choice": "ability_increase"}
+
 PASSIVE_EFFECT_KINDS = frozenset({"armor_class_bonus"})
+
+
+@dataclass(frozen=True, slots=True)
+class AbilityIncrease:
+    """How a feat raises ability scores.
+
+    One shape covers both cases the catalogue has.  Eight feats say "one point,
+    from these abilities"; Ability Score Improvement says "two points, as +2 or
+    as +1/+1".  Only ``points`` and ``pattern`` differ -- the ability set and the
+    score cap are the same vocabulary, so they are one declaration rather than
+    two, and the caller never has to ask which kind of feat this is.
+    """
+
+    points: int
+    #: Empty means every ability (the content says ``"any"``).
+    allowed: tuple[str, ...]
+    maximum: int
+    pattern: str
+
+    def allows(self, ability: str) -> bool:
+        """Whether this increase may be spent on ``ability``."""
+
+        return not self.allowed or ability in self.allowed
 
 
 class FeatDefinitionError(ValueError):
@@ -122,8 +171,37 @@ class FeatDefinition:
     # 主动能力与被动效果是两类东西：一个在回合里花成本做动作，一个常驻
     # 改变数值。共用 ``FeatureCapability`` 让专长与子职走同一条投影/校验链。
     capabilities: tuple[FeatureCapability, ...] = ()
+    #: 属性提升的档位。八条专长的形状是"一点、从这几项里选"，ASI 是"两点、
+    #: 可拆成 +1/+1"；差别只在 points 与 pattern，其余是同一套词汇。
+    ability_increase: AbilityIncrease | None = None
+    #: Printed prerequisites.  Evaluated by ``feat_unavailable_reasons`` only.
+    requires: tuple[FeatRequirement, ...] = ()
     choice: FeatureChoice | None = None
     legacy: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def has_mechanical_effect(self) -> bool:
+        """Whether any declared payload actually changes the game.
+
+        ``enabled_options`` is an executability whitelist, not a category
+        filter: a style that grants nothing must not look selectable.  Asking
+        the declaration instead of maintaining a second hand-written list is
+        what keeps the two from drifting -- FD6a's list silently dropped
+        Two-Weapon Fighting, which the engine already implemented.
+
+        ``display`` parameters do not count; neither do ``unread`` ones, which
+        the completeness gate forbids on a deterministic feat anyway.
+        """
+
+        if self.capabilities or self.passive_effects:
+            return True
+        if self.ability_increase is not None or self.choice is not None:
+            return True
+        return any(
+            (spec := PARAMETERS.get(str(key))) is not None
+            and spec.stage in {"combat", "derivation", "progression"}
+            for key in self.parameters
+        )
 
 
 def parse_feat(raw: Mapping[str, Any]) -> FeatDefinition:
@@ -144,6 +222,19 @@ def parse_feat(raw: Mapping[str, Any]) -> FeatDefinition:
     if automation not in {"deterministic", "guided", "reference"}:
         raise FeatDefinitionError(
             f"{feat_id}.automation_level is not a supported level: {automation!r}"
+        )
+
+    retired = sorted(RETIRED_PREREQUISITE_FIELDS & set(raw))
+    if retired:
+        raise FeatDefinitionError(
+            f"{feat_id} still declares {retired[0]!r}; prerequisites are now "
+            "expressed in `requires` (see feat_requirements)"
+        )
+    renamed = sorted(RETIRED_RENAMED_FIELDS.keys() & set(raw))
+    if renamed:
+        raise FeatDefinitionError(
+            f"{feat_id} still declares {renamed[0]!r}; it is now "
+            f"{RETIRED_RENAMED_FIELDS[renamed[0]]!r}"
         )
 
     unknown = sorted(set(raw) - FEAT_FIELDS - LEGACY_FEAT_FIELDS)
@@ -189,11 +280,70 @@ def parse_feat(raw: Mapping[str, Any]) -> FeatDefinition:
         parameters=parameters,
         passive_effects=_parse_passive_effects(feat_id, raw.get("passive_effects")),
         capabilities=_parse_capabilities(feat_id, raw.get("capabilities")),
+        requires=_parse_requirements(feat_id, raw.get("requires")),
+        ability_increase=_parse_ability_increase(feat_id, raw.get("ability_increase")),
         choice=choice,
         legacy=legacy,
     )
     check_declaration_completeness(definition)
     return definition
+
+
+def _parse_ability_increase(feat_id: str, raw: Any) -> AbilityIncrease | None:
+    """Validate an ability-increase declaration, failing closed on anything odd."""
+
+    if raw is None:
+        return None
+    where = f"{feat_id}.ability_increase"
+    if not isinstance(raw, Mapping):
+        raise FeatDefinitionError(f"{where} must be an object")
+    unknown = sorted({str(key) for key in raw} - {"allowed", "points", "pattern", "maximum"})
+    if unknown:
+        raise FeatDefinitionError(f"{where} has an unknown field: {unknown[0]}")
+
+    points = raw.get("points")
+    if isinstance(points, bool) or not isinstance(points, int) or points not in (1, 2):
+        raise FeatDefinitionError(f"{where}.points must be 1 or 2")
+    pattern = str(raw.get("pattern") or "1")
+    if pattern not in {"1", "2_or_1_1"}:
+        raise FeatDefinitionError(f"{where}.pattern is not supported: {pattern!r}")
+    # 两点才可能拆成 +1/+1；一对不上，声明就是自相矛盾的。
+    if (pattern == "1") != (points == 1):
+        raise FeatDefinitionError(
+            f"{where}.pattern {pattern!r} does not match {points} point(s)"
+        )
+    maximum = raw.get("maximum", 20)
+    if isinstance(maximum, bool) or not isinstance(maximum, int) or not 1 <= maximum <= 30:
+        raise FeatDefinitionError(f"{where}.maximum must be an integer from 1 to 30")
+
+    raw_allowed = raw.get("allowed", "any")
+    if raw_allowed == "any":
+        allowed: tuple[str, ...] = ()
+    elif isinstance(raw_allowed, list) and raw_allowed:
+        if any(
+            not isinstance(item, str) or item not in ABILITY_IDS
+            for item in raw_allowed
+        ):
+            raise FeatDefinitionError(
+                f"{where}.allowed must list ability ids"
+            )
+        if len(set(raw_allowed)) != len(raw_allowed):
+            raise FeatDefinitionError(f"{where}.allowed must not repeat an ability")
+        allowed = tuple(str(item) for item in raw_allowed)
+    else:
+        raise FeatDefinitionError(
+            f"{where}.allowed must be 'any' or a non-empty array"
+        )
+    return AbilityIncrease(
+        points=points, allowed=allowed, maximum=maximum, pattern=pattern,
+    )
+
+
+def _parse_requirements(feat_id: str, raw: Any) -> tuple[FeatRequirement, ...]:
+    try:
+        return parse_requirements(feat_id, raw)
+    except FeatRequirementError as exc:
+        raise FeatDefinitionError(str(exc)) from exc
 
 
 def _parse_labels(raw: Any) -> dict[str, str]:

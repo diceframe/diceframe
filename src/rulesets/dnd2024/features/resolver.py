@@ -32,6 +32,7 @@ from .equipment import Dnd2024EquipmentCatalog
 from . import option_pool
 from .feat_capabilities import capability_labels, owned_capability_feats
 from .feat_models import FeatDefinition, load_feat_definitions
+from .feat_parameters import two_handed_melee_damage_die_minimum
 from .models import (
     ClassFeatureDefinition,
     ClassFeatureError,
@@ -1450,6 +1451,11 @@ class Dnd2024ClassFeatureResolver:
             "ranged_attack_bonus": self._ranged_attack_bonus(character),
             "light_extra_attack_ability_damage": (
                 self._light_extra_attack_ability_damage(character)
+            ),
+            "two_handed_melee_damage_die_minimum": (
+                two_handed_melee_damage_die_minimum(
+                    self.feat_definitions, character,
+                )
             ),
         }
 

@@ -10,17 +10,58 @@ reach these methods through ``self``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
 from src.rulesets.dnd2024.character.builder import ABILITY_IDS, ability_modifier
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.features.feat_models import AbilityIncrease
+from src.rulesets.dnd2024.features.feat_requirements import (
+    FeatContext,
+    feat_unavailable_reasons,
+    proficiencies_from,
+)
 from src.rulesets.dnd2024.progression.catalog import ProgressionCatalogError
 
 if TYPE_CHECKING:
     from src.rulesets.bundle import LoadedRulesetBundle
     from src.rulesets.dnd2024.features.feat_models import FeatDefinition
     from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
+
+
+# 前置理由码的文案。判定只有一处（``feat_unavailable_reasons``），措辞留在
+# 这个通道：列表页给理由码，提交校验给句子，两者本来就不该共用同一个字符串。
+_FEAT_REASON_MESSAGES = {
+    "level": "level prerequisite is not met",
+    "already_owned": "cannot be selected more than once",
+    "ability_prerequisite": "ability prerequisite is not met",
+    "feature": "feature prerequisite is not met",
+    "proficiency": "proficiency prerequisite is not met",
+    "spellcasting": "requires Spellcasting",
+}
+
+def _increase_projection(profile: AbilityIncrease | None) -> dict[str, Any] | None:
+    """One option's ability-increase profile, in the shape the UI reads.
+
+    The option carries it so the form can switch profiles when the player picks a
+    feat (Grappler is one point of Strength or Dexterity, not two of anything)
+    instead of trusting a slot-level default for every choice.
+    """
+
+    if profile is None:
+        return None
+    return {
+        "points": profile.points,
+        "allowed": "any" if not profile.allowed else list(profile.allowed),
+        "maximum": profile.maximum,
+        "pattern": profile.pattern,
+        "auto": (
+            {"ability": profile.allowed[0], "points": profile.points}
+            if profile.points == 1 and len(profile.allowed) == 1
+            else None
+        ),
+    }
 
 
 # 一个特性选项槽的规范化输入只接受这四个字段，多余字段一律拒绝。
@@ -65,9 +106,13 @@ class AdvancementChoicesMixin:
         def _pending_subclass_level(
             feature_state: dict[str, Any], level: int, subclass: dict[str, Any],
         ) -> int | None: ...
-        @staticmethod
-        def _ledger_entries(character: dict[str, Any]) -> list[dict[str, Any]] | None: ...
+        def _ledger_entries(
+            self, character: dict[str, Any],
+        ) -> list[dict[str, Any]] | None: ...
         def _update_derived(self, character: dict[str, Any]) -> None: ...
+        def _advancement_slot(
+            self, character: dict[str, Any], snapshot: dict[str, Any],
+        ) -> Any: ...
 
     def repair_choices(
         self,
@@ -185,7 +230,8 @@ class AdvancementChoicesMixin:
             for ability, points in increases.items():
                 abilities[ability] = int(abilities.get(ability, 0) or 0) + int(points)
             repaired_anything = True
-            epic = "epic_boon" in snapshot["gained_feature_ids"]
+            slot = self._advancement_slot(character, snapshot)
+            epic = slot is not None and slot.category == "epic_boon"
             # The feat slot is a fact about the character, whether or not any
             # ledger is being maintained, so it must not live inside the
             # ledger's branch.
@@ -335,23 +381,13 @@ class AdvancementChoicesMixin:
             errors.append(f"{selected_ref} is not an eligible {expected_category} feat")
             return {}, "", errors
         target_level = int(snapshot["level"])
-        if target_level < feat.minimum_level:
-            errors.append(f"{selected_ref} level prerequisite is not met")
-        owned = list(character.get("features", {}).get("feat_refs") or [])
-        if selected_ref in owned and not feat.repeatable:
-            errors.append(f"{selected_ref} cannot be selected more than once")
-        minimums = feat.legacy.get("any_ability_minimum")
         abilities = character.get("abilities") or {}
-        if isinstance(minimums, dict) and not any(
-            int(abilities.get(ability, 0) or 0) >= int(minimum)
-            for ability, minimum in minimums.items()
-        ):
-            errors.append(f"{selected_ref} ability prerequisite is not met")
-        if feat.legacy.get("requires_spellcasting") and not snapshot.get("slot_profile"):
-            errors.append(f"{selected_ref} requires Spellcasting")
+        context = self._feat_context(character, target_level, snapshot)
+        for reason in feat_unavailable_reasons(feat, context):
+            errors.append(f"{selected_ref} {_FEAT_REASON_MESSAGES[reason]}")
 
-        ability_choice = feat.legacy.get("ability_choice")
-        if not isinstance(ability_choice, dict):
+        increase = feat.ability_increase
+        if increase is None:
             if raw not in (None, {}):
                 errors.append(f"{selected_ref} does not grant an ability increase")
             return {}, selected_ref, errors
@@ -359,30 +395,29 @@ class AdvancementChoicesMixin:
             errors.append("ability_score_increases is required at this level")
             return {}, selected_ref, errors
         parsed: dict[str, int] = {}
-        allowed = ability_choice.get("allowed")
-        allowed_abilities = set(ABILITY_IDS if allowed == "any" else allowed or [])
-        points = int(ability_choice.get("points", 0) or 0)
-        maximum = int(ability_choice.get("maximum", 20) or 20)
-        pattern = str(ability_choice.get("pattern") or "")
-        for ability, increase in raw.items():
+        allowed_abilities = set(ABILITY_IDS) if not increase.allowed else set(increase.allowed)
+        for ability, amount in raw.items():
             if (
                 ability not in allowed_abilities
-                or isinstance(increase, bool)
-                or not isinstance(increase, int)
-                or increase not in ({1, 2} if pattern == "2_or_1_1" else {1})
+                or isinstance(amount, bool)
+                or not isinstance(amount, int)
+                or amount not in ({1, 2} if increase.pattern == "2_or_1_1" else {1})
             ):
                 errors.append(
                     f"ability_score_increases are not valid for {selected_ref}"
                 )
                 continue
-            if int(abilities.get(ability, 0) or 0) + int(increase) > maximum:
+            if int(abilities.get(ability, 0) or 0) + int(amount) > increase.maximum:
                 errors.append(
-                    f"ability_score_increases would raise {ability} above {maximum}"
+                    f"ability_score_increases would raise {ability} above "
+                    f"{increase.maximum}"
                 )
-            parsed[ability] = int(increase)
-        expected_lengths = {1, 2} if pattern == "2_or_1_1" else {1}
-        if sum(parsed.values()) != points or len(parsed) not in expected_lengths:
-            errors.append(f"ability_score_increases must total exactly {points}")
+            parsed[ability] = int(amount)
+        expected_lengths = {1, 2} if increase.pattern == "2_or_1_1" else {1}
+        if sum(parsed.values()) != increase.points or len(parsed) not in expected_lengths:
+            errors.append(
+                f"ability_score_increases must total exactly {increase.points}"
+            )
         return parsed, selected_ref, errors
 
     def _plan_feature_choices(
@@ -424,6 +459,10 @@ class AdvancementChoicesMixin:
                     continue
                 definition = resolver.catalog.features_by_key.get(key)
                 if definition is None or definition.choice is None:
+                    continue
+                if definition.choice.handled_by != "feature_choice":
+                    # 答案记在升级账本里的槽（ASI / 恩惠）由 ``_advancement_feat``
+                    # 收下；这里再问一次就会出现两条并行的"你还没选"。
                     continue
                 if definition.choice.count_track:
                     # 按职业表计数的池由 `plan_pools` 负责，包括"本级刚获得
@@ -905,6 +944,44 @@ class AdvancementChoicesMixin:
             "grants": choice.grants,
         }]
 
+    def _feat_context(
+        self,
+        character: dict[str, Any],
+        level: int,
+        snapshot: Mapping[str, Any],
+    ) -> FeatContext:
+        """The facts a prerequisite may read, as this engine sees the character.
+
+        ``feature_ids`` comes from the resolver rather than from the level table:
+        the table says what this level grants, while the prerequisite asks what
+        the character owns -- subclass features and re-chosen options included.
+        """
+
+        features = character.get("features")
+        owned = (
+            list(features.get("feat_refs") or [])
+            if isinstance(features, Mapping) else []
+        )
+        # 有些特性只有槽位没有定义（``fighting_style`` 就是：它是职业表上的
+        # 一个选择槽，class feature 目录里没有这一条）。只问 resolver 会漏掉
+        # 它们，于是"战士有战斗风格特性"这个事实在升级路径上不成立。
+        feature_ids = {
+            definition.id
+            for definition in self._feature_resolver.features_for(character)
+        }
+        class_ref = str(snapshot.get("class_ref") or "")
+        if class_ref:
+            for row in self.catalog.range(class_ref, 1, level):
+                feature_ids.update(str(item) for item in row["gained_feature_ids"])
+        return FeatContext(
+            level=level,
+            abilities=character.get("abilities") or {},
+            owned_refs=owned,
+            slot_profile=str(snapshot.get("slot_profile") or ""),
+            feature_ids=frozenset(feature_ids),
+            proficiency_refs=proficiencies_from(character),
+        )
+
     def _feat_options(
         self,
         category: str,
@@ -912,34 +989,20 @@ class AdvancementChoicesMixin:
         target_level: int,
         snapshot: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        abilities = character.get("abilities") or {}
-        owned = list(character.get("features", {}).get("feat_refs") or [])
+        context = self._feat_context(character, target_level, snapshot)
         result: list[dict[str, Any]] = []
         for feat_id, feat in self.advancement_feats.items():
             if feat.category != category:
                 continue
-            unavailable_reasons: list[str] = []
-            if target_level < feat.minimum_level:
-                unavailable_reasons.append("level")
-            if f"feat:{feat_id}" in owned and not feat.repeatable:
-                unavailable_reasons.append("already_owned")
-            # 这两条前置仍以旧字段声明（FD2 迁进 ``requires``），只有**位置**
-            # 从顶层换到了 ``legacy``，判据语义一字未改。
-            minimums = feat.legacy.get("any_ability_minimum")
-            if isinstance(minimums, dict) and not any(
-                int(abilities.get(ability, 0) or 0) >= int(minimum)
-                for ability, minimum in minimums.items()
-            ):
-                unavailable_reasons.append("ability_prerequisite")
-            if feat.legacy.get("requires_spellcasting") and not snapshot.get("slot_profile"):
-                unavailable_reasons.append("spellcasting")
+            unavailable_reasons = list(feat_unavailable_reasons(feat, context))
             result.append({
                 "value": f"feat:{feat_id}",
                 "name": self.advancement_feat_labels[feat_id],
                 "source_ref": feat.source_ref,
                 "available": not unavailable_reasons,
                 "unavailable_reasons": unavailable_reasons,
-                # 对外投影保持原形：前端读这个键，内部声明改了它也不变。
-                "ability_choice": deepcopy(feat.legacy.get("ability_choice") or {}),
+                # 每个选项自己的档位：选 Grappler 是"1 点、力或敏"，选 ASI 是
+                # "2 点、可拆"。前端按所选专长取，而不是用槽级的默认档位。
+                "ability_increase": _increase_projection(feat.ability_increase),
             })
         return result
