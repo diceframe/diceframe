@@ -132,11 +132,23 @@ apply_effect_items(instance, combat, source, target, items, rng, *, dc) -> list[
 
 | 片 | 内容 | 交付物 | 与其它片的关系 |
 |---|---|---|---|
-| **P1（本片）** | 契约 + 归一 + 应用点接口 + 攻击 rider 走新路径（行为不变） | 代码 + 测试 | 无内容变化 |
-| P2 | rider 句式覆盖（A 类：直接施加条件 / 带 escape DC） | 导入器 + 目录 | 产出**新形状**，不再走 `kind` |
+| **P1（已交付）** | 字段闭集 + 归一 + 三档判据；**无消费方接入** | `effect_items.py` + 9 条用例 | 无行为变化 |
+| **P2a（进行中）** | 应用点落地（单一函数）+ rider 路径接入，事件不变 | `effect_items.apply_rider_items` | 无内容变化 |
+| P2b | rider 句式覆盖（A 类：直接施加条件 / 带 escape DC） | 导入器 + 目录 | 产出新形状 |
 | P3 | `on_fail` 接受效果项（B1 伤害+条件、B2 推挤+条件） | 契约 + 结算 | 复用同一个应用点 |
 | P4 | `spell_effects` 收敛（48 条，逐条验证） | 内容 + resolver | 一次一条，可中途停 |
 | P5 | `KIND_HANDLERS` 的约 11 个"纯施加"handler 退化 | 代码 | 19 个经济类 handler **不动** |
+
+**P2a 必须在 P1 之后、P2b 之前**：P2b 产出的新形状要有人读；读的人先到位。
+
+**P2a 的设计决定（回应 §6.6 的不可逆问题）**：事件的 `source_rider` **由生产方声明**，
+不再从条件名反推。归一函数因此返回 `(source, item)` 两件而不是一件：
+
+- 旧数据：`source` 就是原来的 `kind`（`condition` / `prone` / `grapple` / `push`），所以
+  `{"kind":"condition","condition":"prone"}` 仍然写 `"condition"`，事件逐字节不变；
+- 新数据：生产方直接声明 `source`（例如 `"prone"`），不再有歧义。
+
+这样"归一有损"不再是问题——损失的是**猜测**，不是信息：生产方本来就知道自己写的是哪一种。
 
 **P2 必须在 P1 之后**：否则 38 条 rider 会按旧 `kind` 形状落进目录，P1 之后要重解析一遍。
 
@@ -176,6 +188,16 @@ apply_effect_items(instance, combat, source, target, items, rng, *, dc) -> list[
 另外修掉：`validate_effect_item` 曾是死代码（现在 `normalize_effect_item` 遇到未知字段
 **拒绝**而不是静默丢弃）；`effect_items.py` 补进 `pyproject.toml` 的 mypy 清单；
 测试里 `save_repeat: "end_of_turn"` 是凭空造的词（真实取值是能力码）已改为 `"wis"`。
+
+## 6.7 P2a 执行记录（2026-11-28）
+
+- `effect_items.normalize_rider(raw) -> (source, item)`：`source` 取生产方声明的 `kind`，
+  **不从条件名反推**；无 `kind` 的新形状由 item 自己回答（`push` / `condition`）。
+- `hit_resolution._apply_effect_items(...)`：唯一应用点（体型门 → 豁免 → 推挤/条件），
+  `_statblock_rider_events` 只剩"取 riders → 归一 → 调它"。
+- 事件不变的做法换了：不是"反推标签"，而是"**生产方带着标签进来**"。
+  `{"kind":"condition","condition":"prone"}` 依旧写 `source_rider: "condition"`。
+- 11 条用例（9 + 2 条 source 保留）+ 武器词条 37 条，全绿。
 
 ## 7. 验收指标
 

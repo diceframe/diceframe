@@ -81,6 +81,35 @@ def normalize_effect_item(raw: Any) -> dict[str, Any] | None:
     return item
 
 
+def normalize_rider(raw: Any) -> tuple[str, dict[str, Any]] | None:
+    """一条旧 rider → ``(source, item)``。
+
+    `source` 是**生产方声明的**种类，不是从条件名反推的——反推会把
+    `{"kind":"condition","condition":"prone"}` 写成 `"prone"`，而旧事件写的是
+    `"condition"`。事件的 `source_rider` 保留它，replay 才不变。
+    """
+
+    item = normalize_effect_item(raw)
+    if item is None:
+        return None
+    source = str((raw or {}).get("kind") or "")
+    if not source:
+        # 新形状没有 kind：由 item 自己回答它是什么。
+        source = "push" if "push" in item else "condition"
+    return source, item
+
+
+def normalize_rider_items(raw_items: Any) -> list[tuple[str, dict[str, Any]]]:
+    if not isinstance(raw_items, list):
+        return []
+    pairs: list[tuple[str, dict[str, Any]]] = []
+    for raw in raw_items:
+        pair = normalize_rider(raw)
+        if pair is not None:
+            pairs.append(pair)
+    return pairs
+
+
 def normalize_effect_items(raw_items: Any) -> list[dict[str, Any]]:
     if not isinstance(raw_items, list):
         return []

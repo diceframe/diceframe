@@ -10,6 +10,7 @@ from src.rulesets.dnd2024.combat.effect_items import (
     LIFETIME_MAINTAINED,
     lifetime_of,
     normalize_effect_item,
+    normalize_rider,
 )
 
 
@@ -59,3 +60,22 @@ def test_lifetime_has_three_tiers() -> None:
     assert lifetime_of({"condition": "prone", "duration": "target_turn_end"}) == LIFETIME_EXPIRING
     # 需维护也有到期点，区别在于有没有维护者（重掷 / 专注）。
     assert lifetime_of({"condition": "paralyzed", "save_repeat": "wis"}) == LIFETIME_MAINTAINED
+
+
+def test_the_declared_source_survives_normalisation() -> None:
+    """事件里的 `source_rider` 由生产方声明，不靠条件名反推。
+
+    `{"kind":"condition","condition":"prone"}` 与 `{"kind":"prone"}` 归一后虽然
+    得到同一个 item，但 `source` 各自保留原值——这正是 P1 不能接入、而 P2a
+    能接入的原因。
+    """
+
+    assert normalize_rider({"kind": "condition", "condition": "prone"}) == (
+        "condition", {"condition": "prone"},
+    )
+    assert normalize_rider({"kind": "prone"}) == ("prone", {"condition": "prone"})
+
+
+def test_a_kind_less_item_declares_its_own_source() -> None:
+    assert normalize_rider({"push": 10}) == ("push", {"push": 10})
+    assert normalize_rider({"condition": "poisoned"}) == ("condition", {"condition": "poisoned"})
