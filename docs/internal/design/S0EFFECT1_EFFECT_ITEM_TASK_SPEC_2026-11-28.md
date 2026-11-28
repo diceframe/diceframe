@@ -5,7 +5,7 @@
 | 切片 | S0-EFFECT1（P1：只定契约与适配器，不产出任何内容） |
 | 性质 | 重构的前置片。本片**不改变任何行为** |
 | 基线 | `f6614d23` |
-| 状态 | 待开工 |
+| 状态 | P1 已实现（契约 + 归一 + rider 走新路径，行为不变） |
 | 后续 | P2 rider 句式（A 类）、P3 `on_fail` 扩展（B1/B2）、P4 法术收敛、P5 handler 长尾 |
 
 ## 1. 问题陈述（只列代码事实）
@@ -80,7 +80,24 @@
 - DC 由**来源**回答：法术取施法者 DC，怪物取动作 DC，特性取 handler 参数；
 - 这与 `cost` 的处理同构（成本来自声明，DC 来自来源）。
 
-### 3.3 应用点
+### 3.3 寿命三档
+
+**持续生效的效应不是全部效应**，所以先分"瞬间 vs 持续"，再在持续里分两档：
+
+| 档 | 判据 | 例子 | 引擎要记什么 |
+|---|---|---|---|
+| **瞬间** `instant` | 没有 `duration`、没有维护者 | 伤害、推挤 | 不记状态 |
+| **带过期** `expiring` | 有到期点，没有维护者 | "倒地直到其下回合结束"、`duration: target_turn_end` | 条件 + 到期点 |
+| **需维护** `maintained` | 有**维护者**（专注 / 每回合重掷） | `save_repeat`、`concentration` | 效果实例 + 维护者 + 终止条件 |
+
+关于第三档要说清一句：**需维护的效果也有到期点**，所以它和"带过期"不是互斥事实，区别在于
+**有没有维护者**——维护者决定了"谁会再来问它一次"（回合结束的重掷、专注中断）。
+正因为不互斥，才要分成两档而不是让 `duration` 一个字段同时回答两个问题。
+
+判据落在代码里：`effect_items.lifetime_of(item)`，`save_repeat`/`concentration` → `maintained`，
+有 `duration` → `expiring`，否则 `instant`。
+
+### 3.4 应用点
 
 ```python
 apply_effect_items(instance, combat, source, target, items, rng, *, dc) -> list[Event]
@@ -133,6 +150,13 @@ apply_effect_items(instance, combat, source, target, items, rng, *, dc) -> list[
 | `radius_ft` / cone | ❌ 不接 | 几何不是载荷；1D 位置做 cone 是伪精度 |
 | `concentration` / `upcast` / `target_count` | ❌ 不接 | casting-shape，属于来源 |
 | 前端 | ✅ 无影响 | `frontend-v2` 对 `riders` 的读取为零命中 |
+
+## 6.5 P1 执行记录（2026-11-28）
+
+- 新增 `combat/effect_items.py`：字段闭集、`normalize_effect_item(s)`、`legacy_label`、`lifetime_of`、`validate_effect_item`。
+- `hit_resolution._statblock_rider_events` 改为"先归一、再按项结算"，**事件形状一个字没动**
+  （`source_rider` 由 `legacy_label` 还原成今天会写的词）。
+- 8 条新用例（五种旧形状归一、未知 kind 不猜、标签还原、三档寿命）+ 既有 57 条 rider 主路径用例全绿。
 
 ## 7. 验收指标
 
