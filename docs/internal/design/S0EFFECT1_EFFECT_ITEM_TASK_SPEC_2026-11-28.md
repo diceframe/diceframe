@@ -235,6 +235,24 @@ apply_effect_items(instance, combat, source, target, items, rng, *, dc) -> list[
   效果项只含载荷字段。这是 P4b 迁移 resolver 之前的安全网。
 - 本片不动 resolver：与 P2a 同一手法——形状先被验完，消费方再切。
 
+## 6.10 P4b 的实地结论：法术侧没有"应用点"，只有三处各自造伤害节点
+
+读完三个消费点，P4b 不能照 P2a/P3 的做法做——它们不是"把效果施加到目标"，而是
+**各自用 `spell_formula_node` 建一棵伤害树**，再折成事件：
+
+| 站点 | 各自额外做的事 |
+|---|---|
+| `spell_resolution.py:876` | 升环（`upcast_damage`）→ 暴击翻骰 → 吟唱加值 → 超魔法重掷 → 过载 → 抗性 |
+| `triggered_spells.py:208` | 升环 → 对特定生物类型追加 `extra_damage` → 暴击翻骰 |
+| `reaction_spells.py:610` | 读的是 `armor_class_bonus`，根本不属于载荷 |
+
+也就是说 P4b 需要的是**一个"载荷 → 伤害节点"的共用构造器**（接受暴击/升环/类型追加），
+而不是把 `effect["damage"]` 换成 `items[0]["damage"]`。这一步的性质与 P2a/P3 不同：
+前者是"接到同一个应用点"，这里是"先造节点、再共用造法"。
+
+结论：P4b 拆成两步——先抽出 `damage_node_for(item, *, spell, slot, actor, critical)`，
+再让三处调用它；`reaction_spells` 那一处确认不需要改（它读的不是载荷）。
+
 ## 7. 验收指标
 
 1. **形状**：`effect_items.py` 提供字段闭集、`normalize_effect_item(s)`、`lifetime_of`、
