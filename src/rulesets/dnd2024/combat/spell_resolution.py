@@ -12,6 +12,8 @@ from src.rulesets.dnd2024.features.resources import (
     USAGE_SCOPE_LONG_REST,
     feature_usage_count,
 )
+from .effect_items import normalize_spell_effect
+from .spell_damage import damage_node_for
 from .action_adapter import (
     double_dice_counts,
     formula_node_from_dice_formula,
@@ -872,12 +874,13 @@ class CombatSpellResolutionMixin:
                     ),
                 })
                 if succeeded:
-                    damage_node = spell_formula_node(
-                        str(effect["damage"]), effect.get("upcast_damage"),
-                        spell, slot_level, actor,
+                    # S0-EFFECT1 P4b：与命中触发法术共用同一个"效果项 → 伤害节点"。
+                    _, payload_items = normalize_spell_effect(effect)
+                    damage_node = damage_node_for(
+                        payload_items[0], upcast_damage=effect.get("upcast_damage"),
+                        spell=spell, slot_level=slot_level, actor=actor,
+                        critical=critical,
                     )
-                    if critical:
-                        damage_node = double_dice_counts(damage_node)
                     # Potent Spellcasting 是加值不是骰：先翻倍骰数再追加，
                     # 否则重击会把这个固定加值也一起翻倍。
                     damage_node = self._add_cantrip_damage_bonus(
