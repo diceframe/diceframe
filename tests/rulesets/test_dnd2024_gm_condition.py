@@ -72,7 +72,8 @@ def test_the_catalog_separates_states_from_source_bound_effects():
 
     # 14 个无等级 SRD 状态（Exhaustion 后置）加 S0-F17 的 dazed 载体。
     assert set(appliable) == {
-        "blinded", "charmed", "dazed", "deafened", "frightened", "grappled",
+        "blinded", "charmed", "dazed", "deafened", "enfeebled", "frightened",
+        "grappled",
         "incapacitated", "invisible", "paralyzed", "petrified", "poisoned",
         "prone", "restrained", "stunned", "unconscious",
     }
@@ -181,7 +182,7 @@ def test_every_gm_state_carries_a_name_and_a_rules_summary():
     engine, _instance_ = _combat()
     catalog = engine.catalog.condition_catalog()
 
-    assert len(catalog) == 15
+    assert len(catalog) == 16
     for row in catalog:
         assert row["name"] and row["name"] != row["id"], row["id"]
         assert len(row["summary"]) > 10, row["id"]
@@ -204,7 +205,7 @@ def test_only_the_gm_view_carries_the_catalog():
     gm_view = engine.gameplay_view(instance, viewer_id="gm", viewer_is_gm=True)
     player_view = engine.gameplay_view(instance, viewer_id="p1", viewer_is_gm=False)
 
-    assert len(gm_view["combat"]["condition_catalog"]) == 15
+    assert len(gm_view["combat"]["condition_catalog"]) == 16
     assert player_view["combat"]["condition_catalog"] == []
 
 

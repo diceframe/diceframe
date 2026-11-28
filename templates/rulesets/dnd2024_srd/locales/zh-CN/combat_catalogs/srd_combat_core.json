@@ -8,6 +8,8 @@
   "fields": {
     "labels": {
       "unarmed_strike": "徒手打击",
+      "condition.enfeebled": "衰弱",
+      "condition.enfeebled.summary": "以力量为基础的 D20 检定具有劣势。",
       "condition.blinded": "目盲",
       "condition.blinded.summary": "看不见：自己的攻击有劣势，打向你的攻击有优势。",
       "condition.charmed": "魅惑",

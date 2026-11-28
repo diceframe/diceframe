@@ -1267,7 +1267,17 @@ class CombatSpellResolutionMixin:
                 # 标记类法术也走这条分支：它们不造成伤害、不施加条件，只把
                 # "谁是我的目标"写进施法者的专注实例（已在上方落地）。
                 succeeded = True
-            condition = str(effect.get("condition") or "")
+            # S0-SP2：`condition` 可以是字符串，也可以是 {choices, picked} 对象
+            # ——二选一的法术（Blindness/Deafness）只能这样表达。`picked` 是
+            # 声明值：本片不支持"由施法者在意图里选"，那要在 intent 上加参数，
+            # 等真有第二个二选一法术再说。
+            declared = effect.get("condition")
+            if isinstance(declared, dict):
+                candidates = [str(c) for c in declared.get("choices") or []]
+                index = int(declared.get("picked", 0) or 0)
+                condition = candidates[index] if 0 <= index < len(candidates) else ""
+            else:
+                condition = str(declared or "")
             condition_applies = (
                 (mode in {"spell_attack", "automatic_damage"} and succeeded)
                 or (mode == "saving_throw" and not succeeded)

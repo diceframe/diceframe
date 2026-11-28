@@ -17,6 +17,56 @@ def context_id(engine: Any, instance: Any) -> str:
     return f"combat:{int(ruleset_runtime.state(instance).get('version', 0))}:{current}"
 
 
+def check_disadvantage_sources(
+    registry: dict[str, dict[str, Any]], conditions: dict[str, Any],
+    *, surface: str, ability: str = "",
+) -> list[str]:
+    """Conditions that impose disadvantage on one kind of check.
+
+    `attack_modes` covers attacks; this covers the three check surfaces.  An
+    entry with no ``abilities`` applies to all of them, matching how a condition
+    like Enfeebled works: "Strength-based D20 Tests" narrows it, a plain
+    "ability checks" would not.
+
+    Returns the condition ids, so an event can say *why* the roll was at
+    disadvantage rather than just that it was.
+    """
+
+    found: list[str] = []
+    for condition_id, entry in registry.items():
+        if condition_id not in conditions:
+            continue
+        for row in entry.get("check_modes") or []:
+            if str(row.get("surface") or "") != surface:
+                continue
+            if str(row.get("mode") or "") != "disadvantage":
+                continue
+            scoped = row.get("abilities")
+            if scoped and ability and ability not in scoped:
+                continue
+            if condition_id not in found:
+                found.append(condition_id)
+    return found
+
+
+def damage_roll_penalty(
+    registry: dict[str, dict[str, Any]], conditions: dict[str, Any],
+) -> str:
+    """The dice a condition subtracts from every damage roll, or ``""``.
+
+    Enfeebled is "-1d8"; the caller keeps the sign, because "subtract 1d8" and
+    "add 1d8" are different rules and both may exist one day.
+    """
+
+    for condition_id, entry in registry.items():
+        if condition_id not in conditions:
+            continue
+        modifier = entry.get("damage_roll_modifier")
+        if isinstance(modifier, dict) and modifier.get("dice"):
+            return str(modifier["dice"])
+    return ""
+
+
 def condition_flags(
     registry: dict[str, dict[str, Any]], conditions: dict[str, Any],
 ) -> dict[str, Any]:
