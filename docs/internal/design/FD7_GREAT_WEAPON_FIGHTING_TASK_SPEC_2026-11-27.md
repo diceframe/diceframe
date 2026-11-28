@@ -202,5 +202,19 @@ def roll_damage_node(node, rng, *, die_floor: int = 0, floored_dice: int = 0):
 |---|---|---|
 | 第一次 | 29 failed / 11343 passed / 3 errors | 17 条 FD6a/FD2a 遗留（smite 10、counterspell 3、improved_critical 1、free_casting 1、scorching_ray 1、feat_requirements 1）；2 条架构基线（`resolver.py` 体积、`hit_resolution` 新增 `intent_switch`）；10 条本机 docker/updater 基线 |
 | 第二次 | **10 failed / 11362 passed / 3 errors** | 全部是本机既有基线：docker launcher 6、updater MAX_PATH 1、docker data generation 1、self-update reentry 1、runtime dependencies 1，外加 docker 升级 3 errors；Linux CI 不复现 |
+| 第三次（并入 3.4.0 后） | **11 failed / 11524 passed / 3 errors** | 同上 10 条本机基线；多出的 `test_plugin_security` 单跑通过，是并行 worker 的环境串扰，与本改动无关 |
 
 第一次的 17 条与 2 条架构失败已在本次修掉（§7.2 / §7.1），第二次没有新增失败。
+
+### 7.5 与 main 的重建
+
+PR #889 于 2026-11-27T15:52Z 合并，但只含到 FD1 与 review 修复；FD2a（`requires` 声明化）、FD6a（槽声明化）与 FD7 是合并之后才推上去的，因此仍留在分支上，需要后续 PR 承载。
+
+把分支 rebase 到 3.4.0 时与 S0F36（simple grants / invocation pool / language choice）在 `models.py`、`choices.py`、`srd_class_features.json`、`test_dnd2024_class_features.py` 冲突，改用 merge 整合，逐项保留双方语义：
+
+- `FEATURE_CHOICE_KEYS` 保留 main 的闭集校验，并加入 FD6a 的 `handled_by`；
+- `parse_feature_choice` 同时接受 main 的 `count_track` 与 FD7 的「advancement 槽允许空清单」；
+- `plan_feature_choices` 分别跳过账本槽（`handled_by`）与按级计数池（`count_track`）；
+- Ranger 2 级同时保留 Deft Explorer 的两条声明与 Fighting Style 槽；Rogue 的特性顺序断言同时含 `thieves_cant`（main）与 `ability_score_improvement`（FD6a）。
+
+`models.py` 在 main 上已是 1492 行，白名单推导放进去会越过 1500 行热点线，因此抽到 `features/feat_slots.py`（`models.py` 1499 行，新模块进 mypy 清单）。
