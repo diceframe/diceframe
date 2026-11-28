@@ -58,14 +58,23 @@ export interface CatalogModelRole {
   modelKey: string
   apiFormats?: readonly string[]
   activation?: Readonly<Record<string, unknown>>
+  /** 分配时恢复默认的字段：它们描述的是被替换掉的那个模型，例如推理强度。 */
+  reset?: readonly string[]
 }
 
 /** 模型目录与“模型配置”页共用的用途注册表。
  * 新增模型用途时在这里声明能力、绑定字段和必要的启用字段，目录行无需再加
  * 一套专用按钮或保存逻辑。 */
 export const CATALOG_MODEL_ROLES: readonly CatalogModelRole[] = [
-  { id: 'main', capability: 'chat', providerKey: 'llm_provider_ref', modelKey: 'model' },
-  { id: 'check', capability: 'chat', providerKey: 'check_provider_ref', modelKey: 'check_model', activation: { check_model_enabled: true } },
+  { id: 'main', capability: 'chat', providerKey: 'llm_provider_ref', modelKey: 'model', reset: ['model_reasoning_effort'] },
+  {
+    id: 'check',
+    capability: 'chat',
+    providerKey: 'check_provider_ref',
+    modelKey: 'check_model',
+    activation: { check_model_enabled: true },
+    reset: ['check_model_reasoning_effort'],
+  },
   {
     id: 'embedding',
     capability: 'embedding',
@@ -141,6 +150,7 @@ export async function assignCatalogModelRoleWithRollback(
     [role.providerKey]: providerId,
     [role.modelKey]: modelName,
     ...(role.activation || {}),
+    ...Object.fromEntries((role.reset || []).map(key => [key, ''])),
   }
   const previous = new Map<string, { existed: boolean; value: unknown }>()
   for (const [key, value] of Object.entries(patch)) {

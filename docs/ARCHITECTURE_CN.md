@@ -2542,6 +2542,38 @@ chunk2 = "nk>..."
 
 ---
 
+## 15.6 推理强度
+
+`src/llm/reasoning.py` 是推理强度（reasoning effort）契约的 owner：档位、按 API 格式的合法性，以及各格式的请求参数。
+
+每个聊天路由一个配置键，随「模型配置」保存，保存后重建模型运行时：
+
+```text
+llm_provider_ref        → model_reasoning_effort
+fallback1_provider_ref  → fallback1_reasoning_effort
+fallback2_provider_ref  → fallback2_reasoning_effort
+check_provider_ref      → check_model_reasoning_effort
+```
+
+档位是**显式用户设置**，随该路由的所有请求原样发送（叙事、流式、工具调用）；端点拒绝即报错。不做模型名启发式，也不协商撤掉。未设置时各路径保持既有默认，只有这些自动默认值会由 `OpenAIChatTransport` 协商：
+
+| 请求路径 | 未设置 | 显式档位 |
+| --- | --- | --- |
+| OpenAI Chat · 叙事 / 流式 | 不发送（官方 DeepSeek 端点：`thinking.type = disabled`） | `reasoning_effort` |
+| OpenAI Chat · 工具调用 | `reasoning_effort = none`（官方 DeepSeek 端点：`thinking.type = disabled`） | `reasoning_effort` |
+| OpenAI Responses | `reasoning.effort = medium` | `reasoning.effort` |
+| Anthropic Messages | 不发送 | `output_config.effort`，不改 `thinking` |
+
+- OpenAI 格式接受 `none / minimal / low / medium / high / xhigh / max`；Anthropic 原生格式只有 `low … max`，保存时明确拒绝 `none / minimal`。
+- 预设之外的值是服务商自定义标识：匹配 `[A-Za-z0-9][A-Za-z0-9._-]{0,63}` 即原样透传，由端点判定。`off` 是保留字，未设置以空值表达。
+- Anthropic 的 effort 独立于 `thinking` 生效，客户端不发送 `thinking`：部分模型拒绝 `disabled` 或 `adaptive`。
+- 磁盘上的非法档位在加载时降为未设置并告警；配置 API 对非法值明确报错。
+- `anthropic-version` 保持 `2023-06-01`：`2026-10-21` 起任何携带 `temperature` / `top_p` / `top_k` 的请求都会被拒绝，改用该版本头属于独立的契约变更。
+
+AI 玩家席位（`src/webui/services/ai_seats.py`）和连接测试自行构造请求，不在这些键的作用范围内。
+
+---
+
 # 16. LLM 返回后的 Stale Fence
 
 调用 LLM 是长耗时操作。

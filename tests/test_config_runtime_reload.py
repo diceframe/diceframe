@@ -183,6 +183,36 @@ async def test_model_request_timeout_reload_rebuilds_model_runtime(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_reasoning_effort_reload_rebuilds_model_runtime_with_the_new_levels(monkeypatch):
+    old_runtime = _runtime()
+    new_runtime = _runtime(registry=old_runtime.registry, memory_store=old_runtime.memory_store)
+    app = {"subsystems": old_runtime, "api": object(), "plugin_host": None}
+    new_api = object()
+    built_with = []
+
+    def build(*, reuse=None, config=None):
+        assert reuse is old_runtime
+        built_with.append((config["model_reasoning_effort"], config["fallback1_reasoning_effort"]))
+        return new_runtime
+
+    monkeypatch.setattr(web_server, "save_config", lambda: None)
+    monkeypatch.setattr(web_server, "_build_subsystems", build)
+    monkeypatch.setattr(web_server, "_make_api", lambda runtime, plugin_host=None, config=None, hub_client=None: new_api)
+    monkeypatch.setitem(web_server.STATE, "proxy_enabled", False)
+    monkeypatch.setitem(web_server.STATE, "proxy_url", "")
+
+    response = await web_server.api_config_post(
+        _ConfigRequest({"model_reasoning_effort": "high", "fallback1_reasoning_effort": "low"}, app)
+    )
+
+    assert response.status == 200
+    assert app["subsystems"] is new_runtime
+    assert app["api"] is new_api
+    assert old_runtime.llm_client.closed == 1
+    assert built_with == [("high", "low")]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("token_key", ["text_gen_max_tokens", "assistant_agent_max_tokens"])
 async def test_api_token_limit_reload_rebuilds_api_without_replacing_subsystems(monkeypatch, token_key):
     runtime = _runtime()

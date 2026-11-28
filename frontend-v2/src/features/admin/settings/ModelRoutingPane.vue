@@ -12,6 +12,8 @@ import { modelCapability, type ModelCapability } from '@/utils/providerModels'
 import type { AppConfig, TestResult } from '@/api/types'
 import CheckModelSettings from './CheckModelSettings.vue'
 import GenerationSettings from './GenerationSettings.vue'
+import ReasoningEffortField from './ReasoningEffortField.vue'
+import { reasoningEffortKeyFor } from './reasoningEffort'
 
 const props = defineProps<{
   supported: boolean
@@ -158,9 +160,16 @@ function setRoleProvider(
   capability: ModelCapability,
 ) {
   setString(providerKey, providerId)
+  // 推理强度属于被换掉的那个模型：换服务商即恢复默认，避免旧档位悄悄套到另一个模型上。
+  const effortKey = reasoningEffortKeyFor(String(providerKey))
+  if (effortKey) setString(effortKey, '')
   const models = savedModels(providerId, capability)
   const current = String((store.config as Record<string, unknown>)[modelKey] || '')
   if (!models.includes(current)) setString(modelKey, models[0] || '')
+}
+
+function providerApiFormat(providerId: unknown): string {
+  return String(providers.value.find(provider => provider.id === String(providerId || ''))?.api_format || 'openai')
 }
 
 function setTtsProvider(value: string) {
@@ -341,12 +350,14 @@ onBeforeUnmount(() => { if (typeof window !== 'undefined') window.removeEventLis
         <header><NIcon :component="SparklesOutline" /><div><h4>{{ t('modelRoleMain') }}</h4><p>{{ t('modelRoleMainHint') }}</p></div></header>
         <label><span>{{ t('providerName') }}</span><select :value="store.config.llm_provider_ref || ''" @change="setRoleProvider('llm_provider_ref', 'model', eventValue($event), 'chat')"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name || provider.id }}</option></select></label>
         <label><span>{{ t('model') }}</span><select :value="store.config.model || ''" :disabled="!store.config.llm_provider_ref" @change="setString('model', eventValue($event))"><option value="">{{ t('modelRoutingChooseModel') }}</option><option v-for="model in savedModels(String(store.config.llm_provider_ref || ''), 'chat')" :key="model" :value="model">{{ model }}</option></select></label>
+        <ReasoningEffortField id="settings-reasoning-effort" config-key="model_reasoning_effort" :api-format="providerApiFormat(store.config.llm_provider_ref)" :disabled="!store.config.llm_provider_ref" hint />
         <div id="settings-fallback" class="model-fallback-grid">
           <section v-for="slot in [1, 2]" :key="slot" class="model-fallback-slot">
             <header><strong>{{ t(slot === 1 ? 'fallbackSlot1' : 'fallbackSlot2') }}</strong><NSwitch :value="!!store.config[slot === 1 ? 'fallback1_enabled' : 'fallback2_enabled']" :disabled="saving" @update:value="emit('toggle-and-save', slot === 1 ? 'fallback1_enabled' : 'fallback2_enabled', $event)" /></header>
             <template v-if="!!store.config[slot === 1 ? 'fallback1_enabled' : 'fallback2_enabled']">
             <label><span>{{ t('providerName') }}</span><select :value="store.config[slot === 1 ? 'fallback1_provider_ref' : 'fallback2_provider_ref'] || ''" :disabled="!store.config[slot === 1 ? 'fallback1_enabled' : 'fallback2_enabled']" @change="setRoleProvider(slot === 1 ? 'fallback1_provider_ref' : 'fallback2_provider_ref', slot === 1 ? 'fallback1_model' : 'fallback2_model', eventValue($event), 'chat')"><option value="">{{ t('modelRoutingChooseProvider') }}</option><option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name || provider.id }}</option></select></label>
             <label><span>{{ t('model') }}</span><select :value="store.config[slot === 1 ? 'fallback1_model' : 'fallback2_model'] || ''" :disabled="!store.config[slot === 1 ? 'fallback1_enabled' : 'fallback2_enabled'] || !store.config[slot === 1 ? 'fallback1_provider_ref' : 'fallback2_provider_ref']" @change="setString(slot === 1 ? 'fallback1_model' : 'fallback2_model', eventValue($event))"><option value="">{{ t('modelRoutingChooseModel') }}</option><option v-for="model in savedModels(String(store.config[slot === 1 ? 'fallback1_provider_ref' : 'fallback2_provider_ref'] || ''), 'chat')" :key="model" :value="model">{{ model }}</option></select></label>
+            <ReasoningEffortField :config-key="slot === 1 ? 'fallback1_reasoning_effort' : 'fallback2_reasoning_effort'" :api-format="providerApiFormat(store.config[slot === 1 ? 'fallback1_provider_ref' : 'fallback2_provider_ref'])" :disabled="!store.config[slot === 1 ? 'fallback1_provider_ref' : 'fallback2_provider_ref']" />
             </template>
           </section>
         </div>

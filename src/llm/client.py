@@ -16,6 +16,7 @@ from src.llm.openai_responses import (
     OpenAIResponsesTransport, ResponsesIncompleteError, ResponsesStreamInterruptedError, responses_url,
 )
 from src.llm.openai_transport import OpenAIChatTransport
+from src.llm.reasoning import anthropic_reasoning_parameters, chat_reasoning_parameters
 from src.llm.tool_usage import ToolUsageLedger, collect_tool_usage, observed_post
 
 logger = logging.getLogger("trpg")
@@ -42,34 +43,6 @@ def strip_reasoning_from_content(text: str) -> str:
     if not cleaned:
         raise ValueError("模型未返回最终正文")
     return cleaned
-
-
-def _disable_thinking_for_deepseek_v4(provider: "ProviderConfig") -> bool:
-    """官方 DeepSeek V4 端点检测（向后兼容，内部使用）。"""
-    return (
-        provider.model_name.strip().lower().startswith("deepseek-v4")
-        and "api.deepseek.com" in provider.base_url.strip().lower()
-    )
-
-
-def _thinking_suppression_for_tool_calls(provider: "ProviderConfig") -> dict[str, Any]:
-    """返回应附加到工具调用请求体、用于关闭思考模式的参数。
-
-    优先级：
-    1. ``provider.reasoning_effort`` 显式配置 → ``{"reasoning_effort": value}``
-    2. 官方 DeepSeek V4 端点 → ``{"thinking": {"type": "disabled"}}``（已验证格式）
-    3. OpenAI 兼容格式 → ``{"reasoning_effort": "none"}``
-       transport 层（OpenAIChatTransport）会自动协商：若端点返回 400
-       unsupported_parameter，则撤掉参数重试，此后永不再发。
-    4. Anthropic 格式 → 空字典（Anthropic 有独立的 thinking 控制路径）
-    """
-    if provider.reasoning_effort is not None:
-        return {"reasoning_effort": provider.reasoning_effort}
-    if _disable_thinking_for_deepseek_v4(provider):
-        return {"thinking": {"type": "disabled"}}
-    if provider.api_format != "anthropic":
-        return {"reasoning_effort": "none"}
-    return {}
 
 
 def length_retry_budgets(base_max_tokens: int) -> tuple[int, ...]:
@@ -120,8 +93,10 @@ class ProviderConfig:
     api_format: str = "openai"
     fallback: bool = False
     reasoning_effort: str | None = None
-    """工具调用路径的思考强度覆盖（``"none"``/``"off"``/``"low"`` 等）。
-    非 None 时优先于自动检测，传入 ``reasoning_effort`` 请求参数。"""
+    """用户显式配置的推理强度（见 ``src/llm/reasoning.py``）；空值表示未设置。
+
+    非空时随该供应商的所有请求（叙事、流式、工具调用）原样发送，端点拒绝即报错。
+    未设置时各请求路径沿用既有默认，只有这些自动默认值会由 transport 协商撤掉。"""
 
 
 @dataclass
@@ -412,7 +387,7 @@ class LLMClient:
         body = transport.body(
             provider.model_name, system_prompt, user_message, max_tokens,
             json_mode=json_mode, tools=tools, force_tool_choice=force_tool_choice,
-            reasoning_effort=provider.reasoning_effort if tools else None,
+            reasoning_effort=provider.reasoning_effort,
         )
         session = await self._get_session()
         try:
@@ -462,7 +437,7 @@ class LLMClient:
             "max_tokens": max_tokens,
             "tools": tools,
         }
-        body.update(_thinking_suppression_for_tool_calls(provider))
+        body.update(chat_reasoning_parameters(provider, tool_calls=True))
         if force_tool_choice:
             body["tool_choice"] = {
                 "type": "function",
@@ -478,6 +453,7 @@ class LLMClient:
             json=body,
             headers=headers,
             timeout=self.request_timeout,
+            explicit_reasoning=bool(provider.reasoning_effort),
             **request_kwargs,
         ) as resp:
             if resp.status != 200:
@@ -556,6 +532,7 @@ class LLMClient:
             "max_tokens": max_tokens,
             "tools": anthropic_tools,
         }
+        body.update(anthropic_reasoning_parameters(provider))
         if force_tool_choice:
             body["tool_choice"] = {
                 "type": "tool",
@@ -828,8 +805,7 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        if _disable_thinking_for_deepseek_v4(provider):
-            body["thinking"] = {"type": "disabled"}
+        body.update(chat_reasoning_parameters(provider, tool_calls=False))
         # JSON 模式：DeepSeek/OpenAI 兼容的 structured output
         if json_mode:
             body["response_format"] = {"type": "json_object"}
@@ -838,6 +814,7 @@ class LLMClient:
         request_kwargs = {"proxy": self.proxy_url} if self.proxy_url else {}
         async with self._openai_transport.post(session, url, json=body, headers=headers,
                                 timeout=self.request_timeout,
+                                explicit_reasoning=bool(provider.reasoning_effort),
                                 **request_kwargs) as resp:
             if resp.status != 200:
                 error_text = await resp.text()
@@ -884,6 +861,7 @@ class LLMClient:
             ],
             "max_tokens": max_tokens,
         }
+        body.update(anthropic_reasoning_parameters(provider))
 
         session = await self._get_session()
         request_kwargs = {"proxy": self.proxy_url} if self.proxy_url else {}
@@ -966,8 +944,7 @@ class LLMClient:
             "stream": True,
             "stream_options": {"include_usage": True},
         }
-        if _disable_thinking_for_deepseek_v4(provider):
-            body["thinking"] = {"type": "disabled"}
+        body.update(chat_reasoning_parameters(provider, tool_calls=False))
         # JSON 模式：DeepSeek/OpenAI 兼容的 structured output
         if json_mode:
             body["response_format"] = {"type": "json_object"}
@@ -979,6 +956,7 @@ class LLMClient:
         total_tokens = 0
         async with self._openai_transport.post(session, url, json=body, headers=headers,
                                 timeout=self.request_timeout,
+                                explicit_reasoning=bool(provider.reasoning_effort),
                                 **request_kwargs) as resp:
             if resp.status != 200:
                 error_text = await resp.text()
@@ -1052,6 +1030,7 @@ class LLMClient:
             "max_tokens": max_tokens,
             "stream": True,
         }
+        body.update(anthropic_reasoning_parameters(provider))
 
         session = await self._get_session()
         request_kwargs = {"proxy": self.proxy_url} if self.proxy_url else {}

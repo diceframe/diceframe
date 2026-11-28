@@ -43,6 +43,7 @@ const index: SearchEntry[] = [
   entry('appearance', 'appearance', 'settings-appearance', 'Theme and backgrounds', '主题与背景', 'Color mode, skin and local backgrounds', '配色、皮肤与本地背景'),
   entry('providers', 'api', 'settings-providers', 'AI providers', 'AI 服务商', 'Shared provider endpoints and API keys', '共享服务商目录与独立密钥', ['api key', 'endpoint', '密钥']),
   entry('models', 'models', 'settings-model-routing', 'Model routing', '模型分配', 'Select a model for each capability', '为各项能力选择服务商和模型'),
+  entry('reasoning', 'models', 'settings-reasoning-effort', 'Reasoning effort', '推理强度', 'How much each chat model thinks before answering', '各聊天模型回答前的思考强度', ['reasoning', 'effort', 'thinking', '思考']),
   entry('embedding', 'models', 'settings-embedding', 'Memory and embeddings', '记忆与向量模型', 'Long-term memory retrieval', '长期记忆检索', ['memory', 'embedding']),
   entry('fallback', 'models', 'settings-fallback', 'Fallback models', '备用模型', 'Ordered model fallback', '主模型失败后的备用顺序'),
   entry('imagegen', 'models', 'settings-imagegen', 'Image generation', '图片生成', 'Automatic scene images, storyboard, prompts and quality', '自动场景图、分镜、提示词与画质', ['生图', 'image', 'storyboard']),

@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type DOMWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { i18n } from '../src/i18n'
@@ -136,6 +136,92 @@ it('makes unsaved model changes visible next to the save action', () => {
   const { wrapper } = setup({ ai_providers: [] }, true, true)
   expect(wrapper.get('.model-routing-save-state').text()).toBe('有未保存更改')
   expect(wrapper.get('.model-routing-unsaved-hint').text()).toContain('尚未生效')
+  wrapper.unmount()
+})
+
+const openAiProvider = { id: 'openai', name: 'OpenAI', base_url: 'http://localhost:8000/v1', api_format: 'openai', models: ['chat'] }
+const anthropicProvider = { id: 'claude', name: 'Claude', base_url: 'https://api.anthropic.com', api_format: 'anthropic', models: ['claude'] }
+const optionValues = (field: Pick<DOMWrapper<Element>, 'findAll'>) => field.findAll('option').map(option => option.attributes('value'))
+
+it('saves each chat route’s reasoning effort with model routing', async () => {
+  const { wrapper, store } = setup({
+    ai_providers: [openAiProvider],
+    llm_provider_ref: 'openai', model: 'chat',
+    fallback1_enabled: true, fallback1_provider_ref: 'openai', fallback1_model: 'chat',
+    check_model_enabled: true, check_provider_ref: 'openai', check_model: 'chat',
+  })
+  const efforts = wrapper.findAll('#settings-reasoning-effort, .model-fallback-slot .reasoning-effort-field, #settings-check-model .reasoning-effort-field')
+  expect(efforts).toHaveLength(3)
+  expect(efforts.every(field => (field.get('select').element as HTMLSelectElement).disabled === false)).toBe(true)
+  await efforts[0]!.get('select').setValue('high')
+  await efforts[1]!.get('select').setValue('none')
+  await efforts[2]!.get('select').setValue('max')
+  await wrapper.get('.model-routing-save').trigger('click')
+  await flushPromises()
+
+  const post = mocks.api.mock.calls.find(([, options]) => options?.method === 'POST')
+  expect(JSON.parse(post![1].body)).toMatchObject({
+    model_reasoning_effort: 'high', fallback1_reasoning_effort: 'none', check_model_reasoning_effort: 'max',
+  })
+  expect(store.config.model_reasoning_effort).toBe('high')
+  wrapper.unmount()
+})
+
+it('offers only the levels the provider format can express and resets the level when the provider changes', async () => {
+  const { wrapper, store } = setup({
+    ai_providers: [openAiProvider, anthropicProvider],
+    llm_provider_ref: 'openai', model: 'chat', model_reasoning_effort: 'high',
+  })
+  const main = wrapper.get('#settings-reasoning-effort')
+  expect(optionValues(main)).toEqual(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'custom'])
+  expect((main.get('select').element as HTMLSelectElement).value).toBe('high')
+
+  await wrapper.get('.model-role-card-main > label select').setValue('claude')
+  expect(store.config.model_reasoning_effort).toBe('')
+  expect(optionValues(main)).toEqual(['', 'low', 'medium', 'high', 'xhigh', 'max', 'custom'])
+  wrapper.unmount()
+})
+
+it('keeps reasoning effort disabled until the route has a provider', () => {
+  const { wrapper } = setup({ ai_providers: [openAiProvider], llm_provider_ref: '', model: '' })
+  const main = wrapper.get('#settings-reasoning-effort')
+  expect((main.get('select').element as HTMLSelectElement).disabled).toBe(true)
+  expect(main.text()).toContain('选择服务商后可设置')
+  wrapper.unmount()
+})
+
+it('saves a provider-specific identifier entered under Custom', async () => {
+  const { wrapper, store } = setup({
+    ai_providers: [openAiProvider], llm_provider_ref: 'openai', model: 'chat', model_reasoning_effort: 'high',
+  })
+  const main = wrapper.get('#settings-reasoning-effort')
+  await main.get('select').setValue('custom')
+  expect(store.config.model_reasoning_effort).toBe('')
+  expect(main.find('input').exists()).toBe(true)
+
+  await main.get('input').setValue('  provider-ultra  ')
+  expect(store.config.model_reasoning_effort).toBe('provider-ultra')
+  await wrapper.get('.model-routing-save').trigger('click')
+  await flushPromises()
+
+  const post = mocks.api.mock.calls.find(([, options]) => options?.method === 'POST')
+  expect(JSON.parse(post![1].body)).toMatchObject({ model_reasoning_effort: 'provider-ultra' })
+  wrapper.unmount()
+})
+
+it('shows a stored identifier as Custom and leaves custom mode when the route is reset', async () => {
+  const { wrapper, store } = setup({
+    ai_providers: [openAiProvider, anthropicProvider],
+    llm_provider_ref: 'openai', model: 'chat', model_reasoning_effort: 'provider-ultra',
+  })
+  const main = wrapper.get('#settings-reasoning-effort')
+  expect((main.get('select').element as HTMLSelectElement).value).toBe('custom')
+  expect((main.get('input').element as HTMLInputElement).value).toBe('provider-ultra')
+
+  await wrapper.get('.model-role-card-main > label select').setValue('claude')
+  expect(store.config.model_reasoning_effort).toBe('')
+  expect((main.get('select').element as HTMLSelectElement).value).toBe('')
+  expect(main.find('input').exists()).toBe(false)
   wrapper.unmount()
 })
 

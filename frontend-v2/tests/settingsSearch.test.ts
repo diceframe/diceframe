@@ -29,6 +29,8 @@ describe('settings search', () => {
     expect(searchSettings('backend', 'en')).toEqual([])
     expect(searchSettings('backend', 'en', true)[0]?.section).toBe('connection')
     expect(searchSettings('生图提示词')[0]?.target).toBe('settings-imagegen-prompts')
+    expect(searchSettings('推理强度', 'zh-CN')[0]).toMatchObject({ id: 'reasoning', section: 'models', target: 'settings-reasoning-effort' })
+    expect(searchSettings('reasoning', 'en')[0]?.label).toBe('Reasoning effort')
     expect(settingsSearchTarget('imagegen-prompts')?.target).toBe('settings-imagegen-prompts')
     expect(settingsSearchTarget('connection')).toBeUndefined()
     expect(settingsSearchTarget('#malicious-selector')).toBeUndefined()

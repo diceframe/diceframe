@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from src.ai_providers import (
+    REASONING_EFFORT_CONFIG_KEYS,
     UNSUPPORTED_AI_CONFIG_KEYS,
     is_provider_secret_key,
     normalize_ai_providers,
@@ -30,6 +31,7 @@ from src.migrations.config import (
     migrate_generation_defaults,
 )
 from src.llm.generation_options import validate_generation_options, validate_recent_rounds
+from src.llm.reasoning import REASONING_EFFORTS, normalize_reasoning_effort
 from src.game_preferences import validate_preferences
 from src.network_proxy import (
     effective_proxy_url,
@@ -180,6 +182,17 @@ class ConfigStore:
             )
         return port
 
+    def _reasoning_effort(self, raw: Any, key: str) -> str:
+        """磁盘上的推理强度：非法值降为未设置并告警，不能静默丢弃，也不能替用户猜一个档位。"""
+        try:
+            return normalize_reasoning_effort(raw)
+        except ValueError:
+            self.logger.warning(
+                "Ignoring %s=%r: reasoning effort must be empty, a preset (%s) or a custom identifier",
+                key, raw, "/".join(REASONING_EFFORTS),
+            )
+            return ""
+
     def load(self) -> RuntimeConfig:
         self.paths.data_dir.mkdir(parents=True, exist_ok=True)
         saved = self.load_json_object(self.paths.config_file, "主配置")
@@ -269,6 +282,10 @@ class ConfigStore:
             "fallback1_model": saved.get("fallback1_model", ""),
             "fallback2_enabled": saved.get("fallback2_enabled", False),
             "fallback2_model": saved.get("fallback2_model", ""),
+            **{
+                key: self._reasoning_effort(saved.get(key), key)
+                for key in REASONING_EFFORT_CONFIG_KEYS
+            },
             "tts_provider": str(saved.get("tts_provider", "browser")),
             "tts_model": str(saved.get("tts_model", "tts-1")),
             "tts_audio_format": str(saved.get("tts_audio_format", "mp3")),

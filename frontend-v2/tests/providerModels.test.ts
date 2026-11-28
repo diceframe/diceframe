@@ -90,6 +90,20 @@ describe('assignCatalogModelRoleWithRollback', () => {
     expect(isCatalogModelAssigned(config, 'embedding', 'provider-b', 'embed-b')).toBe(true)
   })
 
+  it('returns the replaced model’s reasoning effort to default and restores it when saving fails', async () => {
+    const config: Record<string, unknown> = {
+      llm_provider_ref: 'provider-a', model: 'chat-a', model_reasoning_effort: 'high',
+    }
+
+    expect(await assignCatalogModelRoleWithRollback(config, 'main', 'provider-b', 'chat-b', async () => false)).toBe(false)
+    expect(config.model_reasoning_effort).toBe('high')
+
+    expect(await assignCatalogModelRoleWithRollback(config, 'main', 'provider-b', 'chat-b', async () => true)).toBe(true)
+    expect(config.llm_provider_ref).toBe('provider-b')
+    expect(config.model).toBe('chat-b')
+    expect(config.model_reasoning_effort).toBe('')
+  })
+
   it('restores absent fields after a thrown save error', async () => {
     const config: Record<string, unknown> = {}
 

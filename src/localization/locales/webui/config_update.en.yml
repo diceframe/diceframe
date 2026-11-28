@@ -1,0 +1,8 @@
+# src/webui/config_update.py 返回给请求方的提示。
+"en":
+  reasoning_effort_invalid: "%{field} must be empty (default, not sent), one of the preset levels (%{levels}), or a custom identifier made of 1–64 letters, digits, dots, hyphens or underscores"
+  reasoning_effort_format_mismatch: "Reasoning effort %{effort} for the %{label} is not available in the Anthropic format (only %{levels}); choose another level, return to the default, or change the provider"
+  route_main: "main model"
+  route_fallback1: "first fallback model"
+  route_fallback2: "second fallback model"
+  route_check: "dedicated check model"

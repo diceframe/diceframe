@@ -45,6 +45,16 @@ MODEL_CAPABILITY_ROUTES = (
     ("imagegen_provider_ref", "imagegen_model", "image", "图像生成模型"),
 )
 
+# 聊天路由的引用键 → (该路由的推理强度键, 路由名文案键 webui.config_update.route_<路由>)。
+# 推理强度是显式用户设置，随该路由的所有请求发送；取值与各 API 格式的合法性见 src/llm/reasoning.py。
+CHAT_REASONING_EFFORT_KEYS = (
+    ("llm_provider_ref", "model_reasoning_effort", "main"),
+    ("fallback1_provider_ref", "fallback1_reasoning_effort", "fallback1"),
+    ("fallback2_provider_ref", "fallback2_reasoning_effort", "fallback2"),
+    ("check_provider_ref", "check_model_reasoning_effort", "check"),
+)
+REASONING_EFFORT_CONFIG_KEYS = frozenset(key for _, key, _ in CHAT_REASONING_EFFORT_KEYS)
+
 
 def is_valid_provider_id(provider_id: str) -> bool:
     return bool(_PROVIDER_ID_PATTERN.match(provider_id or ""))

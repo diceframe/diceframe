@@ -86,6 +86,37 @@ rejected `max_tokens` can become `max_completion_tokens` without changing its
 number, and an unsupported feature-default temperature can be omitted. User
 overrides are protected. Existing output-truncation retry policy is separate.
 
+## Reasoning effort
+
+In **Model Routing**, the main model, both fallback models and the dedicated check
+model each have a **Reasoning effort** selector. The level is sent with every
+request through that model: GM narration, summaries, character generation, DF Agent
+and check planning. Choosing another provider, or assigning a different model to
+that role from the provider catalog, resets the level to default.
+
+| Level | OpenAI-compatible provider | Anthropic-format provider |
+| --- | --- | --- |
+| Default (not sent) | Existing behavior: nothing on narration; `reasoning_effort: none` on tool calls; `medium` on Responses requests to official GPT-6.2 | Nothing sent |
+| `none`, `minimal` | `reasoning_effort` | Unsupported; saving is rejected |
+| `low`, `medium`, `high`, `xhigh`, `max` | `reasoning_effort` (`reasoning.effort` on Responses) | `output_config.effort`; the thinking switch is left alone |
+| Custom… | An identifier from your provider's docs, sent as-is in `reasoning_effort` | Sent as-is in `output_config.effort` |
+
+Which levels a model accepts is up to the model. The `none` sent automatically on
+tool calls while unset is dropped and retried when a provider explicitly rejects it;
+**a level you choose is sent as-is, and a model or provider that does not support it
+raises an error instead of silently dropping it**. When the presets do not cover an
+identifier your provider documents, choose **Custom…** and enter it (1–64 letters,
+digits, dots, hyphens or underscores). It is sent the same way; the provider decides
+whether it is valid.
+
+Thinking counts toward the output token limit (`max_tokens` on Anthropic,
+`max_completion_tokens` / `max_output_tokens` on OpenAI). Higher levels hit that
+limit sooner and trigger truncation retries; raise the output budgets in
+**Advanced generation settings** if that happens. The official DeepSeek endpoint
+is sent with thinking disabled while unset; an explicit level goes out as
+`reasoning_effort` instead (that endpoint accepts `low`, `high` and `max`; other
+levels are collapsed or rejected by the provider).
+
 ## DF Agent budget
 
 **The DF Agent area on the General page** contains visibility, launcher-position recovery and its independent

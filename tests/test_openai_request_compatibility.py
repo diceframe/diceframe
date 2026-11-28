@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 import aiohttp
 
-from src.llm.client import LLMClient, ProviderConfig
+from src.llm.client import LLMClient, LLMToolCallError, ProviderConfig
 from src.webui.services.generation import ConnectionDependencies, test_connection as connection_test
 
 
@@ -172,3 +172,67 @@ async def test_anthropic_keeps_its_native_token_contract_even_on_a_chat_shaped_e
         await client._call_anthropic(provider, "system", "input", .7, 100)
     assert len(session.calls) == 1
     assert session.calls[0]["max_tokens"] == 100
+
+
+EXAMPLE_TOOL = {"type": "function", "function": {"name": "example", "parameters": {"type": "object"}}}
+
+
+class ReasoningStrictSession:
+    """Rejects ``reasoning_effort`` outright and records every request body."""
+
+    def __init__(self):
+        self.calls = []
+
+    def post(self, url, *, json, **kwargs):
+        self.calls.append(deepcopy(json))
+        if "reasoning_effort" in json:
+            return Response({"param": "reasoning_effort", "code": "unsupported_parameter",
+                             "message": "Unsupported parameter: 'reasoning_effort' is not supported with this model."})
+        return Response()
+
+
+@pytest.mark.asyncio
+async def test_automatic_tool_default_is_negotiated_away_and_remembered():
+    session = ReasoningStrictSession()
+    client, _ = client_with_session(session)
+    result = await client.call_tools("system", "input", max_tokens=123, tools=[EXAMPLE_TOOL])
+    assert result.native_tools is True and len(result.tool_calls) == 1
+    assert session.calls[0]["reasoning_effort"] == "none"
+    assert "reasoning_effort" not in session.calls[1]
+    await client.call_tools("system", "again", max_tokens=123, tools=[EXAMPLE_TOOL])
+    assert len(session.calls) == 3
+    assert "reasoning_effort" not in session.calls[2]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path,failure", [
+    ("normal", aiohttp.ClientResponseError), ("stream", RuntimeError), ("tools", LLMToolCallError),
+])
+async def test_configured_level_is_never_silently_dropped_when_rejected(path, failure, monkeypatch):
+    monkeypatch.setattr("src.llm.client.BASE_DELAY", 0)
+    session = ReasoningStrictSession()
+    old_client, _ = client_with_session(session)
+    provider = ProviderConfig("strict", "https://synthetic.invalid/v1", "synthetic", "gpt-5", reasoning_effort="high")
+    client = LLMClient([provider], "strict")
+    client._get_session = old_client._get_session
+    with pytest.raises(failure):
+        if path == "normal":
+            await client._call_openai_compatible(provider, "system", "input", .7, 123)
+        elif path == "stream":
+            await client.call_stream("system", "input", max_tokens=123)
+        else:
+            await client.call_tools("system", "input", max_tokens=123, tools=[EXAMPLE_TOOL])
+    assert session.calls
+    assert all(call["reasoning_effort"] == "high" for call in session.calls)
+
+
+@pytest.mark.asyncio
+async def test_endpoint_memory_of_the_automatic_default_does_not_strip_a_configured_level():
+    session = ReasoningStrictSession()
+    client, provider = client_with_session(session)
+    await client.call_tools("system", "input", max_tokens=123, tools=[EXAMPLE_TOOL])
+    assert len(session.calls) == 2
+    provider.reasoning_effort = "low"
+    with pytest.raises(LLMToolCallError):
+        await client.call_tools("system", "input", max_tokens=123, tools=[EXAMPLE_TOOL])
+    assert all(call["reasoning_effort"] == "low" for call in session.calls[2:])
