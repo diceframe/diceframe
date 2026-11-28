@@ -1350,6 +1350,7 @@ export const zhCN = {
   honorsUnlockedCount: '已收藏 {count} 枚',
   honorsIssuedAt: '获得日期：{date}',
   honorsFeaturedLabel: '当前主打：{badge}',
+  honorsShowInPlay: '在游玩页佩戴主打勋章',
   honorsTokenPlaceholder: '粘贴以 DFB1. 开头的专属勋章领取码…',
   honorsActivateAction: '点亮勋章',
   honorsTokenRequired: '请先输入勋章领取码',

@@ -1350,6 +1350,7 @@ export const en = {
   honorsUnlockedCount: '{count} collected',
   honorsIssuedAt: 'Awarded: {date}',
   honorsFeaturedLabel: 'Featured: {badge}',
+  honorsShowInPlay: 'Wear featured badge in play view',
   honorsTokenPlaceholder: 'Paste your personal badge code (starts with DFB1.)...',
   honorsActivateAction: 'Unlock Badges',
   honorsTokenRequired: 'Please enter a badge code first',

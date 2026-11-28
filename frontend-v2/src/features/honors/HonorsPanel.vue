@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { NButton, NIcon, NInput, NSelect, NSpin, NTag } from 'naive-ui'
+import { NButton, NIcon, NInput, NSelect, NSpin, NSwitch, NTag } from 'naive-ui'
 import {
   OpenOutline,
   RefreshOutline,
@@ -27,10 +27,12 @@ import { useToast } from '@/composables/useToast'
 import { useConfirm } from '@/composables/useConfirm'
 import BadgeInspectModal from './BadgeInspectModal.vue'
 import { buildBadgeFrontSvg, resolveLocalizedText } from './badgeArtwork'
+import { useHonorsDisplay } from './useHonorsDisplay'
 
 const { t, locale } = useLocale()
 const toast = useToast()
 const { confirm } = useConfirm()
+const { showHonorsInPlay, setShowHonorsInPlay, syncHonorsDisplay } = useHonorsDisplay()
 
 const loading = ref(true)
 const activateBusy = ref(false)
@@ -182,6 +184,7 @@ async function loadState() {
     const state = await getHonorsState()
     catalog.value = state.catalog || []
     active.value = state.active || null
+    syncHonorsDisplay({ active: active.value, catalog: catalog.value })
     redeemUrl.value = state.redeem_url || 'https://diceframe.com/redeem'
     remoteConfigured.value = Boolean(state.remote_configured)
     tokenEditorOpen.value = !state.active
@@ -233,6 +236,7 @@ async function submitToken() {
     const res = await activateHonorsToken(value)
     catalog.value = res.catalog || catalog.value
     active.value = res.active
+    syncHonorsDisplay({ active: active.value, catalog: catalog.value })
     tokenInput.value = ''
     tokenEditorOpen.value = false
     toast.success(t('honorsActivatedToast', { name: res.active?.name || '' }))
@@ -252,6 +256,7 @@ async function handleSetFeatured(badgeId: string) {
   try {
     const res = await setFeaturedHonorBadge(badgeId)
     active.value = res.active
+    syncHonorsDisplay({ active: active.value, catalog: catalog.value })
     toast.success(t('honorsFeaturedUpdated'))
   } catch (err) {
     toast.error(errorMessage(err))
@@ -273,6 +278,7 @@ async function handleClear() {
   try {
     const res = await clearHonorsCredential()
     active.value = res.active
+    syncHonorsDisplay({ active: active.value, catalog: catalog.value })
     tokenEditorOpen.value = true
     toast.success(t('honorsClearedToast'))
     await loadWall(false)
@@ -386,6 +392,14 @@ onMounted(async () => {
                 · {{ t('honorsFeaturedLabel', { badge: badgeName(featuredBadge) }) }}
               </template>
             </p>
+            <label class="play-wear-toggle">
+              <NSwitch
+                size="small"
+                :value="showHonorsInPlay"
+                @update:value="setShowHonorsInPlay"
+              />
+              <span>{{ t('honorsShowInPlay') }}</span>
+            </label>
           </div>
         </div>
 
@@ -807,6 +821,16 @@ onMounted(async () => {
 .holder-meta {
   margin: 6px 0 0;
   font-size: 12px;
+}
+
+.play-wear-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--df-text-secondary);
+  cursor: pointer;
 }
 
 .token-box {
