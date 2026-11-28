@@ -11,7 +11,7 @@ import pytest
 from src.engine.game_instance import GameInstance
 from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
-from src.rulesets.dnd2024.monsters.catalog import MonsterCatalog
+from src.rulesets.dnd2024.monsters.catalog import MonsterCatalog, cr_value
 from src.rulesets.dnd2024.play import EncounterAccess
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 
@@ -418,12 +418,15 @@ def test_a_malformed_attack_profile_is_refused(attack: dict) -> None:
 def test_the_shipped_catalog_uses_the_structured_shape() -> None:
     catalog = MonsterCatalog(json.loads(CATALOG.read_text(encoding="utf-8")))
 
-    assert len(catalog) == 135
+    # 目录现在覆盖到 CR 4（S0-MM4）；这三条断言描述的是**已交付的 CR 0–1 档**，
+    # 所以按档过滤，而不是跟着目录总数走。
+    delivered = [entry for entry in catalog.all() if float(cr_value(entry["cr"])) <= 1]
+    assert len(delivered) == 135
     wolves = catalog.find(creature_type="beast", cr_max="1/4")
     assert wolves
     riders = 0
     multipart = 0
-    for entry in catalog.all():
+    for entry in delivered:
         for attack in entry["attacks"]:
             assert isinstance(attack["damage"], list)
             riders += len(attack.get("riders") or [])

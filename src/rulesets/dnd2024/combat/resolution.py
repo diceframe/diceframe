@@ -392,6 +392,8 @@ class CombatResolutionMixin(
                 # S0-MM3d：特质是事实声明。未知 id 已在装载期拒绝，所以这里
                 # 原样落地即可——消费者各自来查，引擎不替它们改数值。
                 "traits": deepcopy(raw.get("traits") or []),
+                # S0-MM6：反应是规则字段，快照漏掉它 = Parry 永远不可达。
+                **({"reactions": deepcopy(raw["reactions"])} if raw.get("reactions") else {}),
                 "creature_type": str(raw.get("creature_type") or ""),
                 "counterspell_dc": int(raw.get("counterspell_dc", 0) or 0),
                 # S0-MM1：stat block 的事实必须在开局时一次性落账，否则校验

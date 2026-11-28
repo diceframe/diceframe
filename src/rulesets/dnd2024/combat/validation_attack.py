@@ -503,6 +503,8 @@ class CombatValidationAttackMixin:
         if set(intent) - {
             "intent_id", "type", "expected_version", "submitted_by", "actor_id",
             "target_id", "action_id", "choice",
+            # S0-MM5：池形状按声明的顺序结算，所以 `sequence` 只属于这一形状。
+            "sequence",
         }:
             raise CombatIntentError("multiattack intent has unknown field(s)")
         action = self._declared_action(actor, intent)

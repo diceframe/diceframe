@@ -101,3 +101,62 @@ def test_a_per_day_action_reads_its_count() -> None:
 
     assert parsed is not None
     assert parsed["usage_limits"] == {"per_day": 3}
+
+
+# ---------------------------------------------------------------------------
+# 缺口账本：`unmapped` 必须与真实映射同构
+# ---------------------------------------------------------------------------
+
+def _record(**overrides) -> dict:
+    record = {
+        "key": "probe", "name": "Probe", "challenge_rating": 2,
+        "actions": [], "traits": [],
+    }
+    record.update(overrides)
+    return record
+
+
+def test_a_bonus_action_is_a_gap_because_nothing_consumes_it() -> None:
+    """`map_actions` 只处理 ACTION；Bonus/Reaction 动作整条丢掉，必须记账。"""
+
+    record = _record(actions=[{
+        "name": "Trample", "action_type": "BONUS_ACTION",
+        "desc": "Dexterity Saving Throw: DC 16. Failure: 17 (2d10 + 6) Bludgeoning damage.",
+    }])
+
+    assert IMP.unmapped(record) == ["Trample (Bonus Action)"]
+
+
+def test_a_recharge_attack_keeps_its_damage_but_loses_its_limit() -> None:
+    """攻击型 Recharge 不被 `map_attacks` 读，限次会没了——这也是一条缺口。"""
+
+    record = _record(actions=[{
+        "name": "Rock", "action_type": "ACTION",
+        "desc": "Ranged Attack Roll: +9, range 25/50 ft. Hit: 13 (2d6 + 6) Bludgeoning damage.",
+        "usage_limits": {"type": "RECHARGE_ON_ROLL", "param": 6},
+    }])
+
+    gaps = IMP.unmapped(record)
+    assert "Rock (Recharge)" in gaps
+
+
+def test_a_plain_attack_is_not_a_gap() -> None:
+    record = _record(actions=[{
+        "name": "Claw", "action_type": "ACTION",
+        "desc": "Melee Attack Roll: +5, reach 5 ft. Hit: 7 (1d8 + 3) Slashing damage.",
+    }])
+
+    assert IMP.unmapped(record) == []
+
+
+def test_an_unparsable_multiattack_is_a_gap() -> None:
+    """"... in any combination" 没有表达力：整条不解析，算缺口。"""
+
+    record = _record(actions=[
+        {"name": "Bite", "action_type": "ACTION",
+         "desc": "Melee Attack Roll: +5, reach 5 ft. Hit: 7 (1d8 + 3) Piercing damage."},
+        {"name": "Multiattack", "action_type": "ACTION",
+         "desc": "The probe makes two Bite attacks in any combination."},
+    ])
+
+    assert "Multiattack" in IMP.unmapped(record)

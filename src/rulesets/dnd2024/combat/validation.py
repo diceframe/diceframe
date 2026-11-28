@@ -64,6 +64,8 @@ from .obscurement import (
     sanctuary_zone_id,
 )
 from .primitives import (
+    validate_multiattack_pool,
+    validate_reactions,
     slot_available,
     CONDITION_CODES,
     DICE_RE,
@@ -131,6 +133,8 @@ _ENEMY_KEYS = frozenset({
     "actions",
     # S0-MM3d：特质容器。闭集 id，未知即拒绝。
     "traits",
+    # S0-MM6：反应容器。规则字段，不是内容缺口标记。
+    "reactions",
 })
 # 速度档位：walk 是唯一被移动预算读的一档，其余四档本切片只投影（阶段三接）。
 
@@ -316,13 +320,35 @@ def validate_enemy_profiles(enemies: Any) -> None:
         if len(str(enemy.get("name") or enemy_id)) > 120:
             raise CombatIntentError("enemy name is too long")
         _validate_size(enemy, f"enemy {enemy_id}")
+        validate_reactions(enemy.get("reactions"), f"enemy {enemy_id}")
         _validate_defenses(enemy, f"enemy {enemy_id}")
         _validate_senses(enemy, f"enemy {enemy_id}")
         _validate_challenge(enemy, f"enemy {enemy_id}")
         _validate_condition_immunities(enemy, f"enemy {enemy_id}")
         _normalize_speeds(enemy, f"enemy {enemy_id}")
         _validate_statblock_extras(enemy, f"enemy {enemy_id}")
-        _validate_enemy_actions(enemy, f"enemy {enemy_id}")
+        # 攻击必须先校验：Multiattack 的四种形状都要核对"引用的是本生物
+        # 真的拥有的攻击"，没有这份 id 集就只能在校验层放行、到展开时才炸。
+        attacks = enemy.get("attacks")
+        # 0 是合法形状：Giant Fly / Seahorse 在 SRD 里本来就没有攻击，
+        # 但它们是合法形态（德鲁伊能变成海马）。没有攻击的敌人只是永远
+        # 没有 attack 意图，而不是数据错误。
+        if not isinstance(attacks, list) or not 0 <= len(attacks) <= 20:
+            raise CombatIntentError("enemy requires 0 to 20 attacks")
+        attack_ids: set[str] = set()
+        for attack in attacks:
+            if not isinstance(attack, dict):
+                raise CombatIntentError("enemy attack profile is invalid")
+            _validate_attack_profile(attack, attack_ids)
+        # Multiattack 的引用可以写 id、别名或名字（`resolve_attack_ref` 就是这么
+        # 找的），所以校验用的键集必须与它一致，否则合法的别名会被误拒。
+        known_refs = set(attack_ids)
+        for attack in attacks:
+            known_refs.update(str(alias).lower() for alias in attack.get("aliases") or [])
+            name = str(attack.get("name") or "").lower()
+            if name:
+                known_refs.add(name)
+        _validate_enemy_actions(enemy, f"enemy {enemy_id}", known_refs)
         _validate_enemy_traits(enemy, f"enemy {enemy_id}")
         if not isinstance(enemy.get("creature_type", ""), str) or (enemy.get("creature_type") and enemy["creature_type"] not in CREATURE_TYPES):
             raise CombatIntentError("enemy creature_type must be a canonical creature type")
@@ -343,17 +369,6 @@ def validate_enemy_profiles(enemies: Any) -> None:
             value = enemy.get(field_name, default)
             if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
                 raise CombatIntentError(f"enemy {field_name} is invalid")
-        attacks = enemy.get("attacks")
-        # 0 是合法形状：Giant Fly / Seahorse 在 SRD 里本来就没有攻击，
-        # 但它们是合法形态（德鲁伊能变成海马）。没有攻击的敌人只是永远
-        # 没有 attack 意图，而不是数据错误。
-        if not isinstance(attacks, list) or not 0 <= len(attacks) <= 20:
-            raise CombatIntentError("enemy requires 0 to 20 attacks")
-        attack_ids: set[str] = set()
-        for attack in attacks:
-            if not isinstance(attack, dict):
-                raise CombatIntentError("enemy attack profile is invalid")
-            _validate_attack_profile(attack, attack_ids)
 
 
 def _validate_damage_formula(formula: Any) -> None:
@@ -520,13 +535,15 @@ def _validate_attack_profile(attack: dict[str, Any], attack_ids: set[str]) -> No
     attack_ids.add(attack_id)
 
 
-def _validate_multiattack_action(action: dict[str, Any], label: str) -> None:
+def _validate_multiattack_action(
+    action: dict[str, Any], label: str, attack_ids: set[str],
+) -> None:
     """S0-MM3b: repeat / combo / choice, and nothing else."""
 
-    shapes = [key for key in ("repeat", "combo", "choice") if key in action]
+    shapes = [key for key in ("repeat", "combo", "choice", "pool") if key in action]
     if len(shapes) != 1:
         raise CombatIntentError(
-            f"{label} multiattack needs exactly one of repeat, combo or choice"
+            f"{label} multiattack needs exactly one of repeat, combo, choice or pool"
         )
     shape = shapes[0]
     allowed = {"id", "name", "kind", "description", shape}
@@ -546,6 +563,10 @@ def _validate_multiattack_action(action: dict[str, Any], label: str) -> None:
                 r"[a-z0-9][a-z0-9_.-]{0,63}", attack_id
             ):
                 raise CombatIntentError(f"{label} {where} attack id is invalid")
+            if attack_id.lower() not in attack_ids:
+                raise CombatIntentError(
+                    f"{label} {where} names an attack this creature does not have"
+                )
             if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 6:
                 raise CombatIntentError(f"{label} {where} attack count is invalid")
             total += count
@@ -561,6 +582,9 @@ def _validate_multiattack_action(action: dict[str, Any], label: str) -> None:
         return
     if shape == "combo":
         parts_of(action.get("combo"), "combo")
+        return
+    if shape == "pool":
+        validate_multiattack_pool(action.get("pool"), attack_ids, label)
         return
     branches = action.get("choice")
     if not isinstance(branches, list) or not 2 <= len(branches) <= 4:
@@ -698,7 +722,9 @@ def _validate_enemy_traits(enemy: dict[str, Any], label: str) -> None:
                 )
 
 
-def _validate_enemy_actions(enemy: dict[str, Any], label: str) -> None:
+def _validate_enemy_actions(
+    enemy: dict[str, Any], label: str, attack_ids: set[str],
+) -> None:
     """S0-MM3b: the stat block's ``actions[]`` container.
 
     Only Multiattack is expressible today; a save-based action is the next
@@ -721,7 +747,7 @@ def _validate_enemy_actions(enemy: dict[str, Any], label: str) -> None:
         seen.add(action_id)
         kind = str(action.get("kind") or "")
         if kind == "multiattack":
-            _validate_multiattack_action(action, f"{label} {action_id}")
+            _validate_multiattack_action(action, f"{label} {action_id}", attack_ids)
             continue
         if kind == "save_action":
             _validate_save_action(action, f"{label} {action_id}")

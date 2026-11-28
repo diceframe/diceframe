@@ -2,7 +2,7 @@
   "schema_version": 1,
   "kind": "monster_catalog",
   "id": "srd_monsters",
-  "source_ref": "srd-5.2.1:p344-364:animals",
+  "source_ref": "srd-5.2.1:p344-364:stat-blocks",
   "automation_level": "deterministic",
   "entries": [
     {
@@ -2812,7 +2812,20 @@
           "long_range": 320
         }
       ],
-      "actions": [],
+      "actions": [
+        {
+          "id": "multiattack",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "pool": {
+            "attacks": [
+              "scimitar-0",
+              "shortbow-0"
+            ],
+            "count": 2
+          }
+        }
+      ],
       "traits": []
     },
     {
@@ -4822,7 +4835,20 @@
           "long_range": 5
         }
       ],
-      "actions": [],
+      "actions": [
+        {
+          "id": "multiattack",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "pool": {
+            "attacks": [
+              "shortsword-0",
+              "longbow-0"
+            ],
+            "count": 2
+          }
+        }
+      ],
       "traits": []
     },
     {
@@ -8051,7 +8077,14 @@
         }
       ],
       "actions": [],
-      "traits": []
+      "traits": [],
+      "reactions": [
+        {
+          "id": "parry",
+          "kind": "ac_bonus",
+          "bonus": "proficiency"
+        }
+      ]
     },
     {
       "id": "pony",
@@ -8270,6 +8303,2376 @@
           "id": "pack_tactics"
         }
       ]
+    },
+    {
+      "id": "awakened-tree",
+      "name": "Awakened Tree",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_awakened-tree",
+      "creature_type": "plant",
+      "subtype": "",
+      "size": "huge",
+      "cr": "2",
+      "xp": 450,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 59,
+      "hit_dice": "7d12+14",
+      "speeds": {
+        "walk": 20
+      },
+      "abilities": {
+        "str": 19,
+        "dex": 6,
+        "con": 15,
+        "int": 10,
+        "wis": 10,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [
+        "language:common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "slam-0",
+          "name": "Slam",
+          "attack_bonus": 6,
+          "damage": [
+            {
+              "dice": "2d8+4",
+              "type": "bludgeoning"
+            }
+          ],
+          "range": 10,
+          "long_range": 10
+        }
+      ],
+      "actions": [],
+      "traits": []
+    },
+    {
+      "id": "bandit-captain",
+      "name": "Bandit Captain",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_bandit-captain",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "2",
+      "xp": 450,
+      "proficiency_bonus": 2,
+      "armor_class": 15,
+      "hp": 52,
+      "hit_dice": "8d8+16",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 16,
+        "con": 14,
+        "int": 14,
+        "wis": 11,
+        "cha": 14
+      },
+      "saving_throws": {
+        "str": 4,
+        "dex": 5,
+        "wis": 2
+      },
+      "skills": {
+        "athletics": 4,
+        "deception": 4
+      },
+      "passive_perception": 10,
+      "languages": [
+        "language:common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "pistol-0",
+          "name": "Pistol",
+          "attack_bonus": 5,
+          "damage": [
+            {
+              "dice": "1d10+3",
+              "type": "piercing"
+            }
+          ],
+          "range": 30,
+          "long_range": 90
+        },
+        {
+          "id": "scimitar-0",
+          "name": "Scimitar",
+          "attack_bonus": 5,
+          "damage": [
+            {
+              "dice": "1d6+3",
+              "type": "slashing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "pool": {
+            "attacks": [
+              "scimitar-0",
+              "pistol-0"
+            ],
+            "count": 2
+          }
+        }
+      ],
+      "traits": [],
+      "reactions": [
+        {
+          "id": "parry",
+          "kind": "ac_bonus",
+          "bonus": "proficiency"
+        }
+      ]
+    },
+    {
+      "id": "black-dragon-wyrmling",
+      "name": "Black Dragon Wyrmling",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_black-dragon-wyrmling",
+      "creature_type": "dragon",
+      "subtype": "",
+      "size": "medium",
+      "cr": "2",
+      "xp": 450,
+      "proficiency_bonus": 2,
+      "armor_class": 17,
+      "hp": 33,
+      "hit_dice": "6d8+6",
+      "speeds": {
+        "walk": 30,
+        "fly": 60,
+        "swim": 30
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 14,
+        "con": 13,
+        "int": 10,
+        "wis": 11,
+        "cha": 13
+      },
+      "saving_throws": {
+        "dex": 4,
+        "wis": 2
+      },
+      "skills": {
+        "perception": 4,
+        "stealth": 4
+      },
+      "passive_perception": 14,
+      "languages": [
+        "language:draconic"
+      ],
+      "senses": {
+        "darkvision": 60,
+        "blindsight": 10
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 4,
+          "damage": [
+            {
+              "dice": "1d6+2",
+              "type": "slashing"
+            },
+            {
+              "dice": "1d4",
+              "type": "acid"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "save-0",
+          "name": "Acid Breath",
+          "kind": "save_action",
+          "ability": "dex",
+          "dc": 11,
+          "on_fail": [
+            {
+              "damage": [
+                {
+                  "dice": "5d8",
+                  "type": "acid"
+                }
+              ]
+            }
+          ],
+          "on_success": [
+            {
+              "damage": [
+                {
+                  "dice": "5d8",
+                  "type": "acid",
+                  "half": true
+                }
+              ]
+            }
+          ],
+          "usage_limits": {
+            "recharge": {
+              "from": 5,
+              "to": 6
+            }
+          }
+        },
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "rend-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": [
+        {
+          "id": "amphibious"
+        }
+      ]
+    },
+    {
+      "id": "gargoyle",
+      "name": "Gargoyle",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_gargoyle",
+      "creature_type": "elemental",
+      "subtype": "",
+      "size": "medium",
+      "cr": "2",
+      "xp": 450,
+      "proficiency_bonus": 2,
+      "armor_class": 15,
+      "hp": 67,
+      "hit_dice": "9d8+27",
+      "speeds": {
+        "walk": 30,
+        "fly": 60
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 11,
+        "con": 16,
+        "int": 6,
+        "wis": 11,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 4
+      },
+      "passive_perception": 10,
+      "languages": [
+        "language:primordial"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "claw-0",
+          "name": "Claw",
+          "attack_bonus": 4,
+          "damage": [
+            {
+              "dice": "2d4+2",
+              "type": "slashing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "claw-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": [
+        {
+          "id": "flyby"
+        }
+      ]
+    },
+    {
+      "id": "green-dragon-wyrmling",
+      "name": "Green Dragon Wyrmling",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_green-dragon-wyrmling",
+      "creature_type": "dragon",
+      "subtype": "",
+      "size": "medium",
+      "cr": "2",
+      "xp": 450,
+      "proficiency_bonus": 2,
+      "armor_class": 17,
+      "hp": 38,
+      "hit_dice": "7d8+7",
+      "speeds": {
+        "walk": 30,
+        "fly": 60,
+        "swim": 30
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 12,
+        "con": 13,
+        "int": 14,
+        "wis": 11,
+        "cha": 13
+      },
+      "saving_throws": {
+        "dex": 3,
+        "wis": 2
+      },
+      "skills": {
+        "perception": 4,
+        "stealth": 3
+      },
+      "passive_perception": 14,
+      "languages": [
+        "language:draconic"
+      ],
+      "senses": {
+        "darkvision": 60,
+        "blindsight": 10
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 4,
+          "damage": [
+            {
+              "dice": "1d10+2",
+              "type": "slashing"
+            },
+            {
+              "dice": "1d6",
+              "type": "poison"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "rend-0",
+            "count": 2
+          }
+        },
+        {
+          "id": "save-1",
+          "name": "Poison Breath",
+          "kind": "save_action",
+          "ability": "con",
+          "dc": 11,
+          "on_fail": [
+            {
+              "damage": [
+                {
+                  "dice": "6d6",
+                  "type": "poison"
+                }
+              ]
+            }
+          ],
+          "on_success": [
+            {
+              "damage": [
+                {
+                  "dice": "3d6",
+                  "type": "poison"
+                }
+              ]
+            }
+          ],
+          "usage_limits": {
+            "recharge": {
+              "from": 5,
+              "to": 6
+            }
+          }
+        }
+      ],
+      "traits": [
+        {
+          "id": "amphibious"
+        }
+      ]
+    },
+    {
+      "id": "grick",
+      "name": "Grick",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_grick",
+      "creature_type": "aberration",
+      "subtype": "",
+      "size": "medium",
+      "cr": "2",
+      "xp": 450,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 54,
+      "hit_dice": "12d8",
+      "speeds": {
+        "walk": 30,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 14,
+        "dex": 14,
+        "con": 11,
+        "int": 3,
+        "wis": 14,
+        "cha": 5
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 4
+      },
+      "passive_perception": 12,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "beak-0",
+          "name": "Beak",
+          "attack_bonus": 4,
+          "damage": [
+            {
+              "dice": "2d6+2",
+              "type": "piercing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        },
+        {
+          "id": "tentacles-0",
+          "name": "Tentacles",
+          "attack_bonus": 4,
+          "damage": [
+            {
+              "dice": "1d10+2",
+              "type": "slashing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5,
+          "riders": [
+            {
+              "kind": "grapple",
+              "escape_dc": 12,
+              "max_target_size": "medium"
+            }
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "combo": [
+            {
+              "attack_id": "beak-0",
+              "count": 1
+            },
+            {
+              "attack_id": "tentacles-0",
+              "count": 1
+            }
+          ]
+        }
+      ],
+      "traits": []
+    },
+    {
+      "id": "griffon",
+      "name": "Griffon",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_griffon",
+      "creature_type": "monstrosity",
+      "subtype": "",
+      "size": "large",
+      "cr": "2",
+      "xp": 450,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 59,
+      "hit_dice": "7d10+21",
+      "speeds": {
+        "walk": 30,
+        "fly": 80
+      },
+      "abilities": {
+        "str": 18,
+        "dex": 15,
+        "con": 16,
+        "int": 2,
+        "wis": 13,
+        "cha": 8
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5
+      },
+      "passive_perception": 15,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 6,
+          "damage": [
+            {
+              "dice": "1d8+4",
+              "type": "piercing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5,
+          "riders": [
+            {
+              "kind": "grapple",
+              "escape_dc": 14,
+              "max_target_size": "medium"
+            }
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "rend-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
+    },
+    {
+      "id": "hunter-shark",
+      "name": "Hunter Shark",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_hunter-shark",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "2",
+      "xp": 450,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 45,
+      "hit_dice": "6d10+12",
+      "speeds": {
+        "walk": 5,
+        "swim": 40
+      },
+      "abilities": {
+        "str": 18,
+        "dex": 14,
+        "con": 15,
+        "int": 1,
+        "wis": 10,
+        "cha": 4
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 2
+      },
+      "passive_perception": 12,
+      "languages": [],
+      "senses": {
+        "blindsight": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 6,
+          "damage": [
+            {
+              "dice": "3d6+4",
+              "type": "piercing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": [
+        {
+          "id": "water_breathing"
+        }
+      ]
+    },
+    {
+      "id": "ogre",
+      "name": "Ogre",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_ogre",
+      "creature_type": "giant",
+      "subtype": "",
+      "size": "large",
+      "cr": "2",
+      "xp": 450,
+      "proficiency_bonus": 2,
+      "armor_class": 11,
+      "hp": 68,
+      "hit_dice": "8d10+24",
+      "speeds": {
+        "walk": 40
+      },
+      "abilities": {
+        "str": 19,
+        "dex": 8,
+        "con": 16,
+        "int": 5,
+        "wis": 7,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 8,
+      "languages": [
+        "language:common",
+        "language:giant"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "greatclub-0",
+          "name": "Greatclub",
+          "attack_bonus": 6,
+          "damage": [
+            {
+              "dice": "2d8+4",
+              "type": "bludgeoning"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        },
+        {
+          "id": "javelin-0",
+          "name": "Javelin",
+          "attack_bonus": 6,
+          "damage": [
+            {
+              "dice": "2d6+4",
+              "type": "piercing"
+            }
+          ],
+          "range": 5,
+          "long_range": 120
+        }
+      ],
+      "actions": [],
+      "traits": []
+    },
+    {
+      "id": "pegasus",
+      "name": "Pegasus",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_pegasus",
+      "creature_type": "celestial",
+      "subtype": "",
+      "size": "large",
+      "cr": "2",
+      "xp": 450,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 59,
+      "hit_dice": "7d10+21",
+      "speeds": {
+        "walk": 60,
+        "fly": 90
+      },
+      "abilities": {
+        "str": 18,
+        "dex": 15,
+        "con": 16,
+        "int": 10,
+        "wis": 15,
+        "cha": 13
+      },
+      "saving_throws": {
+        "dex": 4,
+        "con": 5,
+        "wis": 4,
+        "cha": 3
+      },
+      "skills": {
+        "perception": 6
+      },
+      "passive_perception": 16,
+      "languages": [
+        "language:celestial",
+        "language:common",
+        "language:elvish",
+        "language:sylvan"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "hooves-0",
+          "name": "Hooves",
+          "attack_bonus": 6,
+          "damage": [
+            {
+              "dice": "1d6+4",
+              "type": "bludgeoning"
+            },
+            {
+              "dice": "2d4",
+              "type": "radiant"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        }
+      ],
+      "actions": [],
+      "traits": []
+    },
+    {
+      "id": "polar-bear",
+      "name": "Polar Bear",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_polar-bear",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "large",
+      "cr": "2",
+      "xp": 450,
+      "proficiency_bonus": 2,
+      "armor_class": 12,
+      "hp": 42,
+      "hit_dice": "5d10+15",
+      "speeds": {
+        "walk": 40,
+        "swim": 40
+      },
+      "abilities": {
+        "str": 20,
+        "dex": 14,
+        "con": 16,
+        "int": 2,
+        "wis": 13,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5,
+        "stealth": 4
+      },
+      "passive_perception": 15,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 7,
+          "damage": [
+            {
+              "dice": "1d8+5",
+              "type": "slashing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "rend-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
+    },
+    {
+      "id": "ankylosaurus",
+      "name": "Ankylosaurus",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_ankylosaurus",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "huge",
+      "cr": "3",
+      "xp": 700,
+      "proficiency_bonus": 2,
+      "armor_class": 15,
+      "hp": 68,
+      "hit_dice": "8d12+16",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 19,
+        "dex": 11,
+        "con": 15,
+        "int": 2,
+        "wis": 12,
+        "cha": 5
+      },
+      "saving_throws": {
+        "str": 6
+      },
+      "skills": {},
+      "passive_perception": 11,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "tail-0",
+          "name": "Tail",
+          "attack_bonus": 6,
+          "damage": [
+            {
+              "dice": "1d10+4",
+              "type": "bludgeoning"
+            }
+          ],
+          "range": 10,
+          "long_range": 10,
+          "riders": [
+            {
+              "kind": "prone",
+              "max_target_size": "huge"
+            }
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "tail-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
+    },
+    {
+      "id": "blue-dragon-wyrmling",
+      "name": "Blue Dragon Wyrmling",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_blue-dragon-wyrmling",
+      "creature_type": "dragon",
+      "subtype": "",
+      "size": "medium",
+      "cr": "3",
+      "xp": 700,
+      "proficiency_bonus": 2,
+      "armor_class": 17,
+      "hp": 65,
+      "hit_dice": "10d8+20",
+      "speeds": {
+        "walk": 30,
+        "fly": 60,
+        "burrow": 15
+      },
+      "abilities": {
+        "str": 17,
+        "dex": 10,
+        "con": 15,
+        "int": 12,
+        "wis": 11,
+        "cha": 15
+      },
+      "saving_throws": {
+        "dex": 2,
+        "wis": 2
+      },
+      "skills": {
+        "perception": 4,
+        "stealth": 2
+      },
+      "passive_perception": 14,
+      "languages": [
+        "language:draconic"
+      ],
+      "senses": {
+        "darkvision": 60,
+        "blindsight": 10
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 5,
+          "damage": [
+            {
+              "dice": "1d10+3",
+              "type": "slashing"
+            },
+            {
+              "dice": "1d6",
+              "type": "lightning"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "save-0",
+          "name": "Lightning Breath",
+          "kind": "save_action",
+          "ability": "dex",
+          "dc": 12,
+          "on_fail": [
+            {
+              "damage": [
+                {
+                  "dice": "6d6",
+                  "type": "lightning"
+                }
+              ]
+            }
+          ],
+          "on_success": [
+            {
+              "damage": [
+                {
+                  "dice": "3d6",
+                  "type": "lightning"
+                }
+              ]
+            }
+          ],
+          "usage_limits": {
+            "recharge": {
+              "from": 5,
+              "to": 6
+            }
+          }
+        },
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "rend-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
+    },
+    {
+      "id": "hell-hound",
+      "name": "Hell Hound",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_hell-hound",
+      "creature_type": "fiend",
+      "subtype": "",
+      "size": "medium",
+      "cr": "3",
+      "xp": 700,
+      "proficiency_bonus": 2,
+      "armor_class": 15,
+      "hp": 58,
+      "hit_dice": "9d8+18",
+      "speeds": {
+        "walk": 50
+      },
+      "abilities": {
+        "str": 17,
+        "dex": 12,
+        "con": 14,
+        "int": 6,
+        "wis": 13,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5
+      },
+      "passive_perception": 15,
+      "languages": [
+        "language:infernal"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 5,
+          "damage": [
+            {
+              "dice": "1d8+3",
+              "type": "piercing"
+            },
+            {
+              "dice": "1d6",
+              "type": "fire"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "save-0",
+          "name": "Fire Breath",
+          "kind": "save_action",
+          "ability": "dex",
+          "dc": 12,
+          "on_fail": [
+            {
+              "damage": [
+                {
+                  "dice": "5d6",
+                  "type": "fire"
+                }
+              ]
+            }
+          ],
+          "on_success": [
+            {
+              "damage": [
+                {
+                  "dice": "5d6",
+                  "type": "fire",
+                  "half": true
+                }
+              ]
+            }
+          ],
+          "usage_limits": {
+            "recharge": {
+              "from": 5,
+              "to": 6
+            }
+          }
+        },
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "bite-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": [
+        {
+          "id": "pack_tactics"
+        }
+      ]
+    },
+    {
+      "id": "knight",
+      "name": "Knight",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_knight",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "3",
+      "xp": 700,
+      "proficiency_bonus": 2,
+      "armor_class": 18,
+      "hp": 52,
+      "hit_dice": "8d8+16",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 16,
+        "dex": 11,
+        "con": 14,
+        "int": 11,
+        "wis": 11,
+        "cha": 15
+      },
+      "saving_throws": {
+        "con": 4,
+        "wis": 2
+      },
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [
+        "language:common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "greatsword-0",
+          "name": "Greatsword",
+          "attack_bonus": 5,
+          "damage": [
+            {
+              "dice": "2d6+3",
+              "type": "slashing"
+            },
+            {
+              "dice": "1d8",
+              "type": "radiant"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        },
+        {
+          "id": "heavy-crossbow-0",
+          "name": "Heavy Crossbow",
+          "attack_bonus": 2,
+          "damage": [
+            {
+              "dice": "2d10",
+              "type": "piercing"
+            },
+            {
+              "dice": "1d8",
+              "type": "radiant"
+            }
+          ],
+          "range": 100,
+          "long_range": 400
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "pool": {
+            "attacks": [
+              "greatsword-0",
+              "heavy-crossbow-0"
+            ],
+            "count": 2
+          }
+        }
+      ],
+      "traits": [],
+      "reactions": [
+        {
+          "id": "parry",
+          "kind": "ac_bonus",
+          "bonus": "proficiency"
+        }
+      ]
+    },
+    {
+      "id": "manticore",
+      "name": "Manticore",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_manticore",
+      "creature_type": "monstrosity",
+      "subtype": "",
+      "size": "large",
+      "cr": "3",
+      "xp": 700,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 68,
+      "hit_dice": "8d10+24",
+      "speeds": {
+        "walk": 30,
+        "fly": 50
+      },
+      "abilities": {
+        "str": 17,
+        "dex": 16,
+        "con": 17,
+        "int": 7,
+        "wis": 12,
+        "cha": 8
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 11,
+      "languages": [
+        "language:common"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 5,
+          "damage": [
+            {
+              "dice": "1d8+3",
+              "type": "slashing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        },
+        {
+          "id": "tail-spike-0",
+          "name": "Tail Spike",
+          "attack_bonus": 5,
+          "damage": [
+            {
+              "dice": "1d8+3",
+              "type": "piercing"
+            }
+          ],
+          "range": 100,
+          "long_range": 200
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "pool": {
+            "attacks": [
+              "rend-0",
+              "tail-spike-0"
+            ],
+            "count": 3
+          }
+        }
+      ],
+      "traits": []
+    },
+    {
+      "id": "owlbear",
+      "name": "Owlbear",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_owlbear",
+      "creature_type": "monstrosity",
+      "subtype": "",
+      "size": "large",
+      "cr": "3",
+      "xp": 700,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 59,
+      "hit_dice": "7d10+21",
+      "speeds": {
+        "walk": 40,
+        "climb": 40
+      },
+      "abilities": {
+        "str": 20,
+        "dex": 12,
+        "con": 17,
+        "int": 3,
+        "wis": 12,
+        "cha": 7
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5
+      },
+      "passive_perception": 15,
+      "languages": [],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 7,
+          "damage": [
+            {
+              "dice": "2d8+5",
+              "type": "slashing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "rend-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
+    },
+    {
+      "id": "warrior-veteran",
+      "name": "Warrior Veteran",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_warrior-veteran",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "3",
+      "xp": 700,
+      "proficiency_bonus": 2,
+      "armor_class": 17,
+      "hp": 65,
+      "hit_dice": "10d8+20",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 16,
+        "dex": 13,
+        "con": 14,
+        "int": 10,
+        "wis": 11,
+        "cha": 10
+      },
+      "saving_throws": {},
+      "skills": {
+        "athletics": 5,
+        "perception": 2
+      },
+      "passive_perception": 12,
+      "languages": [
+        "language:common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "greatsword-0",
+          "name": "Greatsword",
+          "attack_bonus": 5,
+          "damage": [
+            {
+              "dice": "2d6+3",
+              "type": "slashing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        },
+        {
+          "id": "heavy-crossbow-0",
+          "name": "Heavy Crossbow",
+          "attack_bonus": 3,
+          "damage": [
+            {
+              "dice": "2d10+1",
+              "type": "piercing"
+            }
+          ],
+          "range": 100,
+          "long_range": 400
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "choice": [
+            {
+              "label": "greatsword",
+              "parts": [
+                {
+                  "attack_id": "greatsword-0",
+                  "count": 2
+                }
+              ]
+            },
+            {
+              "label": "heavy_crossbow",
+              "parts": [
+                {
+                  "attack_id": "heavy-crossbow-0",
+                  "count": 2
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "traits": [],
+      "reactions": [
+        {
+          "id": "parry",
+          "kind": "ac_bonus",
+          "bonus": "proficiency"
+        }
+      ]
+    },
+    {
+      "id": "winter-wolf",
+      "name": "Winter Wolf",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_winter-wolf",
+      "creature_type": "monstrosity",
+      "subtype": "",
+      "size": "large",
+      "cr": "3",
+      "xp": 700,
+      "proficiency_bonus": 2,
+      "armor_class": 13,
+      "hp": 75,
+      "hit_dice": "10d10+20",
+      "speeds": {
+        "walk": 50
+      },
+      "abilities": {
+        "str": 18,
+        "dex": 13,
+        "con": 14,
+        "int": 7,
+        "wis": 12,
+        "cha": 8
+      },
+      "saving_throws": {},
+      "skills": {
+        "perception": 5,
+        "stealth": 5
+      },
+      "passive_perception": 15,
+      "languages": [
+        "language:common",
+        "language:giant"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 6,
+          "damage": [
+            {
+              "dice": "2d6+4",
+              "type": "piercing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5,
+          "riders": [
+            {
+              "kind": "prone",
+              "max_target_size": "large"
+            }
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "id": "save-0",
+          "name": "Cold Breath",
+          "kind": "save_action",
+          "ability": "con",
+          "dc": 12,
+          "on_fail": [
+            {
+              "damage": [
+                {
+                  "dice": "4d8",
+                  "type": "cold"
+                }
+              ]
+            }
+          ],
+          "on_success": [
+            {
+              "damage": [
+                {
+                  "dice": "2d8",
+                  "type": "cold"
+                }
+              ]
+            }
+          ],
+          "usage_limits": {
+            "recharge": {
+              "from": 5,
+              "to": 6
+            }
+          }
+        }
+      ],
+      "traits": [
+        {
+          "id": "pack_tactics"
+        }
+      ]
+    },
+    {
+      "id": "archelon",
+      "name": "Archelon",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_archelon",
+      "creature_type": "beast",
+      "subtype": "",
+      "size": "huge",
+      "cr": "4",
+      "xp": 1100,
+      "proficiency_bonus": 2,
+      "armor_class": 17,
+      "hp": 90,
+      "hit_dice": "12d12+12",
+      "speeds": {
+        "walk": 20,
+        "swim": 80
+      },
+      "abilities": {
+        "str": 18,
+        "dex": 16,
+        "con": 13,
+        "int": 4,
+        "wis": 14,
+        "cha": 6
+      },
+      "saving_throws": {},
+      "skills": {
+        "stealth": 5
+      },
+      "passive_perception": 12,
+      "languages": [],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "bite-0",
+          "name": "Bite",
+          "attack_bonus": 6,
+          "damage": [
+            {
+              "dice": "3d6+4",
+              "type": "piercing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "bite-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": [
+        {
+          "id": "amphibious"
+        }
+      ]
+    },
+    {
+      "id": "guard-captain",
+      "name": "Guard Captain",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_guard-captain",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "4",
+      "xp": 1100,
+      "proficiency_bonus": 2,
+      "armor_class": 18,
+      "hp": 75,
+      "hit_dice": "10d8+30",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 18,
+        "dex": 14,
+        "con": 16,
+        "int": 12,
+        "wis": 14,
+        "cha": 13
+      },
+      "saving_throws": {},
+      "skills": {
+        "athletics": 6,
+        "perception": 4
+      },
+      "passive_perception": 14,
+      "languages": [
+        "language:common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "javelin-0",
+          "name": "Javelin",
+          "attack_bonus": 6,
+          "damage": [
+            {
+              "dice": "3d6+4",
+              "type": "piercing"
+            }
+          ],
+          "range": 5,
+          "long_range": 120
+        },
+        {
+          "id": "longsword-0",
+          "name": "Longsword",
+          "attack_bonus": 6,
+          "damage": [
+            {
+              "dice": "2d10+4",
+              "type": "slashing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "pool": {
+            "attacks": [
+              "javelin-0",
+              "longsword-0"
+            ],
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
+    },
+    {
+      "id": "red-dragon-wyrmling",
+      "name": "Red Dragon Wyrmling",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_red-dragon-wyrmling",
+      "creature_type": "dragon",
+      "subtype": "",
+      "size": "medium",
+      "cr": "4",
+      "xp": 1100,
+      "proficiency_bonus": 2,
+      "armor_class": 17,
+      "hp": 75,
+      "hit_dice": "10d8+30",
+      "speeds": {
+        "walk": 30,
+        "fly": 60,
+        "climb": 30
+      },
+      "abilities": {
+        "str": 19,
+        "dex": 10,
+        "con": 17,
+        "int": 12,
+        "wis": 11,
+        "cha": 15
+      },
+      "saving_throws": {
+        "dex": 2,
+        "wis": 2
+      },
+      "skills": {
+        "perception": 4,
+        "stealth": 2
+      },
+      "passive_perception": 14,
+      "languages": [
+        "language:draconic"
+      ],
+      "senses": {
+        "darkvision": 60,
+        "blindsight": 10
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 6,
+          "damage": [
+            {
+              "dice": "1d10+4",
+              "type": "slashing"
+            },
+            {
+              "dice": "1d6",
+              "type": "fire"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "save-0",
+          "name": "Fire Breath",
+          "kind": "save_action",
+          "ability": "dex",
+          "dc": 13,
+          "on_fail": [
+            {
+              "damage": [
+                {
+                  "dice": "7d6",
+                  "type": "fire"
+                }
+              ]
+            }
+          ],
+          "on_success": [
+            {
+              "damage": [
+                {
+                  "dice": "7d6",
+                  "type": "fire",
+                  "half": true
+                }
+              ]
+            }
+          ],
+          "usage_limits": {
+            "recharge": {
+              "from": 5,
+              "to": 6
+            }
+          }
+        },
+        {
+          "id": "multiattack-0",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "repeat": {
+            "attack_id": "rend-0",
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
     }
-  ]
+  ],
+  "incomplete": {
+    "ape": [
+      "Rock (Recharge)"
+    ],
+    "blink-dog": [
+      "Teleport (Recharge 4-6) (Bonus Action)"
+    ],
+    "blood-hawk": [
+      "Beak (rider)"
+    ],
+    "boar": [
+      "Bloodied Fury",
+      "Gore (rider)"
+    ],
+    "brass-dragon-wyrmling": [
+      "Sleep Breath"
+    ],
+    "bugbear-warrior": [
+      "Abduct",
+      "Light Hammer (rider)"
+    ],
+    "cat": [
+      "Jumper"
+    ],
+    "cockatrice": [
+      "Petrifying Bite (rider)"
+    ],
+    "commoner": [
+      "Training"
+    ],
+    "copper-dragon-wyrmling": [
+      "Slowing Breath"
+    ],
+    "crocodile": [
+      "Hold Breath"
+    ],
+    "darkmantle": [
+      "Crush (rider)",
+      "Darkness Aura"
+    ],
+    "death-dog": [
+      "Bite (rider)"
+    ],
+    "deer": [
+      "Agile"
+    ],
+    "dretch": [
+      "Fetid Cloud"
+    ],
+    "dryad": [
+      "Multiattack",
+      "Speak with Beasts and Plants",
+      "Spellcasting",
+      "Tree Stride (Bonus Action)"
+    ],
+    "dust-mephit": [
+      "Blinding Breath",
+      "Death Burst",
+      "Sleep"
+    ],
+    "elk": [
+      "Ram (rider)"
+    ],
+    "frog": [
+      "Standing Leap"
+    ],
+    "ghoul": [
+      "Claw (rider)"
+    ],
+    "giant-fire-beetle": [
+      "Illumination"
+    ],
+    "giant-frog": [
+      "Standing Leap",
+      "Swallow"
+    ],
+    "giant-goat": [
+      "Ram (rider)"
+    ],
+    "giant-hyena": [
+      "Rampage (Bonus Action)"
+    ],
+    "giant-octopus": [
+      "Ink Cloud (Reaction)"
+    ],
+    "giant-owl": [
+      "Spellcasting"
+    ],
+    "giant-seahorse": [
+      "Bubble Dash (Bonus Action)"
+    ],
+    "giant-spider": [
+      "Web",
+      "Web Walker"
+    ],
+    "giant-toad": [
+      "Standing Leap",
+      "Swallow"
+    ],
+    "gnoll-warrior": [
+      "Rampage (Bonus Action)"
+    ],
+    "goblin-boss": [
+      "Nimble Escape (Bonus Action)",
+      "Redirect Attack (Reaction)"
+    ],
+    "goblin-minion": [
+      "Nimble Escape (Bonus Action)"
+    ],
+    "goblin-warrior": [
+      "Nimble Escape (Bonus Action)"
+    ],
+    "gray-ooze": [
+      "Corrosive Form"
+    ],
+    "harpy": [
+      "Luring Song"
+    ],
+    "homunculus": [
+      "Bite (rider)",
+      "Telepathic Bond"
+    ],
+    "ice-mephit": [
+      "Death Burst",
+      "Fog Cloud"
+    ],
+    "imp": [
+      "Invisibility",
+      "Shape-Shift"
+    ],
+    "kobold-warrior": [
+      "Sunlight Sensitivity"
+    ],
+    "lemure": [
+      "Hellish Restoration"
+    ],
+    "lion": [
+      "Multiattack",
+      "Roar",
+      "Running Leap"
+    ],
+    "magma-mephit": [
+      "Death Burst"
+    ],
+    "magmin": [
+      "Death Burst",
+      "Ignited Illumination (Bonus Action)",
+      "Touch (rider)"
+    ],
+    "merfolk-skirmisher": [
+      "Ocean Spear (rider)"
+    ],
+    "mule": [
+      "Beast of Burden"
+    ],
+    "octopus": [
+      "Compression",
+      "Ink Cloud (Reaction)"
+    ],
+    "panther": [
+      "Nimble Escape (Bonus Action)"
+    ],
+    "pirate": [
+      "Enthralling Panache",
+      "Multiattack"
+    ],
+    "priest-acolyte": [
+      "Divine Aid (Bonus Action)",
+      "Spellcasting"
+    ],
+    "pseudodragon": [
+      "Sting"
+    ],
+    "quasit": [
+      "Invisibility",
+      "Scare",
+      "Shape-Shift"
+    ],
+    "rat": [
+      "Agile"
+    ],
+    "raven": [
+      "Mimicry"
+    ],
+    "rust-monster": [
+      "Antennae",
+      "Destroy Metal",
+      "Iron Scent",
+      "Multiattack",
+      "Reflexive Antennae (Reaction)"
+    ],
+    "sahuagin-warrior": [
+      "Aquatic Charge (Bonus Action)",
+      "Blood Frenzy",
+      "Limited Amphibiousness",
+      "Shark Telepathy"
+    ],
+    "satyr": [
+      "Hooves (rider)"
+    ],
+    "seahorse": [
+      "Bubble Dash"
+    ],
+    "shadow": [
+      "Shadow Stealth (Bonus Action)",
+      "Sunlight Weakness"
+    ],
+    "shrieker-fungus": [
+      "Shriek (Reaction)"
+    ],
+    "specter": [
+      "Incorporeal Movement",
+      "Life Drain (rider)",
+      "Sunlight Sensitivity"
+    ],
+    "sphinx-of-wonder": [
+      "Burst of Ingenuity (Reaction)"
+    ],
+    "spider": [
+      "Web Walker"
+    ],
+    "sprite": [
+      "Heart Sight",
+      "Invisibility"
+    ],
+    "spy": [
+      "Cunning Action (Bonus Action)"
+    ],
+    "steam-mephit": [
+      "Blurred Form",
+      "Death Burst"
+    ],
+    "stirge": [
+      "Proboscis (rider)"
+    ],
+    "swarm-of-bats": [
+      "Swarm"
+    ],
+    "swarm-of-insects": [
+      "Swarm"
+    ],
+    "swarm-of-piranhas": [
+      "Swarm"
+    ],
+    "swarm-of-rats": [
+      "Swarm"
+    ],
+    "swarm-of-ravens": [
+      "Cacophony",
+      "Swarm"
+    ],
+    "tiger": [
+      "Nimble Escape (Bonus Action)"
+    ],
+    "troll-limb": [
+      "Regeneration",
+      "Troll Spawn"
+    ],
+    "warhorse": [
+      "Hooves (rider)"
+    ],
+    "warhorse-skeleton": [
+      "Hooves (rider)"
+    ],
+    "zombie": [
+      "Undead Fortitude"
+    ]
+  },
+  "skipped": {
+    "allosaurus": [
+      "Claws (rider)"
+    ],
+    "animated-rug-of-smothering": [
+      "Smother (rider)"
+    ],
+    "ankheg": [
+      "Tunneler"
+    ],
+    "azer-sentinel": [
+      "Fire Aura",
+      "Illumination"
+    ],
+    "basilisk": [
+      "Petrifying Gaze (Recharge 4-6) (Bonus Action)"
+    ],
+    "bearded-devil": [
+      "Infernal Glaive (rider)"
+    ],
+    "berserker": [
+      "Bloodied Frenzy"
+    ],
+    "black-pudding": [
+      "Corrosive Form"
+    ],
+    "bronze-dragon-wyrmling": [
+      "Repulsion Breath"
+    ],
+    "bugbear-stalker": [
+      "Abduct",
+      "Morningstar (rider)",
+      "Quick Grapple (Bonus Action)"
+    ],
+    "centaur-trooper": [
+      "Trampling Charge (Bonus Action)"
+    ],
+    "chuul": [
+      "Multiattack",
+      "Paralyzing Tentacles",
+      "Sense Magic"
+    ],
+    "couatl": [
+      "Bite (rider)",
+      "Divine Aid (Bonus Action)",
+      "Shielded Mind",
+      "Spellcasting"
+    ],
+    "cultist-fanatic": [
+      "Spellcasting",
+      "Spiritual Weapon (Bonus Action)"
+    ],
+    "doppelganger": [
+      "Multiattack",
+      "Read Thoughts",
+      "Shape-Shift (Bonus Action)",
+      "Unsettling Visage"
+    ],
+    "druid": [
+      "Spellcasting"
+    ],
+    "elephant": [
+      "Gore (rider)",
+      "Trample (Bonus Action)"
+    ],
+    "ettercap": [
+      "Reel (Bonus Action)",
+      "Web Strand",
+      "Web Walker"
+    ],
+    "ettin": [
+      "Morningstar (rider)"
+    ],
+    "gelatinous-cube": [
+      "Engulf",
+      "Ooze Cube",
+      "Transparent"
+    ],
+    "ghast": [
+      "Stench"
+    ],
+    "ghost": [
+      "Ethereal Sight",
+      "Etherealness",
+      "Incorporeal Movement",
+      "Possession"
+    ],
+    "giant-boar": [
+      "Bloodied Fury",
+      "Gore (rider)"
+    ],
+    "giant-constrictor-snake": [
+      "Multiattack"
+    ],
+    "giant-elk": [
+      "Ram (rider)"
+    ],
+    "giant-scorpion": [
+      "Multiattack"
+    ],
+    "gibbering-mouther": [
+      "Aberrant Ground",
+      "Gibbering"
+    ],
+    "gold-dragon-wyrmling": [
+      "Weakening Breath"
+    ],
+    "green-hag": [
+      "Mimicry",
+      "Spellcasting"
+    ],
+    "hippopotamus": [
+      "Hold Breath"
+    ],
+    "hobgoblin-captain": [
+      "Aura of Authority"
+    ],
+    "incubus": [
+      "Nightmare (Bonus Action)",
+      "Restless Touch (rider)",
+      "Spellcasting",
+      "Succubus Form"
+    ],
+    "killer-whale": [
+      "Hold Breath"
+    ],
+    "lamia": [
+      "Leap (Bonus Action)",
+      "Multiattack",
+      "Spellcasting"
+    ],
+    "merrow": [
+      "Bite (rider)",
+      "Harpoon (rider)",
+      "Multiattack"
+    ],
+    "mimic": [
+      "Adhesive (Object Form Only)",
+      "Bite (rider)",
+      "Shape-Shift (Bonus Action)"
+    ],
+    "minotaur-of-baphomet": [
+      "Gore (Recharge)",
+      "Gore (rider)"
+    ],
+    "minotaur-skeleton": [
+      "Gore (rider)"
+    ],
+    "mummy": [
+      "Dreadful Glare",
+      "Multiattack",
+      "Rotting Fist (rider)"
+    ],
+    "nightmare": [
+      "Confer Fire Resistance",
+      "Ethereal Stride",
+      "Illumination"
+    ],
+    "ochre-jelly": [
+      "Split (Reaction)"
+    ],
+    "ogre-zombie": [
+      "Undead Fortitude"
+    ],
+    "phase-spider": [
+      "Ethereal Jaunt (Bonus Action)",
+      "Ethereal Sight",
+      "Web Walker"
+    ],
+    "plesiosaurus": [
+      "Hold Breath"
+    ],
+    "priest": [
+      "Divine Aid (Bonus Action)",
+      "Spellcasting"
+    ],
+    "rhinoceros": [
+      "Gore (rider)"
+    ],
+    "saber-toothed-tiger": [
+      "Nimble Escape (Bonus Action)",
+      "Running Leap"
+    ],
+    "sea-hag": [
+      "Illusory Appearance",
+      "Vile Appearance"
+    ],
+    "silver-dragon-wyrmling": [
+      "Paralyzing Breath"
+    ],
+    "succubus": [
+      "Charm",
+      "Incubus Form",
+      "Multiattack",
+      "Shape-Shift (Bonus Action)"
+    ],
+    "swarm-of-crawling-claws": [
+      "Swarm"
+    ],
+    "swarm-of-venomous-snakes": [
+      "Swarm"
+    ],
+    "tough-boss": [
+      "Warhammer (rider)"
+    ],
+    "vampire-familiar": [
+      "Deathless Agility (Bonus Action)",
+      "Umbral Dagger (rider)",
+      "Vampiric Connection"
+    ],
+    "wereboar": [
+      "Gore (rider)",
+      "Multiattack",
+      "Shape-Shift (Bonus Action)",
+      "Tusk (rider)"
+    ],
+    "wererat": [
+      "Bite  (rider)",
+      "Multiattack",
+      "Shape-Shift (Bonus Action)"
+    ],
+    "weretiger": [
+      "Bite (rider)",
+      "Multiattack",
+      "Prowl (Tiger or Hybrid Form Only) (Bonus Action)",
+      "Shape-Shift (Bonus Action)"
+    ],
+    "werewolf": [
+      "Bite (rider)",
+      "Multiattack",
+      "Shape-Shift (Bonus Action)"
+    ],
+    "white-dragon-wyrmling": [
+      "Ice Walk"
+    ],
+    "wight": [
+      "Multiattack",
+      "Sunlight Sensitivity"
+    ],
+    "will-o-wisp": [
+      "Consume Life (Bonus Action)",
+      "Ephemeral",
+      "Illumination",
+      "Incorporeal Movement",
+      "Vanish (Bonus Action)"
+    ]
+  }
 }

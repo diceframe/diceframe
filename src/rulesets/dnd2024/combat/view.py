@@ -143,6 +143,8 @@ class CombatViewMixin:
                 # S0-MM3d：特质随 stat block 投影，消费者（豁免优势、集群
                 # 战术、传奇抗性、飞行经过）都从这一份读，不各自解析文本。
                 "traits": deepcopy(enemy.get("traits") or []),
+                **({"reactions": deepcopy(enemy["reactions"])}
+                   if enemy.get("reactions") else {}),
                 "conditions": deepcopy(enemy.get("conditions") or {}),
                 "death_saves": {}, "equipment_refs": [], "spell_refs": [], "slots": {},
                 "weapon_category_refs": [],
@@ -940,12 +942,54 @@ class CombatViewMixin:
         named another monster's attack would silently borrow its numbers.
         """
 
+        if intent.get("sequence") is not None and not isinstance(action.get("pool"), dict):
+            # 只有池形状按顺序结算。别的形状带 sequence 说明客户端对形状理解
+            # 错了，静默忽略会让它以为顺序生效了。
+            raise CombatIntentError("only a pool multiattack takes a sequence")
         raw_parts: list[dict[str, Any]] = []
         repeat = action.get("repeat")
         if isinstance(repeat, dict):
             raw_parts = [repeat]
         elif isinstance(action.get("combo"), list):
             raw_parts = list(action["combo"])
+        elif isinstance(action.get("pool"), dict):
+            # S0-MM5：池由意图里的 `sequence` 决定顺序与次数。校验放在这里，
+            # 因为校验与结算都从同一个展开点读它——两处各写一遍必然分叉。
+            pool = action["pool"]
+            allowed = [str(item) for item in pool.get("attacks") or []]
+            sequence = intent.get("sequence")
+            if not isinstance(sequence, list) or not sequence:
+                raise CombatIntentError("this multiattack needs a sequence of attacks")
+            wanted = int(pool.get("count") or 0)
+            if len(sequence) != wanted:
+                raise CombatIntentError(
+                    f"this multiattack needs exactly {wanted} attacks in its sequence"
+                )
+            picked = [str(item) for item in sequence]
+            for attack_id in picked:
+                if attack_id not in allowed:
+                    raise CombatIntentError(
+                        "this multiattack sequence names an attack outside the pool"
+                    )
+            for row in pool.get("at_least") or []:
+                need = int(row.get("count") or 0)
+                if picked.count(str(row.get("attack_id"))) < need:
+                    raise CombatIntentError(
+                        "this multiattack sequence does not meet the at_least rule"
+                    )
+            for row in pool.get("at_most") or []:
+                room = int(row.get("count") or 0)
+                if picked.count(str(row.get("attack_id"))) > room:
+                    raise CombatIntentError(
+                        "this multiattack sequence breaks the at_most rule"
+                    )
+            # 相邻同名合并成 (attack, count)：下游只认识"打几次什么"。
+            raw_parts = []
+            for attack_id in picked:
+                if raw_parts and raw_parts[-1]["attack_id"] == attack_id:
+                    raw_parts[-1]["count"] += 1
+                else:
+                    raw_parts.append({"attack_id": attack_id, "count": 1})
         elif isinstance(action.get("choice"), list):
             wanted = str(intent.get("choice") or "")
             branch = next(

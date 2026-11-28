@@ -23,6 +23,7 @@ from src.rulesets.dnd2024.combat.resolution import (
 )
 from src.rulesets.dnd2024.combat.validation import validate_enemy_profiles
 from src.rulesets.dnd2024.monsters import MonsterCatalog, MonsterCatalogError
+from src.rulesets.dnd2024.monsters.catalog import cr_value
 
 CATALOG = Path(
     "templates/rulesets/dnd2024_srd/content/monster_catalogs/srd_monsters.json"
@@ -49,12 +50,60 @@ def _entry(catalog: MonsterCatalog, monster_id: str) -> dict:
 # 1–4. 目录可加载、可查询
 # ---------------------------------------------------------------------------
 
-def test_every_cr0_1_creature_loads_through_the_combat_contract(catalog) -> None:
-    """CR 0–1 across *all* types: 135 entries, not only the 70 beasts."""
+def test_every_creature_loads_through_the_combat_contract(catalog) -> None:
+    """CR 0–1 across all types, then S0-MM4's CR 2–4 without a single gap."""
 
-    assert len(catalog) == 135
-    kinds = {entry["creature_type"] for entry in catalog.all()}
+    entries = list(catalog.all())
+    # 135 只 CR 0–1（S0-MM2 的全部）+ 22 只 CR 2–4（S0-MM4/MM5/MM6 只收完整的）。
+    assert len(entries) == 157
+    low = [entry for entry in entries if float(cr_value(entry["cr"])) <= 1]
+    high = [entry for entry in entries if float(cr_value(entry["cr"])) > 1]
+    assert len(low) == 135, "既有 CR 0–1 条目一条都不许少"
+    assert high and all(float(cr_value(entry["cr"])) <= 4 for entry in high)
+    kinds = {entry["creature_type"] for entry in entries}
     assert {"beast", "humanoid", "undead", "fiend", "dragon"} <= kinds
+
+
+def entries_of(catalog: MonsterCatalog) -> list[dict]:
+    return list(catalog.all())
+
+
+def test_the_gap_tables_name_what_each_entry_is_missing(catalog) -> None:
+    """A creature that shipped without an ability must say so, not stay silent."""
+
+    incomplete = catalog.incomplete()
+    skipped = catalog.skipped()
+    assert incomplete and skipped
+    # 已入库的洞：CR 0–1 里有名字的、带一次小能力的条目。
+    assert any("Bloodied Fury" in reasons for reasons in incomplete.values())
+    # 没入库的洞：被丢掉的整条能力决定了"这只不进库"。
+    assert any("Spellcasting" in reasons for reasons in skipped.values())
+    # 两张表互斥，且与 entries 的关系是结构性的，不是数字巧合。
+    ids = {entry["id"] for entry in entries_of(catalog)}
+    assert not set(incomplete) & set(skipped)
+    assert set(incomplete) <= ids
+    assert not set(skipped) & ids
+    # 已入库却有缺口的只可能是已交付那一档：更高的档位一律不收半成品。
+    for entry_id in incomplete:
+        assert float(cr_value(catalog.get(entry_id)["cr"])) <= 1
+
+
+def test_a_catalog_without_gap_tables_still_loads() -> None:
+    """旧目录没有这两个键：加载照旧，两张表退化为空。"""
+
+    catalog = MonsterCatalog({
+        "entries": [{
+            "id": "probe", "name": "Probe", "source_ref": "probe:1",
+            "cr": "1/8", "size": "small", "armor_class": 12, "hp": 5,
+            "speeds": {"walk": 30},
+            "abilities": {"str": 10, "dex": 10, "con": 10, "int": 10, "wis": 10, "cha": 10},
+            # 0 次攻击是合法的（`test_a_form_without_attacks_is_valid` 已钉住），
+            # 但字段必须存在。
+            "attacks": [],
+        }],
+    })
+    assert catalog.incomplete() == {}
+    assert catalog.skipped() == {}
 
 
 def test_tiny_animals_with_flat_damage_are_expressible(catalog) -> None:

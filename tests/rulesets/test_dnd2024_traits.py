@@ -11,7 +11,7 @@ import pytest
 from src.engine.game_instance import GameInstance
 from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
-from src.rulesets.dnd2024.monsters.catalog import MonsterCatalog
+from src.rulesets.dnd2024.monsters.catalog import MonsterCatalog, cr_value
 from src.rulesets.dnd2024.play import EncounterAccess
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 
@@ -320,7 +320,8 @@ def test_the_catalog_traits_all_load_and_are_known() -> None:
     catalog = MonsterCatalog(json.loads(CATALOG.read_text(encoding="utf-8")))
 
     counts: dict[str, int] = {}
-    for entry in catalog.all():
+    # 只数 CR 0–1 档：这组计数是那一档的覆盖快照，CR 2–4 另计（S0-MM4）。
+    for entry in [row for row in catalog.all() if float(cr_value(row["cr"])) <= 1]:
         for trait in entry.get("traits") or []:
             counts[trait["id"]] = counts.get(trait["id"], 0) + 1
     # 八个闭集 id 里，CR 0-1 覆盖到七个（没有传奇生物在这一段）。

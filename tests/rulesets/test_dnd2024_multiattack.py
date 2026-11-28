@@ -11,7 +11,7 @@ import pytest
 from src.engine.game_instance import GameInstance
 from src.engine.modules import ruleset_runtime
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
-from src.rulesets.dnd2024.monsters.catalog import MonsterCatalog
+from src.rulesets.dnd2024.monsters.catalog import MonsterCatalog, cr_value
 from src.rulesets.dnd2024.play import EncounterAccess
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 
@@ -61,7 +61,8 @@ def _attack(attack_id: str, name: str, *, bonus: int = 30, damage: str = "1d6", 
     }
 
 
-def _enemy(attacks: list[dict], actions: list[dict], *, action_id: str = "multiattack-0") -> dict:
+def _enemy(attacks: list[dict], actions: list[dict], *, action_id: str = "multiattack-0",
+           reaction: bool = False) -> dict:
     return {
         "id": "beast-1", "name": "Beast", "hp": 60, "armor_class": 12,
         "speed": 40, "position": 5, "initiative_modifier": 10, "size": "large",
@@ -69,6 +70,9 @@ def _enemy(attacks: list[dict], actions: list[dict], *, action_id: str = "multia
         "saving_throws": {},
         "attacks": attacks,
         "actions": actions,
+        "proficiency_bonus": 2,
+        **({"reactions": [{"id": "parry", "kind": "ac_bonus", "bonus": "proficiency"}]}
+           if reaction else {}),
     }
 
 
@@ -247,22 +251,15 @@ def test_choice_without_a_branch_is_refused() -> None:
 
 def test_an_unknown_attack_reference_is_refused() -> None:
     engine, instance = _instance()
-    _start(engine, instance, _enemy(
-        [_attack("claw-0", "Claw")],
-        [{"id": "multiattack-0", "name": "Multiattack", "kind": "multiattack",
-          "repeat": {"attack_id": "ghost-0", "count": 2}}],
-    ))
-    intent = {
-        "intent_id": "multi-1", "type": "multiattack",
-        "expected_version": int(ruleset_runtime.state(instance)["version"]),
-        "submitted_by": "gm", "actor_id": "enemy:beast-1",
-        "target_id": "player:gm", "action_id": "multiattack-0",
-    }
 
-    resolved = engine.resolve_intent(instance, intent, SequenceRng([15]))
-
-    assert resolved["ok"] is False
-    assert "does not have" in str(resolved["error"])
+    # S0-MM5 修复后，引用在**加载期**就核对：一只"招牌动作永远打不出来"的怪
+    # 不该进战斗，更不该进目录。
+    with pytest.raises(Exception):
+        _start(engine, instance, _enemy(
+            [_attack("claw-0", "Claw")],
+            [{"id": "multiattack-0", "name": "Multiattack", "kind": "multiattack",
+              "repeat": {"attack_id": "ghost-0", "count": 2}}],
+        ))
 
 
 # 5. 别名限定在生物内 --------------------------------------------------------
@@ -379,7 +376,8 @@ def test_the_catalog_multiattacks_all_resolve() -> None:
 
     repeats = 0
     combos = 0
-    for entry in catalog.all():
+    # 同 `test_dnd2024_attack_riders`：这批数字描述 CR 0–1 档，目录已扩到 CR 4。
+    for entry in [row for row in catalog.all() if float(cr_value(row["cr"])) <= 1]:
         attack_ids = {attack["id"] for attack in entry["attacks"]}
         for action in entry.get("actions") or []:
             parts = [action["repeat"]] if "repeat" in action else action.get("combo") or []
@@ -490,3 +488,89 @@ def test_roll_ids_stay_unique_inside_one_multiattack() -> None:
         if row["kind"] == "attack"
     ]
     assert len(roll_ids) == len(set(roll_ids)) == 3
+
+
+# ---------------------------------------------------------------------------
+# S0-MM5：组合池（"in any combination"）
+# ---------------------------------------------------------------------------
+
+def _pool_enemy() -> dict:
+    return _enemy(
+        [_attack("bite-0", "Bite"), _attack("claw-0", "Claw")],
+        [{"id": "multiattack-0", "name": "Multiattack", "kind": "multiattack",
+          "pool": {"attacks": ["bite-0", "claw-0"], "count": 2}}],
+    )
+
+
+def _pool(engine, instance, *, sequence, rolls) -> list[dict]:
+    intent = {
+        "intent_id": "pool-1", "type": "multiattack",
+        "expected_version": int(ruleset_runtime.state(instance)["version"]),
+        "submitted_by": "gm", "actor_id": "enemy:beast-1",
+        "target_id": "player:gm", "action_id": "multiattack-0",
+        "sequence": list(sequence),
+    }
+    return _events(engine, instance, intent, SequenceRng(rolls))
+
+
+def test_a_pool_resolves_in_the_declared_order() -> None:
+    engine, instance = _instance()
+    _start(engine, instance, _pool_enemy())
+
+    events = _pool(engine, instance, sequence=["claw-0", "bite-0"], rolls=[15, 2, 15, 2])
+
+    hits = _hits(events)
+    assert len(hits) == 2, "池声明两次就该掷两次"
+    # 顺序即结算顺序：第一次用的是 Claw。
+    assert hits[0]["damage_type"] == "piercing"
+
+
+@pytest.mark.parametrize("sequence", [["bite-0"], ["bite-0", "tail-0"],
+                                     ["bite-0", "claw-0", "bite-0"]])
+def test_a_pool_refuses_a_sequence_it_cannot_honour(sequence) -> None:
+    engine, instance = _instance()
+    _start(engine, instance, _pool_enemy())
+
+    with pytest.raises(Exception):
+        _pool(engine, instance, sequence=sequence, rolls=[15, 2] * 3)
+
+
+def test_a_pool_naming_an_attack_it_does_not_have_is_refused() -> None:
+    engine, instance = _instance()
+    bad = _enemy(
+        [_attack("bite-0", "Bite")],
+        [{"id": "multiattack-0", "name": "Multiattack", "kind": "multiattack",
+          "pool": {"attacks": ["bite-0", "tail-0"], "count": 2}}],
+    )
+
+    # 引用在加载期核对：池里有不存在的攻击，这只怪不该进战斗。
+    with pytest.raises(Exception):
+        _start(engine, instance, bad)
+    del engine, instance
+
+
+# ---------------------------------------------------------------------------
+# S0-MM6：Parry（怪物反应）
+# ---------------------------------------------------------------------------
+
+def test_a_reaction_kind_the_engine_cannot_settle_is_refused() -> None:
+    engine, instance = _instance()
+    bad = _enemy([_attack("bite-0", "Bite")], [])
+    bad["reactions"] = [{"id": "parry", "kind": "reroll", "bonus": "proficiency"}]
+
+    with pytest.raises(Exception):
+        _start(engine, instance, bad)
+
+
+def test_parry_is_offered_for_melee_only_and_reaches_the_view() -> None:
+    """两个不变量：条目能到 actor view（否则永远不可达），且只管近战。"""
+
+    engine, instance = _instance()
+    enemy = _enemy([_attack("bite-0", "Bite")], [])
+    enemy["reactions"] = [{"id": "parry", "kind": "ac_bonus", "bonus": "proficiency"}]
+    _start(engine, instance, enemy)
+    combat = ruleset_runtime.state(instance)["combat"]
+    view = engine._actor_view(instance, combat, "enemy:beast-1")
+
+    assert engine._enemy_reaction_choices(combat, view), "reactions 必须在视图里"
+    assert engine._enemy_reaction_choices(combat, view, ranged=True) == [], "远程不能 Parry"

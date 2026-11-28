@@ -1091,3 +1091,100 @@ def test_cleave_resets_on_next_turn_and_filters_out_of_reach_or_untrained() -> N
         row for row in wiz_engine.available_intents(wiz_instance, "gm")
         if row.get("type") == "cleave"
     ]
+
+
+# --------------------------------------------------------------------------
+# S0-MM6：Parry 的端到端（窗口 → 应答 → 改判）
+# --------------------------------------------------------------------------
+
+
+def _parry_guard(*, hp: int = 40, ac: int = 12) -> dict:
+    """一只带 Parry 的敌人，先手让给玩家（initiative -20）。"""
+
+    return {
+        "id": "goblin-1", "name": "Bandit Captain", "hp": hp, "armor_class": ac,
+        "size": "medium", "speed": 30, "position": 5, "initiative_modifier": -20,
+        "proficiency_bonus": 2,
+        "abilities": {"str": 14, "dex": 14, "con": 12, "int": 10, "wis": 10, "cha": 10},
+        "saving_throws": {},
+        "attacks": [{
+            "id": "scimitar", "name": "Scimitar", "attack_bonus": 4,
+            "damage": [{"dice": "1d6+2", "type": "slashing"}], "range": 5, "long_range": 5,
+        }],
+        "reactions": [{"id": "parry", "kind": "ac_bonus", "bonus": "proficiency"}],
+    }
+
+
+def _parry_window(instance, *, rolls):
+    engine, instance = instance
+    return _apply(engine, instance, {
+        "intent_id": f"hit-{ruleset_runtime.state(instance)['version']}",
+        "type": "attack",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm", "target_id": "enemy:goblin-1",
+        "weapon_ref": "item:club",
+    }, rolls)
+
+
+def test_parry_offers_a_window_and_can_turn_the_hit_into_a_miss() -> None:
+    """AC 12 + 熟练 2 = 14：攻击总值 13 命中 12，Parry 之后不再命中。"""
+
+    _, engine, instance = _instance(
+        equipment=["item:club"], enemies=[_parry_guard(ac=13)],
+    )
+
+    # 木棒 +5：骰 8 → 13，恰好命中 AC 13；Parry 后 AC 15 → 不再命中。
+    events = _parry_window((engine, instance), rolls=[8, 2])
+
+    pending = [e for e in events if e["type"] == "dnd2024.decision.pending"]
+    assert pending, events
+    decision = pending[0]
+    assert "parry" in decision["options"]
+
+    resolved = _apply(engine, instance, {
+        "intent_id": "parry-1", "type": "decision.resolve",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "decision_id": decision["decision_id"], "option": "parry",
+    })
+
+    defense = next(e for e in resolved if e["type"] == "check.resolved"
+                   and e.get("kind") == "reaction_defense")
+    assert defense["target"] == decision["armor_class"] + 2
+    assert defense["success"] is False
+    # 改判落空：这一击没有造成任何伤害，反应也花掉了。
+    assert not [e for e in resolved
+                if e["type"] == "resource.changed" and e.get("resource") == "hp"]
+    assert ruleset_runtime.state(instance)["combat"]["reactions"]["enemy:goblin-1"] == 0
+
+
+def test_declining_parry_keeps_the_damage() -> None:
+    _, engine, instance = _instance(equipment=["item:club"], enemies=[_parry_guard()])
+
+    events = _parry_window((engine, instance), rolls=[11, 2])
+    decision = next(e for e in events if e["type"] == "dnd2024.decision.pending")
+
+    resolved = _apply(engine, instance, {
+        "intent_id": "parry-2", "type": "decision.resolve",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "decision_id": decision["decision_id"], "option": "decline",
+    })
+
+    assert [e for e in resolved
+            if e["type"] == "resource.changed" and e.get("resource") == "hp"]
+    assert ruleset_runtime.state(instance)["combat"]["reactions"]["enemy:goblin-1"] == 1
+
+
+def test_parry_is_not_offered_against_a_ranged_attack() -> None:
+    _, engine, instance = _instance(
+        equipment=["item:shortbow"], enemies=[_parry_guard()],
+    )
+
+    events = _apply(engine, instance, {
+        "intent_id": "shot-1", "type": "attack",
+        "expected_version": ruleset_runtime.state(instance)["version"],
+        "submitted_by": "gm", "actor_id": "player:gm", "target_id": "enemy:goblin-1",
+        "weapon_ref": "item:shortbow",
+    }, [11, 2])
+
+    pending = [e for e in events if e["type"] == "dnd2024.decision.pending"]
+    assert not pending or "parry" not in pending[0]["options"]
