@@ -150,4 +150,28 @@ describe('HonorsPanel', () => {
     expect(wrapper.text()).toContain('星界旅人')
     expect(wrapper.text()).toContain('NO. DF-0042')
   })
+
+  it('guides users to the website when pasting an event redemption code (DF-...)', async () => {
+    i18n.global.locale.value = 'zh-CN'
+    const wrapper = mount(HonorsPanel, {
+      global: {
+        plugins: [i18n],
+        stubs: {
+          NModal: { template: '<div v-if="show" class="modal-stub"><slot /></div>', props: ['show'] },
+        },
+      },
+    })
+    await flushPromises()
+
+    const input = wrapper.find('input')
+    await input.setValue('DF-CUXP-A87D-M9NY')
+    expect(wrapper.find('.redeem-code-alert').exists()).toBe(true)
+    expect(wrapper.find('.redeem-code-alert').text()).toContain('DFB1.')
+
+    const activateBtn = wrapper.findAll('button').find(btn => btn.text().includes('点亮'))
+    await activateBtn!.trigger('click')
+    await flushPromises()
+
+    expect(honorsApiMocks.activateHonorsToken).not.toHaveBeenCalled()
+  })
 })

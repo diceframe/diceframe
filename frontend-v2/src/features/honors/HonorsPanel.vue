@@ -213,10 +213,19 @@ async function loadWall(refresh = false) {
   }
 }
 
+const looksLikeRedeemCode = computed(() => {
+  const trimmed = tokenInput.value.trim()
+  return /^DF-/i.test(trimmed) && !/^DFB1\./i.test(trimmed)
+})
+
 async function submitToken() {
   const value = tokenInput.value.trim()
   if (!value) {
     toast.warning(t('honorsTokenRequired'))
+    return
+  }
+  if (looksLikeRedeemCode.value) {
+    toast.warning(t('honorsRedeemCodeHint'))
     return
   }
   activateBusy.value = true
@@ -393,6 +402,18 @@ onMounted(async () => {
               <template #icon><NIcon :component="SparklesOutline" /></template>
               {{ t('honorsActivateAction') }}
             </NButton>
+          </div>
+          <div v-if="looksLikeRedeemCode" class="redeem-code-alert" role="status">
+            <span>{{ t('honorsRedeemCodeHint') }}</span>
+            <a
+              class="redeem-link"
+              :href="redeemUrl"
+              target="_blank"
+              rel="noopener"
+            >
+              {{ t('honorsGoRedeem') }}
+              <NIcon :component="OpenOutline" :size="13" />
+            </a>
           </div>
           <div class="token-hints">
             <span class="muted">{{ t('honorsOfflineVerifyHint') }}</span>
@@ -811,6 +832,21 @@ onMounted(async () => {
   gap: 12px;
   flex-wrap: wrap;
   font-size: 12px;
+}
+
+.redeem-code-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  border-radius: var(--df-radius-sm, 8px);
+  border: 1px solid color-mix(in srgb, var(--df-accent) 46%, transparent);
+  background: color-mix(in srgb, var(--df-accent) 12%, transparent);
+  color: var(--df-text);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .redeem-link {
