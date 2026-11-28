@@ -64,6 +64,10 @@
 | GAP-50 | 坠落没有触发通道 | `src/rulesets/dnd2024/` 下 `falling` / `fall_damage` 零命中；决策 kind 只有 `hit_reaction_spell` 与 `counter_spell`，没有"你正在坠落"这种窗口；也没有让 GM 声明一次坠落的意图类型 | Monk 4 的 Slow Fall 无法实现——规则要求它在**真实坠落**时提供 Reaction，F11 任务书 §7 停止条件第 3 条因此成立；任何"GM 直接扣血 + 施加 Prone"的替代都不满足反应窗口 | 需要新意图类型 + 新决策 kind，属 GAP-43 的 kind 注册表之后（先定 window registry 再开口子） | 已登记 |
 
 
+| GAP-58 | 巨武器战斗的伤害骰作用域无法选择 | `srd_advancement_feats.json` 的 `great_weapon_fighting` 只声明 `two_handed_melee_damage_die_minimum`；`combat/hit_resolution.py::_hit_settlement_events` 只对主骰取下限，附伤分别走 `hit_riders` / `extra_damage_parts` / `statblock_riders` 与独立的法术伤害事件（至圣斩），不在同一 AST | 网团常见的「所有附伤都吃 GWF」房规无法表达；若只在主骰路径加，会得到"hex/偷袭吃了、hit rider 与至圣斩没吃"的半成品，比不支持更难发现 | 专长域 L2（前置：把攻击附伤统一到一个 settlement 上下文，scope 才可安全扩成 `attack_dice`） | 未开工（本期按贤者谏言只落武器骰） |
+
+> 编号说明：专长域的 `GAP-50`~`57` 记在 `FD1`/`FD6` 文档对应的工作树里，与本文件已有的 50 号段并行占用；本文件从 58 起编，合并时按内容去重，不按号段拼接。
+
 ## 按片索引
 
 - **S0-F10A**：GAP-14（本片内解决）、GAP-13（后续抽象）
