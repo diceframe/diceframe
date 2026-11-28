@@ -38,7 +38,7 @@ COMBAT_CATALOG = (
 GAP_MATRIX = ROOT / "docs/internal/design/SPELL_GAP_MATRIX.md"
 
 #: 已落地的法术条数。只许涨。丢了实现或改了 id 都会让 ``--check`` 变红。
-BASELINE_EFFECTS = 51
+BASELINE_EFFECTS = 50
 
 #: 环阶分档，与玩家实际体验对应：1–3 环是 1–5 级团的主战场。
 TIERS = ("0", "1-3", "4-5", "6-9")

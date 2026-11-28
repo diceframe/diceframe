@@ -42,6 +42,8 @@
 - **直填桶**：照已有 14 个 `mode`（`spell_attack` / `saving_throw` / `buff` / `healing` / `temp_hp` / `teleport` / `dispel` / `revive` / `stabilize` / `reaction_defense` / `triggered_damage` / `automatic_damage` / `debuff` / `obscuring_zone`）改数字即可。
 - **治疗/复活**：`healing` / `revive` / `stabilize` 三个 mode 已有，缺的是把法术接上去（`aid` 的 temp HP 走 P4 已有的 `temp_hp`）。
 
+**第一批实测：8 条候选里只有 2 条真的能零新增**（`ray_of_sickness`、`dissonant_whispers`）。"直填"这个词容易让人以为整个桶都能直接写，实际逐条看下来，一半以上缺的是一个小小的机制（检定劣势、二选一条件、自身回血、每回合重复）。后续切片按「先逐条核 `srd_spell_descriptions.json`，再决定这一批几条」来切，不要按桶的面积估工期。
+
 验收：新增的每条法术都有端到端用例；`--check` 的基线跟着上调。
 
 ### S2 · counterspell（补 P7 的洞）

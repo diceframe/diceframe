@@ -1,10 +1,11 @@
-"""S0-SP1: the three direct-fill spells, end to end.
+"""S0-SP1: the direct-fill spells that survived a rules check, end to end.
 
-`dissonant_whispers`, `ray_of_sickness` and `phantasmal_force` are the three
-entries from the 1-2 ring direct-fill list whose whole resolution is one roll,
-one damage, maybe one condition. The task spec lists eight; the other five each
-need something the effect schema does not have and were moved out rather than
-forced in.
+`ray_of_sickness` and `dissonant_whispers` are what is left of the eight in the
+task spec after checking each against `srd_spell_descriptions.json`. Six of them
+were dropped: five lack a mechanism the effect schema does not have, and
+`phantasmal_force` was a rules error on my part -- the spell has no initial
+damage at all, only 2d8 per turn from the phantasm, so it needs the repeat
+machinery rather than the one-roll path.
 
 The cases assert numbers and conditions, not the presence of a field: the point
 of the slice is that these spells are playable. `dissonant_whispers` is
@@ -132,14 +133,16 @@ def _cast_event(events: list[dict]) -> dict:
 def test_ray_of_sickness_deals_poison_and_poisons_the_target() -> None:
     _, engine, instance = _combat()
 
+    # d20=15（+4 打 AC 12，命中且**不暴击**——20 会翻倍伤害骰）、2d8 用满 5+5。
     events = _cast(
         engine, instance, "spell:ray_of_sickness", 1, ["enemy:goblin-1"],
-        rolls=[20, 5, 5],
+        rolls=[15, 5, 5],
     )
 
     damage = _damage_of(events, "enemy:goblin-1")
     assert damage, "命中必须产生伤害事件"
     assert damage[0]["damage_type"] == "poison"
+    assert damage[0]["amount"] == 10
     conditions = ruleset_runtime.state(instance)["combat"]["enemies"]["goblin-1"].get(
         "conditions",
     ) or {}
@@ -157,25 +160,9 @@ def test_ray_of_sickness_misses_when_the_attack_roll_is_low() -> None:
     assert not _damage_of(events, "enemy:goblin-1")
 
 
-def test_phantasmal_force_deals_psychic_and_concentrates() -> None:
-    _, engine, instance = _combat()
-
-    events = _cast(
-        engine, instance, "spell:phantasmal_force", 2, ["enemy:goblin-1"],
-        rolls=[1, 4],
-    )
-
-    damage = _damage_of(events, "enemy:goblin-1")
-    assert damage, "豁免失败必须产生伤害事件"
-    assert damage[0]["damage_type"] == "psychic"
-    # 专注记在 canonical 的 spellcasting.class 上，事件里没有这个字段。
-    canonical = instance.get_character_sheet("gm")["ruleset_character"]
-    assert canonical["spellcasting"]["class"]["concentration"] is not None
-
-
 def test_the_sheet_survives_a_round_trip_after_the_cast() -> None:
     runtime, engine, instance = _combat()
-    _cast(engine, instance, "spell:ray_of_sickness", 1, ["enemy:goblin-1"], rolls=[20, 5, 5])
+    _cast(engine, instance, "spell:ray_of_sickness", 1, ["enemy:goblin-1"], rolls=[15, 5, 5])
 
     sheet = instance.get_character_sheet("gm")
 
@@ -200,3 +187,5 @@ def test_dissonant_whispers_is_declared_as_a_wisdom_save() -> None:
     assert effect["save"] == "wis"
     assert effect["damage"] == "3d6"
     assert effect["damage_type"] == "psychic"
+    # 原文 "On a successful save, the target takes half as much damage only."
+    assert effect["half_on_success"] is True

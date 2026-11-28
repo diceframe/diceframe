@@ -33,6 +33,11 @@
 | 7 | `blindness_deafness` | 2 | p113 | `saving_throw` | 体质豁免，失败目盲或耳聋（施法者选一） | `condition: blinded` / `deafened`（已有） |
 | 8 | `phantasmal_force` | 2 | p151 | `saving_throw` | 智力豁免，失败 1d6 心灵，且每回合可再豁免 | 持续伤害在本片**只结算首轮**，见 §4 |
 
+> **§9 修订（2026-11-28，执行后）**：§2 的八条是开工前凭记忆写的，其中三条规则是错的
+> （`ray_of_sickness` 的中毒时长与升环、`dissonant_whispers` 的半伤、`phantasmal_force` 的伤害形状）。
+> 实际只落地 2 条，逐条差异与原因见 `S0SP1_EXECUTION_REPORT_2026-11-27.md` §2–§3。
+> **写内容前先读 `srd_spell_descriptions.json`**，不要用记忆。
+
 ## 3. 为什么是这 8 条
 
 其余 16 条在"1–2 环直填桶"里，但**直填的意思是数据，不是勉强**。判断标准是一条：
