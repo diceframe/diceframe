@@ -225,10 +225,17 @@ def _app() -> web.Application:
     async def legacy_text(_request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
 
+    async def internal_code(_request: web.Request) -> web.Response:
+        # 编排层旧写法：只有 `code`。客户端只读 error_code，所以出口必须提升它。
+        return web.json_response(
+            {"ok": False, "code": "GM_ONLY", "error": "只有 GM 可以确认"}, status=403,
+        )
+
     app = web.Application(middlewares=[request_language_middleware, error_code_middleware])
     app.router.add_get("/no-wording", declared_without_wording)
     app.router.add_get("/wording", declared_with_wording)
     app.router.add_get("/legacy", legacy_text)
+    app.router.add_get("/internal-code", internal_code)
     return app
 
 
@@ -257,3 +264,15 @@ async def test_an_unregistered_declared_code_keeps_its_rendered_text() -> None:
         japanese = await (await client.get("/wording", headers={"Accept-Language": "ja"})).json()
         # 没有 ja 目录时后退英文，但 code 始终在，前端 apiErrors 才能接手。
         assert japanese["error_code"] == english["error_code"]
+
+@pytest.mark.asyncio
+async def test_an_internal_code_reaches_the_client() -> None:
+    """`{"code": ...}` alone is invisible to `apiErrors.<code>`; the exit promotes it."""
+
+    async with TestClient(TestServer(_app())) as client:
+        for language in ("zh-CN", "en", "ja"):
+            body = await (await client.get("/internal-code", headers={"Accept-Language": language})).json()
+            assert body["error_code"] == "GM_ONLY", language
+            assert body["code"] == "GM_ONLY", language
+            # 没有同码译文时原文不动，也不会被换成别的语言。
+            assert body["error"] == "只有 GM 可以确认", language

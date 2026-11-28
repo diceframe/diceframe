@@ -1,11 +1,14 @@
 """巡检仍未声明错误码的接口错误（ADR-0015 §4）。
 
-后端错误码必须在抛出点声明；用 ``"error": t("webui.services.x.y")`` 直接返回
-文案的调用点在请求语言不是中文时既丢失 code，又只能回退英文，社区译文
-（``apiErrors.<code>``）永远命中不了。
+后端错误码必须在抛出点声明。只把文案直接当结果返回的调用点（``"error": t("webui.services.x.y")``
+或裸字面量）没有 code，前端 `apiErrors.<code>` 永远命中不了，社区译文无法接手。
 
 这不是一次清账，而是 ratchet：基线记录每个文件当前的未声明数量，只允许减少。
 迁移一处就把该文件基线调低（``--write-baseline`` 会按当前代码重算）。
+
+量的是「抛出点有没有声明 code」，不是「响应是否已经坏了」：响应出口会为冻结表里的
+存量文案补码，也会把旧 ``code`` 键提升为 ``error_code``，所以每一条都是尚未按新契约写的
+调用点，而不是一个用户可见的缺陷。
 
 用法::
 
@@ -32,7 +35,11 @@ _DIRECT_ERROR = re.compile(r'["\']error["\']\s*:\s*')
 
 
 def undeclared_sites(path: Path) -> list[int]:
-    """行号：``{"error": t(...)}`` 顶层返回，且没有 error_code 兄弟键。"""
+    """行号：作为响应体的载荷里有 ``error`` 却没有声明 ``error_code``。
+
+    “响应体”包括：直接作为 ``return`` 的字典，以及 ``web.json_response(<dict>)``
+    的第一个参数。其他位置的字典（批量报告里的逐条目明细等）不计。
+    """
 
     try:
         with warnings.catch_warnings():
