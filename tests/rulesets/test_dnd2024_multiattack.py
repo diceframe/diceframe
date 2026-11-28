@@ -491,3 +491,62 @@ def test_roll_ids_stay_unique_inside_one_multiattack() -> None:
         if row["kind"] == "attack"
     ]
     assert len(roll_ids) == len(set(roll_ids)) == 3
+
+
+# ---------------------------------------------------------------------------
+# S0-MM5：组合池（"in any combination"）
+# ---------------------------------------------------------------------------
+
+def _pool_enemy() -> dict:
+    return _enemy(
+        [_attack("bite-0", "Bite"), _attack("claw-0", "Claw")],
+        [{"id": "multiattack-0", "name": "Multiattack", "kind": "multiattack",
+          "pool": {"attacks": ["bite-0", "claw-0"], "count": 2}}],
+    )
+
+
+def _pool(engine, instance, *, sequence, rolls) -> list[dict]:
+    intent = {
+        "intent_id": "pool-1", "type": "multiattack",
+        "expected_version": int(ruleset_runtime.state(instance)["version"]),
+        "submitted_by": "gm", "actor_id": "enemy:beast-1",
+        "target_id": "player:gm", "action_id": "multiattack-0",
+        "sequence": list(sequence),
+    }
+    return _events(engine, instance, intent, SequenceRng(rolls))
+
+
+def test_a_pool_resolves_in_the_declared_order() -> None:
+    engine, instance = _instance()
+    _start(engine, instance, _pool_enemy())
+
+    events = _pool(engine, instance, sequence=["claw-0", "bite-0"], rolls=[15, 2, 15, 2])
+
+    hits = _hits(events)
+    assert len(hits) == 2, "池声明两次就该掷两次"
+    # 顺序即结算顺序：第一次用的是 Claw。
+    assert hits[0]["damage_type"] == "piercing"
+
+
+@pytest.mark.parametrize("sequence", [["bite-0"], ["bite-0", "tail-0"],
+                                     ["bite-0", "claw-0", "bite-0"]])
+def test_a_pool_refuses_a_sequence_it_cannot_honour(sequence) -> None:
+    engine, instance = _instance()
+    _start(engine, instance, _pool_enemy())
+
+    with pytest.raises(Exception):
+        _pool(engine, instance, sequence=sequence, rolls=[15, 2] * 3)
+
+
+def test_a_pool_naming_an_attack_it_does_not_have_is_refused() -> None:
+    engine, instance = _instance()
+    bad = _enemy(
+        [_attack("bite-0", "Bite")],
+        [{"id": "multiattack-0", "name": "Multiattack", "kind": "multiattack",
+          "pool": {"attacks": ["bite-0", "tail-0"], "count": 2}}],
+    )
+
+    # 动作契约只能查 id 形状，看不到该生物的攻击表；引用是否成立在展开时回答。
+    _start(engine, instance, bad)
+    with pytest.raises(Exception):
+        _pool(engine, instance, sequence=["bite-0", "tail-0"], rolls=[15, 2, 15, 2])

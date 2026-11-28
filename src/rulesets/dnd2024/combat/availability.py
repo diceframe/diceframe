@@ -439,6 +439,24 @@ class CombatAvailabilityMixin:
                         "action_id": action_id,
                         "targets": targets,
                     }
+                    pool = declaration.get("pool")
+                    if isinstance(pool, dict):
+                        # 面板要能渲染"从这几把里挑 N 次"，所以把池本身投影出去，
+                        # 而不是让前端从 description 里猜。
+                        names = {
+                            str(item.get("id") or ""): str(item.get("name") or "")
+                            for item in actor.get("attacks") or []
+                            if isinstance(item, dict)
+                        }
+                        entry["pool"] = {
+                            "attacks": [
+                                {"id": attack_id, "name": names.get(attack_id, attack_id)}
+                                for attack_id in pool.get("attacks") or []
+                            ],
+                            "count": int(pool.get("count") or 0),
+                            **({"at_least": pool["at_least"]} if pool.get("at_least") else {}),
+                            **({"at_most": pool["at_most"]} if pool.get("at_most") else {}),
+                        }
                     choices = declaration.get("choice")
                     if isinstance(choices, list):
                         entry["choice_ids"] = [

@@ -84,6 +84,9 @@ COMBAT_COUPLING_ALLOWLIST: frozenset[DependencyDebt] = frozenset({
     DependencyDebt("src/rulesets/dnd2024/combat/validation.py", "intent_switch", "cleave_from"),
     DependencyDebt("src/rulesets/dnd2024/combat/validation_attack.py", "intent_switch", "cleave_from"),
     DependencyDebt("src/rulesets/dnd2024/combat/weapon_masteries.py", "kind_branch", "granted_attack"),
+    # S0-MM5: the pool shape is a fourth multiattack form; the engine names it
+    # where it expands parts, and the importer names it where it parses.
+    DependencyDebt("src/rulesets/dnd2024/combat/view.py", "intent_switch", "sequence"),
     DependencyDebt("src/rulesets/dnd2024/combat/check_windows.py", "feature_literal", "feature_value:bardic_inspiration"),
     DependencyDebt("src/rulesets/dnd2024/combat/check_windows.py", "feature_literal", "feature_value:cutting_words"),
     DependencyDebt("src/rulesets/dnd2024/combat/check_windows.py", "feature_literal", "feature_value:peerless_skill"),

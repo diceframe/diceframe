@@ -54,8 +54,8 @@ def test_every_creature_loads_through_the_combat_contract(catalog) -> None:
     """CR 0–1 across all types, then S0-MM4's CR 2–4 without a single gap."""
 
     entries = list(catalog.all())
-    # 135 只 CR 0–1（S0-MM2 的全部）+ 17 只 CR 2–4（S0-MM4 只收完整的）。
-    assert len(entries) == 152
+    # 135 只 CR 0–1（S0-MM2 的全部）+ 19 只 CR 2–4（S0-MM4/MM5 只收完整的）。
+    assert len(entries) == 154
     low = [entry for entry in entries if float(cr_value(entry["cr"])) <= 1]
     high = [entry for entry in entries if float(cr_value(entry["cr"])) > 1]
     assert len(low) == 135, "既有 CR 0–1 条目一条都不许少"

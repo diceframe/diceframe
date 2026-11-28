@@ -2812,7 +2812,20 @@
           "long_range": 320
         }
       ],
-      "actions": [],
+      "actions": [
+        {
+          "id": "multiattack",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "pool": {
+            "attacks": [
+              "scimitar-0",
+              "shortbow-0"
+            ],
+            "count": 2
+          }
+        }
+      ],
       "traits": []
     },
     {
@@ -4822,7 +4835,20 @@
           "long_range": 5
         }
       ],
-      "actions": [],
+      "actions": [
+        {
+          "id": "multiattack",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "pool": {
+            "attacks": [
+              "shortsword-0",
+              "longbow-0"
+            ],
+            "count": 2
+          }
+        }
+      ],
       "traits": []
     },
     {
@@ -9333,6 +9359,87 @@
       ]
     },
     {
+      "id": "manticore",
+      "name": "Manticore",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_manticore",
+      "creature_type": "monstrosity",
+      "subtype": "",
+      "size": "large",
+      "cr": "3",
+      "xp": 700,
+      "proficiency_bonus": 2,
+      "armor_class": 14,
+      "hp": 68,
+      "hit_dice": "8d10+24",
+      "speeds": {
+        "walk": 30,
+        "fly": 50
+      },
+      "abilities": {
+        "str": 17,
+        "dex": 16,
+        "con": 17,
+        "int": 7,
+        "wis": 12,
+        "cha": 8
+      },
+      "saving_throws": {},
+      "skills": {},
+      "passive_perception": 11,
+      "languages": [
+        "language:common"
+      ],
+      "senses": {
+        "darkvision": 60
+      },
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "rend-0",
+          "name": "Rend",
+          "attack_bonus": 5,
+          "damage": [
+            {
+              "dice": "1d8+3",
+              "type": "slashing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        },
+        {
+          "id": "tail-spike-0",
+          "name": "Tail Spike",
+          "attack_bonus": 5,
+          "damage": [
+            {
+              "dice": "1d8+3",
+              "type": "piercing"
+            }
+          ],
+          "range": 100,
+          "long_range": 200
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "pool": {
+            "attacks": [
+              "rend-0",
+              "tail-spike-0"
+            ],
+            "count": 3
+          }
+        }
+      ],
+      "traits": []
+    },
+    {
       "id": "owlbear",
       "name": "Owlbear",
       "source_ref": "srd-5.2.1:creatures:srd-2024_owlbear",
@@ -9565,6 +9672,87 @@
       ]
     },
     {
+      "id": "guard-captain",
+      "name": "Guard Captain",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_guard-captain",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "4",
+      "xp": 1100,
+      "proficiency_bonus": 2,
+      "armor_class": 18,
+      "hp": 75,
+      "hit_dice": "10d8+30",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 18,
+        "dex": 14,
+        "con": 16,
+        "int": 12,
+        "wis": 14,
+        "cha": 13
+      },
+      "saving_throws": {},
+      "skills": {
+        "athletics": 6,
+        "perception": 4
+      },
+      "passive_perception": 14,
+      "languages": [
+        "language:common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "javelin-0",
+          "name": "Javelin",
+          "attack_bonus": 6,
+          "damage": [
+            {
+              "dice": "3d6+4",
+              "type": "piercing"
+            }
+          ],
+          "range": 5,
+          "long_range": 120
+        },
+        {
+          "id": "longsword-0",
+          "name": "Longsword",
+          "attack_bonus": 6,
+          "damage": [
+            {
+              "dice": "2d10+4",
+              "type": "slashing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "pool": {
+            "attacks": [
+              "javelin-0",
+              "longsword-0"
+            ],
+            "count": 2
+          }
+        }
+      ],
+      "traits": []
+    },
+    {
       "id": "red-dragon-wyrmling",
       "name": "Red Dragon Wyrmling",
       "source_ref": "srd-5.2.1:creatures:srd-2024_red-dragon-wyrmling",
@@ -9779,7 +9967,6 @@
       "Rampage (Bonus Action)"
     ],
     "goblin-boss": [
-      "Multiattack",
       "Nimble Escape (Bonus Action)",
       "Redirect Attack (Reaction)"
     ],
@@ -9880,9 +10067,6 @@
     "satyr": [
       "Hooves (rider)"
     ],
-    "scout": [
-      "Multiattack"
-    ],
     "seahorse": [
       "Bubble Dash"
     ],
@@ -9966,7 +10150,6 @@
       "Illumination"
     ],
     "bandit-captain": [
-      "Multiattack",
       "Parry (Reaction)"
     ],
     "basilisk": [
@@ -9992,7 +10175,6 @@
       "Quick Grapple (Bonus Action)"
     ],
     "centaur-trooper": [
-      "Multiattack",
       "Trampling Charge (Bonus Action)"
     ],
     "chuul": [
@@ -10017,7 +10199,6 @@
       "Unsettling Visage"
     ],
     "druid": [
-      "Multiattack",
       "Spellcasting"
     ],
     "elephant": [
@@ -10070,15 +10251,11 @@
       "Mimicry",
       "Spellcasting"
     ],
-    "guard-captain": [
-      "Multiattack"
-    ],
     "hippopotamus": [
       "Hold Breath"
     ],
     "hobgoblin-captain": [
-      "Aura of Authority",
-      "Multiattack"
+      "Aura of Authority"
     ],
     "incubus": [
       "Nightmare (Bonus Action)",
@@ -10090,16 +10267,12 @@
       "Hold Breath"
     ],
     "knight": [
-      "Multiattack",
       "Parry (Reaction)"
     ],
     "lamia": [
       "Leap (Bonus Action)",
       "Multiattack",
       "Spellcasting"
-    ],
-    "manticore": [
-      "Multiattack"
     ],
     "merrow": [
       "Bite (rider)",
@@ -10144,7 +10317,6 @@
     ],
     "priest": [
       "Divine Aid (Bonus Action)",
-      "Multiattack",
       "Spellcasting"
     ],
     "rhinoceros": [
@@ -10174,7 +10346,6 @@
       "Swarm"
     ],
     "tough-boss": [
-      "Multiattack",
       "Warhammer (rider)"
     ],
     "vampire-familiar": [
@@ -10188,31 +10359,26 @@
     ],
     "wereboar": [
       "Gore (rider)",
-      "Multiattack",
       "Shape-Shift (Bonus Action)",
       "Tusk (rider)"
     ],
     "wererat": [
       "Bite  (rider)",
-      "Multiattack",
       "Shape-Shift (Bonus Action)"
     ],
     "weretiger": [
       "Bite (rider)",
-      "Multiattack",
       "Prowl (Tiger or Hybrid Form Only) (Bonus Action)",
       "Shape-Shift (Bonus Action)"
     ],
     "werewolf": [
       "Bite (rider)",
-      "Multiattack",
       "Shape-Shift (Bonus Action)"
     ],
     "white-dragon-wyrmling": [
       "Ice Walk"
     ],
     "wight": [
-      "Multiattack",
       "Sunlight Sensitivity"
     ],
     "will-o-wisp": [

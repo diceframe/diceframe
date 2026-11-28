@@ -369,6 +369,80 @@ _MULTI_UNSUPPORTED = (
 )
 
 
+#: "The X makes two Greatsword or Heavy Crossbow attacks." —— 整组二选一。
+_WHOLE_GROUP_OR_RE = re.compile(
+    r"makes (?P<count>one|two|three|four) (?P<a>[A-Z][A-Za-z'’ -]*?) or "
+    r"(?P<b>[A-Z][A-Za-z'’ -]*?) attacks\."
+)
+#: "... using A and B in any combination" / "using A or B in any combination".
+_POOL_RE = re.compile(
+    r"makes (?P<count>one|two|three|four) attacks?, using "
+    r"(?P<names>[A-Z][A-Za-z'’ -]*(?:(?: and | or )[A-Z][A-Za-z'’ -]*)+) "
+    r"in any combination"
+)
+_WORD_COUNT = {"one": 1, "two": 2, "three": 3, "four": 4}
+
+
+def _resolve_attack_id(attacks: list[dict], name: str) -> str | None:
+    wanted = name.strip().lower()
+    for attack in attacks:
+        if str(attack.get("name") or "").strip().lower() == wanted:
+            return str(attack.get("id") or "")
+    return None
+
+
+def _parse_pool_combination(action: dict, attacks: list[dict]) -> dict | None:
+    """"N 次攻击，从这几把里任意挑" → ``pool``。
+
+    只要有一个名字在本生物的攻击里对不上就整条不解析：一个少了选项的池会
+    让这只怪少一种打法，而且看不出来。
+    """
+
+    text = str(action.get("desc") or "")
+    match = _POOL_RE.search(text)
+    if not match:
+        return None
+    ids = []
+    for name in re.split(r" and | or ", match.group("names")):
+        attack_id = _resolve_attack_id(attacks, name)
+        if attack_id is None:
+            return None
+        ids.append(attack_id)
+    if len(set(ids)) != len(ids):
+        return None
+    return {
+        "id": str(action.get("id") or "multiattack"),
+        "name": str(action.get("name") or "Multiattack"),
+        "kind": "multiattack",
+        "pool": {"attacks": ids, "count": _WORD_COUNT[match.group("count").lower()]},
+    }
+
+
+def _parse_whole_group_or(
+    match: re.Match, attacks: list[dict], action: dict,
+) -> dict | None:
+    """"两次 A 或两次 B" → ``choice`` 两个分支，各是同一把打满。"""
+
+    count = _WORD_COUNT[match.group("count").lower()]
+    branches = []
+    for letter in ("a", "b"):
+        attack_id = _resolve_attack_id(attacks, match.group(letter))
+        if attack_id is None:
+            return None
+        branches.append({
+            "label": match.group(letter).strip().lower().replace(" ", "_")[:32],
+            "parts": [{"attack_id": attack_id, "count": count}],
+        })
+    if branches[0]["label"] == branches[1]["label"]:
+        return None
+    return {
+        "id": str(action.get("id") or "multiattack"),
+        "name": str(action.get("name") or "Multiattack"),
+        "kind": "multiattack",
+        "choice": branches,
+    }
+
+
 def parse_multiattack(action: dict, attacks: list[dict]) -> dict | None:
     """One Multiattack line as a ``repeat`` or ``combo`` action, or nothing.
 
@@ -379,6 +453,13 @@ def parse_multiattack(action: dict, attacks: list[dict]) -> dict | None:
 
     text = str(action.get("desc") or "")
     if any(word in text for word in _MULTI_UNSUPPORTED):
+        # S0-MM5：唯二被放行的两句话——"in any combination" 与整组二选一——
+        # 都在下面单独解析；其余（uses / replace with a use of / 施法）仍然不解析。
+        if "in any combination" in text:
+            return _parse_pool_combination(action, attacks)
+        whole = _WHOLE_GROUP_OR_RE.match(text)
+        if whole:
+            return _parse_whole_group_or(whole, attacks, action)
         return None
 
     def resolve(name: str) -> str | None:

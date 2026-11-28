@@ -523,10 +523,10 @@ def _validate_attack_profile(attack: dict[str, Any], attack_ids: set[str]) -> No
 def _validate_multiattack_action(action: dict[str, Any], label: str) -> None:
     """S0-MM3b: repeat / combo / choice, and nothing else."""
 
-    shapes = [key for key in ("repeat", "combo", "choice") if key in action]
+    shapes = [key for key in ("repeat", "combo", "choice", "pool") if key in action]
     if len(shapes) != 1:
         raise CombatIntentError(
-            f"{label} multiattack needs exactly one of repeat, combo or choice"
+            f"{label} multiattack needs exactly one of repeat, combo, choice or pool"
         )
     shape = shapes[0]
     allowed = {"id", "name", "kind", "description", shape}
@@ -561,6 +561,45 @@ def _validate_multiattack_action(action: dict[str, Any], label: str) -> None:
         return
     if shape == "combo":
         parts_of(action.get("combo"), "combo")
+        return
+    if shape == "pool":
+        # S0-MM5："N 次攻击，从这几把里任意挑"。约束是可选的两条：
+        # ``at_least``（至少几次是哪种）与 ``at_most``（最多几次，用来表达
+        # "可以把一次换成另一种"）。证明不了约束的文本一律不导入。
+        pool = action.get("pool")
+        if not isinstance(pool, dict):
+            raise CombatIntentError(f"{label} multiattack pool is invalid")
+        if set(pool) - {"attacks", "count", "at_least", "at_most"}:
+            raise CombatIntentError(f"{label} multiattack pool has unknown field(s)")
+        ids = pool.get("attacks")
+        if not isinstance(ids, list) or not 2 <= len(ids) <= 4:
+            raise CombatIntentError(f"{label} multiattack pool needs 2 to 4 attacks")
+        for attack_id in ids:
+            if not isinstance(attack_id, str) or not re.fullmatch(
+                r"[a-z0-9][a-z0-9_.-]{0,63}", attack_id
+            ):
+                raise CombatIntentError(f"{label} multiattack pool attack id is invalid")
+        if len(set(ids)) != len(ids):
+            raise CombatIntentError(f"{label} multiattack pool repeats an attack")
+        count = pool.get("count")
+        if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= MULTIATTACK_MAX_ATTACKS:
+            raise CombatIntentError(f"{label} multiattack pool count is invalid")
+        for key in ("at_least", "at_most"):
+            rows = pool.get(key)
+            if rows is None:
+                continue
+            if not isinstance(rows, list) or not rows:
+                raise CombatIntentError(f"{label} multiattack pool {key} is invalid")
+            for row in rows:
+                if not isinstance(row, dict) or set(row) - {"attack_id", "count"}:
+                    raise CombatIntentError(f"{label} multiattack pool {key} row is invalid")
+                if str(row.get("attack_id")) not in ids:
+                    raise CombatIntentError(
+                        f"{label} multiattack pool {key} names an attack outside the pool"
+                    )
+                bound = row.get("count")
+                if isinstance(bound, bool) or not isinstance(bound, int) or not 1 <= bound <= count:
+                    raise CombatIntentError(f"{label} multiattack pool {key} count is invalid")
         return
     branches = action.get("choice")
     if not isinstance(branches, list) or not 2 <= len(branches) <= 4:
