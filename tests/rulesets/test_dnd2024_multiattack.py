@@ -61,7 +61,8 @@ def _attack(attack_id: str, name: str, *, bonus: int = 30, damage: str = "1d6", 
     }
 
 
-def _enemy(attacks: list[dict], actions: list[dict], *, action_id: str = "multiattack-0") -> dict:
+def _enemy(attacks: list[dict], actions: list[dict], *, action_id: str = "multiattack-0",
+           reaction: bool = False) -> dict:
     return {
         "id": "beast-1", "name": "Beast", "hp": 60, "armor_class": 12,
         "speed": 40, "position": 5, "initiative_modifier": 10, "size": "large",
@@ -69,6 +70,9 @@ def _enemy(attacks: list[dict], actions: list[dict], *, action_id: str = "multia
         "saving_throws": {},
         "attacks": attacks,
         "actions": actions,
+        "proficiency_bonus": 2,
+        **({"reactions": [{"id": "parry", "kind": "ac_bonus", "bonus": "proficiency"}]}
+           if reaction else {}),
     }
 
 
@@ -550,3 +554,36 @@ def test_a_pool_naming_an_attack_it_does_not_have_is_refused() -> None:
     _start(engine, instance, bad)
     with pytest.raises(Exception):
         _pool(engine, instance, sequence=["bite-0", "tail-0"], rolls=[15, 2, 15, 2])
+
+
+# ---------------------------------------------------------------------------
+# S0-MM6：Parry（怪物反应）
+# ---------------------------------------------------------------------------
+
+def test_a_reaction_kind_the_engine_cannot_settle_is_refused() -> None:
+    engine, instance = _instance()
+    bad = _enemy([_attack("bite-0", "Bite")], [])
+    bad["reactions"] = [{"id": "parry", "kind": "reroll", "bonus": "proficiency"}]
+
+    with pytest.raises(Exception):
+        _start(engine, instance, bad)
+
+
+def test_parry_needs_a_proficiency_bonus_to_offer() -> None:
+    """没有熟练加值就没有可加的 AC，这条反应不该出现。"""
+
+    engine, instance = _instance()
+    enemy = _enemy([_attack("bite-0", "Bite")], [])
+    enemy["reactions"] = [{"id": "parry", "kind": "ac_bonus", "bonus": "proficiency"}]
+    # 契约不允许 0 熟练加值，所以这一条用"没有 bonuses 的反应条目"来表达
+    # 同一个事实：拿不出加值就不提供。
+    enemy["reactions"] = [{"id": "parry", "kind": "ac_bonus", "bonus": "proficiency"}]
+    enemy.pop("proficiency_bonus", None)
+    _start(engine, instance, enemy)
+
+    choices = engine._enemy_reaction_choices(
+        ruleset_runtime.state(instance)["combat"],
+        engine._actor_view(instance, ruleset_runtime.state(instance)["combat"], "enemy:beast-1"),
+    )
+
+    assert choices == []

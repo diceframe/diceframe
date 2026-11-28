@@ -508,3 +508,32 @@ def stand_up_declaration(
             continue
         return {"condition": str(condition_id), "fraction": fraction}
     return None
+
+
+REACTION_KINDS = frozenset({"ac_bonus"})
+REACTION_BONUSES = frozenset({"proficiency"})
+
+
+def validate_reactions(raw: Any, label: str) -> None:
+    """S0-MM6：stat block 的反应，闭集且最多两条。
+
+    只接受"AC 加熟练加值"这一种。别的反应（改骰、免伤、召唤）各自需要
+    不同的结算点，混进同一个容器只会让某一种被静默忽略。
+    """
+
+    if raw is None:
+        return
+    if not isinstance(raw, list) or not 1 <= len(raw) <= 2:
+        raise CombatIntentError(f"{label} reactions must list 1 or 2 entries")
+    seen: set[str] = set()
+    for row in raw:
+        if not isinstance(row, dict) or set(row) - {"id", "kind", "bonus"}:
+            raise CombatIntentError(f"{label} reaction entry is invalid")
+        reaction_id = str(row.get("id") or "")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", reaction_id) or reaction_id in seen:
+            raise CombatIntentError(f"{label} reaction id is invalid or duplicated")
+        seen.add(reaction_id)
+        if str(row.get("kind") or "") not in REACTION_KINDS:
+            raise CombatIntentError(f"{label} reaction kind is unknown")
+        if str(row.get("bonus") or "") not in REACTION_BONUSES:
+            raise CombatIntentError(f"{label} reaction bonus is unknown")

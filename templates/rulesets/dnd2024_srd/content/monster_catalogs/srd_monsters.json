@@ -8077,7 +8077,14 @@
         }
       ],
       "actions": [],
-      "traits": []
+      "traits": [],
+      "reactions": [
+        {
+          "id": "parry",
+          "kind": "ac_bonus",
+          "bonus": "proficiency"
+        }
+      ]
     },
     {
       "id": "pony",
@@ -8348,6 +8355,98 @@
       ],
       "actions": [],
       "traits": []
+    },
+    {
+      "id": "bandit-captain",
+      "name": "Bandit Captain",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_bandit-captain",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "2",
+      "xp": 450,
+      "proficiency_bonus": 2,
+      "armor_class": 15,
+      "hp": 52,
+      "hit_dice": "8d8+16",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 15,
+        "dex": 16,
+        "con": 14,
+        "int": 14,
+        "wis": 11,
+        "cha": 14
+      },
+      "saving_throws": {
+        "str": 4,
+        "dex": 5,
+        "wis": 2
+      },
+      "skills": {
+        "athletics": 4,
+        "deception": 4
+      },
+      "passive_perception": 10,
+      "languages": [
+        "language:common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "pistol-0",
+          "name": "Pistol",
+          "attack_bonus": 5,
+          "damage": [
+            {
+              "dice": "1d10+3",
+              "type": "piercing"
+            }
+          ],
+          "range": 30,
+          "long_range": 90
+        },
+        {
+          "id": "scimitar-0",
+          "name": "Scimitar",
+          "attack_bonus": 5,
+          "damage": [
+            {
+              "dice": "1d6+3",
+              "type": "slashing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "pool": {
+            "attacks": [
+              "scimitar-0",
+              "pistol-0"
+            ],
+            "count": 2
+          }
+        }
+      ],
+      "traits": [],
+      "reactions": [
+        {
+          "id": "parry",
+          "kind": "ac_bonus",
+          "bonus": "proficiency"
+        }
+      ]
     },
     {
       "id": "black-dragon-wyrmling",
@@ -9359,6 +9458,102 @@
       ]
     },
     {
+      "id": "knight",
+      "name": "Knight",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_knight",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "3",
+      "xp": 700,
+      "proficiency_bonus": 2,
+      "armor_class": 18,
+      "hp": 52,
+      "hit_dice": "8d8+16",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 16,
+        "dex": 11,
+        "con": 14,
+        "int": 11,
+        "wis": 11,
+        "cha": 15
+      },
+      "saving_throws": {
+        "con": 4,
+        "wis": 2
+      },
+      "skills": {},
+      "passive_perception": 10,
+      "languages": [
+        "language:common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "greatsword-0",
+          "name": "Greatsword",
+          "attack_bonus": 5,
+          "damage": [
+            {
+              "dice": "2d6+3",
+              "type": "slashing"
+            },
+            {
+              "dice": "1d8",
+              "type": "radiant"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        },
+        {
+          "id": "heavy-crossbow-0",
+          "name": "Heavy Crossbow",
+          "attack_bonus": 2,
+          "damage": [
+            {
+              "dice": "2d10",
+              "type": "piercing"
+            },
+            {
+              "dice": "1d8",
+              "type": "radiant"
+            }
+          ],
+          "range": 100,
+          "long_range": 400
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "pool": {
+            "attacks": [
+              "greatsword-0",
+              "heavy-crossbow-0"
+            ],
+            "count": 2
+          }
+        }
+      ],
+      "traits": [],
+      "reactions": [
+        {
+          "id": "parry",
+          "kind": "ac_bonus",
+          "bonus": "proficiency"
+        }
+      ]
+    },
+    {
       "id": "manticore",
       "name": "Manticore",
       "source_ref": "srd-5.2.1:creatures:srd-2024_manticore",
@@ -10019,9 +10214,6 @@
     "mule": [
       "Beast of Burden"
     ],
-    "noble": [
-      "Parry (Reaction)"
-    ],
     "octopus": [
       "Compression",
       "Ink Cloud (Reaction)"
@@ -10149,9 +10341,6 @@
       "Fire Aura",
       "Illumination"
     ],
-    "bandit-captain": [
-      "Parry (Reaction)"
-    ],
     "basilisk": [
       "Petrifying Gaze (Recharge 4-6) (Bonus Action)"
     ],
@@ -10162,8 +10351,7 @@
       "Bloodied Frenzy"
     ],
     "black-pudding": [
-      "Corrosive Form",
-      "Parry (Reaction)"
+      "Corrosive Form"
     ],
     "bronze-dragon-wyrmling": [
       "Repulsion Breath"
@@ -10266,9 +10454,6 @@
     "killer-whale": [
       "Hold Breath"
     ],
-    "knight": [
-      "Parry (Reaction)"
-    ],
     "lamia": [
       "Leap (Bonus Action)",
       "Multiattack",
@@ -10354,8 +10539,7 @@
       "Vampiric Connection"
     ],
     "warrior-veteran": [
-      "Multiattack",
-      "Parry (Reaction)"
+      "Multiattack"
     ],
     "wereboar": [
       "Gore (rider)",

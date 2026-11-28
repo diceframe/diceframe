@@ -170,6 +170,32 @@ class CombatReactionSpellsMixin:
                 })
         return choices
 
+    def _enemy_reaction_choices(
+        self, combat: dict[str, Any], defender: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """S0-MM6：stat block 自带的反应（目前只有 Parry）。
+
+        与角色侧共用同一个反应额度与同一个"已花"判据，所以一只怪不可能既
+        Parry 又用别的反应。
+        """
+
+        if defender["kind"] != "enemy":
+            return []
+        if "shield" in defender["conditions"]:
+            return []
+        if not self._reaction_eligible(combat, defender):
+            return []
+        bonus = int(defender.get("proficiency_bonus", 0) or 0)
+        if bonus <= 0:
+            return []
+        return [
+            {"kind": "parry", "reaction_id": str(row.get("id") or ""), "bonus": bonus}
+            for row in defender.get("reactions") or []
+            if isinstance(row, dict)
+            and str(row.get("kind") or "") == "ac_bonus"
+            and str(row.get("bonus") or "") == "proficiency"
+        ]
+
     def _reaction_feature_choices(
         self, combat: dict[str, Any], defender: dict[str, Any],
         attacker: dict[str, Any] | None = None,
@@ -357,7 +383,8 @@ class CombatReactionSpellsMixin:
         features = self._reaction_feature_choices(
             combat, defender, attacker, damage_event, next_decision, ranged=ranged,
         )
-        if not spells and not features:
+        parry = self._enemy_reaction_choices(combat, defender)
+        if not spells and not features and not parry:
             return None
         kind, raw_id = actor_kind(defender["actor_id"])
         human = kind == "player" and not is_ai_controlled(instance, raw_id)
@@ -368,7 +395,10 @@ class CombatReactionSpellsMixin:
             "actor_id": defender["actor_id"],
             "attacker_id": attacker["actor_id"],
             "assigned_to": raw_id if human else str(getattr(instance, "gm_uid", "") or ""),
-            "options": [*(["cast"] if spells else []), *(["feature"] if features else []), "decline"],
+            "options": [
+                *(["cast"] if spells else []), *(["feature"] if features else []),
+                *(["parry"] if parry else []), "decline",
+            ],
             "attack_total": int(check["total"]),
             "armor_class": int(check["target"]),
             "critical": bool(check["critical"]),
@@ -378,6 +408,7 @@ class CombatReactionSpellsMixin:
             "attack_ranged": bool(ranged),
             "spells": spells,
             "features": features,
+            "parry": parry[0] if parry else None,
             # A hit-triggered spell (for example Divine Smite) is offered only
             # after the defender has had the reaction opportunity.
             "next_decision": deepcopy(next_decision) if next_decision else None,
@@ -435,6 +466,36 @@ class CombatReactionSpellsMixin:
             "option": intent["option"],
         }]
         armor_class = int(decision["armor_class"])
+        if intent["option"] == "parry":
+            # S0-MM6：Parry 只做一件事——把这一次命中改判。它不改伤害数值，
+            # 所以不能走"减伤"那条路：落空就是没有伤害事件。
+            parry = decision.get("parry") or {}
+            bonus = int(parry.get("bonus") or 0)
+            if bonus <= 0:
+                raise CombatIntentError("this creature has no parry bonus")
+            events.append({
+                "type": "dnd2024.reaction.spent", "actor_id": defender_id,
+                "reason": "parry",
+            })
+            armor_class += bonus
+            hit = bool(decision.get("critical")) or int(
+                decision["attack_total"]
+            ) >= armor_class
+            events.append({
+                "type": "check.resolved", "kind": "reaction_defense",
+                "actor_id": str(decision["attacker_id"]), "target_id": defender_id,
+                "reaction_id": str(parry.get("reaction_id") or "parry"),
+                "total": int(decision["attack_total"]), "target": armor_class,
+                "success": hit, "critical": bool(decision.get("critical")),
+            })
+            if not hit:
+                return events
+            damage_event = deepcopy(decision.get("damage_event") or {})
+            events.extend(self._commit_hit_damage(
+                instance, combat, damage_event, rng,
+                attacker_id=str(decision["attacker_id"]),
+            ))
+            return events
         if intent["option"] == "redirect":
             events.extend(self._finish_redirect(
                 instance, combat, decision, intent, rng,

@@ -630,6 +630,25 @@ _CLAIMS_A_RIDER = re.compile(
 )
 
 
+#: S0-MM6：能映射的反应只有 Parry，且它只加熟练加值。
+_REACTION_KINDS = {"parry": "ac_bonus"}
+
+
+def map_reactions(actions: list[dict]) -> list[dict]:
+    """Stat-block reactions this slice can settle.  Everything else stays a gap."""
+
+    produced: list[dict] = []
+    for action in actions:
+        if str(action.get("action_type") or "").upper() != "REACTION":
+            continue
+        name = str(action.get("name") or "").strip().lower()
+        kind = _REACTION_KINDS.get(name)
+        if kind is None:
+            continue
+        produced.append({"id": name.replace(" ", "_"), "kind": kind, "bonus": "proficiency"})
+    return produced
+
+
 def map_traits(record_traits: list[dict]) -> list[dict]:
     """The eight supported traits, by closed id.
 
@@ -732,6 +751,8 @@ def map_record(record: dict) -> dict:
         "attacks": attacks,
         "actions": map_actions(record.get("actions") or [], attacks),
         "traits": map_traits(record.get("traits") or []),
+        **({"reactions": map_reactions(record.get("actions") or [])}
+           if map_reactions(record.get("actions") or []) else {}),
     }
 
 
@@ -757,7 +778,10 @@ def unmapped(record: dict) -> list[str]:
         name = str(action.get("name") or "")
         kind = str(action.get("action_type") or "ACTION").upper()
         if kind != "ACTION":
-            # Bonus/Reaction 动作没有任何消费者：整条丢掉，必须记下来。
+            # Bonus 动作仍是缺口；Reaction 里只有 Parry 有消费者（S0-MM6）。
+            if any(row.get("id") == name.strip().lower().replace(" ", "_")
+                   for row in map_reactions([action])):
+                continue
             dropped.append(f"{name} ({kind.replace(chr(95), chr(32)).title()})")
             continue
         if name.strip().lower() == "multiattack":

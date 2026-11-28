@@ -64,6 +64,7 @@ from .obscurement import (
     sanctuary_zone_id,
 )
 from .primitives import (
+    validate_reactions,
     slot_available,
     CONDITION_CODES,
     DICE_RE,
@@ -131,6 +132,8 @@ _ENEMY_KEYS = frozenset({
     "actions",
     # S0-MM3d：特质容器。闭集 id，未知即拒绝。
     "traits",
+    # S0-MM6：反应容器。规则字段，不是内容缺口标记。
+    "reactions",
 })
 # 速度档位：walk 是唯一被移动预算读的一档，其余四档本切片只投影（阶段三接）。
 
@@ -316,6 +319,7 @@ def validate_enemy_profiles(enemies: Any) -> None:
         if len(str(enemy.get("name") or enemy_id)) > 120:
             raise CombatIntentError("enemy name is too long")
         _validate_size(enemy, f"enemy {enemy_id}")
+        validate_reactions(enemy.get("reactions"), f"enemy {enemy_id}")
         _validate_defenses(enemy, f"enemy {enemy_id}")
         _validate_senses(enemy, f"enemy {enemy_id}")
         _validate_challenge(enemy, f"enemy {enemy_id}")
