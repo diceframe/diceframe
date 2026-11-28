@@ -269,3 +269,14 @@ GWF 测试同一做法；不改生产代码，不改这些用例的断言。
 处理：`_savage_attacker_offer` 对 `kind == "player"` 且 `is_ai_controlled` 的 actor 直接不挂窗。
 AI 因此**不使用**该专长，而不是替它选一个答案——它连"这一击值不值得重掷"的期望都不该由引擎
 代算。等 AI 决策支持伤害窗口后，再把这里改成自动 `spend`（取高）。
+
+### 10.4 验证
+
+- 新测试 `tests/rulesets/test_dnd2024_savage_attacker.py`：10 条；
+- `tests/rulesets` 全量：**3386 passed / 0 failed**（隔离前是 3287 + 99）；
+- `tests/architecture`：182 passed（含体量与耦合基线）；
+- `ruff check src/ tests/`：干净；`mypy`：149 文件 0 错；
+- 全量 `pytest tests/ -n 6 --dist loadfile`：**11552 passed / 9 failed / 3 errors**。
+  9 条全是本机既有 docker 基线（launcher 6、data generation 1、self-update reentry 1、
+  runtime dependencies 1），3 errors 是 docker 升级路径；updater 的 MAX_PATH 那条这次没出现
+  （本机偶发）。没有新增失败。
