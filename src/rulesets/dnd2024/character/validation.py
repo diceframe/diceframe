@@ -6,6 +6,12 @@ from copy import deepcopy
 from typing import Any
 
 from src.rulesets.dnd2024.features import load_feat_definitions
+from src.rulesets.dnd2024.features.feat_provenance import (
+    FeatAcquisitionError,
+    FeatProvenance,
+    acquire,
+    feat_provenance,
+)
 from src.rulesets.dnd2024.features.feat_requirements import (
     FeatContext,
     feat_unavailable_reasons,
@@ -198,6 +204,10 @@ class CharacterValidationMixin:
         elif class_feat_choices:
             errors.append("class_feature_feat_choices is not available to this class")
 
+        # 取得期的重复来源检查（FD2b）：背景、物种与 1 级槽都给同一条专长时，
+        # 由 ``repeatable`` 决定是否合法，而不是让派生期的去重静默吞掉一条。
+        self._validate_feat_acquisition(draft, class_entity, errors)
+
         feat_choice_specs = self._feat_choice_specs(
             draft,
             class_entity=class_entity,
@@ -275,6 +285,37 @@ class CharacterValidationMixin:
             if speed <= 0:
                 errors.append("species speed must be positive")
         return list(dict.fromkeys(errors))
+
+    def _validate_feat_acquisition(
+        self,
+        draft: dict[str, Any],
+        class_entity: dict[str, Any] | None,
+        errors: list[str],
+    ) -> None:
+        """Refuse a feat granted twice by sources that cannot repeat it.
+
+        Sources are read through ``feat_provenance`` so this check and the
+        derivation agree on where a feat came from.  The class's own level-1
+        feature list is the whitelist: a craft naming a slot the class does not
+        grant is not a grant.  Unknown refs are left to the existing reference
+        checks, so one mistake produces one error instead of two.
+        """
+
+        definitions = load_feat_definitions(self.bundle)
+        grants: tuple[FeatProvenance, ...] = ()
+        for item in feat_provenance(
+            self.bundle, draft,
+            class_slots=set((class_entity or {}).get("level_1_feature_ids") or []),
+        ):
+            definition = definitions.get(_ref_id(item.ref, "feat"))
+            if definition is None:
+                continue
+            try:
+                grants = acquire(
+                    grants, item.ref, item, repeatable=definition.repeatable,
+                )
+            except FeatAcquisitionError as exc:
+                errors.append(str(exc))
 
     def _validate_fighting_style_choice(
         self,

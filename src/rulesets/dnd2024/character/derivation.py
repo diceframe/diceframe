@@ -12,6 +12,10 @@ from src.rulesets.dnd2024.features import (
     FeatDefinition,
     load_feat_definitions,
 )
+from src.rulesets.dnd2024.features.feat_provenance import (
+    feat_provenance,
+    owned_feat_refs,
+)
 
 from .attunement import AttunementError as _AttunementError
 from .attunement import attunement_capacity as _attunement_capacity
@@ -753,18 +757,16 @@ class CharacterDerivationMixin:
         bonuses = draft["background_ability_bonuses"]
         abilities = {key: int(base[key]) + int(bonuses.get(key, 0) or 0) for key in ABILITY_IDS}
 
-        background_feat_refs = [str(background["feat_ref"])] if background.get("feat_ref") else []
         species_feat_refs = list(draft.get("species_feat_refs") or [])
         class_feature_feat_choices = deepcopy(draft.get("class_feature_feat_choices") or {})
-        class_feature_feat_refs = (
-            [str(class_feature_feat_choices["fighting_style"])]
-            if "fighting_style" in set(class_entity.get("level_1_feature_ids") or [])
-            and isinstance(class_feature_feat_choices.get("fighting_style"), str)
-            else []
+        # 来源是派生视图、不落盘：``feat_refs`` 仍是扁平字符串列表，但每条
+        # 都由一个带出处的 grant 归并而来，重复不再被 ``dict.fromkeys`` 静默
+        # 吞掉（FD2b）。
+        feat_grants = feat_provenance(
+            self.bundle, draft,
+            class_slots=set(class_entity.get("level_1_feature_ids") or []),
         )
-        feat_refs = list(dict.fromkeys([
-            *background_feat_refs, *species_feat_refs, *class_feature_feat_refs,
-        ]))
+        feat_refs = owned_feat_refs(feat_grants)
         # 一次派生要读三处专长声明（AC 被动、先攻、Magic Initiate）。解析一次
         # 传下去，而不是让三个读取点各自 depth-copy 整份目录重跑校验。
         feat_definitions = load_feat_definitions(self.bundle) if feat_refs else {}
@@ -1030,12 +1032,9 @@ class CharacterDerivationMixin:
                 for ref in class_tool_refs
             ),
             *(
-                {"kind": "feat", "ref": ref, "source_ref": draft["background_ref"]}
-                for ref in background_feat_refs
-            ),
-            *(
-                {"kind": "feat", "ref": ref, "source_ref": draft["species_ref"]}
-                for ref in species_feat_refs
+                {"kind": "feat", "ref": item.ref, "source_ref": item.source_ref}
+                for item in feat_grants
+                if item.source_kind in {"background", "species"}
             ),
             *(
                 {

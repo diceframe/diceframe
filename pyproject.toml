@@ -125,6 +125,7 @@ files = [
     "src/rulesets/dnd2024/features/feat_capabilities.py",
     "src/rulesets/dnd2024/features/feat_models.py",
     "src/rulesets/dnd2024/features/feat_parameters.py",
+    "src/rulesets/dnd2024/features/feat_provenance.py",
     "src/rulesets/dnd2024/features/feat_requirements.py",
     "src/rulesets/dnd2024/features/feat_slots.py",
     "src/rulesets/dnd2024/features/kinds.py",
