@@ -1069,6 +1069,7 @@ async def test_call_stream_openai_yields_deltas_and_returns_response(monkeypatch
         base_url="https://api.example.com",
         api_key="k",
         model_name="m",
+        reasoning_effort="o3-mini-high",
     )
     client = LLMClient(providers=[provider], default="openai")
 
@@ -1091,6 +1092,7 @@ async def test_call_stream_openai_yields_deltas_and_returns_response(monkeypatch
     body = session.calls[0]["json"]
     assert body["stream"] is True
     assert body["stream_options"] == {"include_usage": True}
+    assert body["reasoning_effort"] == "o3-mini-high"
 
 
 @pytest.mark.asyncio

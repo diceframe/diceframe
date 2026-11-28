@@ -3167,6 +3167,31 @@ button.provider-catalog-row {
   width: 100%;
 }
 
+.reasoning-effort-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.reasoning-effort-field > span {
+  color: var(--df-text-secondary);
+  font-size: 10px;
+}
+
+.reasoning-effort-field .n-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.reasoning-effort-field .n-radio-button {
+  min-width: 44px;
+}
+
+.reasoning-effort-field .n-input {
+  max-width: 280px;
+}
+
 .model-role-card > label > span {
   color: var(--df-text-secondary);
   font-size: 10px;

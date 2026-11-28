@@ -40,6 +40,8 @@ SECRET_CONFIG_KEYS = frozenset({
 STRING_CONFIG_KEYS = frozenset({
     "model", "embedding_model", "embedding_source", "embedding_local_model_id", "web_cors_origins",
     "fallback1_model", "fallback2_model", "check_model",
+    "model_reasoning_effort", "fallback1_reasoning_effort", "fallback2_reasoning_effort",
+    "check_model_reasoning_effort",
     "public_base_url", "napcat_host", "napcat_connection_id",
     "tts_model", "tts_default_voice", "tts_gm_voice", "tts_player_voice",
     "asr_model",
@@ -49,11 +51,12 @@ STRING_CONFIG_KEYS = frozenset({
 })
 CONFIG_KEYS = (
     "game_defaults",
-    "llm_generation_options", "context_recent_rounds", "check_model_enabled", "check_model",
+    "llm_generation_options", "context_recent_rounds", "check_model_enabled", "check_model", "check_model_reasoning_effort",
     "model", "web_port", "web_cors_origins", "embedding_enabled",
     "embedding_source", "embedding_local_model_id", "embedding_model", "embedding_max_input",
-    "fallback1_enabled", "fallback1_model",
-    "fallback2_enabled", "fallback2_model",
+    "fallback1_enabled", "fallback1_model", "fallback1_reasoning_effort",
+    "fallback2_enabled", "fallback2_model", "fallback2_reasoning_effort",
+    "model_reasoning_effort",
     "narrative_max_tokens", "character_gen_max_tokens", "summary_max_tokens", "brief_max_tokens",
     "analysis_max_tokens", "text_gen_max_tokens", "assistant_agent_max_tokens", "assistant_agent_task_max_tokens", "proxy_enabled", "proxy_url", "public_base_url", "access_token",
     "qq_bot_enabled", "napcat_host", "napcat_port", "napcat_token", "napcat_heartbeat_sec",
@@ -73,11 +76,11 @@ CONFIG_KEYS = (
     "ai_providers", *PROVIDER_REF_KEYS,
 )
 MODEL_RUNTIME_CONFIG_KEYS = frozenset({
-    "llm_generation_options", "context_recent_rounds", "check_model_enabled", "check_provider_ref", "check_model",
-    "model",
+    "llm_generation_options", "context_recent_rounds", "check_model_enabled", "check_provider_ref", "check_model", "check_model_reasoning_effort",
+    "model", "model_reasoning_effort",
     "embedding_enabled", "embedding_source", "embedding_local_model_id", "embedding_model", "embedding_max_input",
-    "fallback1_enabled", "fallback1_model",
-    "fallback2_enabled", "fallback2_model",
+    "fallback1_enabled", "fallback1_model", "fallback1_reasoning_effort",
+    "fallback2_enabled", "fallback2_model", "fallback2_reasoning_effort",
     "narrative_max_tokens", "summary_max_tokens", "brief_max_tokens", "analysis_max_tokens",
     "model_request_timeout_seconds",
     "proxy_enabled", "proxy_url",

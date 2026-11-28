@@ -96,7 +96,7 @@ class RuntimeComposition:
                 api_key=main_api_key,
                 model_name=runtime_config["model"],
                 api_format=main_api_format,
-                reasoning_effort=runtime_config.get("model_reasoning_effort") or None,
+                reasoning_effort=runtime_config.get("model_reasoning_effort") or "off",
             )
         ]
         for index in (1, 2):
@@ -122,7 +122,7 @@ class RuntimeComposition:
                     model_name=fallback_model,
                     api_format=fallback_api_format,
                     fallback=True,
-                    reasoning_effort=runtime_config.get(f"fallback{index}_reasoning_effort") or None,
+                    reasoning_effort=runtime_config.get(f"fallback{index}_reasoning_effort") or "off",
                 )
             )
 
@@ -145,7 +145,7 @@ class RuntimeComposition:
         )
         check_route = resolve_provider(runtime_config, runtime_config.get("check_provider_ref", ""))
         check_model = str(runtime_config.get("check_model") or "").strip()
-        check_reasoning_effort = runtime_config.get("check_model_reasoning_effort") or None
+        check_reasoning_effort = runtime_config.get("check_model_reasoning_effort") or "off"
         check_provider = (
             ProviderConfig("check", check_route["base_url"], check_route["api_key"], check_model,
                            api_format=check_route["api_format"], reasoning_effort=check_reasoning_effort)

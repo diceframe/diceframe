@@ -122,6 +122,7 @@ class AISeatRuntime:
                     provider_name=view["provider_ref"], base_url=connection["base_url"],
                     api_key=connection["api_key"], api_format=connection["api_format"],
                     model_name=view["model"],
+                    reasoning_effort=config.get("model_reasoning_effort") or "off",
                 )], default=view["provider_ref"],
                     proxy_url=effective_proxy_url(bool(config.get("proxy_enabled")), str(config.get("proxy_url") or "")),
                     request_timeout_seconds=float(config.get("model_request_timeout_seconds", 120)))

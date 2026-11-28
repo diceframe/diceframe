@@ -63,6 +63,8 @@ def _thinking_suppression_for_tool_calls(provider: "ProviderConfig") -> dict[str
        unsupported_parameter，则撤掉参数重试，此后永不再发。
     4. Anthropic 格式 → 空字典（Anthropic 有独立的 thinking 控制路径）
     """
+    if provider.reasoning_effort == "off":
+        return {}
     if provider.reasoning_effort is not None:
         return {"reasoning_effort": provider.reasoning_effort}
     if _disable_thinking_for_deepseek_v4(provider):
@@ -120,8 +122,8 @@ class ProviderConfig:
     api_format: str = "openai"
     fallback: bool = False
     reasoning_effort: str | None = None
-    """工具调用路径的思考强度覆盖（``"none"``/``"off"``/``"low"`` 等）。
-    非 None 时优先于自动检测，传入 ``reasoning_effort`` 请求参数。"""
+    """模型请求的推理强度标识（如 ``"off"``、``"low"`` 或自定义值）。
+    ``"off"`` 会省略推理强度字段，其他值按请求协议传给模型。"""
 
 
 @dataclass
@@ -412,7 +414,7 @@ class LLMClient:
         body = transport.body(
             provider.model_name, system_prompt, user_message, max_tokens,
             json_mode=json_mode, tools=tools, force_tool_choice=force_tool_choice,
-            reasoning_effort=provider.reasoning_effort if tools else None,
+            reasoning_effort=provider.reasoning_effort,
         )
         session = await self._get_session()
         try:
@@ -828,7 +830,9 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        if _disable_thinking_for_deepseek_v4(provider):
+        if provider.reasoning_effort and provider.reasoning_effort != "off":
+            body["reasoning_effort"] = provider.reasoning_effort
+        elif provider.reasoning_effort is None and _disable_thinking_for_deepseek_v4(provider):
             body["thinking"] = {"type": "disabled"}
         # JSON 模式：DeepSeek/OpenAI 兼容的 structured output
         if json_mode:
@@ -966,7 +970,9 @@ class LLMClient:
             "stream": True,
             "stream_options": {"include_usage": True},
         }
-        if _disable_thinking_for_deepseek_v4(provider):
+        if provider.reasoning_effort and provider.reasoning_effort != "off":
+            body["reasoning_effort"] = provider.reasoning_effort
+        elif provider.reasoning_effort is None and _disable_thinking_for_deepseek_v4(provider):
             body["thinking"] = {"type": "disabled"}
         # JSON 模式：DeepSeek/OpenAI 兼容的 structured output
         if json_mode:

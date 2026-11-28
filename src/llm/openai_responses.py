@@ -232,10 +232,12 @@ class OpenAIResponsesTransport:
             logger.info("GPT-6 Responses uses default sampling; configured temperature=1 is represented by omitting temperature")
             self._default_sampling_noticed = True
         body: dict[str, Any] = {
-            "model": model, "store": False, "reasoning": {"effort": reasoning_effort if reasoning_effort is not None else "medium"},
+            "model": model, "store": False,
             "input": [{"role": "developer", "content": system}, {"role": "user", "content": user}],
             "max_output_tokens": max_tokens,
         }
+        if reasoning_effort != "off":
+            body["reasoning"] = {"effort": reasoning_effort if reasoning_effort is not None else "medium"}
         if json_mode:
             body["text"] = {"format": {"type": "json_object"}}
         if tools is not None:

@@ -47,8 +47,11 @@ def test_all_model_routes_and_credentials_roundtrip(tmp_path):
         "ai_providers": [_provider(), _provider("cloud")],
         provider_secret_key("cloud"): "sk-cloud-roundtrip",
         "llm_provider_ref": "cloud", "model": "chat",
+        "model_reasoning_effort": "high",
         "fallback1_enabled": True, "fallback1_provider_ref": "local", "fallback1_model": "chat",
+        "fallback1_reasoning_effort": "low",
         "fallback2_enabled": True, "fallback2_provider_ref": "cloud", "fallback2_model": "chat",
+        "fallback2_reasoning_effort": "o3-mini-high",
         "embedding_enabled": True, "embedding_provider_ref": "local",
         "embedding_model": "embed", "embedding_max_input": 12345,
         "tts_provider": "openai-compatible", "tts_provider_ref": "cloud",
@@ -62,6 +65,7 @@ def test_all_model_routes_and_credentials_roundtrip(tmp_path):
         "imagegen_model": "image", "imagegen_square_size": "512x512",
         "imagegen_landscape_size": "1536x1024", "imagegen_quality": "high",
         "imagegen_style_prefix": "watercolor", "imagegen_timeout_seconds": 150,
+        "check_model_reasoning_effort": "custom-provider-effort",
         "proxy_enabled": True, "proxy_url": "http://localhost:7890",
     }
     prepared = prepare_config_update(store.load().state, update)

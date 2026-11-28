@@ -141,6 +141,14 @@ def test_unsupported_explicit_sampling_is_not_silently_discarded(options):
         OpenAIResponsesTransport(options).body("gpt-6.2-sol", "system", "user", 8192)
 
 
+def test_reasoning_effort_off_omits_responses_identifier_and_custom_value_is_preserved():
+    transport = OpenAIResponsesTransport({})
+    off = transport.body("gpt-6.2-sol", "system", "user", 8192, reasoning_effort="off")
+    custom = transport.body("gpt-6.2-sol", "system", "user", 8192, reasoning_effort="o3-mini-high")
+    assert "reasoning" not in off
+    assert custom["reasoning"] == {"effort": "o3-mini-high"}
+
+
 @pytest.mark.asyncio
 async def test_astra_real_dice_schema_is_strict_and_optional_nulls_restore_omission(monkeypatch):
     original = deepcopy(DICE_CHECKS_TOOL)

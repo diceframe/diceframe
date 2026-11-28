@@ -70,10 +70,10 @@ export interface UseProviderModelSettingsOptions {
 }
 
 export const MODEL_ROUTING_CONFIG_KEYS = [
-  'check_model_enabled', 'check_provider_ref', 'check_model',
-  'llm_provider_ref', 'model',
-  'fallback1_enabled', 'fallback1_provider_ref', 'fallback1_model',
-  'fallback2_enabled', 'fallback2_provider_ref', 'fallback2_model',
+  'check_model_enabled', 'check_provider_ref', 'check_model', 'check_model_reasoning_effort',
+  'llm_provider_ref', 'model', 'model_reasoning_effort',
+  'fallback1_enabled', 'fallback1_provider_ref', 'fallback1_model', 'fallback1_reasoning_effort',
+  'fallback2_enabled', 'fallback2_provider_ref', 'fallback2_model', 'fallback2_reasoning_effort',
   'embedding_enabled', 'embedding_source', 'embedding_local_model_id', 'embedding_provider_ref', 'embedding_model', 'embedding_max_input',
   'tts_provider', 'tts_provider_ref', 'tts_model', 'tts_default_voice', 'tts_audio_format', 'tts_cache_mb',
   'asr_provider', 'asr_provider_ref', 'asr_model', 'asr_timeout_seconds',

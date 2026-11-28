@@ -2538,6 +2538,7 @@ export interface AppConfig {
   /** 服务器仍能正确服务的最低客户端版本；客户端版本低于它应提示升级 App */
   min_client_version?: string
   model?: string
+  model_reasoning_effort?: string
   ai_providers?: AiProvider[]
   llm_provider_ref?: string
   fallback1_provider_ref?: string
@@ -2548,8 +2549,10 @@ export interface AppConfig {
   imagegen_provider_ref?: string
   fallback1_enabled?: boolean
   fallback1_model?: string
+  fallback1_reasoning_effort?: string
   fallback2_enabled?: boolean
   fallback2_model?: string
+  fallback2_reasoning_effort?: string
   embedding_enabled?: boolean
   embedding_source?: 'external' | 'local' | string
   embedding_local_model_id?: string
@@ -2579,6 +2582,7 @@ export interface AppConfig {
   check_model_enabled?: boolean
   check_provider_ref?: string
   check_model?: string
+  check_model_reasoning_effort?: string
   proxy_enabled?: boolean
   proxy_url?: string
   proxy_source?: string
