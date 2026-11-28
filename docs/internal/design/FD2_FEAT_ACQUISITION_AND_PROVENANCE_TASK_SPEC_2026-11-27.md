@@ -360,3 +360,43 @@ boon_of_spell_recall   → requires: [...]
   服务展示，后者覆盖全部、服务审计。合并它们会改派生输出，留给下一次。
 - `progression.history` 只记 add、不记 drop（F8 的风格替换）；被替换掉的 ref 已不在 `feat_refs`
   里，provenance 不会为它编造来源，但"它曾经存在过"没有痕迹——属 F8 的替换账本。
+
+## 10. 独立审核（2026-11-28）
+
+由独立审查者（只读子 agent，范围 `099d5a56..HEAD` 的代码与本文 §3/§4/§6/§9）给出 3 条应修、
+5 条可选。逐条核实后：
+
+### 10.1 已修（3）
+
+| # | 发现 | 修法 |
+|---|---|---|
+| A1 | `FeatProvenance.source` 把 `source_kind` 与已带前缀的 `source_ref` 又拼一次，用户看到的建卡错误是 `background:background:soldier` | 改为 `background (background:soldier)`；测试断言两个源都出现且无双前缀 |
+| A2 | 纯 ASI 的伪专长 `feat:ability_score_improvement` 在 `history[].diff.advancement_feat_ref` 与旧 `feat_refs` 里都会出现，视图会把它读成 owned feat | 常量从 `progression/choices.py` 移到 `features/feat_models.py`（避免 `features → progression` 的环），视图两处跳过；新增用例 |
+| B2 | 物种专长分支没有 `feat:` 前缀守卫，与同函数的 class-feature 分支不一致 | 加同一守卫 |
+
+### 10.2 采纳但记为未修（附理由）
+
+| # | 发现 | 理由 |
+|---|---|---|
+| A3 | 建卡 `species_feats` 选项不过滤已拥有专长：Human + Soldier 时 Savage Attacker 仍在列表里，选中后 finalize 才拒绝 | 属 choices 投影/前端契约。后端已 fail closed，且 A1 修好后错误文案可读；过滤留给建卡 UI 或独立的 choices 片 |
+| B1 | `_views` 用"有 `identity` 且有 `build`"判定角色卡形状；一个同时含两者的 draft 会丢掉 `features`/`progression` | 当前不可达（draft 无 identity/build，canonical 必有）。改判定会引入第三种形状猜测，收益为负 |
+| B5 | `builder._acquired_feat_refs` 是背景 + 物种的第三处提取，与 `_draft_feat_refs`、`feat_provenance` 并列 | 范围外；三处合并属同一类清理，应单独立项 |
+| — | `advancement.py:1045` 仍会把伪专长写进 `feat_refs`（既有路径） | 视图已不读它；改写入路径会动 FD2a 的写回契约，属另一片 |
+
+### 10.3 核实后不是问题（记录以防重复讨论）
+
+- **行为等价**：改前（`099d5a56` 独立检出）与改后，fighter 1 级与 paladin 2 级的
+  `features.feat_refs` 与 `build.grants_with_sources` 的 feat 项逐项相等。
+- **多职业错标**：系统当前只支持单职业（`builder.py` 在 `len(class_levels) != 1` 时拒绝），
+  `class_levels[0]` 不会取到错误职业。
+- **视图不去重、升级路径不第二次调 `acquire`**：设计决定，见 §3.1/§3.2。
+- **派生期不抛错**：设计决定，见 §3.2 末。
+
+### 10.4 测试补强（对应审核 B4）
+
+- 矩阵 #4 改为断言消息同时含两个来源、且不含 `background:background:`；
+- 矩阵 #2 在 `choices` 里放一个 `feat_ref` 干扰项，证明视图读的是 `diff`；
+- 矩阵 #3 增加"视图 ref 序列 == 存档 `feat_refs`"断言；
+- 矩阵 #9 改为同一 runtime 派生两次比较（原 dict 顺序用例保留）；
+- `derivation` 守卫改为同时断言 `feat_grants = feat_provenance(` 与 `owned_feat_refs(feat_grants)`，
+  且旧的 `dict.fromkeys([*background_feat_refs` 不再出现。

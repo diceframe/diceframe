@@ -16,7 +16,10 @@ from typing import TYPE_CHECKING, Any
 
 from src.rulesets.dnd2024.character.builder import ABILITY_IDS, ability_modifier
 from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
-from src.rulesets.dnd2024.features.feat_models import AbilityIncrease
+from src.rulesets.dnd2024.features.feat_models import (
+    PLAIN_ABILITY_FEAT_REF,
+    AbilityIncrease,
+)
 from src.rulesets.dnd2024.features.feat_requirements import (
     FeatContext,
     feat_unavailable_reasons,
@@ -67,10 +70,8 @@ def _increase_projection(profile: AbilityIncrease | None) -> dict[str, Any] | No
 # 一个特性选项槽的规范化输入只接受这四个字段，多余字段一律拒绝。
 FEATURE_CHOICE_KEYS = frozenset({"owner", "feature_id", "choice_id", "selected_refs"})
 
-# 纯 ASI 走的是一条与专长相同的代码路径：属性值提升被声明成一条伪专长，
-# 让「占专长槽」只有一种实现。它不是角色拥有的专长，账本据此把它记成
-# ability_score_increase，而不是 feat_ref——否则审计会去要一个从未选过的专长。
-PLAIN_ABILITY_FEAT_REF = "feat:ability_score_improvement"
+# 纯 ASI 的伪专长 id 现在定义在 ``feat_models``：来源视图也要跳过它，
+# 而从 ``features`` 侧 import ``progression`` 会形成环。
 
 
 def _canonical(payload: dict[str, Any]) -> dict[str, Any]:

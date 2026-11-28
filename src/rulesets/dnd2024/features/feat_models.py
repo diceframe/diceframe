@@ -57,6 +57,16 @@ from src.rulesets.dnd2024.features.parameter_registry import (
     validate_feat_parameters,
 )
 
+#: The pseudo-feat a plain ASI is declared as.  It shares the feat code path so
+#: "occupy the feat slot" has one implementation, but it is not a feat the
+#: character owns: the ledger records it as ``ability_score_increase`` and the
+#: progression writers exclude it from ``feat_refs``.  Provenance excludes it
+#: for the same reason -- a sheet that carries it (an old writer, a repair
+#: path) must not be read as "owns a feat named ability_score_improvement".
+#: Defined here, not in ``progression.choices``, so the view can reach it
+#: without importing the progression package.
+PLAIN_ABILITY_FEAT_REF = "feat:ability_score_improvement"
+
 #: Every key a feat entity may carry.  A key outside this set is a typo or a
 #: field somebody added without a reader, and both are load-time errors.
 FEAT_FIELDS = frozenset({

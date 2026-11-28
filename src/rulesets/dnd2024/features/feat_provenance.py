@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.rulesets.bundle import LoadedRulesetBundle
+from src.rulesets.dnd2024.features.feat_models import PLAIN_ABILITY_FEAT_REF
 
 
 class FeatAcquisitionError(ValueError):
@@ -57,7 +58,12 @@ class FeatProvenance:
 
     @property
     def source(self) -> str:
-        return f"{self.source_kind}:{self.source_ref}" if self.source_ref else self.source_kind
+        # ``source_ref`` already carries its own prefix (``background:soldier``),
+        # so the kind goes in parentheses: ``background:background:soldier`` is
+        # what a naive join produces, and it is what the user sees in the error.
+        if not self.source_ref:
+            return self.source_kind
+        return f"{self.source_kind} ({self.source_ref})"
 
 
 def feat_provenance(
@@ -93,7 +99,9 @@ def feat_provenance(
     if species_ref and isinstance(species_refs, list):
         for raw in species_refs:
             ref = _text(raw)
-            if ref:
+            # Same guard as the class slot below: a grant is a feat reference,
+            # and anything else is a craft error the reference checks report.
+            if ref.startswith("feat:"):
                 items.append(FeatProvenance(ref, "species", species_ref))
 
     level_one = build_map.get("class_feature_feat_choices")
@@ -133,9 +141,11 @@ def feat_provenance(
             diff = entry.get("diff")
             diff = diff if isinstance(diff, Mapping) else {}
             # Advancement feats are recorded on the diff, not in choices:
-            # ``advancement.py`` writes ``diff.advancement_feat_ref``.
+            # ``advancement.py`` writes ``diff.advancement_feat_ref``.  A plain
+            # ASI uses the same key with a pseudo-feat id; it is a slot, not an
+            # owned feat, and the writers already exclude it.
             ref = _text(diff.get("advancement_feat_ref"))
-            if not ref:
+            if not ref or ref == PLAIN_ABILITY_FEAT_REF:
                 continue
             level = _optional_int(entry.get("to_level"))
             source_ref = f"level:{level}" if level is not None else ""
@@ -146,7 +156,9 @@ def feat_provenance(
     if isinstance(owned, list):
         for raw in owned:
             ref = _text(raw)
-            if ref and ref not in known:
+            # The pseudo-feat is a slot, not a grant; a sheet carrying it is a
+            # writer's leftover, not an unexplained feat.
+            if ref and ref not in known and ref != PLAIN_ABILITY_FEAT_REF:
                 items.append(FeatProvenance(ref, "unknown", ""))
 
     # Grants are returned one per acquisition, not one per ref: a ref granted

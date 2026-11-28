@@ -37,6 +37,10 @@ def bundle(runtime: Dnd2024Runtime):
     return runtime.load_bundle(LOCALE)
 
 
+def _provenance(sheet: dict, bundle):
+    return feat_provenance(bundle, sheet["ruleset_character"])
+
+
 def _sheet(**parts) -> dict:
     """A derived-sheet shape: identity + build + features + progression."""
 
@@ -65,6 +69,9 @@ def test_a_real_sheet_reports_all_three_build_time_sources(runtime, bundle) -> N
         ("feat:alert", "species", "species:human", None),
         ("feat:archery", "class_feature", "class:fighter", 1),
     ]
+    # The view and the stored list must agree, or one of them is the wrong
+    # answer and nothing would notice.
+    assert canonical["features"]["feat_refs"] == [item.ref for item in grants]
 
 
 def test_advancement_is_read_from_the_diff_not_from_choices(bundle) -> None:
@@ -77,13 +84,34 @@ def test_advancement_is_read_from_the_diff_not_from_choices(bundle) -> None:
     character = _sheet(progression={"history": [{
         "from_level": 3,
         "to_level": 4,
-        "choices": {"ability_score_increases": {"str": 2}},
+        # A decoy the view must not read: the real answer is on ``diff``.
+        "choices": {"ability_score_increases": {"str": 2}, "feat_ref": "feat:wrong"},
         "diff": {"advancement_feat_ref": "feat:grappler"},
     }]})
 
     assert feat_provenance(bundle, character) == (
         FeatProvenance("feat:grappler", "advancement", "level:4", 4),
     )
+
+
+def test_a_plain_ability_score_increase_is_not_a_grant(bundle) -> None:
+    """The ASI pseudo-feat shares the feat path but is a slot, not an owned feat.
+
+    The progression writers already exclude it from `feat_refs`; a sheet that
+    still carries it (old writer, repair path) must not read as "owns a feat
+    named ability_score_improvement".
+    """
+
+    character = _sheet(
+        features={"feat_refs": ["feat:ability_score_improvement"]},
+        progression={"history": [{
+            "to_level": 4,
+            "choices": {"ability_score_increases": {"str": 2}},
+            "diff": {"advancement_feat_ref": "feat:ability_score_improvement"},
+        }]},
+    )
+
+    assert feat_provenance(bundle, character) == ()
 
 
 def test_a_subclass_slot_is_a_class_feature_grant(bundle) -> None:
@@ -198,18 +226,23 @@ def test_acquire_keeps_the_grant_it_accepted() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_the_stored_refs_stay_a_string_list(runtime) -> None:
-    refs = fighter_sheet(runtime)["ruleset_character"]["features"]["feat_refs"]
+def test_the_stored_refs_stay_a_string_list(runtime, bundle) -> None:
+    canonical = fighter_sheet(runtime)["ruleset_character"]
+    refs = canonical["features"]["feat_refs"]
 
     assert refs == ["feat:savage_attacker", "feat:alert", "feat:archery"]
     assert all(isinstance(ref, str) for ref in refs)
+    assert refs == [item.ref for item in feat_provenance(bundle, canonical)]
 
 
-def test_derivation_no_longer_collapses_feat_refs_with_dict_fromkeys() -> None:
+def test_derivation_builds_feat_refs_from_provenance() -> None:
     source = inspect.getsource(derivation_module)
 
-    assert "background_feat_refs" not in source
-    assert "feat_provenance(" in source
+    # The old form concatenated three lists and collapsed them; the string it
+    # produced is a visible marker of that shape coming back.
+    assert "dict.fromkeys([*background_feat_refs" not in source
+    assert "feat_grants = feat_provenance(" in source
+    assert "owned_feat_refs(feat_grants)" in source
 
 
 def test_a_duplicate_background_and_species_feat_is_rejected_at_build_time(
@@ -220,8 +253,15 @@ def test_a_duplicate_background_and_species_feat_is_rejected_at_build_time(
     draft = fighter_draft(runtime, fighting_style="feat:archery")
     draft["species_feat_refs"] = ["feat:savage_attacker"]
 
-    with pytest.raises(ValueError, match="not repeatable"):
+    with pytest.raises(ValueError) as excinfo:
         runtime.finalize_character(None, draft)
+
+    message = str(excinfo.value)
+    assert "not repeatable" in message
+    # Both sources are named, and neither is rendered as background:background.
+    assert "background (background:soldier)" in message
+    assert "species (species:human)" in message
+    assert "background:background:" not in message
 
 
 def test_provenance_order_does_not_depend_on_dict_insertion(bundle) -> None:
@@ -235,3 +275,10 @@ def test_provenance_order_does_not_depend_on_dict_insertion(bundle) -> None:
     }
 
     assert feat_provenance(bundle, build_a) == feat_provenance(bundle, build_b)
+
+
+def test_a_real_sheet_derives_the_same_grants_twice(runtime, bundle) -> None:
+    first = _provenance(fighter_sheet(runtime), bundle)
+    second = _provenance(fighter_sheet(runtime), bundle)
+
+    assert first == second
