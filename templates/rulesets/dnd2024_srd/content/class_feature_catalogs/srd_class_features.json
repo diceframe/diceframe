@@ -687,11 +687,53 @@
             }
           ]
         }
+      ,
+        {
+          "id": "ability_score_improvement",
+          "minimum_level": 4,
+          "source_ref": "srd-5.2.1:p49:ability-score-improvement",
+          "summary": "You gain an Ability Score Improvement or another feat of your choice.",
+          "parameters": {},
+          "choice": {
+            "id": "ability_score_improvement",
+            "kind": "advancement_feat",
+            "category": "general",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        },
+        {
+          "id": "epic_boon",
+          "minimum_level": 19,
+          "source_ref": "srd-5.2.1:p49:epic-boon",
+          "summary": "You gain an Epic Boon feat or another feat of your choice that has the Epic Boon category.",
+          "parameters": {},
+          "choice": {
+            "id": "epic_boon",
+            "kind": "advancement_feat",
+            "category": "epic_boon",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        }
       ]
     },
     "paladin": {
       "source_ref": "srd-5.2.1:p54:paladins-smite",
       "features": [
+        {
+          "id": "fighting_style",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p54:fighting-style",
+          "summary": "You gain a Fighting Style feat of your choice. Whenever you gain a level, you can replace it with another Fighting Style feat.",
+          "parameters": {},
+          "choice": {
+            "id": "fighting_style_feat",
+            "kind": "advancement_feat",
+            "category": "fighting_style",
+            "count": 1
+          }
+        },
         {
           "id": "lay_on_hands",
           "minimum_level": 1,
@@ -1002,11 +1044,53 @@
             }
           ]
         }
+      ,
+        {
+          "id": "ability_score_improvement",
+          "minimum_level": 4,
+          "source_ref": "srd-5.2.1:p54:ability-score-improvement",
+          "summary": "You gain an Ability Score Improvement or another feat of your choice.",
+          "parameters": {},
+          "choice": {
+            "id": "ability_score_improvement",
+            "kind": "advancement_feat",
+            "category": "general",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        },
+        {
+          "id": "epic_boon",
+          "minimum_level": 19,
+          "source_ref": "srd-5.2.1:p54:epic-boon",
+          "summary": "You gain an Epic Boon feat or another feat of your choice that has the Epic Boon category.",
+          "parameters": {},
+          "choice": {
+            "id": "epic_boon",
+            "kind": "advancement_feat",
+            "category": "epic_boon",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        }
       ]
     },
     "fighter": {
       "source_ref": "srd-5.2.1:p47:fighter-features",
       "features": [
+        {
+          "id": "fighting_style",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p48:fighting-style",
+          "summary": "You gain a Fighting Style feat of your choice. Whenever you gain a level, you can replace it with another Fighting Style feat.",
+          "parameters": {},
+          "choice": {
+            "id": "fighting_style_feat",
+            "kind": "advancement_feat",
+            "category": "fighting_style",
+            "count": 1
+          }
+        },
         {
           "id": "second_wind",
           "minimum_level": 1,
@@ -1137,11 +1221,7 @@
             "id": "fighting_style_feat",
             "kind": "advancement_feat",
             "category": "fighting_style",
-            "count": 1,
-            "enabled_options": [
-              "feat:archery",
-              "feat:defense"
-            ]
+            "count": 1
           }
         },
         {
@@ -1214,6 +1294,35 @@
             "mark_kind": "studied",
             "mode": "advantage",
             "expiry": "attacker_next_turn_end"
+          }
+        }
+      ,
+        {
+          "id": "ability_score_improvement",
+          "minimum_level": 4,
+          "source_ref": "srd-5.2.1:p47:ability-score-improvement",
+          "summary": "You gain an Ability Score Improvement or another feat of your choice.",
+          "parameters": {},
+          "choice": {
+            "id": "ability_score_improvement",
+            "kind": "advancement_feat",
+            "category": "general",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        },
+        {
+          "id": "epic_boon",
+          "minimum_level": 19,
+          "source_ref": "srd-5.2.1:p47:epic-boon",
+          "summary": "You gain an Epic Boon feat or another feat of your choice that has the Epic Boon category.",
+          "parameters": {},
+          "choice": {
+            "id": "epic_boon",
+            "kind": "advancement_feat",
+            "category": "epic_boon",
+            "count": 1,
+            "handled_by": "advancement"
           }
         }
       ]
@@ -1544,6 +1653,35 @@
             }
           ]
         }
+      ,
+        {
+          "id": "ability_score_improvement",
+          "minimum_level": 4,
+          "source_ref": "srd-5.2.1:p28:ability-score-improvement",
+          "summary": "You gain an Ability Score Improvement or another feat of your choice.",
+          "parameters": {},
+          "choice": {
+            "id": "ability_score_improvement",
+            "kind": "advancement_feat",
+            "category": "general",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        },
+        {
+          "id": "epic_boon",
+          "minimum_level": 19,
+          "source_ref": "srd-5.2.1:p28:epic-boon",
+          "summary": "You gain an Epic Boon feat or another feat of your choice that has the Epic Boon category.",
+          "parameters": {},
+          "choice": {
+            "id": "epic_boon",
+            "kind": "advancement_feat",
+            "category": "epic_boon",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        }
       ]
     },
     "rogue": {
@@ -1801,6 +1939,35 @@
             "obscure_duration": "target_turn_end"
           }
         }
+      ,
+        {
+          "id": "ability_score_improvement",
+          "minimum_level": 4,
+          "source_ref": "srd-5.2.1:p61:ability-score-improvement",
+          "summary": "You gain an Ability Score Improvement or another feat of your choice.",
+          "parameters": {},
+          "choice": {
+            "id": "ability_score_improvement",
+            "kind": "advancement_feat",
+            "category": "general",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        },
+        {
+          "id": "epic_boon",
+          "minimum_level": 19,
+          "source_ref": "srd-5.2.1:p61:epic-boon",
+          "summary": "You gain an Epic Boon feat or another feat of your choice that has the Epic Boon category.",
+          "parameters": {},
+          "choice": {
+            "id": "epic_boon",
+            "kind": "advancement_feat",
+            "category": "epic_boon",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        }
       ]
     },
     "ranger": {
@@ -1833,6 +2000,19 @@
             "kind": "language",
             "category": "language",
             "count": 2
+          }
+        },
+        {
+          "id": "fighting_style",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p59:fighting-style",
+          "summary": "You gain a Fighting Style feat of your choice. Whenever you gain a level, you can replace it with another Fighting Style feat.",
+          "parameters": {},
+          "choice": {
+            "id": "fighting_style_feat",
+            "kind": "advancement_feat",
+            "category": "fighting_style",
+            "count": 1
           }
         },
         {
@@ -2091,6 +2271,35 @@
             "sustained_condition": "hunters_defense"
           }
         }
+      ,
+        {
+          "id": "ability_score_improvement",
+          "minimum_level": 4,
+          "source_ref": "srd-5.2.1:p59:ability-score-improvement",
+          "summary": "You gain an Ability Score Improvement or another feat of your choice.",
+          "parameters": {},
+          "choice": {
+            "id": "ability_score_improvement",
+            "kind": "advancement_feat",
+            "category": "general",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        },
+        {
+          "id": "epic_boon",
+          "minimum_level": 19,
+          "source_ref": "srd-5.2.1:p59:epic-boon",
+          "summary": "You gain an Epic Boon feat or another feat of your choice that has the Epic Boon category.",
+          "parameters": {},
+          "choice": {
+            "id": "epic_boon",
+            "kind": "advancement_feat",
+            "category": "epic_boon",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        }
       ]
     },
     "bard": {
@@ -2269,6 +2478,35 @@
               "charmed",
               "frightened"
             ]
+          }
+        }
+      ,
+        {
+          "id": "ability_score_improvement",
+          "minimum_level": 4,
+          "source_ref": "srd-5.2.1:p31:ability-score-improvement",
+          "summary": "You gain an Ability Score Improvement or another feat of your choice.",
+          "parameters": {},
+          "choice": {
+            "id": "ability_score_improvement",
+            "kind": "advancement_feat",
+            "category": "general",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        },
+        {
+          "id": "epic_boon",
+          "minimum_level": 19,
+          "source_ref": "srd-5.2.1:p31:epic-boon",
+          "summary": "You gain an Epic Boon feat or another feat of your choice that has the Epic Boon category.",
+          "parameters": {},
+          "choice": {
+            "id": "epic_boon",
+            "kind": "advancement_feat",
+            "category": "epic_boon",
+            "count": 1,
+            "handled_by": "advancement"
           }
         }
       ]
@@ -2494,6 +2732,35 @@
           "summary": "While Innate Sorcery is active you can use one Metamagic option on each of your turns without spending Sorcery Points on it.",
           "parameters": {
             "free_metamagic_per_turn": 1
+          }
+        }
+      ,
+        {
+          "id": "ability_score_improvement",
+          "minimum_level": 4,
+          "source_ref": "srd-5.2.1:p64:ability-score-improvement",
+          "summary": "You gain an Ability Score Improvement or another feat of your choice.",
+          "parameters": {},
+          "choice": {
+            "id": "ability_score_improvement",
+            "kind": "advancement_feat",
+            "category": "general",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        },
+        {
+          "id": "epic_boon",
+          "minimum_level": 19,
+          "source_ref": "srd-5.2.1:p64:epic-boon",
+          "summary": "You gain an Epic Boon feat or another feat of your choice that has the Epic Boon category.",
+          "parameters": {},
+          "choice": {
+            "id": "epic_boon",
+            "kind": "advancement_feat",
+            "category": "epic_boon",
+            "count": 1,
+            "handled_by": "advancement"
           }
         }
       ]
@@ -2832,6 +3099,35 @@
             "truesight_range_ft": 30
           }
         }
+      ,
+        {
+          "id": "ability_score_improvement",
+          "minimum_level": 4,
+          "source_ref": "srd-5.2.1:p70:ability-score-improvement",
+          "summary": "You gain an Ability Score Improvement or another feat of your choice.",
+          "parameters": {},
+          "choice": {
+            "id": "ability_score_improvement",
+            "kind": "advancement_feat",
+            "category": "general",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        },
+        {
+          "id": "epic_boon",
+          "minimum_level": 19,
+          "source_ref": "srd-5.2.1:p70:epic-boon",
+          "summary": "You gain an Epic Boon feat or another feat of your choice that has the Epic Boon category.",
+          "parameters": {},
+          "choice": {
+            "id": "epic_boon",
+            "kind": "advancement_feat",
+            "category": "epic_boon",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        }
       ]
     },
     "cleric": {
@@ -3129,6 +3425,35 @@
             "temp_hp_range_ft": 60
           }
         }
+      ,
+        {
+          "id": "ability_score_improvement",
+          "minimum_level": 4,
+          "source_ref": "srd-5.2.1:p40:ability-score-improvement",
+          "summary": "You gain an Ability Score Improvement or another feat of your choice.",
+          "parameters": {},
+          "choice": {
+            "id": "ability_score_improvement",
+            "kind": "advancement_feat",
+            "category": "general",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        },
+        {
+          "id": "epic_boon",
+          "minimum_level": 19,
+          "source_ref": "srd-5.2.1:p40:epic-boon",
+          "summary": "You gain an Epic Boon feat or another feat of your choice that has the Epic Boon category.",
+          "parameters": {},
+          "choice": {
+            "id": "epic_boon",
+            "kind": "advancement_feat",
+            "category": "epic_boon",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        }
       ]
     },
     "druid": {
@@ -3360,6 +3685,35 @@
           "source_ref": "srd-5.2.1:p46:natures-sanctuary",
           "summary": "Magic action + one Wild Shape use: a 15-foot Cube on the ground within 120 feet for 1 minute or until you are Incapacitated or die. You and your allies have Half Cover there, and allies also gain your Nature's Ward resistance. A Bonus Action moves it up to 60 feet."
         }
+      ,
+        {
+          "id": "ability_score_improvement",
+          "minimum_level": 4,
+          "source_ref": "srd-5.2.1:p46:ability-score-improvement",
+          "summary": "You gain an Ability Score Improvement or another feat of your choice.",
+          "parameters": {},
+          "choice": {
+            "id": "ability_score_improvement",
+            "kind": "advancement_feat",
+            "category": "general",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        },
+        {
+          "id": "epic_boon",
+          "minimum_level": 19,
+          "source_ref": "srd-5.2.1:p46:epic-boon",
+          "summary": "You gain an Epic Boon feat or another feat of your choice that has the Epic Boon category.",
+          "parameters": {},
+          "choice": {
+            "id": "epic_boon",
+            "kind": "advancement_feat",
+            "category": "epic_boon",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        }
       ]
     },
     "wizard": {
@@ -3469,6 +3823,35 @@
             "free_cast_source": "spellbook",
             "free_cast_prepares": true,
             "free_cast_replacement": 0
+          }
+        }
+      ,
+        {
+          "id": "ability_score_improvement",
+          "minimum_level": 4,
+          "source_ref": "srd-5.2.1:p82:ability-score-improvement",
+          "summary": "You gain an Ability Score Improvement or another feat of your choice.",
+          "parameters": {},
+          "choice": {
+            "id": "ability_score_improvement",
+            "kind": "advancement_feat",
+            "category": "general",
+            "count": 1,
+            "handled_by": "advancement"
+          }
+        },
+        {
+          "id": "epic_boon",
+          "minimum_level": 19,
+          "source_ref": "srd-5.2.1:p82:epic-boon",
+          "summary": "You gain an Epic Boon feat or another feat of your choice that has the Epic Boon category.",
+          "parameters": {},
+          "choice": {
+            "id": "epic_boon",
+            "kind": "advancement_feat",
+            "category": "epic_boon",
+            "count": 1,
+            "handled_by": "advancement"
           }
         }
       ]

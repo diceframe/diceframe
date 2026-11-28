@@ -87,6 +87,20 @@ PARAMETERS: Mapping[str, ParameterSpec] = {
             "light_extra_attack_ability_damage",
         ),
     ),
+    # Great Weapon Fighting: 1s and 2s on the weapon's own damage dice become 3.
+    # The name carries the two conditions (two-handed melee) because the resolver
+    # answers "does this character have it", while combat decides whether *this*
+    # attack qualifies.
+    "two_handed_melee_damage_die_minimum": ParameterSpec(
+        "int",
+        stage="combat",
+        reader=(
+            "rulesets/dnd2024/features/feat_parameters.py",
+            "two_handed_melee_damage_die_minimum",
+        ),
+        minimum=2,
+        maximum=12,
+    ),
     "initiative_proficiency_bonus": ParameterSpec(
         "str",
         stage="derivation",
