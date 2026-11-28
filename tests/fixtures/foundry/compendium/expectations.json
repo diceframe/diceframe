@@ -1,0 +1,6 @@
+{
+  "journal_pack.json": {"format": "json", "records": 3, "types": ["JournalEntry", "RollTable", "Macro"]},
+  "items_pack.jsonl": {"format": "jsonl", "records": 2, "types": ["Item", "Item"]},
+  "actors_scenes_pack.yaml": {"format": "yaml", "records": 3, "types": ["Actor", "Scene", "Playlist"]},
+  "envelope_pack.json": {"format": "json", "records": 1, "types": ["Item"], "pack_name": "Lantern Pack"}
+}

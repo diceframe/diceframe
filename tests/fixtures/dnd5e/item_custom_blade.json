@@ -1,0 +1,43 @@
+{
+  "_id": "CustomItemBladeStandalone",
+  "_stats": {
+    "coreVersion": "14.367",
+    "systemId": "dnd5e",
+    "systemVersion": "6.1.2"
+  },
+  "name": "Blade of Testing",
+  "type": "weapon",
+  "img": "icons/weapons/swords/flame-sword.webp",
+  "system": {
+    "identifier": "blade-of-testing",
+    "description": {"value": "<p>A custom magic weapon.</p>"},
+    "quantity": 1,
+    "weight": {"value": 3, "units": "lb"},
+    "price": {"value": 0, "denomination": "gp"},
+    "equipped": true,
+    "properties": ["mgc"],
+    "type": {"value": "martialM", "subtype": "sword"},
+    "rarity": "rare",
+    "attunement": "required",
+    "damage": {
+      "base": {"number": 2, "denomination": 6, "bonus": "", "types": ["fire"]}
+    },
+    "activities": {
+      "CustomAttack": {
+        "_id": "CustomAttack",
+        "type": "attack",
+        "name": "Flame Strike"
+      }
+    },
+    "customProperty": "homebrew flag unknown to the converter"
+  },
+  "effects": [
+    {
+      "_id": "CustomItemBladeEffect",
+      "label": "Flame aura",
+      "changes": [
+        {"key": "system.bonuses.mwak.damage", "mode": 2, "value": "1d6", "priority": 20}
+      ]
+    }
+  ]
+}

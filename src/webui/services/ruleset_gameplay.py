@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
 import secrets
 from collections.abc import Awaitable, Callable
@@ -14,7 +15,19 @@ from typing import Any
 from src.webui.ruleset_draft_validation import validate_draft_shape
 from src.adventures import binding_matches
 from src.engine import module_hooks, progression
-from src.engine.modules import adventure_runtime_state, economy_state, progression_state, ruleset_runtime, session_stats
+from src.engine.module_state import ModuleStateError
+from src.engine.modules import (
+    adventure_runtime_state,
+    economy_state,
+    progression_state,
+    ruleset_runtime,
+    session_stats,
+    tactical_scene,
+)
+from src.tactical_scene.codec import decode_tactical_scene_document
+from src.tactical_scene.contract import TacticalSceneContractError
+from src.tactical_scene.ops import PLACEABLE_UPDATE, TacticalSceneOpError
+from src.webui.services.tactical_scene_ops import Broadcast, _broadcast_projection
 from src.engine.action_gate import (
     GateRequest, ROUND_PROCESSING, SOURCE_INTENT, STRUCTURED_INTENT_POLICY,
     check_not_judging, check_seat_exists, evaluate,
@@ -81,6 +94,9 @@ class RulesetGameplayDependencies:
     complete_adventure_node: Callable[[Any, str, str, str], dict[str, Any]] | None = None
     request_adventure_choice: Callable[[Any, str, str, str], dict[str, Any]] | None = None
     seat_runtime: SeatRuntime | None = None
+    # 组合根晚绑定的 SSE 广播器：写回成功后按 viewer 白名单广播场景投影。
+    # None 表示未接线——写回照常落库，只是不广播（与 scene-03 一致）。
+    resolve_broadcast: Callable[[], Any | None] | None = None
     # 服务端权威 RNG 工厂。默认每个意图从 OS 熵取 128bit 种子的 random.Random：
     # - 可序列化（getstate DTO）：外部 ruleset runtime 的 stdio 适配器必须能
     #   把 rng 传给子进程——SystemRandom 显式不支持 getstate，直接崩溃（P0）；
@@ -477,6 +493,430 @@ async def available_actions(
             requester_is_gm=requester_is_gm,
         )
 
+class _SceneBoardError(ValueError):
+    """The active scene cannot supply a square grid board."""
+
+
+def _token_actor_id(token: Any) -> str:
+    """The DiceFrame actor named by a token's explicit reference, never by name."""
+
+    if not isinstance(token, dict):
+        return ""
+    ref = token.get("actor_ref")
+    if not isinstance(ref, dict):
+        return ""
+    raw_id = str(ref.get("id") or "")
+    if raw_id.startswith(("player:", "companion:", "enemy:")):
+        return raw_id
+    kind = str(ref.get("kind") or "")
+    if kind in {"player", "companion", "enemy"} and raw_id:
+        return f"{kind}:{raw_id}"
+    return ""
+
+
+def _scene_grid_start(instance: Any) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """Take the bound scene's square grid snapshot for an explicit combat.start.
+
+    The ruleset never imports the scene package; this application service hands
+    the grid over as plain data.  Pixels are converted to cells here.
+    """
+
+    scene_ref = tactical_scene.active_scene_ref(instance)
+    if not isinstance(scene_ref, str) or not scene_ref:
+        raise _SceneBoardError("no active Tactical Scene is bound")
+    raw = tactical_scene.scenes(instance).get(scene_ref)
+    if not isinstance(raw, dict):
+        raise _SceneBoardError("the bound Tactical Scene is missing")
+    try:
+        document = decode_tactical_scene_document(raw)
+    except TacticalSceneContractError as exc:
+        raise _SceneBoardError(f"the bound Tactical Scene is invalid: {exc}") from exc
+    grid = document["grid"]
+    if str(grid.get("type") or "") != "square":
+        raise _SceneBoardError("the bound scene is not a square grid")
+    cell_px = int(grid.get("size") or 0)
+    if cell_px <= 0:
+        raise _SceneBoardError("the bound scene has no usable grid size")
+    dimensions = document["dimensions"]
+    width = int(dimensions["width"]) // cell_px
+    height = int(dimensions["height"]) // cell_px
+    if width <= 0 or height <= 0:
+        raise _SceneBoardError("the bound scene has no complete grid cells")
+    distance = float(grid.get("distance") or 0.0)
+    cell_size = int(round(distance)) if distance > 0 else 5
+    walls: list[dict[str, float]] = []
+    for wall in (document["placeables"].get("walls") or {}).values():
+        restrictions = wall.get("restrictions") or {}
+        if int(restrictions.get("move", 0) or 0) == 0:
+            continue
+        endpoints = wall.get("endpoints") or {}
+        walls.append({
+            "x0": float(endpoints["x0"]) / cell_px,
+            "y0": float(endpoints["y0"]) / cell_px,
+            "x1": float(endpoints["x1"]) / cell_px,
+            "y1": float(endpoints["y1"]) / cell_px,
+        })
+    positions: dict[str, dict[str, Any]] = {}
+    for token in (document["placeables"].get("tokens") or {}).values():
+        actor_id = _token_actor_id(token)
+        if not actor_id:
+            continue
+        anchor = token["position"]
+        size = token.get("size") or {}
+        positions[actor_id] = {
+            "x": int(float(anchor["x"]) // cell_px),
+            "y": int(float(anchor["y"]) // cell_px),
+            "footprint": {
+                "w": max(1, math.ceil(float(size.get("width") or 1))),
+                "h": max(1, math.ceil(float(size.get("height") or 1))),
+            },
+        }
+    board = {
+        "id": scene_ref, "width": width, "height": height,
+        "cell_size": cell_size, "distance_metric": "dnd2024", "walls": walls,
+        # The revision captured here is the write-back fence: if the scene
+        # moves under the combat, the final positions are not written back.
+        "scene_revision": tactical_scene.revision(instance),
+    }
+    return board, positions
+
+
+def _bind_grid_start_input(runtime: Any, instance: Any, intent: dict[str, Any]) -> dict[str, Any] | None:
+    """Attach the scene-owned board; a client can never forge one."""
+
+    if str(intent.get("type") or "") != "combat.start":
+        return None
+    intent.pop("board", None)
+    intent.pop("spatial_positions", None)
+    if str(intent.get("position_mode") or "") != "grid":
+        intent.pop("position_mode", None)
+        return None
+    modes = getattr(getattr(runtime, "capabilities", None), "combat_spatial_modes", ())
+    if "grid" not in modes:
+        return _error("SPATIAL_MODE_UNAVAILABLE", "this rules runtime does not declare grid combat")
+    try:
+        board, positions = _scene_grid_start(instance)
+    except _SceneBoardError as exc:
+        return _error("TACTICAL_SCENE_BOARD_UNAVAILABLE", str(exc))
+    intent["board"] = board
+    intent["spatial_positions"] = positions
+    return None
+
+
+def _ended_grid_combat(instance: Any) -> dict[str, Any] | None:
+    state = ruleset_runtime.state(instance)
+    combat = state.get("combat") if isinstance(state, dict) else None
+    if not isinstance(combat, dict) or str(combat.get("status") or "") != "ended":
+        return None
+    if str(combat.get("position_mode") or "") != "grid":
+        return None
+    if not isinstance(combat.get("board"), dict):
+        return None
+    return combat
+
+
+def _scene_write_plan(instance: Any, requester_is_gm: bool) -> dict[str, Any] | None:
+    """Collect the placeable updates that leaving a grid combat owes the scene.
+
+    ``None`` means nothing to do; ``{"error": result}`` is a refusal; otherwise
+    the plan is ``{"scene_id", "revision", "updates"}``.  No state is written.
+    """
+
+    if not requester_is_gm:
+        return None
+    combat = _ended_grid_combat(instance)
+    if combat is None:
+        return None
+    board = combat["board"]
+    scene_ref = str(board.get("id") or "")
+    expected = board.get("scene_revision")
+    if not scene_ref:
+        return {"error": {"ok": False, "code": "tactical_scene_not_found", "scene_id": None},
+                "error_code": "tactical_scene_not_found"}
+    if isinstance(expected, bool) or not isinstance(expected, int) or expected < 0:
+        # A grid combat started before this fence existed never captured one;
+        # never guess a revision just to make the write succeed.
+        return {"error": {
+            "ok": False, "code": "tactical_scene_revision_unknown",
+            "scene_id": scene_ref,
+        }, "error_code": "tactical_scene_revision_unknown"}
+    raw = tactical_scene.scenes(instance).get(scene_ref)
+    if not isinstance(raw, dict):
+        return {"error": {
+            "ok": False, "code": "tactical_scene_not_found", "scene_id": scene_ref,
+        }, "error_code": "tactical_scene_not_found"}
+    try:
+        document = decode_tactical_scene_document(raw)
+    except TacticalSceneContractError:
+        return {"error": {
+            "ok": False, "code": "tactical_scene_invalid_payload", "scene_id": scene_ref,
+        }, "error_code": "tactical_scene_invalid_payload"}
+    cell_px = int(document["grid"].get("size") or 0)
+    if cell_px <= 0:
+        return {"error": {
+            "ok": False, "code": "tactical_scene_invalid_payload", "scene_id": scene_ref,
+        }, "error_code": "tactical_scene_invalid_payload"}
+    positions = combat.get("spatial_position") or {}
+    updates: list[tuple[str, dict[str, Any]]] = []
+    for token_id, token in sorted((document["placeables"].get("tokens") or {}).items()):
+        actor_id = _token_actor_id(token)
+        position = positions.get(actor_id) if actor_id else None
+        if not isinstance(position, dict):
+            continue
+        moved = deepcopy(token)
+        current_position = moved.get("position") or {}
+        new_x = int(position["x"]) * cell_px
+        new_y = int(position["y"]) * cell_px
+        if current_position.get("x") == new_x and current_position.get("y") == new_y:
+            continue
+        moved["position"] = {**current_position, "x": new_x, "y": new_y}
+        updates.append((str(token_id), moved))
+    return {"scene_id": scene_ref, "revision": expected, "updates": updates}
+
+
+async def _apply_scene_write_plan(
+    instance: Any, plan: dict[str, Any],
+    save_instance: Callable[[Any], Awaitable[None]],
+) -> dict[str, Any]:
+    """Apply one plan atomically; the caller already holds ``instance._lock``."""
+
+    scene_ref = plan["scene_id"]
+    expected = plan["revision"]
+    updates = plan["updates"]
+    if not updates:
+        return {"ok": True, "scene_id": scene_ref, "revision": expected, "tokens": []}
+    try:
+        before = tactical_scene.snapshot(instance)
+    except ModuleStateError:
+        return {
+            "ok": False, "code": "tactical_scene_invalid_payload",
+            "scene_id": scene_ref,
+        }
+    revision = expected
+    written: list[str] = []
+    try:
+        for token_id, moved in updates:
+            summary = tactical_scene.apply_op(
+                instance,
+                {
+                    "kind": PLACEABLE_UPDATE, "scene_id": scene_ref,
+                    "collection": "tokens", "placeable_id": token_id,
+                    "placeable": moved,
+                },
+                expected_revision=revision,
+            )
+            revision = int(summary["revision"])
+            written.append(token_id)
+    except TacticalSceneOpError as exc:
+        # Stale revision or an invalid token: write nothing at all.
+        tactical_scene.restore(instance, before)
+        return {"ok": False, "code": exc.code, "scene_id": scene_ref}
+    try:
+        await save_instance(instance)
+    except asyncio.CancelledError:
+        tactical_scene.restore(instance, before)
+        raise
+    except Exception:
+        tactical_scene.restore(instance, before)
+        return {"ok": False, "code": "save_failed", "scene_id": scene_ref}
+    return {
+        "ok": True, "scene_id": scene_ref, "revision": revision, "tokens": written,
+    }
+
+
+async def write_back_combat_positions(
+    instance: Any, *,
+    get_instance: Callable[[Any], Any | None],
+    save_instance: Callable[[Any], Awaitable[None]],
+    requester_is_gm: bool,
+    broadcast: Broadcast | None = None,
+) -> dict[str, Any] | None:
+    """Write final grid positions back to the bound scene after combat ends.
+
+    Leaving combat hands authority back to the scene.  Every token whose
+    explicit actor reference names a participant is moved through the
+    ``placeable_update`` operation, fenced by the slot revision captured at
+    combat start: if the scene changed during the combat nothing is written
+    and the conflict is reported instead of being silently overwritten.
+    Returns ``None`` when there is nothing to sync.
+    """
+
+    if not requester_is_gm:
+        return None
+    event: dict[str, Any] | None = None
+    async with instance.authoritative_write() as entered:
+        if not entered:
+            return {"ok": False, "code": "rewrite_in_progress"}
+        if get_instance(instance.game_key) is not instance:
+            return {"ok": False, "code": "stale_run"}
+        async with instance._lock:
+            plan = _scene_write_plan(instance, requester_is_gm)
+            if plan is None:
+                return None
+            if "error" in plan:
+                return plan["error"]
+            sync = await _apply_scene_write_plan(instance, plan, save_instance)
+            event = _scene_write_event(instance, sync)
+    await _emit_scene_write_broadcast(broadcast, instance, event)
+    return sync
+
+
+def _scene_write_event(instance: Any, sync: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Snapshot the committed scene projection while the caller holds the lock.
+
+    ``None`` means nothing changed on the scene, so there is nothing to broadcast.
+    """
+
+    if not sync or not sync.get("ok") or not sync.get("tokens"):
+        return None
+    scene_id = str(sync.get("scene_id") or "")
+    raw = tactical_scene.scenes(instance).get(scene_id)
+    document: dict[str, Any] | None = None
+    if isinstance(raw, dict):
+        try:
+            document = decode_tactical_scene_document(raw)
+        except (ModuleStateError, TacticalSceneContractError):
+            document = None
+    return {
+        "game_key": "|".join(instance.game_key),
+        "scene_id": scene_id,
+        "revision": int(sync["revision"]),
+        "document": document,
+    }
+
+
+async def _emit_scene_write_broadcast(
+    broadcast: Broadcast | None,
+    instance: Any,
+    event: dict[str, Any] | None,
+) -> None:
+    """Best-effort scene-03 projection after the write is durable and locks are free."""
+
+    if broadcast is None or event is None:
+        return
+    summary = {
+        "scene_id": event["scene_id"],
+        "revision": event["revision"],
+        "operation": PLACEABLE_UPDATE,
+    }
+    try:
+        await _broadcast_projection(
+            broadcast, event["game_key"], instance, summary, event["document"],
+        )
+    except Exception:
+        # The scene write is already durable; a failed projection must not turn
+        # the committed intent into an error response.
+        logger.exception("Scene write-back broadcast failed")
+
+
+def _scene_write_gm_author(
+    instance: Any, intent: dict[str, Any], requester_is_gm: bool,
+) -> bool:
+    # combat.end is GM-gated by the ruleset; a GM identity is GM authority even
+    # when the transport did not flag the request as an owner session.
+    return requester_is_gm or (
+        str(intent.get("submitted_by") or "") == str(getattr(instance, "gm_uid", "") or "")
+    )
+
+
+def _scene_sync_needed(
+    instance: Any, intent: dict[str, Any], combat_was_active: bool,
+) -> bool:
+    """Explicit ``combat.end`` or a fight that ended itself inside ``apply_batch``.
+
+    Victory / party_defeated close the combat from the ruleset's own resolution;
+    the transition is only new when the combat was active before this intent.
+    """
+
+    if str(intent.get("type") or "") == "combat.end":
+        return True
+    return combat_was_active and _ended_grid_combat(instance) is not None
+
+
+def _scene_sync_author(
+    instance: Any, intent: dict[str, Any], requester_is_gm: bool, combat_was_active: bool,
+) -> bool:
+    """Who authorizes this write-back.
+
+    ``combat.end`` is attributed to its GM author.  An automatic victory is
+    authored by the system observing the end, so a seat's killing blow still
+    releases the scene without granting that seat scene-edit authority.
+    """
+
+    if str(intent.get("type") or "") == "combat.end":
+        return _scene_write_gm_author(instance, intent, requester_is_gm)
+    return _scene_sync_needed(instance, intent, combat_was_active)
+
+
+async def _sync_scene_after_combat_end(
+    dependencies: RulesetGameplayDependencies,
+    instance: Any,
+    intent: dict[str, Any],
+    result: dict[str, Any],
+    requester_is_gm: bool,
+    *,
+    combat_was_active: bool = False,
+) -> None:
+    """Hosted path: locks are free, so reuse the full authoritative entry."""
+
+    if not _scene_sync_needed(instance, intent, combat_was_active):
+        return
+    broadcast = (
+        dependencies.resolve_broadcast() if dependencies.resolve_broadcast else None
+    )
+    try:
+        sync = await write_back_combat_positions(
+            instance,
+            get_instance=dependencies.get_instance,
+            save_instance=dependencies.save_instance,
+            requester_is_gm=_scene_sync_author(
+                instance, intent, requester_is_gm, combat_was_active,
+            ),
+            broadcast=broadcast,
+        )
+    except Exception:
+        logger.exception("Scene write-back after combat end failed")
+        sync = {"ok": False, "code": "scene_writeback_failed"}
+    if sync is not None:
+        result["scene_sync"] = sync
+
+
+async def _sync_scene_after_combat_end_locked(
+    dependencies: RulesetGameplayDependencies,
+    instance: Any,
+    intent: dict[str, Any],
+    result: dict[str, Any],
+    requester_is_gm: bool,
+    *,
+    combat_was_active: bool = False,
+) -> dict[str, Any] | None:
+    """Normal path: the caller holds ``instance._lock``; never re-acquire it.
+
+    Returns the broadcast snapshot to emit once the caller releases the lock.
+    """
+
+    if not _scene_sync_needed(instance, intent, combat_was_active):
+        return None
+    try:
+        plan = _scene_write_plan(
+            instance,
+            _scene_sync_author(instance, intent, requester_is_gm, combat_was_active),
+        )
+        if plan is None:
+            return None
+        sync = (
+            plan["error"] if "error" in plan
+            else await _apply_scene_write_plan(
+                instance, plan, dependencies.save_instance,
+            )
+        )
+    except Exception:
+        logger.exception("Scene write-back after combat end failed")
+        sync = {"ok": False, "code": "scene_writeback_failed"}
+    result["scene_sync"] = sync
+    return _scene_write_event(instance, sync)
+
+
 async def submit_intent(
     dependencies: RulesetGameplayDependencies,
     game_key: str,
@@ -527,6 +967,9 @@ async def submit_intent(
     intent = await _await_runtime_call(
         runtime, "prepare_intent_submission", intent, effective_requester, requester_is_gm, instance,
     )
+    board_error = _bind_grid_start_input(runtime, instance, intent)
+    if board_error:
+        return board_error
     is_sequential_action = str(intent.get("type") or "") == "sequential_action"
 
     if dependencies.seat_runtime is not None and isinstance(runtime, HostedIntentChoiceRuntime) and not is_sequential_action:
@@ -540,6 +983,7 @@ async def submit_intent(
             session_stats.require_writable(instance)
             return await _ensure_compatible_adventure_binding(dependencies, runtime, instance)
 
+        combat_was_active = _active_combat(instance) is not None
         planned = await hosted_combat.plan_and_commit(
             instance, runtime, dependencies.seat_runtime, preflight=preflight,
             save=dependencies.save_instance, initial_intent=intent,
@@ -548,8 +992,13 @@ async def submit_intent(
         if not planned.get("ok"):
             return planned
         await _project_batch_memory(dependencies, runtime, instance, planned["batches"])
+        result = planned["result"]
+        await _sync_scene_after_combat_end(
+            dependencies, instance, intent, result, requester_is_gm,
+            combat_was_active=combat_was_active,
+        )
         return await _response(dependencies, rule, runtime, instance, effective_requester,
-                         requester_is_gm=requester_is_gm, result=planned["result"])
+                         requester_is_gm=requester_is_gm, result=result)
 
     async with instance._lock:
         admission_error = _intent_write_error(instance, requester_id, requester_is_gm)
@@ -563,6 +1012,7 @@ async def submit_intent(
         )
         if binding_error:
             return binding_error
+        combat_was_active = _active_combat(instance) is not None
         before = {
             "ruleset_state": deepcopy(ruleset_runtime.state(instance)),
             "event_ledger": deepcopy(ruleset_runtime.event_ledger(instance)),
@@ -666,11 +1116,20 @@ async def submit_intent(
                 "automatic_results": automatic_results,
                 "resolved_event_batches": [batch, *automatic_batches],
             }
-        return await _response(
+        scene_event = await _sync_scene_after_combat_end_locked(
+            dependencies, instance, intent, result, requester_is_gm,
+            combat_was_active=combat_was_active,
+        )
+        response = await _response(
             dependencies, rule, runtime, instance, effective_requester,
             requester_is_gm=requester_is_gm,
             result=result,
         )
+    await _emit_scene_write_broadcast(
+        dependencies.resolve_broadcast() if dependencies.resolve_broadcast else None,
+        instance, scene_event,
+    )
+    return response
 
 
 async def resume_authoritative_combat(

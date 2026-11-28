@@ -39,6 +39,7 @@ from src.rulesets.events import EventBatchError, apply_event_batch, stable_batch
 from .availability import CombatAvailabilityMixin
 from .conditions import CombatConditionsMixin
 from .environment import CombatEnvironmentMixin
+from . import spatial
 from .check_modes import condition_check_bonus_rolls, condition_flags, effective_speed
 from .check_windows import CombatCheckWindowsMixin
 from .divine_actions import CombatDivineActionsMixin
@@ -565,6 +566,12 @@ class Dnd2024CombatEngine(
         combat = state["combat"]
         if combat.get("status") != "active":
             return {"ok": True, "changed": False}
+        if spatial.is_grid(combat):
+            # 战斗中途加入没有绑定 Token 的位置来源；不替它猜一个格子。
+            return {
+                "ok": False,
+                "error": "grid combat cannot enroll a player without a bound token position",
+            }
         actor_id = _player_actor(str(user_id))
         order = list(combat.get("initiative") or [])
         if actor_id in order:
@@ -760,6 +767,7 @@ class Dnd2024CombatEngine(
     ) -> dict[str, Any]:
         state = self.initialize_state(instance)
         combat = state["combat"]
+        grid = spatial.is_grid(combat)
         actors: list[dict[str, Any]] = []
         if combat.get("status") == "active":
             for target in self._all_targets(instance, combat):
@@ -780,6 +788,9 @@ class Dnd2024CombatEngine(
                         hit_spell_decision(combat, view["actor_id"]),
                         is_current=view["actor_id"] == self._current_actor(combat),
                     ),
+                    # 坐标 authority 只来自 combat state；场景侧 Token 由应用层
+                    # 另出投影，前端不得自行合并两份坐标（workplan §6.10）。
+                    **(spatial.actor_view(combat, str(target["actor_id"])) if grid else {}),
                 })
         initiative = list(combat.get("initiative") or [])
         turn_index = int(combat.get("turn_index", 0) or 0)
@@ -823,6 +834,8 @@ class Dnd2024CombatEngine(
                     self.catalog.condition_catalog() if viewer_is_gm else []
                 ),
                 "actors": actors,
+                # grid 才出现；theater 视图保持原有键集合不变。
+                **(spatial.view(combat) if grid else {}),
             },
             "encounter_presets": self.encounter_presets(),
             # 权威模式投影：前端据此区分“剧情绑定/剧情未准备/自由遭遇”，
@@ -1205,6 +1218,11 @@ class Dnd2024CombatEngine(
         return int(combat.get("positions", {}).get(actor_id, 0) or 0)
 
     def _distance(self, combat: dict[str, Any], first: str, second: str) -> int:
+        if spatial.is_grid(combat):
+            try:
+                return spatial.distance_between(combat, first, second)
+            except spatial.SpatialError as exc:
+                raise CombatIntentError(str(exc)) from exc
         return abs(self._position(combat, first) - self._position(combat, second))
 
     def _distance_after_move(

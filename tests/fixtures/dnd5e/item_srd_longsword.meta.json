@@ -1,0 +1,16 @@
+{
+  "source": "synthetic-from-dnd5e-6.1.x-schema",
+  "source_type": "item",
+  "source_system": "foundryvtt/dnd5e 6.1.x (system 6.1.2)",
+  "schema_reference": [
+    "https://github.com/foundryvtt/dnd5e/blob/6.1.x/module/data/item/weapon.mjs",
+    "https://github.com/foundryvtt/dnd5e/blob/6.1.x/module/data/shared/damage-field.mjs"
+  ],
+  "verified_fields": [
+    "system.damage.base is {number, denomination, bonus, types[]}",
+    "system.activities is the Activity collection (not mapped, preserved only)"
+  ],
+  "expected_catalog_ref": "item:longsword",
+  "expected_level": "saved_not_runnable",
+  "expected_unsupported_kinds": ["activity"]
+}

@@ -1,0 +1,171 @@
+.tactical-scene-page {
+  min-height: 100%;
+  padding: clamp(18px, 3vw, 42px);
+  color: var(--df-text);
+  background: radial-gradient(circle at 50% -10%, color-mix(in srgb, var(--df-canvas-glow) 70%, transparent), transparent 42%), var(--df-canvas);
+}
+.tactical-scene-header { display: flex; align-items: end; justify-content: space-between; gap: 20px; max-width: 1320px; margin: 0 auto 18px; }
+.tactical-scene-kicker { color: var(--df-text-muted); font-size: 11px; letter-spacing: .15em; }
+.tactical-scene-page h1 { display: flex; align-items: center; gap: 9px; margin: 6px 0 4px; font: 500 clamp(26px, 4vw, 44px)/1.05 var(--df-font-title); color: var(--df-accent-strong); }
+.tactical-scene-header p { margin: 0; color: var(--df-text-muted); font-size: 12px; }
+.tactical-scene-actions { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; justify-content: end; }
+.tactical-scene-game-picker { display: grid; gap: 4px; color: var(--df-text-muted); font-size: 11px; }
+.tactical-scene-game-picker select { min-width: 190px; }
+.tactical-scene-back-link { color: var(--df-interactive-strong); font-size: 13px; }
+.tactical-scene-import-button { padding: 6px 14px; border: 1px solid var(--df-accent); border-radius: var(--df-radius-sm); background: var(--df-surface-2); color: var(--df-accent-strong); font-size: 13px; cursor: pointer; }
+.tactical-scene-import-button:hover { background: var(--df-surface-1); border-color: var(--df-accent-strong); }
+.tactical-scene-error, .tactical-scene-state { max-width: 1320px; margin: 20px auto; padding: 18px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
+.tactical-scene-error { color: var(--df-danger, var(--df-warning)); }
+.tactical-scene-error button { margin-left: 8px; }
+.tactical-scene-list { display: grid; gap: 10px; max-width: 1320px; margin: 20px auto; padding: 0; list-style: none; }
+.tactical-scene-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
+.tactical-scene-name { font-size: 14px; overflow-wrap: anywhere; }
+.tactical-scene-active-badge { flex: none; padding: 2px 10px; border: 1px solid var(--df-accent-strong); border-radius: 999px; color: var(--df-accent-strong); font-size: 11px; }
+@media (max-width: 700px) { .tactical-scene-header { align-items: start; flex-direction: column; } .tactical-scene-actions { width: 100%; justify-content: start; } .tactical-scene-game-picker { flex: 1 1 100%; } .tactical-scene-game-picker select { width: 100%; } }
+
+.tactical-scene-select { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tactical-scene-item.selected { border-color: var(--df-accent-strong); }
+.tactical-scene-item.selected .tactical-scene-name { color: var(--df-accent-strong); }
+
+.tactical-board { max-width: 1320px; margin: 20px auto; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); overflow: hidden; }
+.tactical-board-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; }
+.tactical-board-toolbar h2 { margin: 0; font: 500 16px/1.3 var(--df-font-title); color: var(--df-text); overflow-wrap: anywhere; }
+.tactical-board-hint { padding: 2px 10px; border: 1px solid var(--df-border-soft); border-radius: 999px; color: var(--df-text-muted); font-size: 11px; }
+.tactical-board-controls { display: flex; gap: 6px; margin-left: auto; }
+.tactical-board-controls button { min-width: 34px; padding: 4px 10px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: var(--df-surface-2); color: var(--df-text); font-size: 13px; cursor: pointer; }
+.tactical-board-controls button:hover { border-color: var(--df-accent); color: var(--df-accent-strong); }
+.tactical-board-viewport { height: clamp(320px, 62vh, 760px); border-top: 1px solid var(--df-border-soft); }
+.tactical-board-svg { display: block; width: 100%; height: 100%; background: var(--df-canvas); touch-action: none; cursor: grab; }
+.tactical-board-svg:active { cursor: grabbing; }
+.board-background-empty { fill: var(--df-surface-2); }
+.board-background-note { fill: var(--df-text-muted); }
+.board-grid line { stroke-width: 1; }
+.board-wall { stroke: var(--df-accent); stroke-width: 3; stroke-linecap: round; }
+.board-wall-door { stroke: var(--df-interactive-strong); stroke-width: 4; stroke-dasharray: 7 5; }
+.board-token-fallback { stroke: var(--df-canvas); stroke-width: 2; }
+@media (max-width: 700px) { .tactical-board-viewport { height: clamp(260px, 52vh, 480px); } .tactical-board-controls { margin-left: 0; } }
+
+.tactical-scene-edit-button { flex: none; padding: 4px 12px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: var(--df-surface-2); color: var(--df-interactive-strong); font-size: 12px; cursor: pointer; }
+.tactical-scene-edit-button:hover { border-color: var(--df-accent); color: var(--df-accent-strong); }
+.tactical-scene-gm-note { max-width: 1320px; margin: 12px auto 0; color: var(--df-text-muted); font-size: 12px; }
+
+.tactical-scene-editor { max-width: 1320px; margin: 20px auto; }
+.editor-toolbar { gap: 10px; }
+.editor-tools { display: flex; gap: 4px; }
+.editor-tools button { padding: 4px 12px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: var(--df-surface-2); color: var(--df-text); font-size: 13px; cursor: pointer; }
+.editor-tools button.active { border-color: var(--df-accent-strong); background: var(--df-surface-1); color: var(--df-accent-strong); }
+.editor-tool-hint { margin: 0; padding: 6px 16px; border-top: 1px solid var(--df-border-soft); color: var(--df-text-muted); font-size: 12px; }
+.editor-body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; border-top: 1px solid var(--df-border-soft); }
+.editor-board-viewport { position: relative; height: clamp(360px, 66vh, 820px); border-top: 0; }
+.editor-board-svg { cursor: default; }
+.editor-board-svg.editor-tool-pan { cursor: grab; }
+.editor-board-svg.editor-tool-pan:active { cursor: grabbing; }
+.editor-board-svg.editor-tool-token { cursor: copy; }
+.editor-board-svg.editor-tool-wall { cursor: crosshair; }
+.editor-board-zoom { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 4px; }
+.editor-board-zoom button { min-width: 30px; padding: 3px 8px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: var(--df-surface-1); color: var(--df-text); font-size: 13px; cursor: pointer; }
+.editor-sidebar { display: flex; flex-direction: column; gap: 12px; padding: 12px; border-left: 1px solid var(--df-border-soft); overflow-y: auto; max-height: clamp(360px, 66vh, 820px); }
+.editor-save-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.editor-status { color: var(--df-text-muted); font-size: 12px; }
+.editor-status.dirty { color: var(--df-warning); }
+.editor-save { padding: 6px 18px; border: 1px solid var(--df-accent-strong); border-radius: var(--df-radius-sm); background: var(--df-accent-strong); color: var(--df-canvas); font-size: 13px; cursor: pointer; }
+.editor-save:disabled { opacity: .5; cursor: default; }
+.editor-panel { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); }
+.editor-panel h3 { margin: 0; font: 500 13px/1.3 var(--df-font-title); color: var(--df-text); }
+.editor-muted { margin: 0; color: var(--df-text-muted); font-size: 12px; }
+.editor-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.editor-field-grid label, .editor-field-block { display: grid; gap: 3px; color: var(--df-text-muted); font-size: 11px; }
+.editor-field-block { grid-template-columns: 1fr; }
+.editor-panel input, .editor-panel select, .editor-panel textarea { width: 100%; padding: 4px 8px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: var(--df-surface-1); color: var(--df-text); font-size: 13px; }
+.editor-check { display: flex; align-items: center; gap: 6px; color: var(--df-text); font-size: 12px; }
+.editor-check input { width: auto; }
+.editor-danger { border-color: var(--df-danger, var(--df-warning)) !important; color: var(--df-danger, var(--df-warning)) !important; }
+.editor-confirm, .editor-conflict { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0; padding: 10px 16px; border-top: 1px solid var(--df-border-soft); font-size: 13px; }
+.editor-confirm { color: var(--df-warning); }
+.editor-conflict { display: grid; gap: 6px; border: 1px solid var(--df-warning); border-radius: var(--df-radius-md); margin: 12px 16px; padding: 12px; background: var(--df-surface-2); color: var(--df-text); }
+.editor-conflict p { margin: 0; color: var(--df-text-muted); font-size: 12px; }
+.editor-conflict button, .editor-confirm button { padding: 4px 12px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: var(--df-surface-1); color: var(--df-text); font-size: 12px; cursor: pointer; }
+.editor-save-error { margin: 12px 16px; }
+.editor-layer-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.editor-layer-list li { display: flex; align-items: center; gap: 4px; }
+.editor-layer-list li.selected .editor-layer-select { border-color: var(--df-accent-strong); color: var(--df-accent-strong); }
+.editor-layer-select { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 4px 8px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: var(--df-surface-1); color: var(--df-text); font-size: 12px; text-align: left; cursor: pointer; }
+.editor-layer-collection { flex: none; color: var(--df-text-muted); font-size: 11px; }
+.editor-layer-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-badge { flex: none; padding: 0 6px; border: 1px solid var(--df-border-soft); border-radius: 999px; color: var(--df-text-muted); font-size: 10px; }
+.editor-layer-order { display: flex; flex-direction: column; gap: 2px; }
+.editor-layer-order button { padding: 0 6px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: var(--df-surface-1); color: var(--df-text); font-size: 11px; cursor: pointer; }
+.editor-inspector-id code { overflow-wrap: anywhere; }
+.editor-hit { fill: transparent; stroke: transparent; stroke-width: 2; cursor: pointer; }
+.editor-hit-line { stroke: transparent; stroke-width: 14; cursor: pointer; }
+.editor-selected-ring { stroke: var(--df-accent-strong); stroke-dasharray: 4 3; }
+.editor-selected-line { stroke: var(--df-accent-strong); stroke-width: 5; }
+.editor-selection-box { fill: none; stroke: var(--df-accent-strong); stroke-width: 2; stroke-dasharray: 6 4; }
+.editor-note-marker { fill: var(--df-surface-1); stroke: var(--df-accent); stroke-width: 1.5; cursor: pointer; }
+.editor-note-text { fill: var(--df-text-muted); font-size: 12px; pointer-events: none; }
+.editor-handle { fill: var(--df-surface-1); stroke: var(--df-accent-strong); stroke-width: 2; cursor: pointer; }
+.editor-handle-stem { stroke: var(--df-accent-strong); stroke-width: 1; }
+.editor-wall-preview { stroke: var(--df-accent-strong); stroke-width: 3; stroke-dasharray: 8 5; }
+.editor-marquee { fill: color-mix(in srgb, var(--df-accent-strong) 12%, transparent); stroke: var(--df-accent-strong); stroke-width: 1; stroke-dasharray: 4 3; }
+.editor-dialog-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 20px; background: color-mix(in srgb, var(--df-canvas) 70%, transparent); }
+.editor-dialog { display: grid; gap: 10px; width: min(440px, 100%); padding: 22px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
+.editor-dialog h2 { margin: 0; font: 500 18px/1.3 var(--df-font-title); color: var(--df-accent-strong); }
+.editor-dialog input { width: 100%; padding: 6px 10px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: var(--df-surface-2); color: var(--df-text); font-size: 14px; }
+.editor-dialog-actions { display: flex; justify-content: end; gap: 8px; }
+.editor-dialog-actions button { padding: 6px 16px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: var(--df-surface-2); color: var(--df-text); font-size: 13px; cursor: pointer; }
+.editor-dialog-actions button[data-testid="create-scene-submit"] { border-color: var(--df-accent-strong); color: var(--df-accent-strong); }
+.editor-dialog-actions button:disabled { opacity: .5; cursor: default; }
+.editor-field-error { margin: 0; color: var(--df-danger, var(--df-warning)); font-size: 12px; }
+@media (max-width: 900px) { .editor-body { grid-template-columns: 1fr; } .editor-sidebar { border-left: 0; border-top: 1px solid var(--df-border-soft); max-height: none; } }
+
+/* ---- Token detail + binding (frontend-05) ---- */
+.tactical-board-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; max-width: 1320px; margin: 20px auto; }
+.tactical-board-layout .tactical-board { margin: 0; max-width: none; }
+.board-token { cursor: pointer; }
+.board-token:focus { outline: none; }
+.board-token:focus .board-token-hit { stroke: var(--df-accent-strong); stroke-width: 2; }
+.board-token-hit { pointer-events: all; }
+.board-token-selected-ring { stroke: var(--df-accent-strong); stroke-width: 2; stroke-dasharray: 5 3; pointer-events: none; }
+
+.tactical-token-detail { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); align-self: start; }
+.token-detail-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.token-detail-header h3 { margin: 0; font: 500 14px/1.3 var(--df-font-title); color: var(--df-accent-strong); }
+.token-detail-close { min-width: 28px; padding: 2px 8px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: var(--df-surface-2); color: var(--df-text); font-size: 14px; cursor: pointer; }
+.token-detail-fields { display: grid; gap: 6px; margin: 0; }
+.token-detail-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.token-detail-row dt { color: var(--df-text-muted); font-size: 11px; }
+.token-detail-row dd { margin: 0; font-size: 12px; overflow-wrap: anywhere; text-align: right; }
+.token-detail-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.tactical-token-detail h4 { margin: 0 0 6px; font: 500 12px/1.3 var(--df-font-title); color: var(--df-text); }
+.token-detail-actor, .token-detail-bars, .token-detail-ownership { padding-top: 10px; border-top: 1px solid var(--df-border-soft); }
+.token-detail-warning { margin: 0; color: var(--df-warning); font-size: 12px; }
+.token-detail-actor p { margin: 0 0 4px; font-size: 12px; overflow-wrap: anywhere; }
+.token-bar-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.token-bar-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 11px; }
+.token-bar-key { color: var(--df-text); font-weight: 500; }
+.token-bar-attribute { color: var(--df-text-muted); overflow-wrap: anywhere; }
+.token-bar-track { position: relative; height: 16px; margin-top: 3px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); background: var(--df-surface-2); overflow: hidden; }
+.token-bar-fill { position: absolute; inset: 0 auto 0 0; background: var(--df-interactive-strong); }
+.token-bar-value { position: relative; display: block; padding: 0 6px; color: var(--df-text); font-size: 10px; line-height: 14px; }
+.token-bar .editor-muted { margin: 3px 0 0; }
+.token-ownership-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.token-ownership-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.token-detail-bind { padding: 6px 14px; border: 1px solid var(--df-accent-strong); border-radius: var(--df-radius-sm); background: var(--df-accent-strong); color: var(--df-canvas); font-size: 13px; cursor: pointer; }
+.token-detail-bind:hover { opacity: .9; }
+
+.token-bind-dialog { width: min(520px, 100%); max-height: min(80vh, 720px); overflow-y: auto; }
+.token-bind-current { overflow-wrap: anywhere; }
+.token-bind-success { margin: 0; color: var(--df-interactive-strong); font-size: 12px; }
+.token-bind-targets { display: grid; gap: 8px; }
+.token-bind-targets h3 { margin: 0; font: 500 13px/1.3 var(--df-font-title); color: var(--df-text); }
+.token-bind-groups { display: grid; gap: 10px; }
+.token-bind-group { display: grid; gap: 4px; margin: 0; padding: 8px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-sm); }
+.token-bind-group legend { padding: 0 4px; color: var(--df-text-muted); font-size: 11px; }
+.token-bind-option { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid transparent; border-radius: var(--df-radius-sm); cursor: pointer; font-size: 13px; }
+.token-bind-option:hover { background: var(--df-surface-2); }
+.token-bind-option.selected { border-color: var(--df-accent-strong); background: var(--df-surface-2); }
+.token-bind-option input { width: auto; margin: 0; }
+.token-bind-option-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.token-bind-option-id { color: var(--df-text-muted); font-size: 11px; }
+.token-bind-submit { border-color: var(--df-accent-strong) !important; color: var(--df-accent-strong) !important; }
+@media (max-width: 900px) { .tactical-board-layout { grid-template-columns: 1fr; } }

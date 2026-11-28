@@ -1,0 +1,35 @@
+{
+  "source": "synthetic-from-api-schema",
+  "source_type": "scene",
+  "source_version": "v14",
+  "api_reference": [
+    "https://foundryvtt.com/api/v14/interfaces/foundry.documents.types.SceneData.html",
+    "https://foundryvtt.com/api/v14/interfaces/foundry.documents.types.TokenData.html",
+    "https://foundryvtt.com/api/v14/interfaces/foundry.documents.types.LevelData.html",
+    "https://foundryvtt.com/api/v14/interfaces/foundry.documents.types.SceneEnvironmentData.html"
+  ],
+  "expected_level": "missing_external_ref",
+  "expected_issue_levels": [
+    "saved_not_runnable",
+    "missing_external_ref"
+  ],
+  "expected_warnings": [
+    "asset not fetched, source_path preserved: worlds/test/ruined-keep.webp",
+    "asset not fetched, source_path preserved: worlds/test/goblin.webp"
+  ],
+  "expected_unknown_fields": [
+    "scene.active",
+    "scene.someFutureField"
+  ],
+  "preserved_fields": [
+    "_id",
+    "name",
+    "navName",
+    "levels",
+    "tokens",
+    "tiles",
+    "flags"
+  ],
+  "expected_error": null,
+  "notes": "Synthetic v14 scene built from the official SceneData/TokenData/LevelData type definitions; background media lives in levels and fog has no exploration flag. No real FVTT export sample exists yet (workplan §23.4)."
+}

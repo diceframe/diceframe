@@ -189,6 +189,10 @@ class WebUIBootstrap:
         # 所有能改 package bytes 的路径（本地导入 / 市场安装 / 覆盖 / 后台自动
         # 更新 / 卸载）共用同一条 choke point。
         app["api"].attach_package_hooks(plugin_host)
+        # Agent 写路径（ApplicationAction handler）没有 transport，取不到
+        # request.app；把连接池接到 api 上，Agent 的战术场景写与导入提交就和
+        # HTTP 写共用同一条 SSE 投影广播（FVTT_COMPAT_WORKPLAN §0.5 遗留 3）。
+        app["api"].attach_connection_pool(app["connection_pool"])
         # T3：把已安装且启用的 ruleset-runtime 插件同步进 ruleset 注册表
         # （安装/卸载/启停/恢复由宿主通知重同步）。注册失败 fail closed，
         # 只影响对应规则的可用性，不阻断启动。

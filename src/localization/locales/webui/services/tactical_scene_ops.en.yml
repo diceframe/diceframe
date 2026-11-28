@@ -1,0 +1,11 @@
+# Messages returned by src/webui/services/tactical_scene_ops.py.
+"en":
+  tactical_scene_forbidden: "Only the GM can modify scenes"
+  tactical_scene_stale_revision: "The scene changed elsewhere; refresh and retry"
+  tactical_scene_not_found: "Scene not found"
+  tactical_scene_invalid_payload: "The scene data cannot be written safely"
+  tactical_scene_unsupported_schema: "The scene data version is not supported"
+  tactical_scene_placeable_not_found: "Scene placeable not found"
+  rewrite_in_progress: "History is being rebuilt; retry later"
+  stale_run: "The game restarted; refresh and retry"
+  save_failed: "Saving the scene failed; this change was rolled back"

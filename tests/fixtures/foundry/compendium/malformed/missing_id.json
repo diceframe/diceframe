@@ -1,0 +1,4 @@
+[
+  {"_id": "ItemNoSecondId01", "name": "First", "system": {"description": {"value": "ok"}}},
+  {"name": "Second without id", "system": {"description": {"value": "no identity"}}}
+]

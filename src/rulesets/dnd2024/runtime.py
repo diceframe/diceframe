@@ -8,6 +8,7 @@ import logging
 import random
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,7 @@ from src.rulesets.dnd2024.narrative_profile import narrative_profile_excerpt
 from src.rulesets.dnd2024.campaign import CAMPAIGN_INTENT_TYPES, Dnd2024CampaignEngine
 from src.rulesets.dnd2024.combat import Dnd2024CombatEngine
 import src.rulesets.dnd2024.combat.visibility as combat_visibility
+from src.rulesets.dnd2024.combat import spatial as combat_spatial
 from src.rulesets.dnd2024.combat.primitives import current_turn_slot
 from src.rulesets.dnd2024.combat.readiness import required_encounter_player_ids
 from src.rulesets.dnd2024.content.catalog import DndContentCatalog
@@ -108,6 +110,17 @@ def _normalize_legacy_check_bonus(event: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+@dataclass(frozen=True, slots=True)
+class _Dnd2024Capabilities(RulesetCapabilities):
+    """D&D 2024 adds its declared spatial modes to the shared capability DTO.
+
+    Kept here (rather than changing the generic contract) so the grid slice
+    declares capability without widening the ruleset boundary for everyone.
+    """
+
+    combat_spatial_modes: tuple[str, ...] = ("theater", "zone", "grid")
+
+
 class Dnd2024Runtime:
     def scene_objective_context(self, instance: Any, *, viewer_is_gm: bool) -> dict[str, Any]:
         from src.engine.staged_transaction import fork_domain_state
@@ -142,7 +155,7 @@ class Dnd2024Runtime:
         {"attunement", "prepared_spells", "land_terrain", "free_cast", "recovery",
          "hunter_options", "wild_shape_forms"}
     )
-    capabilities = RulesetCapabilities(
+    capabilities = _Dnd2024Capabilities(
         experience_profile="dnd2024",
         character_builder="professional",
         character_lifecycle="rules_aware",
@@ -1220,7 +1233,9 @@ class Dnd2024Runtime:
 
     def next_automatic_intent(self, instance: Any) -> dict[str, Any] | None:
         locale = str(getattr(instance, "language", "") or "")
-        return self._combat_engine(instance, locale=locale).next_automatic_intent(instance)
+        intent = self._combat_engine(instance, locale=locale).next_automatic_intent(instance)
+        combat = ruleset_runtime.state(instance).get("combat") or {}
+        return combat_spatial.guard_automatic_intent(intent, combat)
 
     def check_mode_policy(self, instance: Any, rule: Any, uid: str) -> dict[str, Any]:
         from src.rulesets.dnd2024.combat.check_modes import policy

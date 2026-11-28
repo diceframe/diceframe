@@ -36,6 +36,7 @@ from src.rulesets.dnd2024.features.attack_declarations import (
     held_hit_declarations,
 )
 from . import invocation_effects
+from . import spatial
 from ..spells.casting import free_cast_resource
 from .cover import cover_axis
 from .reaction_spells import effective_armor_class
@@ -928,6 +929,7 @@ class CombatSpellResolutionMixin:
                         )
                         events.append({
                             "type": "dnd2024.position.changed", "actor_id": target_id,
+                            "feet": push_ft, "away_from": actor_id,
                             "distance": direction * push_ft, "forced": True,
                             "source_rider": push_feature,
                         })
@@ -1208,10 +1210,19 @@ class CombatSpellResolutionMixin:
                 succeeded = True
             elif mode == "teleport":
                 # 传送不是移动：事件无 movement_cost，不扣经济、不触发借机攻击。
-                events.append({
-                    "type": "dnd2024.position.changed", "actor_id": target_id,
-                    "distance": int(intent["teleport_distance"]), "forced": True,
-                })
+                if spatial.is_grid(combat):
+                    events.append({
+                        "type": "dnd2024.position.changed", "actor_id": target_id,
+                        "target_cell": spatial.teleport_target_cell(
+                            combat, target_id, intent, range_ft=int(effect["range"]),
+                        ),
+                        "forced": True,
+                    })
+                else:
+                    events.append({
+                        "type": "dnd2024.position.changed", "actor_id": target_id,
+                        "distance": int(intent["teleport_distance"]), "forced": True,
+                    })
             elif mode == "dispel":
                 # 逐 condition 判定：≤ 施放环阶自动终止；更高环阶走一次施法属性检定。
                 # 专注来源整道终止（reducer 级联移除全部目标），非专注来源只移除本目标。

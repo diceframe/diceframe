@@ -1,0 +1,15 @@
+{
+  "source": "synthetic-from-api-schema",
+  "source_type": "scene",
+  "source_version": "v14",
+  "api_reference": [
+    "https://foundryvtt.com/api/v14/interfaces/foundry.documents.types.SceneData.html"
+  ],
+  "expected_level": null,
+  "expected_issue_levels": [],
+  "expected_warnings": [],
+  "expected_unknown_fields": [],
+  "preserved_fields": [],
+  "expected_error": "foundry_scene_malformed",
+  "notes": "SceneData.name is required; display names are never used as identity fallbacks."
+}

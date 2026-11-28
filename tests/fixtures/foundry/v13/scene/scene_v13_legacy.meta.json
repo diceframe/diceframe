@@ -1,0 +1,30 @@
+{
+  "source": "synthetic-from-api-schema",
+  "source_type": "scene",
+  "source_version": "v13",
+  "api_reference": [
+    "https://foundryvtt.com/api/v13/interfaces/foundry.documents.types.SceneData.html"
+  ],
+  "expected_level": "degraded_display",
+  "expected_issue_levels": [
+    "degraded_display",
+    "saved_not_runnable"
+  ],
+  "expected_warnings": [
+    "v13 foreground is a media path string"
+  ],
+  "expected_unknown_fields": [
+    "scene.foregroundElevation"
+  ],
+  "preserved_fields": [
+    "_id",
+    "name",
+    "background",
+    "foreground",
+    "fog",
+    "environment",
+    "templates"
+  ],
+  "expected_error": null,
+  "notes": "Synthetic v13 scene: top-level background object, foreground as a path string, fog.exploration, boolean environment.globalLight and a templates array. fog.exploration cannot be represented in the v14 export shape, hence degraded_display; templates are saved opaquely (saved_not_runnable)."
+}

@@ -40,7 +40,7 @@ const diagnostic = (code: string) => {
   if (code === 'storyDraftNpcReferencesOmitted') return locale.value === 'zh-CN'
     ? '核心人物引用没有随本局状态复制。请在草稿中另行创建或映射人物资料。'
     : 'Live NPC references were omitted. Create or map reusable NPC material in this draft.'
-  const external = { externalImportReference: copy.value.reference, externalImportMedia: copy.value.media, externalImportScriptsOmitted: copy.value.scripts, pdfReviewLayout: copy.value.pdf } as Record<string, string>
+  const external = { externalImportReference: copy.value.reference, externalImportMedia: copy.value.media, externalImportScriptsOmitted: copy.value.scripts, externalImportSceneUnconverted: t('adventureSceneUnconverted'), externalImportSceneScriptsOmitted: t('adventureSceneScriptsOmitted'), pdfReviewLayout: copy.value.pdf } as Record<string, string>
   return messageKeys[code] ? t(messageKeys[code]) : external[code] || code
 }
 const publishReasons = computed(() => {

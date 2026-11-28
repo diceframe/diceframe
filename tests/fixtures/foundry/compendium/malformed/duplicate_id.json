@@ -1,0 +1,4 @@
+[
+  {"_id": "ItemDup000000001", "name": "One", "system": {"description": {"value": "one"}}},
+  {"_id": "ItemDup000000001", "name": "Two", "system": {"description": {"value": "two"}}}
+]

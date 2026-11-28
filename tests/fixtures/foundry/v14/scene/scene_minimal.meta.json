@@ -1,0 +1,23 @@
+{
+  "source": "synthetic-from-api-schema",
+  "source_type": "scene",
+  "source_version": "v14",
+  "api_reference": [
+    "https://foundryvtt.com/api/v14/interfaces/foundry.documents.types.SceneData.html"
+  ],
+  "expected_level": "convertible",
+  "expected_issue_levels": [],
+  "expected_warnings": [
+    "scene.fog.exploration is absent from the v14 fog object; defaulted to false"
+  ],
+  "expected_unknown_fields": [],
+  "preserved_fields": [
+    "_id",
+    "name",
+    "grid",
+    "environment",
+    "levels"
+  ],
+  "expected_error": null,
+  "notes": "Bare v14 scene: no placeables, no external references. The level foreground has a null src, so an empty asset reference is reported without changing the conversion level."
+}

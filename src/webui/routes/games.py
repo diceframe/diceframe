@@ -93,6 +93,10 @@ from src.webui.routes.game_character_routes import (
     api_seat_token_claim,
     api_seat_token_issue,
 )
+from src.webui.routes.dnd5e_import import (
+    api_dnd5e_character_commit,
+    api_dnd5e_character_preview,
+)
 from src.webui.routes.game_package_routes import (
     _SavePackageTooLarge,
     _read_save_upload as _read_save_upload_impl,
@@ -308,6 +312,14 @@ def register_games(app: web.Application) -> None:
         "PUT", "/api/games/{game_key}/npc/{npc_id}/voice", api_npc_voice_update
     )
     app.router.add_post("/api/games/{game_key}/players", api_player_create)
+    app.router.add_post(
+        "/api/games/{game_key}/dnd5e/characters/preview",
+        api_dnd5e_character_preview,
+    )
+    app.router.add_post(
+        "/api/games/{game_key}/dnd5e/characters/commit",
+        api_dnd5e_character_commit,
+    )
     app.router.add_post(
         "/api/games/{game_key}/players/{uid}/seat-token", api_seat_token_issue
     )

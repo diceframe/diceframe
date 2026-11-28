@@ -70,7 +70,7 @@ def review(deps: adventures.AdventureDependencies, draft: dict[str, Any]) -> dic
     warnings.extend(code for code in ('storyDraftGmReview', 'storyDraftNpcReferencesOmitted') if code in draft.get('warnings', []))
     if 'scriptUnknownMarker' in draft.get('warnings', []):
         warnings.append('scriptUnknownMarker')
-    warnings.extend(code for code in ('externalImportReference', 'externalImportMedia', 'externalImportScriptsOmitted', 'pdfReviewLayout') if code in draft.get('warnings', []))
+    warnings.extend(code for code in ('externalImportReference', 'externalImportMedia', 'externalImportScriptsOmitted', 'externalImportSceneUnconverted', 'externalImportSceneScriptsOmitted', 'pdfReviewLayout') if code in draft.get('warnings', []))
     blockers: list[str] = []
     try:
         adventures._ensure_identity_available(deps, identity)

@@ -1,0 +1,23 @@
+{
+  "_id": "f0f0f0f0f0f0f0f0",
+  "name": "Future World Scene",
+  "width": 1000,
+  "height": 1000,
+  "grid": {
+    "type": 1,
+    "size": 100
+  },
+  "environment": {
+    "darknessLevel": 0,
+    "globalLight": {
+      "enabled": 0
+    }
+  },
+  "ownership": {
+    "default": 0
+  },
+  "flags": {},
+  "_stats": {
+    "coreVersion": "15.000"
+  }
+}

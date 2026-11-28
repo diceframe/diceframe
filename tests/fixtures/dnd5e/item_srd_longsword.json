@@ -1,0 +1,35 @@
+{
+  "_id": "SRDItemLongswordStandalone",
+  "_stats": {
+    "coreVersion": "14.367",
+    "systemId": "dnd5e",
+    "systemVersion": "6.1.2"
+  },
+  "name": "Longsword",
+  "type": "weapon",
+  "img": "icons/weapons/swords/sword-guard.webp",
+  "system": {
+    "identifier": "longsword",
+    "description": {"value": "<p>A martial melee weapon.</p>", "chat": ""},
+    "source": {"custom": "", "book": "SRD 5.1", "license": "CC-BY-4.0"},
+    "quantity": 1,
+    "weight": {"value": 3, "units": "lb"},
+    "price": {"value": 15, "denomination": "gp"},
+    "equipped": false,
+    "proficient": 1,
+    "properties": ["ver"],
+    "type": {"value": "martialM", "subtype": "sword"},
+    "damage": {
+      "base": {"number": 1, "denomination": 8, "bonus": "", "types": ["slashing"]}
+    },
+    "activation": {"type": "action", "cost": 1, "condition": ""},
+    "activities": {
+      "SrdLongswordAttack": {
+        "_id": "SrdLongswordAttack",
+        "type": "attack",
+        "name": "Attack",
+        "activation": {"type": "action", "value": 1}
+      }
+    }
+  }
+}

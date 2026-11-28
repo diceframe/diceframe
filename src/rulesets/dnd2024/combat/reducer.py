@@ -26,6 +26,7 @@ from src.rulesets.dnd2024.spells.feat_spells import concentration_holder
 MAX_TEMPORARY_SLOT_LEVEL = 9
 from src.rulesets.dnd2024.spells.casting import apply_free_cast_cost
 from src.rulesets.events import EventBatchError
+from . import spatial
 from .primitives import actor_kind as _actor_kind
 from .primitives import (
     FEATURE_STATE_KEYS,
@@ -68,9 +69,9 @@ def _position_delta(combat: dict[str, Any], event: dict[str, Any]) -> int:
     """How far this event moves the actor, in whatever geometry exists.
 
     A forced move says "N feet away from that actor"; turning that into a
-    number needs positions, and positions belong here.  One-dimensional today
-    (a sign), a unit vector when the map grows a second axis -- and only this
-    function changes then.
+    number needs positions, and positions belong here.  Theater is
+    one-dimensional (a sign); the grid's two-dimensional interpretation lives
+    in :mod:`spatial` and never reaches this function.
 
     ``distance`` is still accepted for events written before ``feet`` /
     ``away_from`` existed; both are emitted during the transition.
@@ -252,6 +253,12 @@ class CombatReducerMixin:
                 "mark_damage_history": [],
                 "mounted": deepcopy(event.get("mounted") or {}),
             }
+            if str(event.get("position_mode") or "") == spatial.POSITION_MODE_GRID:
+                # 加法字段：旧事件没有 board，仍按 theater 重放，绝不猜二维。
+                try:
+                    spatial.apply_started(state["combat"], event)
+                except spatial.SpatialError as exc:
+                    raise EventBatchError(str(exc)) from exc
             return
         if event_type == "dnd2024.weapon.swapped":
             # 拔/收一次武器：事件携带换手后的完整握持，归约只负责落地。
@@ -966,9 +973,15 @@ class CombatReducerMixin:
             return
         if event_type == "dnd2024.position.changed":
             actor_id = str(event["actor_id"])
-            combat["positions"][actor_id] = int(
-                combat["positions"].get(actor_id, 0)
-            ) + _position_delta(combat, event)
+            if spatial.is_grid(combat):
+                try:
+                    spatial.apply_move_event(combat, actor_id, event)
+                except spatial.SpatialError as exc:
+                    raise EventBatchError(str(exc)) from exc
+            else:
+                combat["positions"][actor_id] = int(
+                    combat["positions"].get(actor_id, 0)
+                ) + _position_delta(combat, event)
             cost = int(event.get("movement_cost", 0) or 0)
             if cost:
                 remaining = int(combat["economy"].get("movement", 0) or 0)

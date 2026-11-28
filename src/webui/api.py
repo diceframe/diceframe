@@ -46,6 +46,10 @@ from src.content_modules.projection import ContentProjectionService
 from src.webui import content_sources, rule_loading
 from src.webui.services import adventures, asr, avatars, bot_access, bot_extensions, character_cards, characters, content, content_pack_maps, game_controls, game_lifecycle, game_master, game_media, game_packages, game_queries, generated_images, generation, knowledge, kp_questions, logs, lorebooks, map_backgrounds, maps, tavern, turns, worlds, rules, ruleset_advancement, ruleset_builder, ruleset_gameplay, ruleset_rest, plugins, modules, scene_images, speech, system, tunnel, announcements, assistant, hub, legal, manual_rolls, check_reveals, seat_tokens, storytelling
 from src.webui.services import lorebook_usage
+from src.webui.services import foundry_import as foundry_import_service
+from src.webui.services import tactical_scene_read as tactical_scene_read_service
+from src.webui.services import tactical_scene_ops as tactical_scene_ops_service
+from src.webui.services import map_scene_conversion
 from src.webui.services.ui_actions import UiActionDependencies, dispatch_ui_action
 from src.webui.services import standing_portraits
 from src.webui.services import combat_extension as combat_extension_service
@@ -252,6 +256,18 @@ class WebAPI:
             ),
             load_rule_for_game=self._load_rule_for_game,
             ruleset_registry=self._ruleset_registry,
+        )
+        # Agent 写路径的 SSE 广播器由组合根在启动时接线（attach_connection_pool）。
+        # 未接线时为 None：Agent 写照常落库，只是不广播。
+        self._connection_pool: Any | None = None
+        self._tactical_scene_read_dependencies = tactical_scene_read_service.TacticalSceneReadDependencies(
+            get_instance=self.get_game_instance,
+        )
+        self._tactical_scene_ops_dependencies = tactical_scene_ops_service.TacticalSceneOpDependencies(
+            get_instance=self.get_game_instance, save_instance=self._reg.save,
+        )
+        self._foundry_import_dependencies = foundry_import_service.FoundryImportDependencies(
+            get_instance=self.get_game_instance, save_instance=self._reg.save,
         )
         self._llm_client = llm_client
         self._worlds_dir = worlds_dir or (Path(__file__).parent.parent.parent / "templates" / "worlds")
@@ -773,6 +789,7 @@ class WebAPI:
                 ),
                 resolve_llm_client=lambda: self._llm_client,
                 seat_runtime=self._ai_seat_runtime if config_state is not None else None,
+                resolve_broadcast=lambda: self._write_broadcast(None),
             )
         )
         self._hosted_combat_scheduler = None
@@ -1027,6 +1044,8 @@ class WebAPI:
         from src.webui.services.assistant_world_tools import WorldToolDependencies, world_tools
         from src.webui.services.assistant_plugin_tools import PluginActionDependencies, plugin_tools
         from src.webui.services.assistant_library_tools import LibraryToolCallbacks, build_library_actions
+        from src.webui.services.assistant_tactical_scene_tools import TacticalSceneToolDependencies, tactical_scene_tools
+        from src.webui.services.assistant_foundry_tools import FoundryToolDependencies, foundry_tools
         self._game_lorebooks = GameLorebookService(GameLorebookDependencies(
             store=self._lore, get_game=self.get_game_instance,
             list_books=lambda: self.list_lorebooks(include_all=True), save_instance=self._reg.save,
@@ -1120,6 +1139,24 @@ class WebAPI:
             commit_lorebook_plan=self.commit_lorebook_plan,
             list_adventures=self.list_adventures, copy_adventure=self.copy_adventure,
             adventure_detail=self.adventure_detail,
+        ))
+        agent_tools += tactical_scene_tools(TacticalSceneToolDependencies(
+            get_game=self.get_game_instance,
+            viewer_for=lambda instance, owner: resolve_viewer(
+                instance, user_id=owner, owner_authenticated=True, player_preview=False),
+            read_tactical_scene=lambda game_key, viewer, scene_id=None: self.tactical_scene_read(
+                game_key, viewer, scene_id),
+            apply_op=lambda game_key, viewer, op, expected_revision: self.tactical_scene_apply(
+                game_key, viewer, op, expected_revision=expected_revision),
+        ))
+        agent_tools += foundry_tools(FoundryToolDependencies(
+            get_game=self.get_game_instance,
+            viewer_for=lambda instance, owner: resolve_viewer(
+                instance, user_id=owner, owner_authenticated=True, player_preview=False),
+            preview=lambda game_key, viewer, scene, source_version: self.foundry_import_preview(
+                game_key, viewer, scene, source_version=source_version),
+            commit=lambda game_key, viewer, plan, **options: self.foundry_import_commit(
+                game_key, viewer, plan, **options),
         ))
         self.application_actions = ActionRegistry(agent_tools)
         plugin_action_dependencies = PluginActionDependencies(
@@ -2204,6 +2241,72 @@ class WebAPI:
             viewer_is_gm,
         )
 
+    def tactical_scene_read(
+        self, game_key: str, viewer: Viewer, scene_id: str | None = None,
+    ) -> dict[str, Any]:
+        return tactical_scene_read_service.tactical_scene_read(
+            self._tactical_scene_read_dependencies, game_key, viewer, scene_id,
+        )
+
+    def tactical_scene_list(self, game_key: str, viewer: Viewer) -> dict[str, Any]:
+        return tactical_scene_read_service.tactical_scene_list(
+            self._tactical_scene_read_dependencies, game_key, viewer,
+        )
+
+    async def tactical_scene_apply(
+        self, game_key: str, viewer: Viewer, op: dict,
+        *, expected_revision: Any, broadcast: Any = None,
+    ) -> dict[str, Any]:
+        return await tactical_scene_ops_service.apply_tactical_scene_op(
+            self._tactical_scene_ops_dependencies, game_key, viewer, op,
+            expected_revision=expected_revision,
+            broadcast=self._write_broadcast(broadcast),
+        )
+
+    async def convert_map_background_to_tactical_scene(
+        self, game_key: str, viewer: Viewer, *, intent: Any, broadcast: Any = None,
+    ) -> dict[str, Any]:
+        return await map_scene_conversion.convert_map_background_to_scene(
+            self._tactical_scene_ops_dependencies, self.resolve_map_background_file,
+            game_key, viewer, intent=intent, broadcast=self._write_broadcast(broadcast))
+
+    def foundry_import_preview(
+        self, game_key: str, viewer: Viewer, scene: Any, *, source_version: Any,
+    ) -> dict[str, Any]:
+        return foundry_import_service.preview(
+            self._foundry_import_dependencies, game_key, viewer, scene,
+            source_version=source_version,
+        )
+
+    async def foundry_import_commit(
+        self, game_key: str, viewer: Viewer, plan: Any, *,
+        plan_digest: Any, policies: Any, operation_id: Any, broadcast: Any = None,
+    ) -> dict[str, Any]:
+        return await foundry_import_service.commit(
+            self._foundry_import_dependencies, game_key, viewer, plan,
+            plan_digest=plan_digest, policies=policies,
+            operation_id=operation_id,
+            broadcast=self._write_broadcast(broadcast),
+        )
+
+    def attach_connection_pool(self, pool: Any) -> None:
+        """组合根接线点：Agent 写路径与 HTTP 写共用同一个 SSE 广播器。
+
+        bootstrap 在创建 api 与连接池之后调用。Agent 动作没有 transport，拿不到
+        ``request.app``，所以广播器只能在这里晚绑定。传 None 只清除接线；未接线
+        时 Agent 写照常落库，只是不广播。
+        """
+
+        self._connection_pool = pool
+
+    def _write_broadcast(self, broadcast: Any) -> Any:
+        """显式传入的广播器优先，否则回落到组合根接线的连接池。"""
+
+        if broadcast is not None:
+            return broadcast
+        pool = self._connection_pool
+        return pool.broadcast if pool is not None else None
+
     def gameplay_view(self, game_key: str, viewer_uid: str, viewer_is_gm: bool = False) -> dict[str, Any]:
         """Project an owner-supplied non-TRPG gameplay view.
 
@@ -2347,6 +2450,7 @@ class WebAPI:
 
     async def cancel_manual_roll_request(self, game_key, user_id, request_id, body):
         return await self._manual_rolls.cancel(game_key, user_id, request_id, body)
+
 
     async def reveal_check(self, game_key: str, check_id: str, user_id: str):
         return await self._check_reveals.reveal(game_key, check_id, user_id)

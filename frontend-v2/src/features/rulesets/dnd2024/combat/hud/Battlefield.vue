@@ -2,13 +2,17 @@
 import { computed } from 'vue'
 import BattlefieldLine from './BattlefieldLine.vue'
 import BattleTokenCard from './BattleToken.vue'
+import GridBoard from './GridBoard.vue'
 import { battlefieldLayoutFor, type BattleToken } from './battleView'
+import type { GridCombat } from './useGridCombat'
 import type { Floater } from './feedback'
 import type { BattlefieldLabels } from './labels'
 
 /**
  * Picks the layout for the server's `position_mode`. Each layout takes the same
  * props, so a new axis is one new component plus one entry in battleView.ts.
+ * A grid board only renders when the server declares `grid` AND supplies a real
+ * board; otherwise the roster shows who is present without inventing geometry.
  */
 const props = defineProps<{
   positionMode?: string
@@ -20,15 +24,37 @@ const props = defineProps<{
   canReach: (x: number) => boolean
   labels: BattlefieldLabels
   floaters?: Floater[]
+  grid?: GridCombat
+  moveActive?: boolean
 }>()
-const emit = defineEmits<{ selectToken: [id: string]; choosePosition: [x: number] }>()
+const emit = defineEmits<{
+  selectToken: [id: string]
+  choosePosition: [x: number]
+  chooseCell: [cell: { x: number; y: number }]
+}>()
 
 const layout = computed(() => battlefieldLayoutFor(props.positionMode))
+const showGrid = computed(() => layout.value === 'grid' && Boolean(props.grid?.board))
 </script>
 
 <template>
+  <GridBoard
+    v-if="showGrid && grid"
+    :board="grid.board!"
+    :tokens="tokens"
+    :movement-remaining="movementRemaining"
+    :target-id="targetId"
+    :selectable-ids="selectableIds"
+    :selected-cell="moveActive ? grid.selectedCell : null"
+    :reachable="grid.reachable"
+    :can-move="grid.canMove"
+    :labels="labels"
+    :floaters="floaters"
+    @select-token="emit('selectToken', $event)"
+    @choose-cell="emit('chooseCell', $event)"
+  />
   <BattlefieldLine
-    v-if="layout === 'line'"
+    v-else-if="layout === 'line'"
     :tokens="tokens"
     :movement-remaining="movementRemaining"
     :target-id="targetId"
@@ -40,8 +66,8 @@ const layout = computed(() => battlefieldLayoutFor(props.positionMode))
     @select-token="emit('selectToken', $event)"
     @choose-position="emit('choosePosition', $event)"
   />
-  <!-- Unknown position mode: show who is present without inventing geometry. -->
-  <div v-else class="battlefield-roster">
+  <!-- Unknown mode, or grid without a board: show who is present, no fake map. -->
+  <div v-else class="battlefield-roster" data-testid="battlefield-roster">
     <BattleTokenCard
       v-for="token in tokens"
       :key="token.id"

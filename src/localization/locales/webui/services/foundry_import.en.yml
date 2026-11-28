@@ -1,0 +1,12 @@
+# Messages returned by src/webui/services/foundry_import.py.
+"en":
+  tactical_scene_forbidden: "Only the GM can import scenes"
+  tactical_scene_not_found: "Game or scene not found"
+  tactical_scene_invalid_payload: "The scene data cannot be imported safely"
+  foundry_version_unsupported: "Unsupported Foundry version; only v13/v14 are accepted"
+  foundry_import_plan_invalid: "The import plan or its policies are invalid"
+  foundry_import_stale: "The scene state changed since the preview; preview again"
+  tactical_scene_stale_revision: "The scene changed elsewhere; refresh and retry"
+  rewrite_in_progress: "History is being rebuilt; retry later"
+  stale_run: "The game restarted; refresh and retry"
+  save_failed: "Saving the scene failed; this import was rolled back"

@@ -18,12 +18,13 @@ import DOMPurify from 'dompurify'
 import { CubeOutline } from '@vicons/ionicons5'
 import type { PluginMarketplaceItem } from '@/api/types'
 import ContentPackCard from './ContentPackCard.vue'
+import CompendiumImportDialog from './CompendiumImportDialog.vue'
 import HubDetailModal from '@/features/plugins/modals/HubDetailModal.vue'
 import { promptEnableAfterInstall } from '@/features/plugins/installEnable'
 import { useHubDetail } from '@/features/plugins/useHubDetail'
 import { contentPackSubmissionUrl } from '@/features/creator/submission'
 import { localeLabel } from '@/utils/contentLanguage'
-import { formatModuleBlocker, missingRuntimeFromBlocker, moduleCategoryLabel, moduleCopy, moduleInventory } from './copy'
+import { formatModuleBlocker, missingRuntimeFromBlocker, moduleCategoryLabel, moduleCopy, moduleInventory, compendiumImportCopy } from './copy'
 
 type RecoveryAdventure = {
   binding?: {
@@ -45,6 +46,7 @@ type RecoveryCheck = {
 
 const { t, locale } = useLocale()
 const copy = computed(() => moduleCopy(locale.value))
+const compendiumCopy = computed(() => compendiumImportCopy(locale.value))
 const library = computed(() => libraryCopy(locale.value))
 const route = useRoute()
 const router = useRouter()
@@ -108,6 +110,7 @@ const hasRulesItems = computed(() => market.value.some(item => (item.capabilitie
 
 // 我的内容包面板
 const myPanelOpen = ref(false)
+const showCompendiumImport = ref(false)
 // 筛选面板展开状态
 const showFilters = ref(false)
 // 跳转前保存面板状态，回来后恢复
@@ -654,6 +657,7 @@ async function checkRecovery() {
                 {{ t('modulesSectionLocal') }}
                 <input type="file" accept=".dfplugin" @change="selectImportFile">
               </label>
+              <button type="button" class="module-compendium-open" data-testid="modules-compendium-open" @click="showCompendiumImport = true">{{ compendiumCopy.open }}</button>
               <template v-if="importFile">
                 <button type="button" :disabled="importBusy" @click="previewImport">{{ t('modulesPreview') }}</button>
                 <button v-if="preview" type="button" :disabled="Boolean(preview.blockers.length) || importBusy" @click="importModule">{{ t('modulesInstall') }}</button>
@@ -920,6 +924,11 @@ async function checkRecovery() {
         </footer>
       </div>
     </Modal>
+
+    <CompendiumImportDialog
+      v-if="showCompendiumImport"
+      @close="showCompendiumImport = false"
+    />
   </section>
 </template>
 
@@ -973,6 +982,8 @@ async function checkRecovery() {
 .modules-my-panel-footer { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .65rem 1rem; border-top: 1px solid var(--df-border-soft); font-size: .84rem; }
 .module-import-file { display: inline-flex; align-items: center; gap: .4rem; color: var(--df-text-muted); cursor: pointer; }
 .module-import-file input[type="file"] { max-width: 160px; }
+.module-compendium-open { min-height: 32px; padding: 0 .7rem; border: 1px solid color-mix(in srgb, var(--df-accent) 45%, var(--df-border-soft)); border-radius: var(--df-radius-md); background: color-mix(in srgb, var(--df-accent) 10%, var(--df-surface-1)); color: var(--df-accent-strong); font-size: .8rem; font-weight: 700; cursor: pointer; }
+.module-compendium-open:hover { border-color: var(--df-accent-strong); }
 .module-import-preview { width: 100%; display: grid; gap: .3rem; padding: .5rem .75rem; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-2); }
 .module-import-preview p { margin: 0; font-size: .8rem; }
 .module-runtime-cta { justify-self: start; min-height: 32px; padding: 0 .7rem; border: 1px solid var(--df-border-strong, var(--df-border)); border-radius: var(--df-radius-sm, 4px); background: var(--df-surface-2, transparent); color: var(--df-interactive-strong); font-size: .8rem; font-weight: 600; cursor: pointer; }

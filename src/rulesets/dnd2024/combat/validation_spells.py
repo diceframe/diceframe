@@ -14,6 +14,7 @@ from ..character.primitives import ability_modifier
 from .primitives import slot_available, CombatIntentError
 from .check_modes import owned_mark, vision_codes
 from .triggered_spells import free_cast_resource, hit_spell_decision
+from . import spatial
 
 
 class CombatValidationSpellsMixin:
@@ -376,11 +377,22 @@ class CombatValidationSpellsMixin:
             except ClassFeatureError as exc:
                 raise CombatIntentError(str(exc)) from exc
         if effect["mode"] == "teleport":
-            distance = intent.get("teleport_distance")
-            if isinstance(distance, bool) or not isinstance(distance, int) or distance == 0:
-                raise CombatIntentError("teleport distance must be a non-zero integer")
-            if abs(distance) > int(effect["range"]):
-                raise CombatIntentError("teleport distance exceeds the spell range")
+            if spatial.is_grid(combat):
+                # Grid teleport names its destination cell; theatre keeps the
+                # signed one-dimensional distance it has always used.
+                try:
+                    spatial.teleport_target_cell(
+                        combat, str(actor["actor_id"]), intent,
+                        range_ft=int(effect["range"]),
+                    )
+                except spatial.SpatialError as exc:
+                    raise CombatIntentError(str(exc)) from exc
+            else:
+                distance = intent.get("teleport_distance")
+                if isinstance(distance, bool) or not isinstance(distance, int) or distance == 0:
+                    raise CombatIntentError("teleport distance must be a non-zero integer")
+                if abs(distance) > int(effect["range"]):
+                    raise CombatIntentError("teleport distance exceeds the spell range")
         elif intent.get("teleport_distance") is not None:
             raise CombatIntentError("teleport distance is not valid for this spell")
 

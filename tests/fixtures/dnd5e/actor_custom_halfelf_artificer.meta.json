@@ -1,0 +1,19 @@
+{
+  "source": "synthetic-from-dnd5e-6.1.x-schema",
+  "source_type": "actor",
+  "source_system": "foundryvtt/dnd5e 6.1.x (system 6.1.2)",
+  "schema_reference": [
+    "https://github.com/foundryvtt/dnd5e/blob/6.1.x/module/data/actor/character.mjs",
+    "https://github.com/foundryvtt/dnd5e/blob/6.1.x/module/data/actor/templates/creature.mjs"
+  ],
+  "note": "Non-SRD species/class/background: no explicit dnd2024 mapping exists, so they must be preserved and reported, never name-guessed. details.background is a plain string (older export shape) and must not resolve either.",
+  "expected_level": "saved_not_runnable",
+  "expected_catalog_refs": ["language:common", "language:elvish"],
+  "expected_unsupported_kinds": ["species", "class", "background", "unsupported"],
+  "expected_missing_references": [
+    {"kind": "species", "external_id": "half-elf"},
+    {"kind": "class", "external_id": "artificer"},
+    {"kind": "background", "external_id": "Haunted One"},
+    {"kind": "item", "external_id": "tinkers-wrench"}
+  ]
+}

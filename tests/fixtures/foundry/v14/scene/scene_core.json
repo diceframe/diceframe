@@ -1,0 +1,219 @@
+{
+  "_id": "a1b2c3d4e5f6a7b8",
+  "name": "Ruined Keep",
+  "navName": "Ruined Keep",
+  "active": false,
+  "navigation": true,
+  "navOrder": 10,
+  "sort": 100000,
+  "folder": null,
+  "thumb": "worlds/test/ruined-keep-thumb.webp",
+  "width": 2000,
+  "height": 1500,
+  "padding": 0.25,
+  "shiftX": 0,
+  "shiftY": 0,
+  "initial": {
+    "x": 1000,
+    "y": 750,
+    "scale": 0.5
+  },
+  "grid": {
+    "type": 1,
+    "size": 100,
+    "style": "solidLines",
+    "thickness": 1,
+    "color": "#000000",
+    "alpha": 0.2,
+    "distance": 5,
+    "units": "ft"
+  },
+  "environment": {
+    "darknessLevel": 0.35,
+    "darknessLevelLock": false,
+    "cycle": false,
+    "globalLight": {
+      "enabled": 0,
+      "bright": false,
+      "alpha": 0.5
+    },
+    "base": {
+      "hue": 0,
+      "saturation": 0,
+      "intensity": 0,
+      "luminosity": 0,
+      "shadows": 0
+    },
+    "dark": {
+      "hue": 0,
+      "saturation": 0,
+      "intensity": 1,
+      "luminosity": 0,
+      "shadows": 0
+    }
+  },
+  "fog": {
+    "mode": 1,
+    "colors": {
+      "explored": null,
+      "unexplored": null
+    },
+    "reset": null
+  },
+  "initialLevel": "lvl0000000000001",
+  "levels": [
+    {
+      "_id": "lvl0000000000001",
+      "name": "Ground",
+      "sort": 0,
+      "background": {
+        "src": "worlds/test/ruined-keep.webp",
+        "color": 0,
+        "tint": "#ffffff",
+        "alphaThreshold": 0.75,
+        "scaleX": 1,
+        "scaleY": 1
+      },
+      "foreground": {
+        "src": "worlds/test/ruined-keep-fg.webp",
+        "tint": "#ffffff",
+        "alphaThreshold": 0.5
+      },
+      "elevation": {
+        "bottom": 0,
+        "top": 10
+      },
+      "textures": {
+        "anchorX": 0.5,
+        "anchorY": 0.5,
+        "scaleX": 1,
+        "scaleY": 1,
+        "fit": "fill"
+      },
+      "fog": {
+        "src": null
+      },
+      "visibility": {
+        "levels": []
+      },
+      "flags": {}
+    }
+  ],
+  "tokens": [
+    {
+      "_id": "tok0000000000001",
+      "name": "Goblin",
+      "actorId": "actor00000000001",
+      "actorLink": true,
+      "x": 300,
+      "y": 400,
+      "elevation": 0,
+      "width": 1,
+      "height": 1,
+      "rotation": 45,
+      "alpha": 0.9,
+      "hidden": false,
+      "locked": false,
+      "disposition": -1,
+      "texture": {
+        "src": "worlds/test/goblin.webp",
+        "tint": "#ffffff",
+        "scaleX": 1,
+        "scaleY": 1
+      },
+      "ring": {
+        "enabled": false
+      },
+      "sight": {
+        "enabled": true,
+        "range": 60
+      },
+      "detectionModes": {
+        "basicSight": {
+          "enabled": true,
+          "range": 60
+        }
+      },
+      "light": {
+        "dim": 0,
+        "bright": 0
+      },
+      "bar1": {
+        "attribute": "attributes.hp"
+      },
+      "bar2": {},
+      "displayName": 0,
+      "displayBars": 0,
+      "flags": {
+        "dnd5e": {
+          "token": {
+            "custom": 1
+          }
+        }
+      },
+      "level": "lvl0000000000001",
+      "sort": 0,
+      "lockRotation": false,
+      "movementAction": "walk",
+      "shape": "square",
+      "occludable": {
+        "radius": 0
+      },
+      "depth": 1,
+      "_movementHistory": [],
+      "_regions": []
+    }
+  ],
+  "tiles": [
+    {
+      "_id": "tile000000000001",
+      "x": 100,
+      "y": 200,
+      "width": 300,
+      "height": 200,
+      "rotation": 0,
+      "elevation": 0,
+      "sort": 0,
+      "hidden": false,
+      "locked": false,
+      "texture": {
+        "src": "worlds/test/tile.webp"
+      },
+      "flags": {}
+    }
+  ],
+  "walls": [],
+  "lights": [],
+  "sounds": [],
+  "notes": [],
+  "drawings": [],
+  "templates": [],
+  "regions": [],
+  "weather": "",
+  "ownership": {
+    "default": 0,
+    "gm1": 3
+  },
+  "flags": {
+    "world": {
+      "custom": {
+        "note": "keep me"
+      }
+    }
+  },
+  "someFutureField": {
+    "nested": [
+      1,
+      2,
+      3
+    ]
+  },
+  "_stats": {
+    "coreVersion": "14.370",
+    "systemId": "dnd5e",
+    "systemVersion": "5.2.0",
+    "createdTime": 1700000000000,
+    "modifiedTime": 1700000000000,
+    "lastModifiedBy": "gm1"
+  }
+}

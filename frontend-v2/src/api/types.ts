@@ -1368,6 +1368,41 @@ export interface RuleConditionDefinition {
   effects: Record<string, unknown>
 }
 
+/** Grid footprint in cells (workplan §6.14). Defaults to 1×1 when omitted. */
+export interface RulesetGridFootprint {
+  w: number
+  h: number
+}
+
+/** One actor's authoritative grid cell; coordinates are cells, never pixels. */
+export interface RulesetSpatialPosition {
+  x: number
+  y: number
+  footprint?: RulesetGridFootprint
+}
+
+/** A blocking wall segment in cell space (anchor-to-anchor straight moves). */
+export interface RulesetGridWall {
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+}
+
+/**
+ * The board snapshot the server attaches to a grid combat (workplan §6.14).
+ * Absent in theater/zone; the client must never invent one.
+ */
+export interface RulesetGridBoard {
+  id: string
+  width: number
+  height: number
+  cell_size: number
+  distance_metric: string
+  walls?: RulesetGridWall[]
+  scene_revision?: number
+}
+
 export interface RulesetCombatTarget {
   actor_id: string
   kind: 'player' | 'enemy'
@@ -1376,6 +1411,10 @@ export interface RulesetCombatTarget {
   hp: number
   max_hp: number
   position: number
+  /** Grid mode only: the combat-owned cell. Theater keeps `position`. */
+  spatial_position?: RulesetSpatialPosition | null
+  /** Grid mode only: which module owns this token's coordinates (§6.10). */
+  position_authority?: 'combat' | 'scene' | string
   /** Server-projected death state; clients must not infer it from hp === 0. */
   is_dead?: boolean
   armor_class?: number
@@ -1719,6 +1758,10 @@ export interface RulesetGameplayView {
     current_actor_id: string
     initiative: string[]
     position_mode: string
+    /** Grid mode only: the board snapshot; absent in theater/zone (§6.14). */
+    board?: RulesetGridBoard | null
+    /** Grid mode only: per-actor authoritative cells keyed by actor_id. */
+    spatial_position?: Record<string, RulesetSpatialPosition>
     economy: Record<string, number | boolean | string>
     reactions: Record<string, number>
     pending_decisions: RulesetPendingDecision[]

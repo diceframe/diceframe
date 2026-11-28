@@ -4,7 +4,30 @@ from __future__ import annotations
 import json
 import re
 
-from src.adventures.importers.common import NativeDraft, prose
+from src.adventures.importers.common import NativeDraft, local_id, prose
+from src.content_modules.adapters.foundry_scene import (
+    detect_scene_version,
+    portable_scene,
+    scene_entity,
+)
+
+# Same power the Adventure bundle loader already refuses outright (bundle.py
+# ``_FORBIDDEN_KEYS``). A scene definition carrying one of these keys cannot be
+# stored in a bundle, so the row falls back to a reference instead of failing
+# the whole import.
+_BUNDLE_FORBIDDEN_KEYS = frozenset({
+    "python", "javascript", "script", "code", "eval", "module", "callable",
+})
+
+
+def _has_bundle_forbidden_key(value) -> bool:
+    if isinstance(value, dict):
+        if any(str(key).lower() in _BUNDLE_FORBIDDEN_KEYS for key in value):
+            return True
+        return any(_has_bundle_forbidden_key(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_has_bundle_forbidden_key(child) for child in value)
+    return False
 
 
 def parse_foundry(payload: bytes, filename: str, runtime: dict, language: str) -> dict:
@@ -47,10 +70,36 @@ def parse_foundry(payload: bytes, filename: str, runtime: dict, language: str) -
         html = "\n".join(content)
         node = builder.scene("journal:" + row["_id"], str(row.get("name") or row["_id"]), prose(html))
         node["npc_refs"] = list(dict.fromkeys(actor_refs[key] for key in re.findall(r'@UUID\[Actor\.([^\].]+)\]', html) if key in actor_refs))
+    adventure_version = detect_scene_version(data)
     for row in collections["scenes"]:
         name = str(row.get("name") or row["_id"])
         builder.resource("map_location", row["_id"], name, name, row)
-        builder.scene("scene:" + row["_id"], name, json.dumps(row, ensure_ascii=False, sort_keys=True), reference=True)
+        node = builder.scene("scene:" + row["_id"], name, "", reference=True)
+        try:
+            document, report = portable_scene(
+                row, source_version=detect_scene_version(row) or adventure_version,
+            )
+        except ValueError:
+            # No declared version or a malformed row: never guess a schema, and
+            # keep the raw document as inert reference evidence.
+            builder.draft["warnings"].append("externalImportSceneUnconverted")
+            node["description"] = json.dumps(row, ensure_ascii=False, sort_keys=True)
+            continue
+        entity_id = local_id("scene", row["_id"])
+        entity = scene_entity(
+            document,
+            entity_id=entity_id,
+            source_ref=builder.graph["source_ref"],
+            name=name,
+        )
+        if report.contains_script or _has_bundle_forbidden_key(entity):
+            # Adventure bundles refuse executable content keys outright; keep
+            # the scene as reference prose rather than failing the package.
+            builder.draft["warnings"].append("externalImportSceneScriptsOmitted")
+            node["description"] = json.dumps(row, ensure_ascii=False, sort_keys=True)
+            continue
+        node["scene_ref"] = "scene:" + entity_id
+        builder.files[f"content/scene/{entity_id}.json"] = entity
     if data.get("macros") or data.get("playlists"):
         builder.draft["warnings"].append("externalImportScriptsOmitted")
     if collections["scenes"] or data.get("img"):

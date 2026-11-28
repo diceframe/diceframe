@@ -9,7 +9,7 @@ from src.adventures.external_import import parse_import
 from tests.test_module_install_hardening import _make_api
 
 RUNTIME = {"id": "core:dnd2024", "minimum_version": 1}
-FOUNDRY = {"_id": "FoundryQuest", "name": "The gate", "journal": [{"_id": "JournalGate", "name": "Gate", "pages": [{"_id": "PageOne", "type": "text", "text": {"content": "<p>Enter the <strong>gate</strong>.</p><script>alert('secret')</script>"}}]}], "actors": [{"_id": "ActorGuard", "name": "Guard", "system": {"details": {"biography": {"value": "<p>A keeper.</p>"}}, "attributes": {"hp": {"value": 12}}}}], "items": [{"_id": "ItemKey", "name": "Key", "system": {"description": {"value": "<p>Brass.</p>"}}}], "scenes": [{"_id": "SceneGate", "name": "Gate map", "background": {"src": "maps/gate.png"}}], "macros": [{"command": "throw new Error()"}]}
+FOUNDRY = {"_id": "FoundryQuest", "name": "The gate", "_stats": {"coreVersion": "14.370"}, "journal": [{"_id": "JournalGate", "name": "Gate", "pages": [{"_id": "PageOne", "type": "text", "text": {"content": "<p>Enter the <strong>gate</strong>.</p><script>alert('secret')</script>"}}]}], "actors": [{"_id": "ActorGuard", "name": "Guard", "system": {"details": {"biography": {"value": "<p>A keeper.</p>"}}, "attributes": {"hp": {"value": 12}}}}], "items": [{"_id": "ItemKey", "name": "Key", "system": {"description": {"value": "<p>Brass.</p>"}}}], "scenes": [{"_id": "SceneGate", "name": "Gate map", "background": {"src": "maps/gate.png"}}], "macros": [{"command": "throw new Error()"}]}
 FG_XML = b'<root version="4.5"><encounter><category name="Chapter"><id-00001><name type="string">Gate</name><text type="formattedtext"><p>Enter the gate.</p></text></id-00001></category></encounter><npc><id-00001><name type="string">Guard</name><text type="formattedtext"><p>A keeper.</p></text><hp type="number">12</hp></id-00001></npc><item><id-00001><name type="string">Key</name><description type="formattedtext"><p>Brass.</p></description></id-00001></item></root>'
 
 
@@ -75,6 +75,65 @@ def test_structured_formats_preserve_prose_resources_provenance_without_executin
 def test_ambiguous_or_unsafe_foreign_documents_fail_closed(payload, filename):
     with pytest.raises(ValueError):
         parse_import(payload, filename, RUNTIME, 'en')
+
+
+def test_foundry_scene_rows_become_portable_scene_definitions():
+    draft = parse_import(json.dumps(FOUNDRY).encode(), 'quest.json', RUNTIME, 'en')
+
+    scene_paths = [path for path in draft['files'] if path.startswith('content/scene/')]
+    assert len(scene_paths) == 1
+    entity = draft['files'][scene_paths[0]]
+    assert entity['kind'] == 'scene' and entity['spec'] == 'tactical-scene-v1'
+    assert entity['source_ref'] == draft['files']['adventure.json']['source_ref']
+    document = entity['tactical_scene']
+    assert document['kind'] == 'scene' and document['display_name'] == 'Gate map'
+    assert document['canonical_id'].startswith('fvtt.')
+    assert document['background']['source_path'] == 'maps/gate.png'
+    # Display placeables are exactly what the adapter converted; nothing is guessed.
+    assert document['placeables']['tokens'] == {}
+    assert document['placeables']['walls'] == {}
+
+    node = next(n for n in draft['files']['adventure.json']['nodes'] if n['name'] == 'Gate map')
+    assert node['type'] == 'reference'
+    assert node['scene_ref'] == f"scene:{entity['id']}"
+    # The raw Foundry JSON no longer stands in for the scene definition.
+    assert 'maps/gate.png' not in node['description']
+
+
+def test_foundry_scene_without_a_declared_version_stays_reference_evidence(tmp_path):
+    payload = dict(FOUNDRY)
+    payload.pop('_stats')
+    draft = parse_import(json.dumps(payload).encode(), 'quest.json', RUNTIME, 'en')
+
+    assert not [path for path in draft['files'] if path.startswith('content/scene/')]
+    assert 'externalImportSceneUnconverted' in draft['warnings']
+    node = next(n for n in draft['files']['adventure.json']['nodes'] if n['name'] == 'Gate map')
+    assert 'scene_ref' not in node
+    assert 'SceneGate' in node['description']  # inert raw evidence, never a guessed schema
+
+    api, _host, store = _make_api(tmp_path / 'data')
+    try:
+        checked = api.preview_adventure_script(json.dumps(payload).encode(), 'quest.json', 'en')
+        assert not checked['blockers'], checked
+        assert 'externalImportSceneUnconverted' in checked['warnings']
+    finally:
+        store.close()
+
+
+def test_foundry_malformed_scene_row_is_kept_as_reference_not_guessed():
+    payload = dict(FOUNDRY)
+    payload["scenes"] = [{
+        "_id": "SceneBroken001",
+        "name": "Broken map",
+        "_stats": {"coreVersion": "14.370"},
+        "grid": {"type": 1, "size": "huge"},
+    }]
+    draft = parse_import(json.dumps(payload).encode(), 'quest.json', RUNTIME, 'en')
+
+    assert not [path for path in draft['files'] if path.startswith('content/scene/')]
+    assert 'externalImportSceneUnconverted' in draft['warnings']
+    node = next(n for n in draft['files']['adventure.json']['nodes'] if n['name'] == 'Broken map')
+    assert 'scene_ref' not in node and 'SceneBroken001' in node['description']
 
 
 @pytest.mark.parametrize('payload,filename', [(json.dumps(FOUNDRY).encode(), 'quest.json'), (fg_package(), 'quest.mod'), (pdf_source(), 'quest.pdf')])

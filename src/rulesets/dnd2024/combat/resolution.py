@@ -34,6 +34,7 @@ from ..items.charges import (
 )
 from ..spells.font_of_magic import declaring_class_level
 from .obscurement import SANCTUARY_DURATION_ROUNDS, sanctuary_zone_id, zone_members
+from . import spatial
 from .action_adapter import (
     attack_damage_node,
     average_damage,
@@ -463,7 +464,7 @@ class CombatResolutionMixin(
             instance, enemies, companions, [actor_id for actor_id in order if actor_id not in dead_actor_ids],
             self._initiative_choices(intent), rng,
         )
-        return [{
+        started = [{
             "type": "dnd2024.combat.started", "round": 1, "initiative": order,
             "turn_slots": slots, "turn_index": first_index,
             "initiative_rolls": initiatives, "enemies": enemies, "positions": positions,
@@ -482,7 +483,24 @@ class CombatResolutionMixin(
                 for uid in (intent.get("mounted_player_ids") or [])
                 if str(uid)
             },
-        }, *refills, *opening, *self._turn_start_events(instance, None, first, rng)]
+        }]
+        grid_input = spatial.start_input(intent)
+        if grid_input is not None:
+            board, grid_positions = grid_input
+            missing = [actor for actor in order if actor not in grid_positions]
+            if missing:
+                raise CombatIntentError(
+                    "GRID_START_MISSING_POSITION: no bound token position for "
+                    + ", ".join(sorted(missing))
+                )
+            started[0].update({
+                "position_mode": spatial.POSITION_MODE_GRID,
+                "board": board,
+                "spatial_position": {
+                    actor: grid_positions[actor] for actor in order
+                },
+            })
+        return [*started, *refills, *opening, *self._turn_start_events(instance, None, first, rng)]
 
     @staticmethod
     def _initiative_choices(intent: dict[str, Any]) -> dict[str, dict[str, bool]]:
@@ -832,13 +850,26 @@ class CombatResolutionMixin(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
     ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
         actor_id = str(intent["actor_id"])
-        distance = int(intent["distance"])
+        grid = spatial.is_grid(combat)
+        target_cell = spatial.require_target_cell(intent) if grid else None
+        distance = (
+            spatial.move_cost_ft(combat, actor_id, target_cell)
+            if grid else int(intent["distance"])
+        )
         economy = combat.get("economy") or {}
         adjacent_hostiles: list[dict[str, Any]] = []
         for target in self._hostile_targets(instance, combat, actor_id):
             if self._distance(combat, actor_id, target["actor_id"]) > 5:
                 continue
-            if self._distance_after_move(combat, actor_id, target["actor_id"], distance) <= 5:
+            if grid:
+                # Chebyshev, same metric every other grid range reader uses.
+                after = spatial.distance_ft(
+                    combat["board"], target_cell,
+                    spatial.position_of(combat, target["actor_id"]),
+                )
+                if after <= 5:
+                    continue
+            elif self._distance_after_move(combat, actor_id, target["actor_id"], distance) <= 5:
                 continue
             threat = self._actor_view(instance, combat, target["actor_id"])
             # 借机攻击同样是反应：失能 / 禁反应 / 反应已耗尽 / 倒地的威胁者
@@ -873,12 +904,17 @@ class CombatResolutionMixin(
                 "assigned_to": str(getattr(instance, "gm_uid", "") or ""),
                 "options": ["resolve", "decline"],
                 "threat_actor_ids": [item["actor_id"] for item in adjacent_hostiles],
-                "movement": {"actor_id": actor_id, "distance": distance},
+                "movement": {
+                    "actor_id": actor_id,
+                    **({"target_cell": target_cell} if grid else {"distance": distance}),
+                },
             }
             return decision, [{"type": "dnd2024.decision.pending", **decision}]
         return None, [{
             "type": "dnd2024.position.changed", "actor_id": actor_id,
-            "distance": distance, "movement_cost": abs(distance), "forced": False,
+            "distance": 0 if grid else distance,
+            "movement_cost": distance if grid else abs(distance), "forced": False,
+            **({"target_cell": target_cell} if grid else {}),
             **({"move_allowance": True} if covered else {}),
         }]
 
@@ -1775,7 +1811,20 @@ class CombatResolutionMixin(
                     events.extend(opportunity)
         events.append({
             "type": "dnd2024.position.changed", "actor_id": movement["actor_id"],
-            "distance": int(movement["distance"]),
-            "movement_cost": abs(int(movement["distance"])), "forced": False,
+            **(
+                {
+                    "distance": 0,
+                    "movement_cost": spatial.move_cost_ft(
+                        combat, str(movement["actor_id"]), movement["target_cell"],
+                    ),
+                    "target_cell": movement["target_cell"],
+                }
+                if "target_cell" in movement
+                else {
+                    "distance": int(movement["distance"]),
+                    "movement_cost": abs(int(movement["distance"])),
+                }
+            ),
+            "forced": False,
         })
         return events

@@ -1,0 +1,89 @@
+{
+  "_id": "b0b0b0b0b0b0b0b0",
+  "name": "Empty Plaza",
+  "navName": "Plaza",
+  "width": 1000,
+  "height": 800,
+  "padding": 0.1,
+  "shiftX": 10,
+  "shiftY": -10,
+  "initial": {
+    "x": 500,
+    "y": 400,
+    "scale": 1
+  },
+  "grid": {
+    "type": 0,
+    "size": 0,
+    "style": "solidLines",
+    "thickness": 1,
+    "color": "#7d7d7d",
+    "alpha": 0.15,
+    "distance": 0,
+    "units": "ft"
+  },
+  "environment": {
+    "darknessLevel": 0,
+    "globalLight": {
+      "enabled": 1
+    }
+  },
+  "fog": {
+    "mode": 0,
+    "colors": {
+      "explored": null,
+      "unexplored": null
+    },
+    "reset": null
+  },
+  "levels": [
+    {
+      "_id": "lvlp000000000001",
+      "name": "Plaza",
+      "sort": 0,
+      "background": {
+        "src": "worlds/test/plaza.webp",
+        "color": 0,
+        "tint": "#ffffff"
+      },
+      "foreground": {
+        "src": null
+      },
+      "elevation": {
+        "bottom": 0,
+        "top": 0
+      },
+      "textures": {
+        "anchorX": 0.5,
+        "anchorY": 0.5,
+        "scaleX": 1,
+        "scaleY": 1,
+        "fit": "fill"
+      },
+      "fog": {
+        "src": null
+      },
+      "visibility": {
+        "levels": []
+      },
+      "flags": {}
+    }
+  ],
+  "tokens": [],
+  "tiles": [],
+  "walls": [],
+  "lights": [],
+  "sounds": [],
+  "notes": [],
+  "drawings": [],
+  "templates": [],
+  "regions": [],
+  "sort": 200000,
+  "ownership": {
+    "default": 1
+  },
+  "flags": {},
+  "_stats": {
+    "coreVersion": "14.370"
+  }
+}
