@@ -2539,7 +2539,7 @@ body.light .kw-change {
   opacity: .96;
 }
 
-.live-narration:after {
+.live-narration.live-narration-active:after {
   content: "▍";
   display: inline-block;
   margin-left: 2px;
@@ -2557,7 +2557,7 @@ body.light .kw-change {
   }
 }
 
-body.light .live-narration:after {
+body.light .live-narration.live-narration-active:after {
   color: #17665f;
 }
 

@@ -376,7 +376,7 @@ watch(() => rounds.value, async (latest) => {
         <div class="message-copy">
           <strong>{{ t('thinkingMessage') }}<span v-if="!liveNarration" class="thinking-dots"><i></i><i></i><i></i></span></strong>
           <StorySequenceView v-if="liveStory" :story="liveStory" :lore="lore" :rule-id="ruleId" :game-key="gameKey" :round="round" :tts-language="ttsVoiceLang" />
-          <p v-else v-for="(paragraph, index) in liveParagraphs" :key="index" class="chat-gm live-narration">{{ paragraph }}</p>
+          <p v-else v-for="(paragraph, index) in liveParagraphs" :key="index" class="chat-gm live-narration" :class="{ 'live-narration-active': index === liveParagraphs.length - 1 }">{{ paragraph }}</p>
         </div>
       </div>
       <div v-if="!log.length && !live.length && !processing" class="timeline-empty"><strong>{{ t('adventureNotStarted') }}</strong><span>{{ t('firstActionHint') }}</span></div>
