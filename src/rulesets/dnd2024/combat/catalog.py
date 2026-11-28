@@ -10,9 +10,19 @@ from typing import Any
 from src.rulesets.bundle import LoadedRulesetBundle
 
 from ..items.activation import validate_item_declarations
+from ..character.primitives import ABILITY_IDS
 
 
 DICE_RE = re.compile(r"^[1-9]\d*d(?:4|6|8|10|12|20)(?:\+[1-9]\d*)?$")
+
+#: 条件能施加劣势的三类检定。与 `check_modifiers.surface` 不同——那个
+#: 只有 `skill_check` 有消费者，这里三类各有结算入口（`_ability_check_events`
+#: / `_skill_check_events` / `_saving_throw_check`）。
+CHECK_SURFACES = frozenset({"ability_check", "skill_check", "saving_throw"})
+
+#: `spell_effects.ongoing` 的两种触发点。`bonus_action` / `magic_action` 不在
+#: 这里：那是"授予一个动作"，属 capability，不是自动 tick。
+ONGOING_TRIGGERS = frozenset({"turn_end", "caster_turn_start"})
 # 固定伤害（例如徒手打击的 1 点基础伤害）：没有骰子，因此重击不翻倍。
 FLAT_DAMAGE_RE = re.compile(r"^[1-9]\d{0,3}$")
 _DICE_PARTS_RE = re.compile(r"^([1-9]\d*)d(4|6|8|10|12|20)(?:\+([1-9]\d*))?$")
@@ -250,6 +260,82 @@ class Dnd2024CombatCatalog:
                     raise CombatCatalogError(
                         f"combat spell {dice_field} is invalid: {spell_id}"
                     )
+            # S0-SP2：`condition` 允许字符串或 {choices, picked} 对象。对象形态
+            # 只服务"二选一"（Blindness/Deafness），所以只允许这两个键。
+            condition = effect.get("condition")
+            if isinstance(condition, dict):
+                if set(condition) - {"choices", "picked"}:
+                    raise CombatCatalogError(
+                        f"combat spell condition object has unknown fields: {spell_id}"
+                    )
+                choices = condition.get("choices")
+                # 与字符串形态一致：只校验形状，不校验候选项是否在当前
+                # catalog 里登记过。字符串 `condition` 从来不做存在性校验，
+                # 对象形态更严格会让"删掉 conditions 的最小 catalog"装不上。
+                if (
+                    not isinstance(choices, list) or not choices
+                    or any(not isinstance(c, str) or not c for c in choices)
+                ):
+                    raise CombatCatalogError(
+                        f"combat spell condition choices are invalid: {spell_id}"
+                    )
+                picked = condition.get("picked", 0)
+                if isinstance(picked, bool) or not isinstance(picked, int) or not 0 <= picked < len(choices):
+                    raise CombatCatalogError(
+                        f"combat spell condition picked is out of range: {spell_id}"
+                    )
+            elif condition is not None and not isinstance(condition, str):
+                raise CombatCatalogError(
+                    f"combat spell condition is invalid: {spell_id}"
+                )
+            # S0-SP3：成功豁免后仍施加的条件。只接受对象——成功分支的时长
+            # 几乎总与失败分支不同，裸字符串会逼出"时长从哪来"的猜测。
+            success_condition = effect.get("condition_on_success")
+            if success_condition is not None:
+                if (
+                    not isinstance(success_condition, dict)
+                    or set(success_condition) != {"condition", "duration"}
+                ):
+                    raise CombatCatalogError(
+                        f"combat spell condition_on_success must be "
+                        f"{{condition, duration}}: {spell_id}"
+                    )
+                if not str(success_condition.get("condition") or ""):
+                    raise CombatCatalogError(
+                        f"combat spell condition_on_success names no condition: {spell_id}"
+                    )
+                if not str(success_condition.get("duration") or ""):
+                    raise CombatCatalogError(
+                        f"combat spell condition_on_success has no duration: {spell_id}"
+                    )
+            ongoing = effect.get("ongoing")
+            if ongoing is not None:
+                if not isinstance(ongoing, dict):
+                    raise CombatCatalogError(
+                        f"combat spell ongoing must be an object: {spell_id}"
+                    )
+                if set(ongoing) - {"trigger", "save_repeat", "damage", "damage_type"}:
+                    raise CombatCatalogError(
+                        f"combat spell ongoing has unknown fields: {spell_id}"
+                    )
+                if str(ongoing.get("trigger") or "") not in ONGOING_TRIGGERS:
+                    raise CombatCatalogError(
+                        f"combat spell ongoing trigger is invalid: {spell_id}"
+                    )
+                repeat = ongoing.get("save_repeat")
+                if repeat is not None and str(repeat) not in ABILITY_IDS:
+                    raise CombatCatalogError(
+                        f"combat spell ongoing save_repeat is invalid: {spell_id}"
+                    )
+                dice = ongoing.get("damage")
+                if dice is not None and not DICE_RE.fullmatch(str(dice)):
+                    raise CombatCatalogError(
+                        f"combat spell ongoing damage is invalid: {spell_id}"
+                    )
+                if repeat is None and dice is None:
+                    raise CombatCatalogError(
+                        f"combat spell ongoing does nothing: {spell_id}"
+                    )
             if effect["mode"] == "triggered_damage" and (effect.get("trigger") != "melee_hit" or not effect.get("damage")):
                 raise CombatCatalogError(f"combat spell trigger is invalid: {spell_id}")
             if effect["mode"] == "reaction_defense" and (
@@ -377,6 +463,10 @@ class Dnd2024CombatCatalog:
                 "speed_zero", "auto_fail_saves", "crit_on_hit_within_5",
                 "speed_modifier", "speed_halved", "check_bonus_dice",
                 "initiative_advantage", "cannot_attack_source", "cannot_approach_source",
+                # S0-SP2：条件对**检定**的劣势与对**伤害骰**的减值。
+                # 与 `check_modifiers`（特性给的加值/替换）不是同一件事：那是
+                # "改数值"，这是"优劣势"，两套并存。
+                "check_modes", "damage_roll_modifier",
                 # S0-MM3e：条件自带"怎么解除"，与"怎么施加"分开声明。
                 "escape", "stand_up",
             }:
@@ -386,6 +476,49 @@ class Dnd2024CombatCatalog:
             # 状态与来源绑定效应共用一个运行时注册表（解释器只按 flag 取值），
             # 但只有 ``condition`` 是规则书里的公共状态、可以由 GM 直接施加；
             # ``effect`` 是法术/特性/物品自己制造的产物，一对一绑在来源上。
+            check_modes = entry.get("check_modes")
+            if check_modes is not None:
+                if not isinstance(check_modes, list):
+                    raise CombatCatalogError(
+                        f"combat condition check_modes must be an array: {condition_id}"
+                    )
+                for row in check_modes:
+                    if not isinstance(row, dict):
+                        raise CombatCatalogError(
+                            f"combat condition check_modes row must be an object: {condition_id}"
+                        )
+                    if set(row) - {"surface", "mode", "abilities"}:
+                        raise CombatCatalogError(
+                            f"combat condition check_modes row has unknown fields: {condition_id}"
+                        )
+                    if str(row.get("surface") or "") not in CHECK_SURFACES:
+                        raise CombatCatalogError(
+                            f"combat condition check_modes surface is invalid: {condition_id}"
+                        )
+                    # 只有 disadvantage 有消费者。写 advantage 会静默无效，
+                    # 与"枚举值存在但引擎丢弃"是同一类问题。
+                    if str(row.get("mode") or "") != "disadvantage":
+                        raise CombatCatalogError(
+                            f"combat condition check_modes mode is invalid: {condition_id}"
+                        )
+                    abilities = row.get("abilities")
+                    if abilities is not None and (
+                        not isinstance(abilities, list)
+                        or any(str(a) not in ABILITY_IDS for a in abilities)
+                    ):
+                        raise CombatCatalogError(
+                            f"combat condition check_modes abilities are invalid: {condition_id}"
+                        )
+            modifier = entry.get("damage_roll_modifier")
+            if modifier is not None:
+                if not isinstance(modifier, dict) or set(modifier) != {"dice"}:
+                    raise CombatCatalogError(
+                        f"combat condition damage_roll_modifier must be {{dice}}: {condition_id}"
+                    )
+                if not DICE_RE.fullmatch(str(modifier["dice"]).lstrip("-")):
+                    raise CombatCatalogError(
+                        f"combat condition damage_roll_modifier dice is invalid: {condition_id}"
+                    )
             kind = entry.get("kind")
             if kind is not None and str(kind) not in {"condition", "effect"}:
                 raise CombatCatalogError(

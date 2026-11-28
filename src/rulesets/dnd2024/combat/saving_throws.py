@@ -11,7 +11,12 @@ from src.rulesets.dnd2024.character.builder import ability_modifier
 from ..features.resources import long_effect_active
 from .primitives import world_minutes, CombatIntentError, LEGENDARY_RESISTANCE_DEFAULT_PER_DAY, trait_ids, trait_params
 from .check_modifiers import active_modifiers, check_total
-from .check_modes import condition_check_bonus_rolls, condition_flags, mode_from_sources
+from .check_modes import (
+    check_disadvantage_sources,
+    condition_check_bonus_rolls,
+    condition_flags,
+    mode_from_sources,
+)
 
 INDOMITABLE_MIGHT = "indomitable_might"
 
@@ -268,15 +273,36 @@ class CombatSavingThrowsMixin:
                 "resource": cost, "amount": 1,
             })
         modifier = ability_modifier(int((actor.get("abilities") or {}).get(ability, 10)))
-        roll = int(rng.randint(1, 20))
+        # S0-SP2：条件施加的属性检定劣势。没有此类条件时不掷第二颗骰，
+        # 既有检定的骰序完全不变。
+        disadvantage = check_disadvantage_sources(
+            self.catalog.conditions,
+            actor.get("conditions") or {},
+            surface="ability_check",
+            ability=ability,
+        )
+        if disadvantage:
+            first = int(rng.randint(1, 20))
+            second = int(rng.randint(1, 20))
+            rolls = [first, second]
+            roll = min(rolls)
+        else:
+            rolls = [int(rng.randint(1, 20))]
+            roll = rolls[0]
         total = roll + modifier
-        events.append({
+        event: dict[str, Any] = {
             "type": "check.resolved", "kind": "ability_check", "actor_id": actor_id,
-            "ability": ability, "rolls": [roll], "natural": roll,
+            "ability": ability, "rolls": rolls, "natural": roll,
             "modifier": modifier, "total": total, "target": dc,
             "success": total >= dc,
             "roll_id": self._roll_id(events, "ability_check", actor_id),
-        })
+        }
+        if disadvantage:
+            event["advantage_mode"] = "disadvantage"
+            event["advantage_sources"] = [
+                {"code": cid, "mode": "disadvantage"} for cid in disadvantage
+            ]
+        events.append(event)
         return events
 
     def _skill_default_ability(self, skill: str) -> str:
@@ -347,6 +373,19 @@ class CombatSavingThrowsMixin:
             actor, skill, base_bonus,
         )
         declared = list(sources or ())
+        # S0-SP2：条件施加的检定劣势。技能检定按"该技能用的属性"匹配——
+        # Enfeebled 限定 Strength-based D20 Tests，所以 Acrobatics 用 Dex 时
+        # 不吃这个劣势，Athletics 吃。
+        for condition_id in check_disadvantage_sources(
+            self.catalog.conditions,
+            actor.get("conditions") or {},
+            surface="skill_check",
+            # 用**本次实际**的属性，不是技能的默认属性：Primal Knowledge 在
+            # 狂暴时把 Acrobatics 之类做成力量检定，按默认属性匹配会让
+            # Enfeebled 在那类检定上失效（或反过来误伤）。
+            ability=check_ability or self._skill_default_ability(skill),
+        ):
+            declared.append({"code": condition_id, "mode": "disadvantage"})
         mode = mode_from_sources(declared)
         first = int(rng.randint(1, 20))
         second = int(rng.randint(1, 20)) if mode == "disadvantage" else None
@@ -501,6 +540,15 @@ class CombatSavingThrowsMixin:
         traits = actor.get("traits")
         if against_spell and "magic_resistance" in trait_ids(traits):
             save_sources.append({"code": "magic_resistance", "mode": "advantage"})
+        # S0-SP2：条件施加的豁免劣势（Enfeebled 限定 Strength-based D20 Tests，
+        # 所以只有力量的豁免吃它）。
+        for condition_id in check_disadvantage_sources(
+            self.catalog.conditions,
+            actor.get("conditions") or {},
+            surface="saving_throw",
+            ability=ability,
+        ):
+            save_sources.append({"code": condition_id, "mode": "disadvantage"})
         save_mode = mode_from_sources(save_sources)
         first = int(rng.randint(1, 20))
         second = int(rng.randint(1, 20)) if save_mode else None
