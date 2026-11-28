@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from copy import deepcopy
 from src.rulesets.dnd2024.character.builder import ability_modifier
+from src.engine.player_control import is_ai_controlled
 from src.rulesets.dnd2024.features.resolver import ENEMY_REDUCED_TO_ZERO_HP
 from src.rulesets.dnd2024.features.resources import (
     USAGE_SCOPE_LONG_REST,
@@ -546,6 +547,11 @@ class CombatHitResolutionMixin:
         """
 
         if actor["kind"] not in {"player", "companion"}:
+            return None
+        kind_name, raw_id = _actor_kind(str(actor["actor_id"]))
+        if kind_name == "player" and is_ai_controlled(instance, raw_id):
+            # AI 托管还不答伤害窗口；挂起会让它的回合停在这里。放弃这次能力，
+            # 而不是让它卡住——与"AI 不主动用资源型窗口"的既有取向一致。
             return None
         if int(actor.get("weapon_damage_rerolls_per_turn") or 0) <= 0:
             return None
