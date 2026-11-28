@@ -133,9 +133,9 @@ async def api_plugin_install(request: web.Request) -> web.Response:
     denied=_require_confirmed_request(request)
     if denied is not None: return denied
     if request.content_type != "multipart/form-data":
-        return web.json_response({"ok":False,"error":t("webui.routes.plugins.install_multipart_required")},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.install_multipart_required"), "error_code": "route_plugins_install_multipart_required"},status=400)
     if request.content_length and request.content_length > MAX_PLUGIN_PACKAGE_BYTES + 1024 * 1024:
-        return web.json_response({"ok":False,"error":t("webui.routes.plugins.package_too_large")},status=413)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.package_too_large"), "error_code": "route_plugins_package_too_large"},status=413)
     try:
         reader = await request.multipart()
         payload = b""
@@ -156,13 +156,13 @@ async def api_plugin_install(request: web.Request) -> web.Response:
                     break
                 size += len(chunk)
                 if size > MAX_PLUGIN_PACKAGE_BYTES:
-                    return web.json_response({"ok":False,"error":t("webui.routes.plugins.package_too_large")},status=413)
+                    return web.json_response({"ok":False,"error":t("webui.routes.plugins.package_too_large"), "error_code": "route_plugins_package_too_large"},status=413)
                 chunks.append(chunk)
             payload = b"".join(chunks)
         if not payload:
-            return web.json_response({"ok":False,"error":t("webui.routes.plugins.dfplugin_file_missing")},status=400)
+            return web.json_response({"ok":False,"error":t("webui.routes.plugins.dfplugin_file_missing"), "error_code": "route_plugins_dfplugin_file_missing"},status=400)
         if not filename.lower().endswith(".dfplugin"):
-            return web.json_response({"ok":False,"error":t("webui.routes.plugins.install_dfplugin_only")},status=400)
+            return web.json_response({"ok":False,"error":t("webui.routes.plugins.install_dfplugin_only"), "error_code": "route_plugins_install_dfplugin_only"},status=400)
         result = await _get_api(request).install_plugin(payload, overwrite)
     except ValueError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=400)
@@ -225,13 +225,13 @@ async def api_plugin_tool_invoke(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object")},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object"), "error_code": "route_plugins_body_must_be_json_object"},status=400)
     if not isinstance(body, dict):
-        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object")},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object"), "error_code": "route_plugins_body_must_be_json_object"},status=400)
     arguments = body.get("arguments", {})
     context = body.get("context", {})
     if not isinstance(arguments, dict) or not isinstance(context, dict):
-        return web.json_response({"ok":False,"error":t("webui.routes.plugins.arguments_context_not_object")},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.arguments_context_not_object"), "error_code": "route_plugins_arguments_context_not_object"},status=400)
     try:
         result = await _get_api(request).invoke_plugin_tool(
             request.match_info["plugin_id"],
@@ -303,9 +303,9 @@ async def api_plugin_export(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object")},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object"), "error_code": "route_plugins_body_must_be_json_object"},status=400)
     if not isinstance(body, dict):
-        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object")},status=400)
+        return web.json_response({"ok":False,"error":t("webui.routes.plugins.body_must_be_json_object"), "error_code": "route_plugins_body_must_be_json_object"},status=400)
     try:
         result = _get_api(request).export_content_pack(
             body.get("plugin_id", ""),
@@ -365,7 +365,7 @@ async def api_plugin_marketplace_install(request: web.Request) -> web.Response:
         plugin_id = str(body.get("plugin_id") or "").strip()
         overwrite = bool(body.get("overwrite"))
         if not plugin_id:
-            return web.json_response({"ok":False,"error":t("webui.routes.plugins.plugin_id_missing")},status=400)
+            return web.json_response({"ok":False,"error":t("webui.routes.plugins.plugin_id_missing"), "error_code": "route_plugins_plugin_id_missing"},status=400)
         result = await _get_api(request).install_marketplace_plugin(plugin_id, overwrite)
     except ValueError as exc:
         return web.json_response({"ok":False,"error":str(exc)},status=400)

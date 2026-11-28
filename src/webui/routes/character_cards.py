@@ -41,7 +41,7 @@ async def api_character_cards(request: web.Request) -> web.Response:
 async def api_game_character_cards(request: web.Request) -> web.Response:
     api = _get_api(request)
     if not api.game_detail(request.match_info["game_key"]):
-        return web.json_response({"error": "游戏不存在"}, status=404)
+        return web.json_response({"error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     if sees_full_card_library(request):
         return web.json_response(api.list_character_cards())
     # Players and visitors only get cards meant for any table (plugin

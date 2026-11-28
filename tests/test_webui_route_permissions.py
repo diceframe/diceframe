@@ -296,7 +296,7 @@ async def test_non_owner_session_cannot_convert_foreign_solo_save(tmp_path):
     response = await games.api_set_solo_mode(req)
 
     assert response.status == 403
-    assert response_json(response) == {"ok": False, "error": "GM only"}
+    assert response_json(response) == {"ok": False, "error": "GM only", "error_code": "gm_only"}
     assert api.calls == []
 
 
@@ -583,7 +583,7 @@ async def test_gm_only_gameplay_routes_reject_non_gm(tmp_path, handler):
     response = await handler(req)
 
     assert response.status == 403
-    assert response_json(response) == {"ok": False, "error": "GM only"}
+    assert response_json(response) == {"ok": False, "error": "GM only", "error_code": "gm_only"}
     assert api.calls == []
 
 

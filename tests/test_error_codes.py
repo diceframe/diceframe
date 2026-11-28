@@ -139,6 +139,38 @@ def test_no_new_upper_case_codes_appear_at_raise_sites() -> None:
     assert not offenders, f"新增错误码必须是 snake_case：{offenders}"
 
 
+def test_no_payload_declares_two_different_codes() -> None:
+    """One payload, one code. `code` and `error_code` may not disagree.
+
+    Routes whitelist the legacy UPPER spelling through `declared_error_code`,
+    which prefers `error_code`; a second, derived value silently turns a 403
+    into a 422. Stamping a code next to an existing `code` is therefore only
+    allowed when both say the same thing.
+    """
+
+    conflicts: list[str] = []
+    for path in sorted((ROOT / "src").rglob("*.py")):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = ast.parse(path.read_bytes().decode("utf-8-sig"))
+        rel = path.relative_to(ROOT).as_posix()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            keys = [k.value for k in node.keys if isinstance(k, ast.Constant)]
+            if "code" not in keys or "error_code" not in keys:
+                continue
+            code = node.values[keys.index("code")]
+            error_code = node.values[keys.index("error_code")]
+            if (
+                isinstance(code, ast.Constant) and isinstance(error_code, ast.Constant)
+                and isinstance(code.value, str) and isinstance(error_code.value, str)
+                and code.value != error_code.value
+            ):
+                conflicts.append(f"{rel}:{node.lineno}: {code.value!r} vs {error_code.value!r}")
+    assert not conflicts, "\n".join(conflicts)
+
+
 def test_the_legacy_code_list_matches_the_codebase() -> None:
     """The frozen UPPER list is the exact set still in use — no silent growth."""
 
@@ -193,10 +225,17 @@ def _app() -> web.Application:
     async def legacy_text(_request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
 
+    async def internal_code(_request: web.Request) -> web.Response:
+        # 编排层旧写法：只有 `code`。客户端只读 error_code，所以出口必须提升它。
+        return web.json_response(
+            {"ok": False, "code": "GM_ONLY", "error": "只有 GM 可以确认"}, status=403,
+        )
+
     app = web.Application(middlewares=[request_language_middleware, error_code_middleware])
     app.router.add_get("/no-wording", declared_without_wording)
     app.router.add_get("/wording", declared_with_wording)
     app.router.add_get("/legacy", legacy_text)
+    app.router.add_get("/internal-code", internal_code)
     return app
 
 
@@ -225,3 +264,15 @@ async def test_an_unregistered_declared_code_keeps_its_rendered_text() -> None:
         japanese = await (await client.get("/wording", headers={"Accept-Language": "ja"})).json()
         # 没有 ja 目录时后退英文，但 code 始终在，前端 apiErrors 才能接手。
         assert japanese["error_code"] == english["error_code"]
+
+@pytest.mark.asyncio
+async def test_an_internal_code_reaches_the_client() -> None:
+    """`{"code": ...}` alone is invisible to `apiErrors.<code>`; the exit promotes it."""
+
+    async with TestClient(TestServer(_app())) as client:
+        for language in ("zh-CN", "en", "ja"):
+            body = await (await client.get("/internal-code", headers={"Accept-Language": language})).json()
+            assert body["error_code"] == "GM_ONLY", language
+            assert body["code"] == "GM_ONLY", language
+            # 没有同码译文时原文不动，也不会被换成别的语言。
+            assert body["error"] == "只有 GM 可以确认", language

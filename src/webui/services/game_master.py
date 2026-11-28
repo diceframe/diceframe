@@ -619,9 +619,9 @@ class GameMasterService:
         return {
             "ok": False,
             "code": "REWRITE_IN_PROGRESS",
-            "error": t("webui.services.game_master.rewriting_wait_and_retry"),
+            "error": t("webui.services.game_master.rewriting_wait_and_retry"), "error_code": "REWRITE_IN_PROGRESS",
         }
 
     @staticmethod
     def _stale_run() -> dict[str, Any]:
-        return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.game_master.game_restarted_refresh_and_retry")}
+        return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.game_master.game_restarted_refresh_and_retry"), "error_code": "STALE_RUN"}

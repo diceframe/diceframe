@@ -269,7 +269,7 @@ class GameControlService:
                 return {
                     "ok": False,
                     "code": "REWRITE_IN_PROGRESS",
-                    "error": t("webui.services.game_controls.rewriting_wait_and_retry"),
+                    "error": t("webui.services.game_controls.rewriting_wait_and_retry"), "error_code": "REWRITE_IN_PROGRESS",
                 }
             pending = instance.pending_dice_actions(user_id or None)
             if not pending:
@@ -314,13 +314,13 @@ class GameControlService:
             return {
                 "ok": False,
                 "code": "GAME_NOT_FOUND",
-                "error": "游戏不存在",
+                "error": "游戏不存在", "error_code": "GAME_NOT_FOUND",
             }
         async with instance.authoritative_write() as entered:
             if not entered:
-                return {"ok": False, "code": "REWRITE_IN_PROGRESS", "error": t("webui.services.game_controls.rewriting_wait_and_retry")}
+                return {"ok": False, "code": "REWRITE_IN_PROGRESS", "error": t("webui.services.game_controls.rewriting_wait_and_retry"), "error_code": "REWRITE_IN_PROGRESS"}
             if self._instance(game_key) is not instance:
-                return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.game_controls.game_restarted_refresh_and_retry")}
+                return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.game_controls.game_restarted_refresh_and_retry"), "error_code": "STALE_RUN"}
             async with instance._lock:
                 transaction = StagedGameTransaction(instance)
                 result = await transaction.staged.resolve_luck_decision(check_id, actor_uid, spend, rule=self._dependencies.load_rule(instance), allow_gm=True)
@@ -341,13 +341,13 @@ class GameControlService:
             return {
                 "ok": False,
                 "code": "GAME_NOT_FOUND",
-                "error": "游戏不存在",
+                "error": "游戏不存在", "error_code": "GAME_NOT_FOUND",
             }
         async with instance.authoritative_write() as entered:
             if not entered:
-                return {"ok": False, "code": "REWRITE_IN_PROGRESS", "error": t("webui.services.game_controls.rewriting_wait_and_retry")}
+                return {"ok": False, "code": "REWRITE_IN_PROGRESS", "error": t("webui.services.game_controls.rewriting_wait_and_retry"), "error_code": "REWRITE_IN_PROGRESS"}
             if self._instance(game_key) is not instance:
-                return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.game_controls.game_restarted_refresh_and_retry")}
+                return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.game_controls.game_restarted_refresh_and_retry"), "error_code": "STALE_RUN"}
             async with instance._lock:
                 transaction = StagedGameTransaction(instance)
                 declined = await transaction.staged.decline_pending_luck()

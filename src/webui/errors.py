@@ -418,12 +418,22 @@ async def error_code_middleware(request: web.Request, handler) -> web.StreamResp
         return response
     if not isinstance(data, dict) or not data.get("error"):
         return response
+    # `code` is the spelling the orchestration layer has always used internally
+    # (`{"ok": False, "code": "GM_ONLY", ...}`). Clients only ever read
+    # `error_code`, so a payload whose code lives under `code` is invisible to
+    # `apiErrors.<code>` and to bot/CLI branching. Promote it here rather than
+    # depending on every module finishing its migration; the raise-site rule
+    # (and the ratchet in scripts/audit_error_codes.py) still applies to new
+    # code, and where both keys exist they must agree.
     declared = str(data.get("error_code") or "")
-    code = declared or ERROR_CODE_MAP.get(str(data["error"]))
+    inherited = str(data.get("code") or "")
+    code = declared or inherited or ERROR_CODE_MAP.get(str(data["error"]))
     if not code:
         return response
     localized = _localized_error(code)
-    if declared and localized is None:
+    # 已用规范键声明且没有同码译文：载荷本来就是这样，不必重写响应体。
+    # （只有 `code` 的不算：必须经过下面的提升。）
+    if localized is None and declared:
         return response
     data["error_code"] = code
     if localized is not None:

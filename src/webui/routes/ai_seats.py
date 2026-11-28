@@ -10,7 +10,7 @@ def _denied(request: web.Request) -> web.Response | None:
     if inst is None:
         return web.json_response({"ok": False, "error_code": "game_missing"}, status=404)
     if not viewer_for(request, inst).is_gm:
-        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     return None
 
 

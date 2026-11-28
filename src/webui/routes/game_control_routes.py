@@ -28,12 +28,12 @@ async def api_claim_gm_session(request: web.Request) -> web.Response:
     inst = api.get_game_instance(request.match_info["game_key"])
     if not inst or not inst.gm_uid:
         return web.json_response(
-            {"ok": False, "error": t("webui.routes.game_control_routes.no_recoverable_host")}, status=404
+            {"ok": False, "error": t("webui.routes.game_control_routes.no_recoverable_host"), "error_code": "route_game_control_routes_no_recoverable_host"}, status=404
         )
     token = request.get("session_token", "")
     manager = request.app.get("session_manager")
     if not token or not manager:
-        return web.json_response({"ok": False, "error": t("webui.routes.game_control_routes.browser_session_unavailable")}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.game_control_routes.browser_session_unavailable"), "error_code": "route_game_control_routes_browser_session_unavailable"}, status=400)
     manager.rebind(token, inst.gm_uid)
     return web.json_response({"ok": True, "user_id": inst.gm_uid})
 
@@ -69,7 +69,7 @@ async def api_game_health(request: web.Request) -> web.Response:
     if not inst:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
     if not _system_log_allowed(request, inst):
-        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     include_resolved = request.query.get("include_resolved", "").lower() in {
         "1",
         "true",
@@ -86,7 +86,7 @@ async def api_mark_health_event(request: web.Request) -> web.Response:
     if not inst:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
     if not _health_allowed(request, inst):
-        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     action = request.match_info["action"]
     result = await api.mark_game_health_event(
         gk,
@@ -108,7 +108,7 @@ async def api_set_solo_mode(request: web.Request) -> web.Response:
         request.get("user_id", ""),
         bool(request.get("owner_authenticated", False)),
     ):
-        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     body = await request.json()
     result = await api.set_solo_mode(gk, bool(body.get("solo")))
     return web.json_response(result, status=200 if result.get("ok") else 400)
@@ -125,7 +125,7 @@ async def api_set_narrative_perspective(request: web.Request) -> web.Response:
         request.get("user_id", ""),
         bool(request.get("owner_authenticated", False)),
     ):
-        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     body = await request.json()
     result = await api.set_narrative_perspective(
         gk,
@@ -146,11 +146,11 @@ async def api_set_gm_style(request: web.Request) -> web.Response:
         request.get("user_id", ""),
         bool(request.get("owner_authenticated", False)),
     ):
-        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     body = await request.json()
     if not isinstance(body, dict):
         return web.json_response(
-            {"ok": False, "error": t("webui.routes.game_control_routes.gm_style_invalid")}, status=400,
+            {"ok": False, "error": t("webui.routes.game_control_routes.gm_style_invalid"), "error_code": "route_game_control_routes_gm_style_invalid"}, status=400,
         )
     result = await api.set_gm_style(gk, body.get("gm_style"))
     return web.json_response(result, status=200 if result.get("ok") else 400)
@@ -164,7 +164,7 @@ async def api_set_dice_reveal_mode(request: web.Request) -> web.Response:
     if not inst:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
     if request.get("user_id", "") != inst.gm_uid:
-        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     body = await request.json()
     try:
         inst.configure_session(dice_reveal_mode=str(body.get("mode") or ""))
@@ -188,13 +188,13 @@ async def api_set_luck_timeout(request: web.Request) -> web.Response:
     if not inst:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
     if request.get("user_id", "") != inst.gm_uid:
-        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     body = await request.json()
     try:
         seconds = int(body.get("seconds"))
     except (TypeError, ValueError):
         return web.json_response(
-            {"ok": False, "error": "seconds 必须是整数（秒，0=禁用）"}, status=400
+            {"ok": False, "error": "seconds 必须是整数（秒，0=禁用）", "error_code": "invalid_seconds"}, status=400
         )
     try:
         inst.configure_session(luck_timeout_seconds=seconds)
@@ -219,7 +219,7 @@ async def api_set_reward_policy(request: web.Request) -> web.Response:
     if not inst:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
     if request.get("user_id", "") != inst.gm_uid:
-        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     body = await request.json()
     policy = {
         "mode": str(body.get("mode") or ""),
@@ -255,7 +255,7 @@ async def api_set_player_control(request: web.Request) -> web.Response:
     if not inst:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
     if request.get("user_id", "") != inst.gm_uid:
-        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     body = await request.json()
     result = await api.set_player_control(gk, uid, str(body.get("mode") or ""))
     status = 200 if result.get("ok") else (409 if result.get("error_code") == "CONTROL_CHANGE_BUSY" else 400)
@@ -271,7 +271,7 @@ async def api_set_away_control_policy(request: web.Request) -> web.Response:
     if not inst:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
     if request.get("user_id", "") != inst.gm_uid:
-        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     body = await request.json()
     result = await api.set_away_control_policy(gk, str(body.get("away_control_policy") or ""))
     return web.json_response(result, status=200 if result.get("ok") else 400)
@@ -284,7 +284,7 @@ async def api_set_player_access(request: web.Request) -> web.Response:
     if not inst:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
     if request.get("user_id", "") != inst.gm_uid:
-        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     body = await request.json()
     result = await api.set_player_access(gk, bool(body.get("open")))
     return web.json_response(result, status=200 if result.get("ok") else 400)
@@ -297,7 +297,7 @@ async def api_set_room_password(request: web.Request) -> web.Response:
     if not inst:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
     if request.get("user_id", "") != inst.gm_uid:
-        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     body = await request.json()
     password = str(body.get("password", "") or "")
     try:
@@ -320,7 +320,7 @@ async def api_private_log(request: web.Request) -> web.Response:
     elif viewer.is_seat:
         result = _get_api(request).private_log_for_user(gk, viewer.uid)
     else:
-        return web.json_response({"ok": False, "error": "未加入本局"}, status=403)
+        return web.json_response({"ok": False, "error": "未加入本局", "error_code": "player_not_in_game"}, status=403)
     return web.json_response(result, status=200 if result.get("ok") else 404)
 
 
@@ -333,7 +333,7 @@ async def api_table_talk(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
     viewer = viewer_for(request, inst)
     if not viewer.is_member:
-        return web.json_response({"ok": False, "error": "未加入本局"}, status=403)
+        return web.json_response({"ok": False, "error": "未加入本局", "error_code": "player_not_in_game"}, status=403)
     return web.json_response(api.table_talk(gk))
 
 
@@ -344,7 +344,7 @@ async def api_verify_room_password(request: web.Request) -> web.Response:
     api = _get_api(request)
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
+        return web.json_response({"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     try:
         result, status = await room_password_svc.verify_and_issue_room_token(
             inst, password, api.save_game_instance,

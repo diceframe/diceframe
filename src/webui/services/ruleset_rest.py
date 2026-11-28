@@ -58,14 +58,14 @@ def resolve(
         raise ValueError("hit_die_rolls must be a JSON object")
     rule = dependencies.load_rule_by_id(rule_id, language)
     if rule is None:
-        return {"ok": False, "code": "RULE_NOT_FOUND", "error": t("webui.services.ruleset_rest.rule_missing", rule_id=rule_id)}
+        return {"ok": False, "code": "RULE_NOT_FOUND", "error": t("webui.services.ruleset_rest.rule_missing", rule_id=rule_id), "error_code": "RULE_NOT_FOUND"}
     runtime = dependencies.ruleset_registry.resolve(rule.template)
     method = getattr(runtime, "complete_rest", None)
     if not callable(method):
         return {
             "ok": False,
             "code": "RULESET_REST_UNAVAILABLE",
-            "error": t("webui.services.ruleset_rest.no_professional_rest"),
+            "error": t("webui.services.ruleset_rest.no_professional_rest"), "error_code": "RULESET_REST_UNAVAILABLE",
         }
     result = method(
         rule, character, rest, hit_die_rolls,

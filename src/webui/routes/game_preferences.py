@@ -14,7 +14,7 @@ async def preferences(request: web.Request) -> web.Response:
         return web.json_response({'ok': False, 'error': 'Game not found'}, status=404)
     viewer = viewer_for(request, inst)
     if not viewer.is_gm or request.get('player_preview'):
-        return web.json_response({'ok': False, 'error': 'GM only'}, status=403)
+        return web.json_response({'ok': False, 'error': 'GM only', "error_code": "gm_only"}, status=403)
     can_manage_defaults = bool(request.get('owner_authenticated', False)
                                or request.get(ACCESS_PASSWORD_CONFIGURED_KEY) is False)
     if request.method == 'GET':

@@ -105,10 +105,19 @@
 - service 抛错时用 `src/webui/errors.py` 的 `error_payload("webui.services.<module>.<key>", **params)` 返回；code 由目录键派生（`worlds_name_empty`），也可用 `code=` 指定共享语义 code。**不再从文案反推 code。**
 - 出口 `error_code_middleware` 的职责收窄：已声明的 code 原样保留；能在 `webui/errors.<lang>.yml` 找到同码译文时用译文替换 `error`，否则保留抛出点渲染的文案。
 - `ERROR_CODE_MAP`（中文文案 → code）冻结：只允许删除，不允许新增。它是迁移遗留，不是新路径。
-- 新 code 必须 snake_case（`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`）；现存的 80 个 UPPER 写法登记为 `LEGACY_DECLARED_CODES` 并冻结。**不批量改写旧 code**：`apiErrors` 的社区译文按 key 名登记来源指纹，改名会让已审核译文失效，收益不匹配代价。
+- 新 code 必须 snake_case（`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`）；现存的 180 个 UPPER 写法登记为 `LEGACY_DECLARED_CODES` 并冻结。**不批量改写旧 code**：`apiErrors` 的社区译文按 key 名登记来源指纹，改名会让已审核译文失效，收益不匹配代价。
+- 载荷只用旧 `code` 键时，出口把它提升为 `error_code`（值相同，`code` 保留给内部读取）。
+  这样 100 处尚未迁移的载荷立刻对客户端可见；ratchet 仍把它们计为未迁移，因为目标是在抛出点声明。
+- **一个载荷只能声明一个 code。** `code` 与 `error_code` 同时出现时值必须相同；路由状态经
+  `declared_error_code()`（优先 `error_code`，回退 `code`）解析，两个不同的值会让白名单失配，
+  把 403 变成 422。`tests/test_error_codes.py` 对全仓 AST 检查这条不变量。
 - 同一条错误只在一处登记译文：`webui/errors.<lang>.yml` 与 service 级 yml 不得重复覆盖同一 code。
+- 拥有该契约的模块可以保留刻意的载荷形状例外。R4-a 对 `PLAYER_NOT_IN_GAME` 的 error-only 响应
+  仍然成立（`tests/test_player_control_authority.py` 保护它）：出口会为它补 `error_code`，
+  抛出点不声明。§4 不覆盖别的模块显式写下的响应契约，要改由该 owner 决定。
 - 前端 `apiErrors.<code>` 保持社区语言的唯一出口；未登记的 code 回退后端原文。
-- 迁移用 ratchet：`scripts/audit_error_codes.py` 按文件记录未声明 code 的 `"error": t(...)` 数量（`scripts/error_code_baseline.json`），只允许减少。首个模块 `webui/services/worlds.py` 已完成（52 处）。
+- 迁移用 ratchet：`scripts/audit_error_codes.py` 按文件记录「载荷有 `error` 但没有 `error_code`」的处数（`scripts/error_code_baseline.json`），只允许减少。口径包含 `t()` 文本、裸字面量与只写 `code` 三种：前两种出口按冻结表仍可能补码，第三种由出口提升，但三者都还没按新契约在抛出点声明。当前基线 **511 处 / 89 个文件**（已迁移 581 处）。
+- 剩余主要是动态消息（`str(exc)`：code 得来自异常类型，属于逐模块判断）、没有目录键也没有存量 code 的英文文案（需要新起 code 并补 `apiErrors`），以及带额外字段的载荷（批量报告、逐条目结果）。
 
 ### 5. verdict 词表统一（第一项落地，取代 display-as-identity）
 
@@ -152,7 +161,10 @@
 
 两个脚本都是「冻结今天，只允许变好」，不清算存量：
 
-- `scripts/audit_error_codes.py` + `scripts/error_code_baseline.json`：扫描 `src/webui/services`、`src/webui/routes` 与 `src/webui/api.py`，按文件统计「顶层 `{"error": t(...)}` 且没有 `error_code`」的处数。`src/webui/api.py` 必须在内，否则 orchestrator 等于有免检通道。
+- `scripts/audit_error_codes.py` + `scripts/error_code_baseline.json`：扫描 `src/webui/services`、`src/webui/routes` 与 `src/webui/api.py`，按文件统计「载荷有 `error` 但没有 `error_code`」的处数（`t()` 文本、裸字面量、只写 `code` 都算）。
+  「载荷」指响应体本身：直接 `return` 的字典，或 `web.json_response(<dict>)` 的第一个参数；
+  批量报告里的逐条目明细不计。注意这量的是抛出点是否按新契约声明，不是响应是否缺 code——
+  出口仍会为存量文案补码并提升 `code`。`src/webui/api.py` 必须在内，否则 orchestrator 等于有免检通道。
 - `scripts/audit_localization.py` + `scripts/localization_baseline.json`：按包统计运行期 CJK 字符串字面量（排除 docstring），并对 `src/engine/` 与 `src/rulesets/` 逐文件单独统计 —— 机械目录的增长（包括新增文件）直接失败。已登记例外只有 `check_verdict.py`、`language.py` 与 `intent/locales/`。
 - `localization/locales/**/*.yml` 的 en / zh-CN key 齐平由 `tests/test_localization_messages.py` 覆盖；前端目录由 `locales:check` 覆盖。
 

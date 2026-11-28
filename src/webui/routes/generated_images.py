@@ -93,7 +93,7 @@ async def api_generate_image(request: web.Request) -> web.Response:
     if game_key:
         inst = api.get_game_instance(game_key)
         if inst is None:
-            return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
+            return web.json_response({"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}, status=404)
         user_id = _effective_game_user_id(request, inst)
         is_gm = bool(user_id and user_id == inst.gm_uid)
         is_member = bool(is_gm or user_id in inst.players)
@@ -126,7 +126,7 @@ async def api_generated_image_file(request: web.Request) -> web.StreamResponse:
     if game_key:
         inst = api.get_game_instance(game_key)
         if inst is None:
-            return web.json_response({"error": "游戏不存在"}, status=404)
+            return web.json_response({"error": "游戏不存在", "error_code": "game_not_found"}, status=404)
         user_id = _effective_game_user_id(request, inst)
         if not user_id or (user_id != inst.gm_uid and user_id not in inst.players):
             return web.json_response(error_fields("webui.routes.generated_images.image_requires_membership"), status=403)
@@ -150,7 +150,7 @@ async def api_game_generated_images(request: web.Request) -> web.Response:
             viewer_is_gm=viewer.is_gm,
         )
     except KeyError:
-        return web.json_response({"error": "游戏不存在"}, status=404)
+        return web.json_response({"error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     except PermissionError:
         return web.json_response(error_fields("webui.routes.generated_images.history_requires_membership"), status=403)
     return web.json_response({"images": images})
