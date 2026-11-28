@@ -147,7 +147,8 @@ apply_effect_items(instance, combat, source, target, items, rng, *, dc) -> list[
 | **P2a（进行中）** | 应用点落地（单一函数）+ rider 路径接入，事件不变 | `effect_items.apply_rider_items` | 无内容变化 |
 | P2b | rider 句式覆盖（A 类：直接施加条件 / 带 escape DC） | 导入器 + 目录 | 产出新形状 |
 | P3 | `on_fail` 接受效果项（B1 伤害+条件、B2 推挤+条件） | 契约 + 结算 | 复用同一个应用点 |
-| P4 | `spell_effects` 收敛（48 条，逐条验证） | 内容 + resolver | 一次一条，可中途停 |
+| **P4a（已交付）** | `spell_effects` 的"施法形状 / 效果项"拆分 + 48 条全量证明 | `normalize_spell_effect` | 无行为变化 |
+| P4b | resolver 改读 `items`（一次一条法术） | 代码 | 可中途停 |
 | P5 | `KIND_HANDLERS` 的约 11 个"纯施加"handler 退化 | 代码 | 19 个经济类 handler **不动** |
 
 **P2a 必须在 P1 之后、P2b 之前**：P2b 产出的新形状要有人读；读的人先到位。
@@ -224,6 +225,15 @@ apply_effect_items(instance, combat, source, target, items, rng, *, dc) -> list[
 结果：**条目数不变（157）**，因为 Couatl 的 rider 修好后它的缺口变成
 `Divine Aid / Shielded Mind / Spellcasting`——这三项不在本片范围。也就是
 "修好了一条 rider，但那只怪还没完整"，这正是本仓一再出现的形态。
+
+## 6.9 P4a 记录（2026-11-28）
+
+- `normalize_spell_effect(effect) -> (casting_shape, items)`：`mode`/`save`/`range`/`target_count`/
+  `radius_ft`/`concentration`/`upcast_*`/`trigger` 留在施法形状；`damage`+`damage_type`+`half_on_success`
+  与 `condition`+`condition_duration`+`save_repeat` 进效果项。
+- 一条**全量证明**用例：48 条逐条拆分，断言载荷字段不残留在施法形状里、有效果就有效果项、
+  效果项只含载荷字段。这是 P4b 迁移 resolver 之前的安全网。
+- 本片不动 resolver：与 P2a 同一手法——形状先被验完，消费方再切。
 
 ## 7. 验收指标
 

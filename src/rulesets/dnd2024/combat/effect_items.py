@@ -141,6 +141,48 @@ def normalize_effect_items(raw_items: Any) -> list[dict[str, Any]]:
     return items
 
 
+#: 法术效果里**不是载荷**的字段：掷骰形状、目标集、施法形状、升环参数。
+#: 它们回答"怎么掷、对谁、花什么"，不回答"造成什么"。
+SPELL_CASTING_FIELDS = frozenset({
+    "mode", "save", "range", "target_count", "upcast_target_count", "radius_ft",
+    "concentration", "duration_rounds", "level", "magical", "upcast_damage",
+    "upcast_level", "damage_type_choice", "trigger", "half_on_success",
+    "condition_duration", "damage", "condition", "damage_type", "save_repeat",
+})
+
+
+def normalize_spell_effect(effect: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """一条 `spell_effects` → ``(casting_shape, items)``。
+
+    P4 只做这一步：把"怎么掷"与"造成什么"分开，并证明 48 条效果一条都不丢。
+    消费方迁移（resolver 改读 ``items``）是 P4b，分开是为了让"形状"先被验完。
+    """
+
+    casting = {
+        key: value for key, value in effect.items()
+        if key in SPELL_CASTING_FIELDS
+        and key not in {"damage", "damage_type", "condition", "condition_duration",
+                        "save_repeat", "half_on_success"}
+    }
+    items: list[dict[str, Any]] = []
+    if effect.get("damage"):
+        item: dict[str, Any] = {
+            "damage": {"dice": str(effect["damage"]),
+                       "type": str(effect.get("damage_type") or "")},
+        }
+        if effect.get("half_on_success"):
+            item["half_on_success"] = True
+        items.append(item)
+    if effect.get("condition"):
+        item = {"condition": str(effect["condition"])}
+        if effect.get("condition_duration"):
+            item["duration"] = str(effect["condition_duration"])
+        if effect.get("save_repeat"):
+            item["save_repeat"] = effect["save_repeat"]
+        items.append(item)
+    return casting, items
+
+
 def lifetime_of(item: dict[str, Any]) -> str:
     """三档寿命。``save_repeat``/专注就是"需维护"，其余按有没有 duration 分。"""
 

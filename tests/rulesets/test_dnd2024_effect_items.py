@@ -79,3 +79,37 @@ def test_the_declared_source_survives_normalisation() -> None:
 def test_a_kind_less_item_declares_its_own_source() -> None:
     assert normalize_rider({"push": 10}) == ("push", {"push": 10})
     assert normalize_rider({"condition": "poisoned"}) == ("condition", {"condition": "poisoned"})
+
+
+def test_every_shipped_spell_effect_splits_without_losing_anything() -> None:
+    """P4 的硬指标：48 条法术效果，逐条拆成"施法形状 + 效果项"，一条不丢。
+
+    这条用例比"某条法术正确"更有价值：它是对**全部**既有数据的一次性证明，
+    也是 P4b 迁移消费方之前必须先有的安全网。
+    """
+
+    import json
+    from pathlib import Path
+
+    from src.rulesets.dnd2024.combat.effect_items import normalize_spell_effect
+
+    catalog = json.loads(
+        (Path(__file__).resolve().parents[2]
+         / "templates/rulesets/dnd2024_srd/content/combat_catalogs/srd_combat_core.json"
+         ).read_text(encoding="utf-8")
+    )
+    effects = catalog["spell_effects"]
+    assert len(effects) >= 48
+
+    for key, effect in effects.items():
+        casting, items = normalize_spell_effect(effect)
+        # 载荷字段必须全部落进 items，不能留在 casting 里，也不能消失。
+        for field in ("damage", "damage_type", "condition", "condition_duration",
+                      "save_repeat", "half_on_success"):
+            assert field not in casting, f"{key}: {field} 留在施法形状里"
+        if effect.get("damage") or effect.get("condition"):
+            assert items, f"{key}: 有效果却没有效果项"
+        for item in items:
+            assert set(item) <= {
+                "damage", "condition", "duration", "save_repeat", "half_on_success",
+            }, f"{key}: 效果项含非载荷字段"
