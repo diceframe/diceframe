@@ -12,7 +12,7 @@ export function settingsGroupName(group: SettingsGroupId, locale: string): strin
   return groupNames[group][chinese(locale) ? 1 : 0]
 }
 export function settingsGroupFor(id: SettingsSectionId): SettingsGroupId {
-  if (['general', 'game', 'appearance', 'about'].includes(id)) return 'general'
+  if (['general', 'game', 'appearance', 'honors', 'about'].includes(id)) return 'general'
   if (id === 'api' || id === 'models') return 'ai'
   if (id === 'security' || id === 'access') return 'security'
   return 'connection'
@@ -68,6 +68,7 @@ const index: SearchEntry[] = [
   entry('access', 'access', 'settings-access', 'Access password', '访问密码', 'Password and login history', '密码与登录记录', ['login']),
   entry('logs', 'general', 'settings-runtime-logs', 'Runtime logs', '运行日志', 'Export or clear diagnostic logs', '导出、清理诊断日志', ['log', '维护']),
   entry('test-timeout', 'general', 'settings-test-timeout', 'Connection test timeout', '连接测试超时', 'Timeout for provider connection tests', '服务商连接测试的等待时间'),
+  entry('honors', 'honors', 'settings-honors', 'Honors and badges', '荣誉殿堂', 'Commemorative badges showcase and community honors wall', '纪念勋章陈列柜与社区荣誉墙', ['badge', 'badges', 'honor', 'trophy', '勋章', '徽章', '奖品', '荣誉墙', '纪念章']),
   entry('about', 'about', 'settings-update', 'Updates and about', '更新与关于', 'Version, update channel and project information', '版本、更新渠道与项目信息', ['version']),
   entry('rollback', 'general', 'settings-rollback', 'Restore previous version', '回退到上一版本', 'Restore a retained application version', '切换到已保留的上一程序版本', ['rollback', '回滚']),
 ]

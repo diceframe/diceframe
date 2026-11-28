@@ -14,6 +14,7 @@ import SceneImageBlock from '@/components/play/SceneImageBlock.vue'
 import { initializeTts, speakingKey, ttsSupported, ttsToggle } from '@/utils/tts'
 import StorySequenceView from '@/features/play/story/StorySequence.vue'
 import { isStorySequence } from '@/features/play/story/story'
+import HonorBadgePin from '@/features/honors/HonorBadgePin.vue'
 
 const props = defineProps<{ log: LogEntry[]; live: PublicAction[]; players: Player[]; round: number; lore?: LoreKeywords; gameKey?: string; ruleId?: string; processing?: boolean; isGm?: boolean; liveNarration?: string; liveStory?: StorySequence | null; pendingChecks?: CheckResult[]; revealChecks?: CheckResult[]; currentUserId?: string; luckBusyId?: string; revealBusyIds?: string[]; manualRolls?: ManualRollTimelineEntry[]; checkReveals?: Record<string, CheckRevealRecord>; diceRevealMode?: string; decisionReadonly?: boolean }>()
 const emit = defineEmits<{ refresh: []; luck: [check: CheckResult, spend: boolean]; reveal: [check: CheckResult] }>()
@@ -240,7 +241,7 @@ watch(() => rounds.value, async (latest) => {
         <div v-for="a in actions(item.entry)" :key="a.uid + a.text" class="message player message-with-avatar" :style="{ '--speaker-color': playerColor(a.uid) }">
           <PortraitImage :portrait="portrait(a.uid)" :rule-id="ruleId" :seed="a.uid" :name="name(a.uid)" :size="48" />
           <div class="message-copy">
-            <strong class="message-speaker"><span class="message-speaker-name">{{ name(a.uid) }}</span><button
+            <strong class="message-speaker"><span class="message-speaker-name">{{ name(a.uid) }}</span><HonorBadgePin v-if="currentUserId && a.uid === currentUserId" :size="16" :instance-id="`msg-${item.round}`" /><button
               v-if="ttsSupported()"
               type="button"
               class="tts-button"
@@ -347,7 +348,7 @@ watch(() => rounds.value, async (latest) => {
       <div v-for="a in live" :key="a.user_id" class="message player live message-with-avatar" :style="{ '--speaker-color': playerColor(a.user_id) }">
         <PortraitImage :portrait="portrait(a.user_id)" :rule-id="ruleId" :seed="a.user_id" :name="name(a.user_id, a.character_name)" :size="48" />
         <div class="message-copy">
-          <strong class="message-speaker"><span class="message-speaker-name">{{ name(a.user_id, a.character_name) }}</span><span class="message-speaker-meta">{{ ` · ${t('published')} · ${a.revision_count || 1}/3` }}</span></strong>
+          <strong class="message-speaker"><span class="message-speaker-name">{{ name(a.user_id, a.character_name) }}</span><HonorBadgePin v-if="currentUserId && a.user_id === currentUserId" :size="16" instance-id="live" /><span class="message-speaker-meta">{{ ` · ${t('published')} · ${a.revision_count || 1}/3` }}</span></strong>
           <p>{{ liveAct(a).text }}</p>
           <span v-if="liveAct(a).dice" class="dice-tag">🎲 {{ liveAct(a).dice?.system }}={{ liveAct(a).dice?.value }}</span>
         </div>

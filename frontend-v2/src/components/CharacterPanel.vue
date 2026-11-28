@@ -11,6 +11,7 @@ import SidebarRowIcon from '@/components/SidebarRowIcon.vue'
 import Modal from '@/components/ui/Modal.vue'
 import LevelUpDialog from '@/components/admin/LevelUpDialog.vue'
 import GeneratedImageThumbnail from '@/components/common/GeneratedImageThumbnail.vue'
+import HonorBadgePin from '@/features/honors/HonorBadgePin.vue'
 
 const props = defineProps<{ player?: Player; ruleMeta?: RuleMeta | null; portraitEditable?: boolean; showAdvancedCenter?: boolean }>()
 const emit = defineEmits<{ 'portrait-click': []; 'allocate-level-up': [attrs: Record<string, number>]; 'open-character-center': [] }>()
@@ -174,11 +175,14 @@ function submitLevelUp(attrs: Record<string, number>) {
       <h2>{{ t('characterStatus') }}</h2>
     </header>
     <div class="character-profile">
-      <button v-if="portraitEditable" type="button" class="portrait-edit-button" :title="t('clickToChangeAvatar')" @click="emit('portrait-click')">
-        <PortraitImage :portrait="cs.portrait" :rule-id="String(ruleMeta?.rule_id || '')" :seed="player.user_id" :name="player.character_name" :size="64" />
-        <span>{{ t('changeAvatar') }}</span>
-      </button>
-      <PortraitImage v-else :portrait="cs.portrait" :rule-id="String(ruleMeta?.rule_id || '')" :seed="player.user_id" :name="player.character_name" :size="64" />
+      <div class="character-portrait-shell">
+        <button v-if="portraitEditable" type="button" class="portrait-edit-button" :title="t('clickToChangeAvatar')" @click="emit('portrait-click')">
+          <PortraitImage :portrait="cs.portrait" :rule-id="String(ruleMeta?.rule_id || '')" :seed="player.user_id" :name="player.character_name" :size="64" />
+          <span>{{ t('changeAvatar') }}</span>
+        </button>
+        <PortraitImage v-else :portrait="cs.portrait" :rule-id="String(ruleMeta?.rule_id || '')" :seed="player.user_id" :name="player.character_name" :size="64" />
+        <HonorBadgePin :size="24" clickable instance-id="char" class="character-honor-pin" />
+      </div>
       <div class="character-title">
         <h3>{{ player.character_name }}</h3>
         <span v-if="cs.deceased" class="tag tag-deceased">{{ t('unavailable') }}</span>
@@ -339,6 +343,19 @@ function submitLevelUp(attrs: Record<string, number>) {
   border: 1px solid var(--df-border-soft);
   border-radius: var(--df-radius-sm, 8px);
   background: var(--df-surface-2, var(--df-surface-1));
+}
+.character-portrait-shell {
+  position: relative;
+  display: inline-flex;
+}
+.character-honor-pin {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  z-index: 2;
+  border-radius: 999px;
+  background: var(--df-surface-2, var(--df-surface-1));
+  box-shadow: 0 0 0 2px var(--df-surface-2, var(--df-surface-1));
 }
 .portrait-edit-button {
   position: relative;
