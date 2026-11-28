@@ -20,6 +20,7 @@ from typing import Any
 from src.engine.modules import ruleset_runtime
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.attunement import attuned_refs
+from src.rulesets.dnd2024.character.health_display import sync_health_display
 from src.rulesets.dnd2024.character.reconciliation import (
     Dnd2024CharacterStateReconciler,
     merge_live_character_projection,
@@ -41,6 +42,7 @@ from .environment import CombatEnvironmentMixin
 from .check_modes import condition_check_bonus_rolls, condition_flags, effective_speed
 from .check_windows import CombatCheckWindowsMixin
 from .divine_actions import CombatDivineActionsMixin
+from . import invocation_effects
 from .stealth_actions import CombatStealthActionsMixin
 from .martial_actions import CombatMartialActionsMixin
 from .support_actions import CombatSupportActionsMixin
@@ -738,6 +740,7 @@ class Dnd2024CombatEngine(
                         # canonical 已按 ref 摘除，live 背包/装备行必须同步清理，
                         # 否则下一次 reconcile 会把行重新写回 canonical。
                         remove_destroyed_item(existing, str(event["item_ref"]))
+                sync_health_display(existing, canonical)
                 updated_sheets[uid] = existing
             ruleset_runtime.replace_state(instance, ruleset_state)
             for uid, sheet in updated_sheets.items():
@@ -1035,9 +1038,11 @@ class Dnd2024CombatEngine(
     def _attack_cost_event(
         self, combat: dict[str, Any], actor: dict[str, Any], *, resource: str = "",
         weapon: dict[str, Any] | None = None, attacks_per_action: int = 0,
+        nick_extra: bool = False, free: bool = False, cleave_extra: bool = False,
     ) -> dict[str, Any]:
         return {
             "type": "dnd2024.attack.spent", "actor_id": actor["actor_id"],
+            **({"free": True} if free else {}),
             "resource": resource or self._spend_action_resource(combat),
             "attacks_per_action": (
                 attacks_per_action or self._attacks_per_action(actor)
@@ -1045,6 +1050,10 @@ class Dnd2024CombatEngine(
             # 归约需要知道"这一击用的是不是 Light 武器"，才能回答下一问：
             # "本回合还允许 Light 追加攻击吗"。
             "light_weapon": bool((weapon or {}).get("light")),
+            # Nick：这一次 Light 追加攻击由 Attack action 承担，不花附赠动作。
+            # 归约据此记账，保证同一回合只给一次。
+            **({"nick_extra": True} if nick_extra else {}),
+            **({"cleave_extra": True} if cleave_extra else {}),
             # 但"用 Light 武器攻击过"还不够：追加攻击的参照点是**触发它的那一次
             # 攻击所用的武器**（"a different Light weapon"），所以账本必须记下
             # 每一下的武器，而不是只记一个布尔。空串代表徒手或没有武器档案。
@@ -1126,9 +1135,22 @@ class Dnd2024CombatEngine(
         extended = bool(
             isinstance(concentration, dict) and concentration.get("extended")
         )
+        # 两个来源都是"掷两颗取高"，但它们回答的是不同问题：Extended Spell
+        # 把持续时间拉长（F28），Eldritch Mind 只给维持专注的这一下优势。
+        # 合并成"要不要掷第二颗"是对的，合并成"谁给的"就不行，所以来源分开记。
+        advantage_sources: list[dict[str, str]] = []
+        if extended:
+            advantage_sources.append({"code": "extended_spell", "mode": "advantage"})
+        concentration_feature = invocation_effects.concentration_advantage(
+            self.features, self._feature_character(target),
+        )
+        if concentration_feature:
+            advantage_sources.append(
+                {"code": concentration_feature, "mode": "advantage"},
+            )
         first = int(rng.randint(1, 20))
-        second = int(rng.randint(1, 20)) if extended else None
-        roll = max(first, second) if extended else first
+        second = int(rng.randint(1, 20)) if advantage_sources else None
+        roll = max(first, second) if advantage_sources else first
         # 专注维持是一次体质豁免，条件声明的豁免加值骰同样生效。
         check_bonus_rolls = condition_check_bonus_rolls(
             self.catalog.conditions, target.get("conditions") or {}, "saving_throw", rng,
@@ -1143,8 +1165,7 @@ class Dnd2024CombatEngine(
             "type": "check.resolved", "kind": "concentration", "actor_id": target["actor_id"],
             "rolls": [value for value in (first, second) if value is not None],
             "natural": roll, "modifier": modifier,
-            **({"advantage_sources": [{"code": "extended_spell", "mode": "advantage"}]}
-               if extended else {}),
+            **({"advantage_sources": advantage_sources} if advantage_sources else {}),
             "check_bonus": check_bonus, "check_bonus_rolls": check_bonus_rolls,
             "aura_bonus": int(aura["bonus"]), "aura_sources": aura["sources"],
             "total": total, "target": dc, "success": success,

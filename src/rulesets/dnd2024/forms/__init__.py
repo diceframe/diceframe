@@ -28,6 +28,7 @@ from .state import (
     FormStateError,
     assume_form,
     bootstrap_known_forms,
+    inactive_refs_for,
     known_form_count,
     learn_form,
     merged_refs_for,
@@ -43,7 +44,7 @@ __all__ = [
     "POLYMORPH_POLICY", "RECOMMENDED_FORMS", "SLOTS", "WILD_SHAPE_POLICY",
     "FormPanelError", "FormState", "FormStateError", "StatPanel",
     "assume_form", "bootstrap_known_forms", "compose", "cr_value",
-    "known_form_count", "learn_form", "merged_refs_for", "mode_for",
+    "inactive_refs_for", "known_form_count", "learn_form", "merged_refs_for", "mode_for",
     "panel_from_statblock", "panel_from_view", "restrictions",
     "wild_shape_state",
 ]

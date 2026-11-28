@@ -102,11 +102,13 @@
 
 ### 4. 错误文案单一 authority
 
-- service 抛错时显式携带 `error_code`（可带参数），文案在出口按 `ui_locale` 渲染。
-- `ERROR_CODE_MAP` 冻结：只允许删除条目，不允许新增。新增错误必须从抛出点声明 code。
+- service 抛错时用 `src/webui/errors.py` 的 `error_payload("webui.services.<module>.<key>", **params)` 返回；code 由目录键派生（`worlds_name_empty`），也可用 `code=` 指定共享语义 code。**不再从文案反推 code。**
+- 出口 `error_code_middleware` 的职责收窄：已声明的 code 原样保留；能在 `webui/errors.<lang>.yml` 找到同码译文时用译文替换 `error`，否则保留抛出点渲染的文案。
+- `ERROR_CODE_MAP`（中文文案 → code）冻结：只允许删除，不允许新增。它是迁移遗留，不是新路径。
+- 新 code 必须 snake_case（`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`）；现存的 80 个 UPPER 写法登记为 `LEGACY_DECLARED_CODES` 并冻结。**不批量改写旧 code**：`apiErrors` 的社区译文按 key 名登记来源指纹，改名会让已审核译文失效，收益不匹配代价。
 - 同一条错误只在一处登记译文：`webui/errors.<lang>.yml` 与 service 级 yml 不得重复覆盖同一 code。
 - 前端 `apiErrors.<code>` 保持社区语言的唯一出口；未登记的 code 回退后端原文。
-- code 命名空间统一为 snake_case，大小写两种历史写法在迁移时归一。
+- 迁移用 ratchet：`scripts/audit_error_codes.py` 按文件记录未声明 code 的 `"error": t(...)` 数量（`scripts/error_code_baseline.json`），只允许减少。首个模块 `webui/services/worlds.py` 已完成（52 处）。
 
 ### 5. verdict 词表统一（第一项落地，取代 display-as-identity）
 
@@ -148,13 +150,11 @@
 
 ### 8. 门禁（ratchet，不清算存量）
 
-新增 `scripts/audit_localization.py`，纳入 CI：
+两个脚本都是「冻结今天，只允许变好」，不清算存量：
 
-- `src/engine/`、`src/rulesets/` 的机械目录禁止新增 CJK 字符串字面量；
-- 全仓 CJK 字面量计数按路径写入 baseline，只允许减少；
-- `localization/locales/**/*.yml` 的 en / zh-CN key 必须齐平；
-- 新增 `ERROR_CODE_MAP` 条目、新增以显示文本为键的 dict 视为失败；
-- 新增 service 级错误文案必须带 `error_code`。
+- `scripts/audit_error_codes.py` + `scripts/error_code_baseline.json`：扫描 `src/webui/services`、`src/webui/routes` 与 `src/webui/api.py`，按文件统计「顶层 `{"error": t(...)}` 且没有 `error_code`」的处数。`src/webui/api.py` 必须在内，否则 orchestrator 等于有免检通道。
+- `scripts/audit_localization.py` + `scripts/localization_baseline.json`：按包统计运行期 CJK 字符串字面量（排除 docstring），并对 `src/engine/` 与 `src/rulesets/` 逐文件单独统计 —— 机械目录的增长（包括新增文件）直接失败。已登记例外只有 `check_verdict.py`、`language.py` 与 `intent/locales/`。
+- `localization/locales/**/*.yml` 的 en / zh-CN key 齐平由 `tests/test_localization_messages.py` 覆盖；前端目录由 `locales:check` 覆盖。
 
 ## Alternatives Considered
 

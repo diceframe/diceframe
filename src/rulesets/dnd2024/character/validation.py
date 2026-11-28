@@ -254,7 +254,10 @@ class CharacterValidationMixin:
             if not isinstance(language_refs, list):
                 errors.append("language_refs must be an array")
                 language_refs = []
-            standard_refs = {f"language:{item['id']}" for item in languages}
+            standard_refs = {
+                f"language:{item['id']}" for item in languages
+                if item.get("rarity") == "standard"
+            }
             if len(language_refs) != 3 or len(set(language_refs)) != 3:
                 errors.append("choose exactly three different languages")
             if "language:common" not in language_refs:

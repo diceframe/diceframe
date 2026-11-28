@@ -759,7 +759,14 @@ def _validate_statblock_extras(enemy: dict[str, Any], label: str) -> None:
             raise CombatIntentError(f"{label} languages must be a list")
         seen: set[str] = set()
         for item in languages:
-            if not isinstance(item, str) or not item.strip() or len(item) > 40:
+            # 语言是内容引用（`language:common`），不是显示名：显示名走 locale，
+            # 两边用同一个 id 才能和玩家的 language_refs 对上。
+            if (
+                not isinstance(item, str)
+                or not item.startswith("language:")
+                or not item[len("language:"):].strip()
+                or len(item) > 60
+            ):
                 raise CombatIntentError(f"{label} language entry is invalid")
             if item in seen:
                 raise CombatIntentError(f"{label} language entry is duplicated")
@@ -1139,6 +1146,20 @@ class CombatValidationMixin(
                 # 两次吐息"。
                 if intent.get("second_target_of"):
                     pass
+                elif intent_type == "attack" and intent.get("cleave_from"):
+                    # Cleave 的第二击与 Horde Breaker 同构：不付动作、不占
+                    # `attacks_remaining`，前提与额度由各自的校验回答。
+                    pass
+                elif (
+                    intent_type == "attack"
+                    and declaration_value(intent, LIGHT_EXTRA_ATTACK) is True
+                ):
+                    # Light 追加攻击不是 Attack action 的一击，也不是靠
+                    # ``attacks_remaining`` 兑现的那几次：它的成本是附赠动作
+                    # （或 Nick 的"每回合一次"），由 `_validate_light_extra_attack`
+                    # 单独结账。留在这道门里会让它在真实回合里永远不可达——
+                    # 动作已经花掉了。
+                    pass
                 elif not has_action and not (
                     intent_type == "attack"
                     and int(economy.get("attacks_remaining", 0) or 0) >= 1
@@ -1420,10 +1441,15 @@ class CombatValidationMixin(
         item = self.bundle.get("item", item_ref.removeprefix("item:"))
         if not isinstance(item, dict):
             raise CombatIntentError("item is not defined in the active bundle")
-        if self._item_is_merged_in_form(instance, actor["actor_id"], item_ref):
+        form_mode = self._form_item_mode(instance, actor["actor_id"], item_ref)
+        if form_mode == "merge":
             # merged 的含义就是"没有效果"，不是"在 UI 里藏起来"：连激活也不行。
             raise CombatIntentError(
                 "that item has no effect while you are shape-shifted (merged)"
+            )
+        if form_mode == "drop":
+            raise CombatIntentError(
+                "that item was dropped when you shape-shifted"
             )
         try:
             declaration = validate_activation_declaration(item)

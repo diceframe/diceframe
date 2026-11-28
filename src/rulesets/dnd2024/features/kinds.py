@@ -138,7 +138,10 @@ KIND_HANDLERS: dict[str, KindHandler] = {
     ),
     "holy_nimbus": KindHandler(resolve=effects.holy_nimbus),
     "dragon_wings": KindHandler(resolve=effects.dragon_wings),
-    "intimidating_presence": KindHandler(resolve=effects.intimidating_presence),
+    "intimidating_presence": KindHandler(
+        resolve=effects.intimidating_presence,
+        validate=effects.validate_intimidating_presence,
+    ),
     "innate_sorcery": KindHandler(resolve=effects.innate_sorcery),
     "restore_feature_use": KindHandler(
         resolve=effects.restore_feature_use, validate=effects.validate_restore_feature_use,

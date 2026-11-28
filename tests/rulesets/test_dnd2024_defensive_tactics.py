@@ -176,3 +176,88 @@ def test_a_hunter_below_seven_carries_neither_option() -> None:
 
     assert "multiattack_defense" not in _codes(_mode(engine, instance))
     assert "escape_the_horde" not in _codes(_mode(engine, instance, opportunity=True))
+
+
+def test_multiattack_intent_disadvantages_the_second_swing_after_first_hit() -> None:
+    """In one Multiattack batch, a first-swing hit must disadvantage the second swing."""
+
+    multi_goblin = goblin(position=5, hp=40)
+    multi_goblin["actions"] = [{
+        "id": "multiattack", "name": "Multiattack", "kind": "multiattack",
+        "repeat": {"attack_id": "scimitar", "count": 2},
+    }]
+    engine, instance = _combat(
+        {"gm": _hunter(7, "multiattack_defense")}, {"gm": 1},
+        enemies=[multi_goblin],
+    )
+    _to_actor(engine, instance, "enemy:goblin-1")
+
+    events = _apply(engine, instance, {
+        "intent_id": "multi-1", "type": "multiattack", "submitted_by": "gm",
+        "actor_id": "enemy:goblin-1", "target_id": "player:gm",
+        "action_id": "multiattack",
+    }, rolls=(19, 3, 18, 4))
+
+    attacks = [
+        row for row in events
+        if row.get("type") == "check.resolved" and row.get("kind") == "attack"
+    ]
+    assert len(attacks) == 2
+    assert attacks[0]["success"] is True
+    assert "multiattack_defense" not in {
+        str(row["code"]) for row in attacks[0].get("advantage_sources") or []
+    }
+    assert attacks[1]["advantage_mode"] == "disadvantage"
+    assert "multiattack_defense" in {
+        str(row["code"]) for row in attacks[1].get("advantage_sources") or []
+    }
+
+
+def test_shield_turning_a_hit_into_a_miss_does_not_set_multiattack_defense() -> None:
+    sheet = _hunter(7, "multiattack_defense")
+    casting = sheet["ruleset_character"].setdefault("spellcasting", {}).setdefault("class", {})
+    prepared = list(casting.get("prepared_spell_refs") or [])
+    if "spell:shield" not in prepared:
+        prepared.append("spell:shield")
+    casting["prepared_spell_refs"] = prepared
+    casting.setdefault("slots", {})["1"] = {"current": 2, "max": 2}
+    engine, instance = _combat(
+        {"gm": sheet}, {"gm": 1}, enemies=[goblin(position=5, hp=40)],
+    )
+    _to_actor(engine, instance, "enemy:goblin-1")
+
+    # Goblin attack bonus +4 vs Ranger AC: pick a roll that hits AC but misses AC + 5.
+    hunter_ac = int(engine._actor_view(instance, _combat_state(instance), "player:gm")["armor_class"])
+    hit_roll = max(2, hunter_ac - 4)
+    opened = _goblin_attack(engine, instance, rolls=(hit_roll, 4))
+    decision = next(row for row in opened if row["type"] == "dnd2024.decision.pending")
+    _apply(engine, instance, {
+        "intent_id": "shield-1", "type": "decision.resolve", "submitted_by": "gm",
+        "decision_id": decision["decision_id"],
+        "option": "cast", "spell_ref": "spell:shield", "slot_level": 1,
+    })
+
+    assert "multiattack_defense" not in _codes(_mode(engine, instance))
+
+
+def test_a_declined_reaction_window_still_sets_multiattack_defense() -> None:
+    sheet = _hunter(7, "multiattack_defense")
+    casting = sheet["ruleset_character"].setdefault("spellcasting", {}).setdefault("class", {})
+    prepared = list(casting.get("prepared_spell_refs") or [])
+    if "spell:shield" not in prepared:
+        prepared.append("spell:shield")
+    casting["prepared_spell_refs"] = prepared
+    casting.setdefault("slots", {})["1"] = {"current": 2, "max": 2}
+    engine, instance = _combat(
+        {"gm": sheet}, {"gm": 1}, enemies=[goblin(position=5, hp=40)],
+    )
+    _to_actor(engine, instance, "enemy:goblin-1")
+
+    opened = _goblin_attack(engine, instance, rolls=(18, 4))
+    decision = next(row for row in opened if row["type"] == "dnd2024.decision.pending")
+    _apply(engine, instance, {
+        "intent_id": "decline-shield", "type": "decision.resolve", "submitted_by": "gm",
+        "decision_id": decision["decision_id"], "option": "decline",
+    })
+
+    assert "multiattack_defense" in _codes(_mode(engine, instance))

@@ -513,7 +513,7 @@ const referenceLabels: Record<string, [string, string]> = {
   small: ['小型', 'Small'], medium: ['中型', 'Medium'],
   barbarian: ['野蛮人', 'Barbarian'], bard: ['吟游诗人', 'Bard'], cleric: ['牧师', 'Cleric'], druid: ['德鲁伊', 'Druid'],
   fighter: ['战士', 'Fighter'], monk: ['武僧', 'Monk'], paladin: ['圣武士', 'Paladin'], ranger: ['游侠', 'Ranger'],
-  rogue: ['游荡者', 'Rogue'], sorcerer: ['术士', 'Sorcerer'], warlock: ['邪术师', 'Warlock'], wizard: ['法师', 'Wizard'],
+  rogue: ['游荡者', 'Rogue'], sorcerer: ['术士', 'Sorcerer'], warlock: ['魔契师', 'Warlock'], wizard: ['法师', 'Wizard'],
   single_class: ['单职业', 'Single class'], multiclass: ['多职业', 'Multiclass'],
   acrobatics: ['体操', 'Acrobatics'], animal_handling: ['驯兽', 'Animal Handling'], arcana: ['奥秘', 'Arcana'], athletics: ['运动', 'Athletics'],
   deception: ['欺瞒', 'Deception'], history: ['历史', 'History'], insight: ['洞悉', 'Insight'], intimidation: ['威吓', 'Intimidation'],
@@ -760,6 +760,13 @@ async function completeRest(): Promise<void> {
       </dl>
       <h3>{{ text('熟练项', 'Proficiencies') }}</h3>
       <div class="tag-list"><span v-for="skill in ((canonical.proficiencies as JsonObject)?.skill_refs as string[]) || []" :key="skill">{{ refName(skill) }}</span></div>
+      <h3>{{ text('语言', 'Languages') }}</h3>
+      <!-- 语言不参与任何判定，它是给玩家与 GM 的权威参考：这个角色懂什么语言、
+           怪物说的是什么语言。所以它只出现在角色卡这一处，不进战斗 actor 视图。 -->
+      <div v-if="((canonical.proficiencies as JsonObject)?.language_refs as string[])?.length" class="tag-list">
+        <span v-for="language in ((canonical.proficiencies as JsonObject)?.language_refs as string[])" :key="language">{{ refName(language) }}</span>
+      </div>
+      <p v-else class="locked-note">{{ text('尚未记录语言。', 'No languages recorded yet.') }}</p>
       <h3>{{ text('规则来源', 'Rules source') }}</h3>
       <code>{{ (canonical.rule_binding as JsonObject)?.content_version || '—' }}</code>
       </div>

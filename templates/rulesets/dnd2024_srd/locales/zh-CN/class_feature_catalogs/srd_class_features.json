@@ -247,7 +247,15 @@
       "cunning_strike.withdraw": "撤步",
       "cunning_strike.daze": "恍惚",
       "cunning_strike.knock_out": "击昏",
-      "cunning_strike.obscure": "眩目"
+      "cunning_strike.obscure": "眩目",
+      "agonizing_blast": "苦痛冲击",
+      "devil_s_sight": "魔鬼视界",
+      "eldritch_mind": "邪术心智",
+      "eldritch_spear": "邪术长矛",
+      "fiendish_vigor": "邪魔活力",
+      "lessons_of_the_first_ones": "原初者之训",
+      "repelling_blast": "斥退冲击",
+      "witch_sight": "女巫视界"
     }
   }
 }

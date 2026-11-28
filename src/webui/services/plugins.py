@@ -210,7 +210,7 @@ def plugin_detail(
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     return {"ok": True, **host.public_detail(plugin_id)}
 
 def read_plugin_docs(
@@ -219,7 +219,7 @@ def read_plugin_docs(
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     return host.read_docs(plugin_id)
 
 
@@ -259,7 +259,7 @@ def sync_plugin_lorebooks(
     """
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     return {"ok": True, "synced": host.sync_lorebooks(dependencies.store.lorebook)}
 
 
@@ -599,7 +599,7 @@ async def update_plugin_config(
     changes: dict[str, Any],
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
-    if not host: return {"ok": False, "error": "插件宿主未启用"}
+    if not host: return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     result = await host.update_config(plugin_id, changes)
     # update_config 失败会抛异常，能走到这行即成功；public_detail 不含 ok，故不再判断 result.get("ok")。
     # 启用内容包/主题时立即同步世界书 + 自动灌注全部内容资源，避免用户还得手动一键导入。
@@ -618,11 +618,11 @@ async def control_plugin(
     action: str,
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
-    if not host: return {"ok": False, "error": "插件宿主未启用"}
+    if not host: return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     # 前端进程开关要求强制启动/停止，不受 config.enabled 拦截（enabled 是"开机自启"概念）。
     start_kwargs = {"require_enabled": False} if action in ("start", "restart") else {}
     method = {"start": host.start, "stop": host.stop, "restart": host.restart}.get(action)
-    if not method: return {"ok": False, "error": t("webui.services.plugins.plugin_operation_invalid")}
+    if not method: return {"ok": False, "error": t("webui.services.plugins.plugin_operation_invalid"), "error_code": "plugins_plugin_operation_invalid"}
     await method(plugin_id, **start_kwargs)
     if action in ("start", "restart") and _legacy_autoimport_allowed(host, plugin_id):
         LegacyContentPackAdapter(
@@ -641,7 +641,7 @@ async def install_plugin(
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     detail = await host.install_from_zip(
         payload, overwrite=overwrite, expected_plugin_type=expected_plugin_type,
     )
@@ -656,7 +656,7 @@ async def install_plugin_group(
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     details = await host.install_group_from_zips(payloads, overwrite=overwrite)
     return {"ok": True, "plugins": details}
 
@@ -676,7 +676,7 @@ async def install_marketplace_plugin(
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     result = await host.install_from_marketplace(
         plugin_id, overwrite=overwrite, expected_plugin_type=expected_plugin_type,
     )
@@ -689,7 +689,7 @@ async def update_marketplace_plugin(
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     detail = await host.update_from_marketplace(plugin_id)
     # Same follow-up as a marketplace (over)install: an enabled legacy content
     # pack gets the new version's content right away, not after a restart.
@@ -728,7 +728,7 @@ async def uninstall_plugin(
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     # 卸载前按类型 descriptor 声明的清理域清理插件灌入的数据，避免残留
     cleanup = _run_cleanup_domains(dependencies, plugin_id)
     result = await host.uninstall(plugin_id, delete_data=delete_data)
@@ -753,7 +753,7 @@ def add_plugin_mirror(
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     return {"ok": True, "mirror": host.add_mirror(data)}
 
 def update_plugin_mirror(
@@ -763,7 +763,7 @@ def update_plugin_mirror(
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     return {"ok": True, "mirror": host.update_mirror(mirror_id, data)}
 
 def delete_plugin_mirror(
@@ -772,7 +772,7 @@ def delete_plugin_mirror(
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     return {"ok": True, **host.delete_mirror(mirror_id)}
 
 async def test_plugin_mirror(
@@ -781,7 +781,7 @@ async def test_plugin_mirror(
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     return await host.test_mirror(mirror_id)
 
 def clear_plugin_card_cache(
@@ -790,14 +790,14 @@ def clear_plugin_card_cache(
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     if plugin_id != "qq-napcat":
-        return {"ok": False, "error": t("webui.services.plugins.no_card_cache")}
+        return {"ok": False, "error": t("webui.services.plugins.no_card_cache"), "error_code": "plugins_no_card_cache"}
     host.public_detail(plugin_id)  # 触发 KeyError，保持和其他插件接口一致
     data_dir = Path(host.data_dir).resolve()
     card_dir = (data_dir / "bot" / "cards").resolve()
     if data_dir not in card_dir.parents:
-        return {"ok": False, "error": t("webui.services.plugins.card_cache_path_invalid")}
+        return {"ok": False, "error": t("webui.services.plugins.card_cache_path_invalid"), "error_code": "plugins_card_cache_path_invalid"}
     result = cleanup_card_cache(card_dir, delete_all=True)
     return {"ok": True, "path": str(card_dir), **result}
 
@@ -882,7 +882,7 @@ def prebuilt_ui_descriptor(
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     return {"ok": True, **host.prebuilt_ui_descriptor(plugin_id)}
 
 
@@ -954,7 +954,7 @@ async def invoke_plugin_tool(
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     result = await host.call_tool(
         (plugin_id or "").strip(),
         (tool_name or "").strip(),
@@ -996,7 +996,7 @@ def import_plugin_content(
 ) -> dict[str, Any]:
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     kind = (kind or "").strip()
     resource_id = (resource_id or "").strip()
     plugin_id = (plugin_id or "").strip()
@@ -1004,7 +1004,7 @@ def import_plugin_content(
     target_book_id = (target_book_id or "").strip()
     resource = host.get_content_resource(kind, resource_id, plugin_id=plugin_id)
     if not resource:
-        return {"ok": False, "error": "插件内容不存在或未启用"}
+        return {"ok": False, "error": "插件内容不存在或未启用", "error_code": "plugin_content_unavailable"}
     try:
         import_target = CONTENT_KIND_REGISTRY.spec(kind).import_target
     except ContentRefError:
@@ -1045,11 +1045,11 @@ def import_plugin_content(
             if callable(world_projection) else ""
         )
     elif not target_world_id:
-        return {"ok": False, "error": t("webui.services.plugins.select_target_lorebook")}
+        return {"ok": False, "error": t("webui.services.plugins.select_target_lorebook"), "error_code": "plugins_select_target_lorebook"}
     if not lorebook or not lorebook.get_world(target_world_id):
         # A standalone canonical Book intentionally has no world projection.
         if not target_book_id:
-            return {"ok": False, "error": "目标世界书不存在"}
+            return {"ok": False, "error": "目标世界书不存在", "error_code": "lorebook_not_found"}
     entry = _content_to_lore_entry(
         resource, kind, target_world_id, book_id=target_book_id,
     )
@@ -1082,7 +1082,7 @@ def import_all_plugin_content(
     """一键导入插件全部内容：角色卡→卡库，NPC/道具/魔法/职业→指定世界书。"""
     host = dependencies.plugin_host
     if not host:
-        return {"ok": False, "error": "插件宿主未启用"}
+        return {"ok": False, "error": "插件宿主未启用", "error_code": "plugin_host_disabled"}
     plugin_id = (plugin_id or "").strip()
     target_world_id = (target_world_id or "").strip()
     target_book_id = (target_book_id or "").strip()
@@ -1123,9 +1123,9 @@ def import_all_plugin_content(
                         continue
                     lorebook = dependencies.store.lorebook
                     if not target_book_id and (not lorebook or not lorebook.get_world(target_world_id)):
-                        return {"ok": False, "error": "目标世界书不存在"}
+                        return {"ok": False, "error": "目标世界书不存在", "error_code": "lorebook_not_found"}
                     if lorebook is None:
-                        return {"ok": False, "error": "目标世界书不存在"}
+                        return {"ok": False, "error": "目标世界书不存在", "error_code": "lorebook_not_found"}
                     entry = _content_to_lore_entry(
                         resource, kind, target_world_id, book_id=target_book_id,
                     )
@@ -1257,7 +1257,7 @@ def _save_plugin_book_entry(
         return writer(str(book_id), entry)
     lorebook = dependencies.store.lorebook
     if lorebook is None:
-        return {"ok": False, "error": t("webui.services.plugins.lorebook_storage_unavailable")}
+        return {"ok": False, "error": t("webui.services.plugins.lorebook_storage_unavailable"), "error_code": "plugins_lorebook_storage_unavailable"}
     add_book_entry = getattr(lorebook, "add_book_entry", None)
     if callable(add_book_entry):
         add_book_entry(str(book_id), entry)

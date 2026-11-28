@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from src.rules.rule_system import RuleSystem
 
-__all__ = ["migrate_legacy_character_sheet", "normalize_character_sheet", "normalize_character_payload"]
+_DEFAULT_HP_LABEL = "生命"
+
+__all__ = [
+    "migrate_legacy_character_sheet",
+    "normalize_character_sheet",
+    "normalize_character_payload",
+    "repair_ruleset_health_display",
+]
 
 # 技能效果说明是玩家自定义文本（descriptive metadata，非规则权威）：
 # 长度上限同时防止单技能塞入超长文本撑大 planner context。
@@ -67,7 +75,7 @@ def migrate_legacy_character_sheet(
 
     resources = character_sheet.setdefault("resources", {})
     hp = resources.setdefault("hp", {})
-    hp.setdefault("label", "生命")
+    hp.setdefault("label", _DEFAULT_HP_LABEL)
     hp.setdefault("current", int(character_sheet.get("hp", 0) or 0))
     hp.setdefault("max", int(character_sheet.get("max_hp", hp.get("current", 0)) or 0))
     hp.setdefault("min", 0)
@@ -146,3 +154,52 @@ def normalize_character_sheet(
 def normalize_character_payload(character: dict[str, Any], rule: object | None = None) -> dict[str, Any]:
     """Normalize a character without deleting legacy aliases."""
     return normalize_character_sheet(character, rule)  # type: ignore[arg-type]
+
+
+def repair_ruleset_health_display(character_sheet: dict[str, Any]) -> dict[str, Any]:
+    """Repair display HP fields from canonical ruleset health; canonical is never rewritten."""
+
+    canonical = character_sheet.get("ruleset_character")
+    if not isinstance(canonical, dict):
+        return character_sheet
+    canonical_resources = canonical.get("resources")
+    if not isinstance(canonical_resources, dict):
+        return character_sheet
+    hp = canonical_resources.get("hp")
+    if isinstance(hp, bool) or not isinstance(hp, int):
+        return character_sheet
+    raw_max_hp = canonical_resources.get("max_hp")
+    if raw_max_hp is None:
+        max_hp = 0
+    elif isinstance(raw_max_hp, bool) or not isinstance(raw_max_hp, int):
+        return character_sheet
+    else:
+        max_hp = raw_max_hp
+
+    character_sheet["hp"] = hp
+    character_sheet["max_hp"] = max_hp
+    resources = character_sheet.setdefault("resources", {})
+    if not isinstance(resources, dict):
+        resources = {}
+        character_sheet["resources"] = resources
+    display_hp = resources.setdefault("hp", {})
+    if not isinstance(display_hp, dict):
+        display_hp = {}
+        resources["hp"] = display_hp
+    display_hp.setdefault("label", _DEFAULT_HP_LABEL)
+    display_hp.setdefault("min", 0)
+    display_hp["current"] = hp
+    display_hp["max"] = max_hp
+
+    conditions = canonical.get("conditions")
+    conditions = conditions if isinstance(conditions, dict) else {}
+    deceased = "dead" in conditions
+    character_sheet["deceased"] = deceased
+    if "death_saves" in conditions:
+        character_sheet["death_saves"] = deepcopy(conditions["death_saves"])
+    else:
+        character_sheet.pop("death_saves", None)
+    character_sheet["status"] = "dead" if deceased else "downed" if hp <= 0 else "active"
+    if not deceased:
+        character_sheet.pop("death_round", None)
+    return character_sheet

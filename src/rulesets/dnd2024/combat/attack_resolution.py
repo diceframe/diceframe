@@ -17,6 +17,7 @@ from .primitives import (
 from .check_modes import condition_check_bonus_rolls, condition_flags, mode_from_sources
 from src.rulesets.dnd2024.features.attack_declarations import BRUTAL_STRIKE, LIGHT_EXTRA_ATTACK, SACRED_WEAPON, declaration_value
 from .reaction_spells import effective_armor_class
+from .weapon_masteries import nick_active
 
 
 class CombatAttackResolutionMixin:
@@ -421,6 +422,10 @@ class CombatAttackResolutionMixin:
         # ``attack:<actor>:0``。整批里同名 id 会让重掷推导与前端对不上，
         # 所以收集完按 (kind, actor) 重排一次序号。
         roll_seq: dict[tuple[str, str], int] = {}
+        # Multiattack 在单次批次里连续结算多击：前几击落账的攻击标记（如
+        # Hunter 的 Multiattack Defense）必须在同一批次的后续攻击里立即可见，
+        # 同时保持对调用方 ``combat`` 的只读不变性。
+        working_combat = combat
         made = 0
         for attack, count in parts:
             for _ in range(count):
@@ -442,16 +447,45 @@ class CombatAttackResolutionMixin:
                 # 任一击被拒绝即整批拒绝：这里不吞异常，抛出的事件批次不会
                 # 落地，前几击也不落账（任务书 §2 的原子性要求）。
                 part_events = self._attack_events(
-                    instance, combat, attempt, rng,
+                    instance, working_combat, attempt, rng,
                     attacks_in_action=total if made == 0 else 0,
                 )
                 for event in part_events:
-                    if event.get("type") != "check.resolved":
-                        continue
-                    key = (str(event.get("kind") or ""), str(event.get("actor_id") or ""))
-                    seq = roll_seq.get(key, 0)
-                    event["roll_id"] = f"{key[0]}:{key[1]}:{seq}"
-                    roll_seq[key] = seq + 1
+                    event_type = event.get("type")
+                    if event_type == "check.resolved":
+                        key = (str(event.get("kind") or ""), str(event.get("actor_id") or ""))
+                        seq = roll_seq.get(key, 0)
+                        event["roll_id"] = f"{key[0]}:{key[1]}:{seq}"
+                        roll_seq[key] = seq + 1
+                    elif event_type == "dnd2024.attack_mark.set":
+                        if working_combat is combat:
+                            working_combat = {
+                                **combat,
+                                "attack_marks": deepcopy(combat.get("attack_marks") or {}),
+                            }
+                        marks = working_combat.setdefault("attack_marks", {})
+                        kind_marks = marks.setdefault(str(event.get("kind") or ""), {})
+                        actor_marks = kind_marks.setdefault(str(event.get("actor_id") or ""), {})
+                        actor_marks[str(event.get("target_id") or "")] = {
+                            "turns_remaining": int(event.get("turns_remaining", 0) or 0),
+                            "expiry": str(event.get("expiry") or ""),
+                            "round": int(working_combat.get("round", 0) or 0),
+                            "turn_index": int(working_combat.get("turn_index", 0) or 0),
+                        }
+                    elif event_type == "dnd2024.attack_mark.cleared":
+                        if working_combat is combat:
+                            working_combat = {
+                                **combat,
+                                "attack_marks": deepcopy(combat.get("attack_marks") or {}),
+                            }
+                        marks = working_combat.get("attack_marks") or {}
+                        per_kind = marks.get(str(event.get("kind") or ""))
+                        per_actor = (
+                            per_kind.get(str(event.get("actor_id") or ""))
+                            if isinstance(per_kind, dict) else None
+                        )
+                        if isinstance(per_actor, dict):
+                            per_actor.pop(str(event.get("target_id") or ""), None)
                 events.extend(part_events)
                 made += 1
                 remaining_hp -= sum(
@@ -667,7 +701,23 @@ class CombatAttackResolutionMixin:
             *self._spell_end_trigger_events(actor, "attack_roll"),
             *([self._attack_cost_event(
                 combat, actor,
-                resource="bonus_action" if declaration_value(intent, LIGHT_EXTRA_ATTACK) else "",
+                resource=(
+                    ""
+                    if declaration_value(intent, LIGHT_EXTRA_ATTACK)
+                    and nick_active(self.features, self._feature_character(actor), weapon)
+                    else "bonus_action"
+                    if declaration_value(intent, LIGHT_EXTRA_ATTACK) else ""
+                ),
+                nick_extra=bool(
+                    declaration_value(intent, LIGHT_EXTRA_ATTACK)
+                    and nick_active(self.features, self._feature_character(actor), weapon)
+                ),
+                free=bool(
+                    (declaration_value(intent, LIGHT_EXTRA_ATTACK)
+                     and nick_active(self.features, self._feature_character(actor), weapon))
+                    or intent.get("cleave_from")
+                ),
+                cleave_extra=bool(intent.get("cleave_from")),
                 weapon=weapon,
                 # Multiattack 的第一次攻击为"这一次动作"开一张总额度，后续
                 # 每一击都从同一份额度里扣：动作只付一次，次数不重复付。
@@ -740,13 +790,14 @@ class CombatAttackResolutionMixin:
             target["kind"] == "enemy" and "rage" in actor["conditions"]
             and str((combat.get("economy") or {}).get("actor_id") or "") == str(actor_id)
         )
-        if (
+        if intent.get("cleave_from") or (
             declaration_value(intent, LIGHT_EXTRA_ATTACK)
             and actor["kind"] in {"player", "companion"}
             and not bool(actor.get("light_extra_attack_ability_damage"))
         ):
-            # Light 追加攻击默认不吃属性调整值，但负值仍然生效（规则原文：
-            # "unless that modifier is negative"），所以这里只压掉正数。
+            # Light 追加攻击与 Cleave 的第二击都不吃属性调整值，但负值仍然
+            # 生效（规则原文："unless that modifier is negative"），所以这里
+            # 只压掉正数。
             # 唯一例外是 Two-Weapon Fighting 风格，由角色投影回答。
             modifier = min(0, modifier)
         settlement = {
@@ -789,9 +840,6 @@ class CombatAttackResolutionMixin:
                 "condition": "rage",
             })
         if hit:
-            # Multiattack Defense：命中之后才立标记，所以这一击自己不受影响，
-            # 只有本回合后续对该防御者的攻击骰吃劣势。
-            events.extend(self._multiattack_mark_events(actor, target))
             events.extend(self._hit_settlement_events(
                 instance, combat, actor, target, weapon, check_event, intent, rng,
                 ability=ability, modifier=modifier,

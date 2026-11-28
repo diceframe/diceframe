@@ -142,6 +142,45 @@ class CombatValidationSpellsMixin:
             "maximum": int(state.get("maximum", 0) or 0),
         }
 
+    def _validate_repelling_blast(
+        self, actor: dict[str, Any], intent: dict[str, Any], spell_ref: str,
+        effect: dict[str, Any],
+    ) -> None:
+        """0-10 feet, on a bound attack cantrip; bigger targets are skipped later.
+
+        The distance is the player's choice and stays theirs: an out-of-range
+        number is refused rather than clamped, because moving a creature 10 feet
+        when 15 was asked for is a different outcome, not a correction.  Size is
+        not checked here -- one oversized target must not fail the whole cast
+        when another target is small enough, so the per-hit path decides.
+        """
+
+        raw = intent.get("spell_push_ft")
+        if raw is None:
+            return
+        if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+            raise CombatIntentError("spell_push_ft must be a non-negative integer")
+        character = self._feature_character(actor)
+        # 与 `invocation_effects` 同一套发现方式：按声明参数找载体，不认名字。
+        carrier = next(
+            (
+                definition for definition in self.features.features_for(character)
+                if "invocation_push_distance_ft" in definition.parameters
+            ),
+            None,
+        )
+        if carrier is None:
+            raise CombatIntentError("no invocation can push with a spell here")
+        if not self.features.owns_binding(character, carrier.id, spell_ref):
+            raise CombatIntentError("that invocation is not bound to this cantrip")
+        if str(effect.get("mode") or "") != "spell_attack":
+            raise CombatIntentError("this invocation needs a cantrip with an attack roll")
+        cap = int(carrier.parameters.get("invocation_push_distance_ft", 0) or 0)
+        if raw > cap:
+            raise CombatIntentError(
+                f"this invocation can push at most {cap} feet"
+            )
+
     def _validate_spell(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
         actor: dict[str, Any], economy: dict[str, Any],
@@ -242,6 +281,7 @@ class CombatValidationSpellsMixin:
             raise CombatIntentError(f"spell requires 1 to {required_count} unique targets")
         if effect["mode"] == "triggered_damage" and target_ids != [trigger["target_id"]]:
             raise CombatIntentError("this spell must target the creature hit by the melee attack")
+        self._validate_repelling_blast(actor, intent, spell_ref, effect)
         for target_id in target_ids:
             target = self._actor_view(instance, combat, target_id)
             actor_side = str(actor.get("side") or "")

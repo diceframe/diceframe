@@ -28,6 +28,7 @@ from src.rulesets.dnd2024.features import (
     FeatDefinitionError,
     load_feat_definitions,
 )
+from src.rulesets.dnd2024.features import option_pool
 from src.rulesets.dnd2024.progression.catalog import (
     Dnd2024ProgressionCatalog,
     ProgressionCatalogError,
@@ -372,7 +373,7 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         snapshot = self.catalog.snapshot(class_ref, level)
         if not snapshot["slot_profile"]:
             return []
-        required = Dnd2024SpellSelection(self.bundle).requirements(class_ref, level)
+        required = Dnd2024SpellSelection(self.bundle).requirements(class_ref, level, character)
         spellcasting = character.get("spellcasting")
         spell_class = (
             spellcasting.get("class") if isinstance(spellcasting, dict) else None
@@ -489,8 +490,15 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         self,
         payload: dict[str, Any],
         choices: dict[str, Any] | None = None,
+        *,
+        allow_legacy_pool: bool = False,
     ) -> dict[str, Any]:
-        """Validate one next-level choice set and return an exact, non-mutating diff."""
+        """Validate one next-level choice set and return an exact, non-mutating diff.
+
+        ``allow_legacy_pool`` is only for replaying a card written before
+        track-counted pools existed; the normal path never sets it, so an
+        unanswered slot stays an error there.
+        """
 
         character = _canonical(payload)
         choices = deepcopy(choices or {})
@@ -754,6 +762,38 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         )
         errors.extend(choice_errors)
         requirements.extend(choice_requirements)
+        # 按职业表累加名额的选项池（邪术祈唤）：它不在 `_plan_feature_choices`
+        # 里，因为那条路径只处理"本级新获得的特性"，而池子每一级都可能再给
+        # 一个新名额。
+        preview_spellcasting = deepcopy(character.get("spellcasting") or {})
+        preview_class_magic = preview_spellcasting.setdefault("class", {})
+        if isinstance(preview_class_magic, dict) and spell_choices.get("cantrip_refs"):
+            preview_class_magic["cantrip_refs"] = list(spell_choices["cantrip_refs"])
+        preview_features = dict(feature_state)
+        if next_subclass_ref:
+            preview_features["subclass_ref"] = next_subclass_ref
+        pool_character = {
+            **character,
+            "build": {
+                **(character.get("build") or {}),
+                "level": target_level,
+                "class_levels": [{"class_ref": class_ref, "level": target_level}],
+            },
+            "features": preview_features,
+            "spellcasting": preview_spellcasting,
+        }
+        pool_requirements, pool_records, pool_errors = option_pool.plan_pools(
+            resolver=self._feature_resolver,
+            character=pool_character,
+            target_level=target_level,
+            tracks=after.get("tracks") or {},
+            choices=choices,
+            spells=self._spell_entities(),
+            spell_effects=self._spell_effects(),
+            allow_legacy=allow_legacy_pool,
+        )
+        errors.extend(pool_errors)
+        requirements.extend(pool_requirements)
         # S0-F25：Wild Shape 在 2 级开始，同一级必须选满已知形态。选择本身走
         # 通用 `choices`，不新开一条升级通道。
         form_requirements: dict[str, Any] = {}
@@ -910,6 +950,7 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
                 "feature_choice_refs": [
                     ref for record in choice_records for ref in record["selected_refs"]
                 ],
+                "feature_pool_records": pool_records,
                 "abilities": new_abilities,
                 "ability_bonus_applied": ability_bonus_applied,
                 "class_spell_choices": spell_choices,
@@ -933,11 +974,15 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         self,
         payload: dict[str, Any],
         choices: dict[str, Any] | None = None,
+        *,
+        allow_legacy_pool: bool = False,
     ) -> dict[str, Any]:
         """Apply a ready preview to a copied canonical character."""
 
         original = _canonical(payload)
-        preview = self.preview_next_level(original, choices)
+        preview = self.preview_next_level(
+            original, choices, allow_legacy_pool=allow_legacy_pool,
+        )
         if not preview["ok"]:
             raise ProgressionCatalogError("; ".join(preview["errors"]))
         character = deepcopy(original)
@@ -1011,6 +1056,10 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
                         continue
                     if ref not in owned_refs:
                         owned_refs.append(ref)
+        # 池子写的是"当前持有的那一组"，不是"这一级新加了什么"：替换要能把
+        # 旧的取下来，而追加记录只能表达加法。逐级提交内容留在 history 里。
+        for record in preview["diff"].get("feature_pool_records") or []:
+            option_pool.write_record(features, record)
         grants = features.setdefault("class_feature_grants", [])
         if not grants:
             level_one = self.catalog.snapshot(preview["class_ref"], 1)
@@ -1060,6 +1109,23 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         self._update_spellcasting(character, preview)
         self._update_derived(character)
         return character
+
+    def _spell_entities(self) -> dict[str, dict[str, Any]]:
+        """The spell catalog as ``id -> row``; options bind cantrips from it."""
+
+        catalog = self.bundle.get("spell_catalog", "srd_spells") or {}
+        return {
+            str(row.get("id")): row
+            for row in (catalog.get("spells") or [])
+            if isinstance(row, dict)
+        }
+
+    def _spell_effects(self) -> dict[str, Any]:
+        """The combat catalog's spell effects: what a spell actually does."""
+
+        combat = self.bundle.get("combat_catalog", "srd_combat_core") or {}
+        effects = combat.get("spell_effects") if isinstance(combat, Mapping) else None
+        return dict(effects) if isinstance(effects, Mapping) else {}
 
     def _single_class_state(self, character: dict[str, Any]) -> tuple[str, int]:
         binding = character.get("rule_binding")
@@ -1299,12 +1365,36 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
                 # 来源单独记一笔：集合本身只说明"有这个熟练"，看不出谁给的。
                 derived["saving_throw_proficiency_sources"] = dict(specific_saves)
         skill_refs = set(proficiencies.get("skill_refs") or [])
+        # `grants: "proficiency"` 的槽选中的技能必须真的变成熟练，否则只是
+        # 一个记下来的名字、加值是 0。（建卡路径在 derivation 里做同一件事。）
+        ordered_skill_refs = list(dict.fromkeys(
+            str(ref) for ref in (proficiencies.get("skill_refs") or [])
+        ))
+        ordered_language_refs = list(dict.fromkeys([
+            *(str(ref) for ref in (proficiencies.get("language_refs") or [])),
+            *(str(ref) for ref in self._feature_resolver.language_sources(character)),
+        ]))
+        for record in (character.get("features") or {}).get("feature_choices") or []:
+            if not isinstance(record, dict):
+                continue
+            for ref in record.get("selected_refs") or []:
+                ref_text = str(ref)
+                if record.get("grants") == "proficiency" and ref_text.startswith("skill:"):
+                    skill_refs.add(ref_text)
+                    if ref_text not in ordered_skill_refs:
+                        ordered_skill_refs.append(ref_text)
+                elif ref_text.startswith("language:"):
+                    if ref_text not in ordered_language_refs:
+                        ordered_language_refs.append(ref_text)
+        proficiencies["skill_refs"] = ordered_skill_refs
+        proficiencies["language_refs"] = ordered_language_refs
         saving_throws = {
             ability: ability_modifier(abilities[ability])
             + (proficiency if f"ability:{ability}" in saving_refs else 0)
             for ability in ABILITY_IDS
         }
         skill_values: dict[str, int] = {}
+        skill_parts: dict[str, dict[str, Any]] = {}
         # 技能加值只有一个聚合入口：升级、建卡与 live 重算都走它。Expertise
         # 与半熟练若在这里另写一套，同一张卡在升级前后会出现两种加值。
         expertise = {
@@ -1314,13 +1404,19 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
         for skill in self.bundle.list("skill"):
             ability = str(skill.get("ability_ref") or "").removeprefix("ability:")
             ref = f"skill:{skill['id']}"
-            skill_values[str(skill["id"])] = derive_skill_check(
+            derived_skill = derive_skill_check(
                 int(abilities[ability]),
                 proficiency_bonus=proficiency,
                 proficient=ref in skill_refs,
                 expertise=ref in expertise,
                 half_proficiency=half_proficiency,
-            )["total"]
+            )
+            skill_values[str(skill["id"])] = derived_skill["total"]
+            skill_parts[str(skill["id"])] = {
+                "ability": ability,
+                "ability_modifier": int(derived_skill["ability_modifier"]),
+                "contribution": int(derived_skill["contribution"]),
+            }
         perception = skill_values.get("perception", ability_modifier(abilities["wis"]))
         derived = character.setdefault("derived", {})
         derived.update({
@@ -1338,6 +1434,7 @@ class Dnd2024AdvancementEngine(AdvancementChoicesMixin):
             "saving_throws": saving_throws,
         })
         proficiencies["skill_values"] = skill_values
+        proficiencies["skill_parts"] = skill_parts
         # 升级当次就要生效：Defense 这类被动 AC 加值不能等下一次换装。
         # 复用建卡与 live 协调共用的唯一公式，装备取 canonical 已装备列表。
         equipment = character.get("equipment")

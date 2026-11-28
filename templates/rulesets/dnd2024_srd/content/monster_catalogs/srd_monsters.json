@@ -33,7 +33,7 @@
       "skills": {},
       "passive_perception": 10,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -306,7 +306,7 @@
       "skills": {},
       "passive_perception": 10,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -790,7 +790,7 @@
       "skills": {},
       "passive_perception": 10,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {
         "darkvision": 60
@@ -957,7 +957,7 @@
       "skills": {},
       "passive_perception": 10,
       "languages": [
-        "Infernal"
+        "language:infernal"
       ],
       "senses": {
         "darkvision": 120
@@ -1741,7 +1741,7 @@
       },
       "passive_perception": 14,
       "languages": [
-        "Draconic"
+        "language:draconic"
       ],
       "senses": {
         "darkvision": 60,
@@ -1923,8 +1923,8 @@
       },
       "passive_perception": 10,
       "languages": [
-        "Common",
-        "Goblin"
+        "language:common",
+        "language:goblin"
       ],
       "senses": {
         "darkvision": 60
@@ -2006,7 +2006,7 @@
       },
       "passive_perception": 14,
       "languages": [
-        "Draconic"
+        "language:draconic"
       ],
       "senses": {
         "darkvision": 60,
@@ -2228,8 +2228,8 @@
       },
       "passive_perception": 14,
       "languages": [
-        "Elvish",
-        "Sylvan"
+        "language:elvish",
+        "language:sylvan"
       ],
       "senses": {
         "darkvision": 60
@@ -2300,7 +2300,7 @@
       "skills": {},
       "passive_perception": 10,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {
         "darkvision": 60
@@ -2384,9 +2384,9 @@
       },
       "passive_perception": 16,
       "languages": [
-        "Celestial",
-        "Common",
-        "Primordial"
+        "language:celestial",
+        "language:common",
+        "language:primordial"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -2708,7 +2708,7 @@
       },
       "passive_perception": 13,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {
         "darkvision": 60
@@ -2775,8 +2775,8 @@
       },
       "passive_perception": 9,
       "languages": [
-        "Common",
-        "Goblin"
+        "language:common",
+        "language:goblin"
       ],
       "senses": {
         "darkvision": 60
@@ -2844,7 +2844,7 @@
       "skills": {},
       "passive_perception": 10,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -2968,8 +2968,8 @@
       },
       "passive_perception": 11,
       "languages": [
-        "Common",
-        "Infernal"
+        "language:common",
+        "language:infernal"
       ],
       "senses": {
         "darkvision": 120
@@ -3093,7 +3093,7 @@
       "skills": {},
       "passive_perception": 11,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -3147,8 +3147,8 @@
       },
       "passive_perception": 10,
       "languages": [
-        "Abyssal",
-        "Common"
+        "language:abyssal",
+        "language:common"
       ],
       "senses": {
         "darkvision": 120
@@ -3215,7 +3215,7 @@
       "skills": {},
       "passive_perception": 10,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {
         "darkvision": 60
@@ -3274,8 +3274,8 @@
       },
       "passive_perception": 11,
       "languages": [
-        "Celestial",
-        "Common"
+        "language:celestial",
+        "language:common"
       ],
       "senses": {
         "darkvision": 60
@@ -3345,7 +3345,7 @@
       },
       "passive_perception": 16,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -3853,7 +3853,7 @@
       },
       "passive_perception": 12,
       "languages": [
-        "Primordial"
+        "language:primordial"
       ],
       "senses": {
         "darkvision": 60
@@ -4202,8 +4202,8 @@
       "skills": {},
       "passive_perception": 10,
       "languages": [
-        "Common",
-        "Goblin"
+        "language:common",
+        "language:goblin"
       ],
       "senses": {
         "darkvision": 60
@@ -4282,7 +4282,7 @@
       },
       "passive_perception": 12,
       "languages": [
-        "Primordial"
+        "language:primordial"
       ],
       "senses": {
         "darkvision": 60
@@ -4378,7 +4378,7 @@
       },
       "passive_perception": 10,
       "languages": [
-        "Primordial"
+        "language:primordial"
       ],
       "senses": {
         "darkvision": 60
@@ -4470,7 +4470,7 @@
       "skills": {},
       "passive_perception": 10,
       "languages": [
-        "Primordial"
+        "language:primordial"
       ],
       "senses": {
         "darkvision": 60
@@ -4707,9 +4707,9 @@
       },
       "passive_perception": 12,
       "languages": [
-        "Common",
-        "Elvish",
-        "Sylvan"
+        "language:common",
+        "language:elvish",
+        "language:sylvan"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -4788,7 +4788,7 @@
       },
       "passive_perception": 15,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -4968,7 +4968,7 @@
       "skills": {},
       "passive_perception": 10,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -5195,7 +5195,7 @@
       },
       "passive_perception": 14,
       "languages": [
-        "Goblin"
+        "language:goblin"
       ],
       "senses": {
         "darkvision": 60
@@ -5358,8 +5358,8 @@
       },
       "passive_perception": 15,
       "languages": [
-        "Elvish",
-        "Sylvan"
+        "language:elvish",
+        "language:sylvan"
       ],
       "senses": {
         "darkvision": 60
@@ -5587,7 +5587,7 @@
       "skills": {},
       "passive_perception": 9,
       "languages": [
-        "Abyssal"
+        "language:abyssal"
       ],
       "senses": {
         "darkvision": 60
@@ -5995,10 +5995,10 @@
       },
       "passive_perception": 16,
       "languages": [
-        "Celestial",
-        "Common",
-        "Elvish",
-        "Sylvan"
+        "language:celestial",
+        "language:common",
+        "language:elvish",
+        "language:sylvan"
       ],
       "senses": {
         "darkvision": 120
@@ -6182,8 +6182,8 @@
       },
       "passive_perception": 9,
       "languages": [
-        "Common",
-        "Goblin"
+        "language:common",
+        "language:goblin"
       ],
       "senses": {
         "darkvision": 60
@@ -6370,7 +6370,7 @@
       },
       "passive_perception": 12,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -6443,8 +6443,8 @@
       },
       "passive_perception": 15,
       "languages": [
-        "Common",
-        "Draconic"
+        "language:common",
+        "language:draconic"
       ],
       "senses": {
         "darkvision": 60,
@@ -6620,7 +6620,7 @@
       "skills": {},
       "passive_perception": 9,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {
         "darkvision": 60
@@ -6691,9 +6691,9 @@
       },
       "passive_perception": 13,
       "languages": [
-        "Common",
-        "Elvish",
-        "Sylvan"
+        "language:common",
+        "language:elvish",
+        "language:sylvan"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -6768,7 +6768,7 @@
       },
       "passive_perception": 10,
       "languages": [
-        "Primordial"
+        "language:primordial"
       ],
       "senses": {
         "darkvision": 60
@@ -7148,7 +7148,7 @@
       "skills": {},
       "passive_perception": 8,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {
         "darkvision": 60
@@ -7202,7 +7202,7 @@
       "skills": {},
       "passive_perception": 10,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -7383,7 +7383,7 @@
       },
       "passive_perception": 10,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -7683,8 +7683,8 @@
       },
       "passive_perception": 9,
       "languages": [
-        "Common",
-        "Goblin"
+        "language:common",
+        "language:goblin"
       ],
       "senses": {
         "darkvision": 60
@@ -7740,7 +7740,7 @@
       },
       "passive_perception": 12,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -7792,8 +7792,8 @@
       "skills": {},
       "passive_perception": 8,
       "languages": [
-        "Common",
-        "Draconic"
+        "language:common",
+        "language:draconic"
       ],
       "senses": {
         "darkvision": 60
@@ -7912,8 +7912,8 @@
       "skills": {},
       "passive_perception": 12,
       "languages": [
-        "Common",
-        "Primordial"
+        "language:common",
+        "language:primordial"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -8029,7 +8029,7 @@
       },
       "passive_perception": 12,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -8243,7 +8243,7 @@
       "skills": {},
       "passive_perception": 10,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {},
       "resist_damage_types": [],

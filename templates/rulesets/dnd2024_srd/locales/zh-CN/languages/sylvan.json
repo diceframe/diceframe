@@ -1,0 +1,11 @@
+{
+  "locale_schema_version": 1,
+  "locale": "zh-CN",
+  "target": {
+    "kind": "language",
+    "id": "sylvan"
+  },
+  "fields": {
+    "name": "木族语"
+  }
+}

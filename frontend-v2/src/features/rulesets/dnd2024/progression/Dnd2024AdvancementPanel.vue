@@ -111,7 +111,13 @@ const subclassRequirement = computed(() => requirement('subclass_ref'))
 const featureChoiceRequirements = computed(() => (
   requirements.value.filter(item => item.kind === 'feature_choice')
 ))
-const featureSelections = ref<Record<string, string[]>>({})
+// 一次选择可能是"哪个选项"，也可能是"哪个选项 + 绑定哪个对象"（祈唤绑定
+// 戏法）。绑定属于**这一次选择**，所以状态里存 pair，而不是另开一张表：
+// 同一个可重复选项可以各绑一个戏法，存成字符串就再也区分不出两次选择。
+type FeaturePick = { ref: string; object_ref?: string }
+const featureSelections = ref<Record<string, FeaturePick[]>>({})
+// 每个选项当前在"绑定对象"下拉里选中的值。
+const featureBindChoice = ref<Record<string, string>>({})
 
 // Wild Shape 的已知形态：与其它槽位共用 requirements 通道，只是提交键不同
 // （后端读 choices.known_form_refs）。数量、CR 上限、候选都由内容给出。
@@ -215,17 +221,101 @@ function featureChoiceTitle(spec: JsonObject): string {
   return pair ? text(pair[0], pair[1]) : featureName(String(spec.feature_id))
 }
 
-function featureChoiceSelected(spec: JsonObject): string[] {
+function featureChoiceSelected(spec: JsonObject): FeaturePick[] {
   return featureSelections.value[String(spec.id)] || []
 }
 
-function featureChoiceIsPicked(spec: JsonObject, value: string): boolean {
-  return featureChoiceSelected(spec).includes(value)
+function featureChoiceIsPicked(
+  spec: JsonObject, value: string, objectRef = '',
+): boolean {
+  return featureChoiceSelected(spec).some(
+    pick => pick.ref === value && (pick.object_ref || '') === objectRef,
+  )
 }
 
 function featureChoiceAtLimit(spec: JsonObject): boolean {
   const limit = Number(spec.count || 1)
   return featureChoiceSelected(spec).length >= limit
+}
+
+function featureBindOptions(option: JsonObject): JsonObject[] {
+  return (option.bind_options as JsonObject[]) || []
+}
+
+// 选项需要绑定对象时，默认挑第一个可用项：让玩家先点选项再回头选对象，
+// 会在"还没选对象"的中间态被服务端拒绝，界面看起来像点不动。
+function featureBindValue(option: JsonObject): string {
+  const key = String(option.value)
+  const explicit = featureBindChoice.value[key]
+  if (explicit) return explicit
+  return String(featureBindOptions(option).find(row => row.available !== false)?.value || '')
+}
+
+function setFeatureBind(option: JsonObject, value: string): void {
+  featureBindChoice.value[String(option.value)] = value
+}
+
+function featureToggle(spec: JsonObject, option: JsonObject): void {
+  const value = String(option.value)
+  const bindOptions = featureBindOptions(option)
+  const objectRef = bindOptions.length ? featureBindValue(option) : ''
+  const key = String(spec.id)
+  const selected = [...featureChoiceSelected(spec)]
+  const index = selected.findIndex(
+    pick => pick.ref === value && (pick.object_ref || '') === objectRef,
+  )
+  if (index >= 0) selected.splice(index, 1)
+  else if (selected.length < Number(spec.count || 1)) {
+    selected.push(objectRef ? { ref: value, object_ref: objectRef } : { ref: value })
+  }
+  if (selected.length) featureSelections.value[key] = selected
+  else delete featureSelections.value[key]
+  syncFeatureChoices()
+  void refresh()
+}
+
+// 替换槽：后端发送 `replace: {count, drop_options, add_options}`。drop 可能是
+// 字符串（不绑定的选择）也可能是 {ref, object_ref}（绑定的选择），原样提交，
+// 由服务端按同一形状匹配——客户端不替它猜。
+const featureReplacements = ref<Record<string, { drop: JsonObject | string; add: string }>>({})
+
+function featureReplaceSlot(spec: JsonObject): JsonObject | null {
+  return (spec.replace as JsonObject | undefined) || null
+}
+
+function featureReplaceValue(spec: JsonObject): { drop: JsonObject | string; add: string } {
+  return featureReplacements.value[String(spec.id)] || { drop: '', add: '' }
+}
+
+function featureReplaceLabel(spec: JsonObject, option: JsonObject | string): string {
+  if (typeof option === 'string') {
+    const row = ((spec.options as JsonObject[]) || []).find(item => item.value === option)
+    return String(row?.name || option)
+  }
+  const row = ((spec.options as JsonObject[]) || []).find(item => item.value === option.ref)
+  const bound = String(option.object_ref || '')
+  return `${String(row?.name || option.ref)}${bound ? ` · ${bound.replace('spell:', '')}` : ''}`
+}
+
+function setFeatureReplace(spec: JsonObject, field: 'drop' | 'add', value: string): void {
+  const key = String(spec.id)
+  const current = { ...featureReplaceValue(spec) }
+  const slot = featureReplaceSlot(spec)
+  if (field === 'drop') {
+    const rows = (slot?.drop_options as (JsonObject | string)[]) || []
+    current.drop = rows.find(row => featureReplaceLabel(spec, row) === value) || ''
+  } else {
+    current.add = value
+  }
+  featureReplacements.value[key] = current
+  syncFeatureChoices()
+  void refresh()
+}
+
+function clearFeatureReplace(spec: JsonObject): void {
+  delete featureReplacements.value[String(spec.id)]
+  syncFeatureChoices()
+  void refresh()
 }
 
 function unavailableLabel(option: JsonObject): string {
@@ -239,6 +329,13 @@ function unavailableLabel(option: JsonObject): string {
   if (reasons.includes('already_expertise')) return text('已有专精', 'Already has Expertise')
   if (reasons.includes('level')) return text('等级不足', 'Level too low')
   if (reasons.includes('already_owned')) return text('已拥有', 'Already owned')
+  if (reasons.includes('already_bound')) return text('已绑定该对象', 'Already bound to it')
+  if (reasons.includes('no_eligible_cantrip')) {
+    return text('没有可绑定的戏法', 'No eligible cantrip')
+  }
+  if (reasons.includes('prerequisite_invocation')) {
+    return text('缺少前置祈唤', 'Missing prerequisite invocation')
+  }
   if (reasons.includes('ability_prerequisite')) {
     return text('属性不满足', 'Ability prerequisite not met')
   }
@@ -257,26 +354,25 @@ function syncFeatureChoices(): void {
       owner: String(spec.owner || ''),
       feature_id: String(spec.feature_id || ''),
       choice_id: String(spec.choice_id || ''),
-      selected_refs: selected,
+      // 一次选择是 {ref, object_ref} 或裸 ref：服务端两种都认，但不带对象
+      // 的绑定选择会被拒，所以这里不把带绑定的选择压成字符串。
+      selected_refs: selected.map(
+        pick => (pick.object_ref ? { ref: pick.ref, object_ref: pick.object_ref } : pick.ref),
+      ),
     })
   }
   // 只提交当前这一级真正存在的槽位：把上一轮预览留下的记录发回去，后端
   // 会按 "matching no slot" 整条拒绝，玩家看到的是一个他已经改掉的旧错。
   if (rows.length) choices.value.feature_choices = rows
   else delete choices.value.feature_choices
+  const replacement = Object.values(featureReplacements.value).find(
+    item => item.drop && item.add,
+  )
+  if (replacement) choices.value.feature_choice_replace = replacement
+  else delete choices.value.feature_choice_replace
 }
 
-function toggleFeatureChoice(spec: JsonObject, value: string): void {
-  const key = String(spec.id)
-  const selected = [...featureChoiceSelected(spec)]
-  const index = selected.indexOf(value)
-  if (index >= 0) selected.splice(index, 1)
-  else if (selected.length < Number(spec.count || 1)) selected.push(value)
-  if (selected.length) featureSelections.value[key] = selected
-  else delete featureSelections.value[key]
-  syncFeatureChoices()
-  void refresh()
-}
+
 
 // A card can arrive with choices it never made: imported from outside, or
 // carried over from before the choice was required.  The audit reports them so
@@ -636,7 +732,7 @@ onMounted(() => {
       <fieldset v-if="metamagicReplaceRequirement"><legend>{{ text('替换一个超魔选项（可选）', 'Replace one Metamagic option (optional)') }}</legend><p class="spell-help">{{ text('每次获得术士等级可以换掉一个已知选项；换成的必须是尚未拥有的。', 'Each Sorcerer level may replace one known option with one you do not know.') }}</p><div class="feat-grid"><label><span>{{ text('换掉', 'Replace') }}<select :value="metamagicDrop" @change="setMetamagicDrop(($event.target as HTMLSelectElement).value)"><option value="">{{ text('不换', 'Keep all') }}</option><option v-for="value in ((metamagicReplaceRequirement.known as string[]) || [])" :key="value" :value="value">{{ metamagicLabel(value) }}</option></select></span></label><label><span>{{ text('换成', 'With') }}<select :value="metamagicAdd" @change="setMetamagicAdd(($event.target as HTMLSelectElement).value)"><option value="">{{ text('未选择', 'Not chosen') }}</option><option v-for="option in (metamagicReplaceRequirement.options as JsonObject[])" :key="String(option.value)" :value="String(option.value)">{{ option.name || option.value }}</option></select></span></label></div></fieldset>
       <fieldset v-if="knownFormsRequirement"><legend>{{ text('已知野兽形态', 'Known beast forms') }}</legend><p class="spell-help">{{ text(`Wild Shape 在 2 级开始，本级要选满 ${knownFormLimit()} 个形态；CR 上限 ${knownFormsRequirement.cr_cap}，8 级前不能选带飞行速度的形态。长休时可以用一个替换其中一个。`, `Wild Shape starts at level 2; choose ${knownFormLimit()} forms now. CR cap ${knownFormsRequirement.cr_cap}, and no flying forms before level 8. A long rest can swap one of them.`) }}</p><p class="spell-help"><b>{{ text(`已选 ${knownForms.length} / 需要 ${knownFormLimit()}`, `${knownForms.length} selected / ${knownFormLimit()} required`) }}</b></p><div class="feat-grid"><label v-for="option in (knownFormsRequirement.options as JsonObject[])" :key="String(option.value)"><input type="checkbox" :disabled="!knownFormIsPicked(String(option.value)) && knownForms.length >= knownFormLimit()" :checked="knownFormIsPicked(String(option.value))" @change="toggleKnownForm(String(option.value))"><span><b>{{ option.name || option.value }}</b><small>CR {{ option.cr }}</small></span></label></div></fieldset>
 
-      <fieldset v-for="spec in featureChoiceRequirements" :key="String(spec.id)"><legend>{{ featureChoiceTitle(spec) }}</legend><p class="spell-help">{{ text(`本级需要选择 ${spec.count} 项。标灰的选项写着不可选的原因：本规则集尚未实现的专长会一直无法选中，前置条件不足的补齐后即可。`, `Choose ${spec.count} for this level. Greyed options name their reason: feats this ruleset does not implement stay unavailable, while unmet prerequisites become selectable once satisfied.`) }}</p><div class="feat-grid"><label v-for="option in (spec.options as JsonObject[])" :key="String(option.value)" :class="{ unavailable: option.available === false }"><input :type="Number(spec.count || 1) > 1 ? 'checkbox' : 'radio'" :name="String(spec.id)" :disabled="option.available === false || (!featureChoiceIsPicked(spec, String(option.value)) && featureChoiceAtLimit(spec))" :checked="featureChoiceIsPicked(spec, String(option.value))" @change="toggleFeatureChoice(spec, String(option.value))"><span><b>{{ option.name || option.value }}</b><small v-if="option.available === false">{{ unavailableLabel(option) }}</small><code v-if="option.source_ref">{{ option.source_ref }}</code></span></label></div></fieldset>
+      <fieldset v-for="spec in featureChoiceRequirements" :key="String(spec.id)"><legend>{{ featureChoiceTitle(spec) }}</legend><p class="spell-help">{{ text(`本级需要选择 ${spec.count} 项。标灰的选项写着不可选的原因：本规则集尚未实现的专长会一直无法选中，前置条件不足的补齐后即可。可重复的选项每选一次绑一个对象。`, `Choose ${spec.count} for this level. Greyed options name their reason: feats this ruleset does not implement stay unavailable, while unmet prerequisites become selectable once satisfied. Repeatable options bind one object per pick.`) }}</p><div class="feat-grid"><label v-for="option in (spec.options as JsonObject[])" :key="String(option.value)" :class="{ unavailable: option.available === false }"><input :type="Number(spec.count || 1) > 1 ? 'checkbox' : 'radio'" :name="String(spec.id)" :disabled="option.available === false || (featureBindOptions(option).length === 0 && !featureChoiceIsPicked(spec, String(option.value)) && featureChoiceAtLimit(spec))" :checked="featureChoiceIsPicked(spec, String(option.value), featureBindValue(option))" @change="featureToggle(spec, option)"><span><b>{{ option.name || option.value }}</b><small v-if="option.available === false">{{ unavailableLabel(option) }}</small><select v-if="featureBindOptions(option).length" :value="featureBindValue(option)" @click.stop @change.stop="setFeatureBind(option, ($event.target as HTMLSelectElement).value)"><option v-for="bind in featureBindOptions(option)" :key="String(bind.value)" :value="String(bind.value)" :disabled="bind.available === false">{{ bind.value }}<template v-if="bind.available === false"> · {{ text('已绑定', 'bound') }}</template></option></select><code v-if="option.source_ref">{{ option.source_ref }}</code></span></label></div><div v-if="featureReplaceSlot(spec)" class="replace-row"><b>{{ text('本級可替换一个', 'Replace one this level') }}</b><select :value="featureReplaceValue(spec).drop ? featureReplaceLabel(spec, featureReplaceValue(spec).drop) : ''" @change="setFeatureReplace(spec, 'drop', ($event.target as HTMLSelectElement).value)"><option value="">{{ text('不替换', 'Keep them') }}</option><option v-for="row in (featureReplaceSlot(spec)?.drop_options as (JsonObject | string)[])" :key="featureReplaceLabel(spec, row)" :value="featureReplaceLabel(spec, row)">{{ featureReplaceLabel(spec, row) }}</option></select><select :value="featureReplaceValue(spec).add" @change="setFeatureReplace(spec, 'add', ($event.target as HTMLSelectElement).value)"><option value="">{{ text('换成…', 'Replace with…') }}</option><option v-for="row in (featureReplaceSlot(spec)?.add_options as string[])" :key="row" :value="row">{{ row }}</option></select><button v-if="featureReplaceValue(spec).drop || featureReplaceValue(spec).add" type="button" @click="clearFeatureReplace(spec)">{{ text('取消替换', 'Clear') }}</button></div></fieldset>
 
       <fieldset v-if="featRequirement"><legend>{{ requirement('epic_boon_ref') ? text('选择史诗恩惠', 'Choose Epic Boon') : text('选择通用专长', 'Choose General feat') }}</legend><div class="feat-grid"><label v-for="option in (featRequirement.options as JsonObject[])" :key="String(option.value)" :class="{ unavailable: option.available === false }"><input type="radio" :name="String(featRequirement.id)" :disabled="option.available === false" :checked="choices[String(featRequirement.id)] === option.value" @change="setChoice(String(featRequirement.id), String(option.value))"><span><b>{{ option.name }}</b><small v-if="option.available === false">{{ text('前置条件未满足', 'Prerequisite not met') }}</small><code>{{ option.source_ref }}</code></span></label></div></fieldset>
 
