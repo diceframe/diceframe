@@ -12,9 +12,11 @@ from src.rulesets.dnd2024.features.resources import (
 )
 from .action_adapter import (
     attack_damage_node,
+    damage_dice_count,
     dice_count,
     reduce_dice_count,
     roll_damage_node,
+    roll_damage_node_with_trace,
 )
 from .reaction_spells import attack_is_ranged
 from .primitives import (
@@ -25,6 +27,7 @@ from .primitives import (
     rider_attack_kind,
     rider_condition,
     size_at_most,
+    two_handed_weapon_refs,
 )
 from .check_modes import HUNTERS_MARK_REF, marked_target_id, owned_mark
 from src.rulesets.dnd2024.features.attack_declarations import (
@@ -246,6 +249,7 @@ class CombatHitResolutionMixin:
         exclude_bards: tuple[str, ...] = (), spent_reactions: tuple[str, ...] = (),
         granted_by: str = "",
         horde_breaker: bool = False,
+        die_floor: int = 0,
     ) -> list[dict[str, Any]]:
         """Damage construction and commit for an already-hit attack.
 
@@ -331,7 +335,12 @@ class CombatHitResolutionMixin:
                 damage_node = {"op": "add", "args": [
                     damage_node, {"op": "constant", "value": rage_damage},
                 ]}
-        damage, rolls = roll_damage_node(damage_node, rng)
+        floored_dice = damage_dice_count(damage_formula) * (2 if critical else 1)
+        damage, rolls, floored = roll_damage_node_with_trace(
+            damage_node, rng,
+            die_floor=die_floor,
+            floored_dice=floored_dice,
+        )
         damage = max(0, damage)
         damage, resistance = self._resist_damage(target, damage, damage_type)
         damage_event = {
@@ -339,6 +348,15 @@ class CombatHitResolutionMixin:
             "delta": -damage, "amount": damage, "damage_type": damage_type,
             "critical": critical, "rolls": rolls,
         }
+        if floored:
+            # 只有真的抬升了才记字段：5、6 这种结果与没有专长完全一样，
+            # 事件也必须逐字节一样（沿 S-P2 ``maximized`` 的"仅变化时携带"）。
+            # 原始点数仍要留，日志才能说清哪几颗是"掷出 1，按 3 算"，
+            # 而不是把 1 悄悄改写成 3 让人以为骰子变了。
+            damage_event["damage_die_floor"] = die_floor
+            damage_event["floored_rolls"] = [
+                [rolled, effective] for rolled, effective in floored
+            ]
         if resistance:
             damage_event["resisted"] = True
             damage_event["resistance"] = resistance

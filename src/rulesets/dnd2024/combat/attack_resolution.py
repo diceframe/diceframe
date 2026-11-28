@@ -8,7 +8,12 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 from src.rulesets.dnd2024.character.builder import ability_modifier
-from .primitives import CombatIntentError, attack_damage_parts, trait_ids
+from .primitives import (
+    CombatIntentError,
+    attack_damage_parts,
+    trait_ids,
+    two_handed_weapon_refs,
+)
 from .check_modes import condition_check_bonus_rolls, condition_flags, mode_from_sources
 from src.rulesets.dnd2024.features.attack_declarations import BRUTAL_STRIKE, LIGHT_EXTRA_ATTACK, SACRED_WEAPON, declaration_value
 from .reaction_spells import effective_armor_class
@@ -469,6 +474,36 @@ class CombatAttackResolutionMixin:
                     return events
         return events
 
+    def _great_weapon_fighting_die_floor(
+        self, actor: dict[str, Any], weapon: dict[str, Any], intent: dict[str, Any],
+    ) -> int:
+        """Great Weapon Fighting's die floor for *this* attack, or 0.
+
+        The declaration answers whether the character owns the style and what
+        the floor is; the predicates that make it apply belong here, next to
+        the weapon and the grip: a melee weapon (``ranged`` false), not
+        unarmed, and actually held with two hands.  Answering it once, into
+        ``settlement``, also means the check-window finisher applies the same
+        rule instead of deriving a second opinion.
+
+        The engine cannot tell a thrown melee weapon from a stabbed one
+        (``attack_is_ranged`` documents the same limit), so a thrown spear is
+        treated as a melee use here -- the existing boundary, not a new one.
+        """
+
+        floor = int(actor.get("two_handed_melee_damage_die_minimum") or 0)
+        if floor <= 0:
+            return 0
+        if weapon.get("ranged") or weapon.get("unarmed"):
+            return 0
+        weapon_ref = str(weapon.get("weapon_ref") or "")
+        two_handed = weapon_ref in two_handed_weapon_refs(
+            actor, self.catalog.weapons,
+        ) or (
+            bool(intent.get("two_handed")) and bool(weapon.get("damage_two_handed"))
+        )
+        return floor if two_handed else 0
+
     def _attack_events(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any], rng: Any,
         *, spend_attack_action: bool = True,
@@ -721,6 +756,8 @@ class CombatAttackResolutionMixin:
             "crit_on_hit": crit_on_hit, "rage_sustain": rage_sustain,
             "exclude_bards": [], "spent_reactions": [],
             "remaining_windows": [], "intent": deepcopy(intent),
+            # 一次算好，直通与窗口结清两条路径都读同一份，避免第二个判定点。
+            "die_floor": self._great_weapon_fighting_die_floor(actor, weapon, intent),
         }
         if hit:
             window = self._attack_check_window_offer(
@@ -761,6 +798,7 @@ class CombatAttackResolutionMixin:
                 damage_formula=damage_formula, damage_type=damage_type,
                 crit_on_hit=crit_on_hit, granted_by=granted_by,
                 horde_breaker=horde_breaker,
+                die_floor=int(settlement["die_floor"]),
             ))
         else:
             events.extend(self._miss_mastery_events(

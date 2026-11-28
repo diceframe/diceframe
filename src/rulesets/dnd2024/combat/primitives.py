@@ -334,6 +334,30 @@ def resolve_attack_ref(
     return None
 
 
+def two_handed_weapon_refs(
+    actor: Mapping[str, Any], weapons: Mapping[str, Any],
+) -> set[str]:
+    """Carried refs whose weapon needs both hands (mounted exception aside).
+
+    One implementation for validation and settlement: the grip question decides
+    both "may this attack happen" and "does Great Weapon Fighting apply", and a
+    second copy would eventually disagree with the first.  The mounted lance
+    exception lives here because it is part of the same fact.
+    """
+
+    refs: set[str] = set()
+    for raw in actor.get("equipment_refs") or []:
+        ref = str(raw)
+        weapon = weapons.get(ref.removeprefix("item:"))
+        if not isinstance(weapon, Mapping) or not weapon.get("two_handed"):
+            continue
+        exception = str(weapon.get("two_handed_exception") or "")
+        if exception == "mounted" and bool(actor.get("mounted")):
+            continue
+        refs.add(ref)
+    return refs
+
+
 def attack_damage_parts(profile: Mapping[str, Any]) -> list[dict[str, Any]]:
     """The damage instances this attack profile deals, in declaration order.
 

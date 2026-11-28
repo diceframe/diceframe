@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pytest
 
+from src.rulesets.dnd2024.features.feat_models import load_feat_definitions, parse_feat
 from src.rulesets.dnd2024.features.models import Dnd2024ClassFeatureCatalog
 from src.rulesets.dnd2024.progression.advancement import Dnd2024AdvancementEngine
 from src.rulesets.dnd2024.runtime import Dnd2024Runtime
@@ -49,19 +50,71 @@ def test_every_class_that_grants_fighting_style_declares_it(bundle) -> None:
 
 
 def test_the_whitelist_is_what_actually_has_an_effect(bundle) -> None:
-    """`enabled_options` is an executability whitelist, not the category.
+    """`enabled_options` is derived from the declarations, not hand-written.
 
-    Great Weapon Fighting has a declaration and a category but no effect, so it
-    must not be selectable; a style that grants nothing would look finished.
+    FD6a wrote ``["feat:archery", "feat:defense"]`` into the four JSON slots and
+    silently dropped Two-Weapon Fighting, which the engine already implemented
+    end to end.  The slot went from selectable to rejected and this test used to
+    assert the omission.  The whitelist now answers the same question the
+    declaration does: does this style change anything?
     """
 
     catalog = Dnd2024ClassFeatureCatalog.from_bundle(bundle)
+    definitions = load_feat_definitions(bundle)
+    effective = {
+        f"feat:{feat_id}"
+        for feat_id, definition in definitions.items()
+        if definition.category == "fighting_style" and definition.has_mechanical_effect
+    }
+    assert effective == {
+        "feat:archery", "feat:defense",
+        "feat:great_weapon_fighting", "feat:two_weapon_fighting",
+    }
     for owner, _level in OWNERS:
         choice = catalog.features_by_key[(owner, "fighting_style")].choice
         assert choice is not None
-        assert "feat:great_weapon_fighting" not in choice.enabled_options, owner
-        assert "feat:archery" in choice.enabled_options, owner
-        assert "feat:defense" in choice.enabled_options, owner
+        assert set(choice.enabled_options) == effective, owner
+
+
+def test_advancement_feat_slots_do_not_hardcode_options(bundle) -> None:
+    """The whitelist is derived; a hard-coded one is how TWF was lost.
+
+    Explicit lists are still honoured and validated, so this guard is what
+    keeps the data from growing a second source of truth against the
+    declaration.
+    """
+
+    raw = bundle.get("class_feature_catalog", "srd_class_features")
+    offenders: list[str] = []
+    for class_id, row in raw["classes"].items():
+        for feature in row["features"]:
+            choice = feature.get("choice") or {}
+            if (
+                choice.get("kind") == "advancement_feat"
+                and choice.get("handled_by", "feature_choice") == "feature_choice"
+                and choice.get("enabled_options")
+            ):
+                offenders.append(f"{class_id}.{feature['id']}")
+    assert not offenders, offenders
+
+
+def test_a_style_without_a_payload_is_not_effective() -> None:
+    """The derivation must reject inert styles, or the slot lies again.
+
+    No SRD fighting style is inert today, so the predicate itself is pinned
+    here: a declaration with a category but no payload reports no effect, and
+    the slot-level consequence (an inert option is not selectable) follows from
+    the set equality asserted above.
+    """
+
+    inert = parse_feat({
+        "id": "inert_style",
+        "category": "fighting_style",
+        "source_ref": "test:inert-style",
+        "automation_level": "deterministic",
+        "repeatable": False,
+    })
+    assert inert.has_mechanical_effect is False
 
 
 @pytest.mark.parametrize(("class_ref", "level"), [
@@ -109,10 +162,10 @@ def test_a_style_outside_the_whitelist_is_rejected(engine) -> None:
         "owner": "class:ranger",
         "feature_id": "fighting_style",
         "choice_id": "fighting_style_feat",
-        "selected_refs": ["feat:great_weapon_fighting"],
+        "selected_refs": ["feat:grappler"],
     }]}
     _requirements, records, errors = engine._plan_feature_choices(
         _character(), "class:ranger", 2, ["fighting_style"], snapshot, choices,
     )
     assert records == []
-    assert any("great_weapon_fighting" in error for error in errors)
+    assert any("grappler" in error for error in errors)

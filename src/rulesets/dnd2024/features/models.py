@@ -15,7 +15,7 @@ read from a localized display name, and nothing here is persisted.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -357,9 +357,10 @@ def _parse_feature_choice(
         raise ClassFeatureError(
             f"{feature_id}.choice.enabled_options must be an array"
         )
-    # 账本槽（ASI / 恩惠）没有白名单："整个 category" 就是它的语义。走
-    # feature_choices 的槽仍然必须点名，否则"未实现"的选项会被当成可选。
-    if not raw_refs and kind in {"advancement_feat", "feature_option"} and handled_by != "advancement":
+    # feature_option 是互斥选项，必须点名；advancement_feat 的清单由声明的
+    # 机械载荷推导（见 ``_fill_advancement_feat_options``），所以空值是"待填"
+    # 而不是"未实现"。账本槽（ASI / 恩惠）本来就空着。
+    if not raw_refs and kind == "feature_option":
         raise ClassFeatureError(
             f"{feature_id}.choice.enabled_options must be a non-empty array"
         )
@@ -485,6 +486,65 @@ def _advancement_feat_categories(bundle: LoadedRulesetBundle) -> dict[str, str]:
         for feat_id, feat in feats.items()
         if isinstance(feat, Mapping)
     }
+
+
+def _fill_advancement_feat_options(
+    features: list[ClassFeatureDefinition], bundle: LoadedRulesetBundle,
+) -> list[ClassFeatureDefinition]:
+    """Derive a feat slot's whitelist from what its options actually do.
+
+    A slot used to name its options by hand.  FD6a wrote
+    ``["feat:archery", "feat:defense"]`` into four JSON entries and dropped
+    Two-Weapon Fighting -- a style the engine already implemented end to end.
+    The slot went from selectable to rejected, and the only test looking at it
+    asserted the omission.
+
+    "May this be selected" is the same question as "does it do anything", and
+    the feat declaration already answers the second one.  Keeping a second,
+    hand-maintained list is how the omission happened.
+
+    Only ``feature_choice`` slots are filled.  Ledger slots (ASI / epic boon)
+    deliberately carry no whitelist: their answer is stored in the advancement
+    history, and an empty list means the whole category.
+    """
+
+    # Local import: ``feat_models`` imports this module for FeatureChoice, so a
+    # module-level import here would be a cycle.  The dependency is real and
+    # one-directional at call time.
+    from .feat_models import FeatDefinitionError, load_feat_definitions
+    from .parameter_registry import FeatParameterError
+
+    try:
+        definitions = load_feat_definitions(bundle)
+    except (FeatDefinitionError, FeatParameterError):
+        # A broken declaration is not this function's finding to report.  The
+        # catalogs that own feats raise it with their own error type (the
+        # advancement engine raises ProgressionCatalogError), and deriving a
+        # whitelist must not replace that contract with an earlier exception.
+        return features
+    result: list[ClassFeatureDefinition] = []
+    for definition in features:
+        choice = definition.choice
+        if (
+            choice is None
+            or choice.kind != "advancement_feat"
+            or choice.handled_by != "feature_choice"
+        ):
+            result.append(definition)
+            continue
+        if choice.enabled_options:
+            # 显式写出的清单保留，并照常交给 ``_validate_feature_choices``
+            # 校验；推导只负责"空清单"。写死清单曾漏掉 Two-Weapon Fighting，
+            # 所以守卫测试要求这些槽保持为空——两层一起拦。
+            result.append(definition)
+            continue
+        options = tuple(
+            f"feat:{feat_id}"
+            for feat_id, feat in sorted(definitions.items())
+            if feat.category == choice.category and feat.has_mechanical_effect
+        )
+        result.append(replace(definition, choice=replace(choice, enabled_options=options)))
+    return result
 
 
 def _validate_feature_choices(
@@ -772,6 +832,7 @@ class Dnd2024ClassFeatureCatalog:
                 )
             if definition.option_of == definition.id:
                 raise ClassFeatureError(f"{definition.id} cannot be its own option")
+        features = _fill_advancement_feat_options(features, bundle)
         _validate_feature_choices(features, bundle)
         return cls(
             source_ref=_require_text(raw.get("source_ref"), "class feature catalog source_ref"),

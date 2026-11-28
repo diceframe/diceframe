@@ -580,6 +580,10 @@ class CombatViewMixin:
             "light_extra_attack_ability_damage": bool(
                 feature_projection["light_extra_attack_ability_damage"]
             ),
+            # Great Weapon Fighting 的伤害骰下限；是否适用于这一击由结算处判定。
+            "two_handed_melee_damage_die_minimum": int(
+                feature_projection["two_handed_melee_damage_die_minimum"]
+            ),
         }
         # S0-F18 §4.2.4：感官是角色自己的属性，必须在 actor view 里。挂在
         # cast_spell 那一行会让"法术用尽 / 不在自己回合"时整条感官消失，

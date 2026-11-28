@@ -40,7 +40,8 @@
       "category": "fighting_style",
       "source_ref": "srd-5.2.1:p88:great-weapon-fighting",
       "requires": [{"kind": "feature", "id": "fighting_style"}],
-      "repeatable": false
+      "repeatable": false,
+      "parameters": {"two_handed_melee_damage_die_minimum": 3}
     },
     "two_weapon_fighting": {
       "category": "fighting_style",

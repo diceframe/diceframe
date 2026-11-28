@@ -8,7 +8,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from ..character.attunement import AttunementError, canonical_item_ref, inventory_ref_counts, owned_ref_counts
 from ..features.attack_declarations import BRUTAL_STRIKE, CUNNING_STRIKE_EFFECTS_KEY, LIGHT_EXTRA_ATTACK, STUNNING_STRIKE, declaration_value, validate_cunning_strike, validate_uses, validate_weapon_selection
-from .primitives import CombatIntentError, rider_attack_kind, world_minutes
+from .primitives import (
+    CombatIntentError,
+    rider_attack_kind,
+    two_handed_weapon_refs,
+    world_minutes,
+)
 from .check_modes import effective_speed, marked_target_id
 from .hands import apply_swap
 
@@ -80,17 +85,7 @@ class CombatValidationAttackMixin:
     def _two_handed_refs(self, actor: dict[str, Any]) -> set[str]:
         """Carried refs whose weapon needs both hands (mounted exception aside)."""
 
-        refs: set[str] = set()
-        for raw in actor.get("equipment_refs") or []:
-            ref = str(raw)
-            weapon = self.catalog.weapons.get(ref.removeprefix("item:"))
-            if not isinstance(weapon, dict) or not weapon.get("two_handed"):
-                continue
-            exception = str(weapon.get("two_handed_exception") or "")
-            if exception == "mounted" and bool(actor.get("mounted")):
-                continue
-            refs.add(ref)
-        return refs
+        return two_handed_weapon_refs(actor, self.catalog.weapons)
 
     def _weapon_swap_hands(
         self, actor: dict[str, Any], intent: dict[str, Any],

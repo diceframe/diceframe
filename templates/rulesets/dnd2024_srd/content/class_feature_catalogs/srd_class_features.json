@@ -731,8 +731,7 @@
             "id": "fighting_style_feat",
             "kind": "advancement_feat",
             "category": "fighting_style",
-            "count": 1,
-            "enabled_options": ["feat:archery", "feat:defense"]
+            "count": 1
           }
         },
         {
@@ -1089,8 +1088,7 @@
             "id": "fighting_style_feat",
             "kind": "advancement_feat",
             "category": "fighting_style",
-            "count": 1,
-            "enabled_options": ["feat:archery", "feat:defense"]
+            "count": 1
           }
         },
         {
@@ -1223,11 +1221,7 @@
             "id": "fighting_style_feat",
             "kind": "advancement_feat",
             "category": "fighting_style",
-            "count": 1,
-            "enabled_options": [
-              "feat:archery",
-              "feat:defense"
-            ]
+            "count": 1
           }
         },
         {
@@ -1935,8 +1929,7 @@
             "id": "fighting_style_feat",
             "kind": "advancement_feat",
             "category": "fighting_style",
-            "count": 1,
-            "enabled_options": ["feat:archery", "feat:defense"]
+            "count": 1
           }
         },
         {

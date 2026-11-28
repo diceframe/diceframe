@@ -179,6 +179,30 @@ class FeatDefinition:
     choice: FeatureChoice | None = None
     legacy: Mapping[str, Any] = field(default_factory=dict)
 
+    @property
+    def has_mechanical_effect(self) -> bool:
+        """Whether any declared payload actually changes the game.
+
+        ``enabled_options`` is an executability whitelist, not a category
+        filter: a style that grants nothing must not look selectable.  Asking
+        the declaration instead of maintaining a second hand-written list is
+        what keeps the two from drifting -- FD6a's list silently dropped
+        Two-Weapon Fighting, which the engine already implemented.
+
+        ``display`` parameters do not count; neither do ``unread`` ones, which
+        the completeness gate forbids on a deterministic feat anyway.
+        """
+
+        if self.capabilities or self.passive_effects:
+            return True
+        if self.ability_increase is not None or self.choice is not None:
+            return True
+        return any(
+            (spec := PARAMETERS.get(str(key))) is not None
+            and spec.stage in {"combat", "derivation", "progression"}
+            for key in self.parameters
+        )
+
 
 def parse_feat(raw: Mapping[str, Any]) -> FeatDefinition:
     """Validate one entity and return its declaration.
