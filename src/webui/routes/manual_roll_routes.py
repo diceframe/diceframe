@@ -37,3 +37,21 @@ async def api_manual_roll_cancel(request):
     out=await api.cancel_manual_roll_request(request.match_info["game_key"],uid,request.match_info["request_id"],await request.json())
     if out.get("ok"): await _broadcast_change(request, request.match_info["game_key"])
     return web.json_response(out,status=200 if out.get("ok") else 400)
+
+
+async def api_manual_roll_quick(request):
+    api = _get_api(request)
+    body = await request.json()
+    if request.get("player_preview") and not request.get("player_delegate"):
+        return web.json_response(
+            {"ok": False, "error": t("webui.routes.manual_roll_routes.preview_requires_proxy_permission")},
+            status=403,
+        )
+    inst = api.get_game_instance(request.match_info["game_key"])
+    uid = request.get("user_id") or (inst.gm_uid if inst and request.get("owner_authenticated") else "")
+    out = await api.quick_manual_roll(request.match_info["game_key"], uid, body)
+    if out.get("ok"):
+        await _broadcast_change(request, request.match_info["game_key"])
+        return web.json_response(out, status=200)
+    status = 403 if out.get("error_code") == "manual_rolls_not_allowed_to_roll" else 400
+    return web.json_response(out, status=status)

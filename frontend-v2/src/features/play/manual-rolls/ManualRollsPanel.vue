@@ -19,7 +19,7 @@ const copy = computed(() => zh.value ? {
   pending: '等待投掷', resolved: '已完成', cancelled: '已取消', rollFor: '代投',
   gmOverride: 'GM 代投', requestNotice: 'GM 请求你进行一次投掷，请确认后提交结果。',
   cancel: '取消请求', pendingRoll: '待投掷', dialog: '发起手动投掷', label: '说明',
-  labelPlaceholder: '例如：察觉检定', formula: '骰子公式', formulaHint: '例如 d20、d20+2、2d6+1；自由投掷只记录骰值，规则检定会显示成败。', visibility: '可见范围',
+  labelPlaceholder: '例如：察觉检定', formula: '骰子公式', formulaHint: '例如 d20、d20+2、2d6+1、2d20kh1、1d8+1d6+2；自由投掷只记录骰值，规则检定会显示成败。', visibility: '可见范围',
   ability: '属性', skill: '技能', anyAbility: '按技能自带', anySkill: '不指定',
   checkHint: '选了技能就用角色的技能加值（含熟练）；只选属性就用属性修正；都不选则按骰子公式结算。',
   party: '全队可见', private: '仅目标可见', targets: '投掷角色', later: '稍后',

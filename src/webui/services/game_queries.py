@@ -313,6 +313,7 @@ def _public_manual_rolls(instance: Any, viewer_uid: str) -> list[dict[str, Any]]
                 "rolls": list(result.get("rolls") or []),
                 "modifier": result.get("modifier", 0),
                 "natural": result.get("natural"),
+                "faces": list(result.get("faces") or []),
                 "target": result.get("target"),
                 "comparison": result.get("comparison"),
                 "verdict": result.get("verdict"),

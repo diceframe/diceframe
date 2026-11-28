@@ -114,7 +114,13 @@ from src.webui.routes.storytelling import (
     api_set_story_mode,
     api_set_story_speaker_portrait,
 )
-from src.webui.routes.manual_roll_routes import api_manual_roll_list, api_manual_roll_create, api_manual_roll_resolve, api_manual_roll_cancel
+from src.webui.routes.manual_roll_routes import (
+    api_manual_roll_cancel,
+    api_manual_roll_create,
+    api_manual_roll_list,
+    api_manual_roll_quick,
+    api_manual_roll_resolve,
+)
 
 
 async def _read_save_upload(reader) -> bytes:
@@ -156,6 +162,7 @@ def register_games(app: web.Application) -> None:
     app.router.add_get("/api/games/{game_key}/player-context", api_player_context)
     app.router.add_get("/api/games/{game_key}/roll-requests", api_manual_roll_list)
     app.router.add_post("/api/games/{game_key}/roll-requests", api_manual_roll_create)
+    app.router.add_post("/api/games/{game_key}/roll-requests/quick", api_manual_roll_quick)
     app.router.add_post("/api/games/{game_key}/roll-requests/{request_id}/roll", api_manual_roll_resolve)
     app.router.add_post("/api/games/{game_key}/roll-requests/{request_id}/cancel", api_manual_roll_cancel)
     app.router.add_get("/api/games/{game_key}/health", api_game_health)

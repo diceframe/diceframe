@@ -418,3 +418,92 @@ def test_partially_rolled_request_cancels_keeping_results_and_blocking_the_rest(
     assert stored["status"] == "cancelled" and set(stored["results"]) == {"p1"}
     blocked = asyncio.run(service.resolve("game", "p2", "mr-check", {"run_id": "run-1"}))
     assert blocked["ok"] is False and "p2" not in stored["results"]
+
+
+def test_quick_roll_allows_any_player_one_step_with_extended_formula(monkeypatch):
+    instance = _context_instance([])
+    saves = []
+    service = _make_service(instance, saves)
+    seq = iter([5, 18])
+    monkeypatch.setattr("random.randint", lambda a, b: next(seq))
+
+    out = asyncio.run(service.quick_roll("game", "p1", {
+        "operation_id": "quick-op-1",
+        "run_id": "run-1",
+        "formula": "2d20kh1+2",
+        "label": "看谁先守夜",
+        "visibility": "party",
+        "include_in_ai_context": False,
+    }))
+    assert out["ok"] is True
+    assert out["request"]["status"] == "resolved"
+    assert out["request"]["purpose"] == "free"
+    assert out["request"]["source"] == "quick"
+    assert out["request"]["created_by"] == "p1"
+    assert out["request"]["target_uids"] == ["p1"]
+    assert out["result"]["total"] == 20
+    assert out["result"]["natural"] == 18
+    assert [f["taken"] for f in out["result"]["faces"]] == [False, True]
+    assert len(saves) == 1
+    assert format_manual_roll_context(instance, viewer_is_gm=True) == ""
+
+    # 幂等重放不重复掷骰
+    replay = asyncio.run(service.quick_roll("game", "p1", {
+        "operation_id": "quick-op-1",
+        "run_id": "run-1",
+        "formula": "2d20kh1+2",
+    }))
+    assert replay["ok"] is True and replay["idempotent"] is True
+    assert replay["result"]["total"] == 20
+    assert len(saves) == 1
+
+
+def test_quick_roll_private_visibility_and_ai_context_opt_in(monkeypatch):
+    instance = _context_instance([])
+    service = _make_service(instance, [])
+    monkeypatch.setattr("random.randint", lambda a, b: 14)
+
+    outsider = asyncio.run(service.quick_roll("game", "stranger", {
+        "operation_id": "quick-bad",
+        "run_id": "run-1",
+        "formula": "d20",
+    }))
+    assert outsider["ok"] is False
+    assert outsider["error_code"] == "manual_rolls_not_allowed_to_roll"
+
+    out = asyncio.run(service.quick_roll("game", "p1", {
+        "operation_id": "quick-priv",
+        "run_id": "run-1",
+        "formula": "d20",
+        "label": "暗骰",
+        "visibility": "private",
+        "include_in_ai_context": True,
+    }))
+    assert out["ok"] is True
+    assert len(service.list("game", "p1")) == 1
+    assert len(service.list("game", "gm")) == 1
+    assert len(service.list("game", "p2")) == 0
+    assert "暗骰" in format_manual_roll_context(instance, viewer_is_gm=True)
+    assert "暗骰" in format_manual_roll_context(instance, viewer_is_gm=False, viewer_uid="p1")
+    assert format_manual_roll_context(instance, viewer_is_gm=False, viewer_uid="p2") == ""
+
+
+def test_quick_roll_prunes_oldest_quick_entries_without_touching_checks(monkeypatch):
+    monkeypatch.setattr(manual_rolls_service, "MAX_QUICK_ROLLS_PER_INSTANCE", 2)
+    monkeypatch.setattr("random.randint", lambda a, b: 10)
+    instance = _context_instance([_resolved_check()])
+    service = _make_service(instance, [])
+
+    for idx in range(3):
+        out = asyncio.run(service.quick_roll("game", "p1", {
+            "operation_id": f"quick-{idx}",
+            "run_id": "run-1",
+            "formula": "d20",
+            "label": f"roll-{idx}",
+        }))
+        assert out["ok"] is True
+
+    stored = checks.manual_roll_requests(instance)
+    assert stored[0]["id"] == "mr-check"
+    quick_labels = [item["label"] for item in stored if item.get("source") == "quick"]
+    assert quick_labels == ["roll-1", "roll-2"]

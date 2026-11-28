@@ -45,4 +45,25 @@ describe('authoritative dice presentation', () => {
     })
     expect(wrapper.get('[data-testid="dice-tray"]').classes()).toContain('dice-tray-reveal')
   })
+
+  it('highlights natural 20 as critical and natural 1 as fumble, and toggles sound mute', async () => {
+    const crit = mount(DiceTray, {
+      props: { revealed: true, check: { dice: 'd20', rolls: [20], roll: 20 } },
+      global: { plugins: [i18n] },
+    })
+    expect(crit.get('[data-testid="dice-tray"]').classes()).toContain('dice-tray-critical')
+    expect(crit.get('[data-die-value="20"]').attributes('data-tone')).toBe('critical')
+
+    const fumble = mount(DiceTray, {
+      props: { revealed: true, check: { dice: 'd20', rolls: [1], roll: 1 } },
+      global: { plugins: [i18n] },
+    })
+    expect(fumble.get('[data-testid="dice-tray"]').classes()).toContain('dice-tray-fumble')
+    expect(fumble.get('[data-die-value="1"]').attributes('data-tone')).toBe('fumble')
+
+    const toggle = crit.get('[data-testid="dice-sound-toggle"]')
+    const before = toggle.attributes('aria-pressed')
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-pressed')).not.toBe(before)
+  })
 })
