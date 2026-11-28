@@ -1035,9 +1035,11 @@ class CombatSpellResolutionMixin:
                 # "下一次豁免有劣势"：消费点就是豁免本身，不是回合边界。
                 events.extend(self._consume_save_markers(target_id, target))
                 if effect.get("damage"):
-                    damage_node = spell_formula_node(
-                        str(effect["damage"]), effect.get("upcast_damage"),
-                        spell, slot_level, actor,
+                    # 同一构造器：豁免分支也不自己读 payload。
+                    _, payload_items = normalize_spell_effect(effect)
+                    damage_node = damage_node_for(
+                        payload_items[0], upcast_damage=effect.get("upcast_damage"),
+                        spell=spell, slot_level=slot_level, actor=actor,
                     )
                     # 加值先并入骰式，再走豁免减半与抗性：三者都只作用于
                     # 同一个总数，顺序不能倒。
@@ -1099,9 +1101,10 @@ class CombatSpellResolutionMixin:
                                 instance, combat, actor_id, target, total_dealt,
                             ))
             elif mode == "automatic_damage":
-                damage_node = spell_formula_node(
-                    str(effect["damage"]), effect.get("upcast_damage"),
-                    spell, slot_level, actor,
+                _, payload_items = normalize_spell_effect(effect)
+                damage_node = damage_node_for(
+                    payload_items[0], upcast_damage=effect.get("upcast_damage"),
+                    spell=spell, slot_level=slot_level, actor=actor,
                 )
                 damage_node = self._add_cantrip_damage_bonus(
                         actor, spell, spell_ref, damage_node,
