@@ -108,7 +108,8 @@
 - 新 code 必须 snake_case（`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`）；现存的 80 个 UPPER 写法登记为 `LEGACY_DECLARED_CODES` 并冻结。**不批量改写旧 code**：`apiErrors` 的社区译文按 key 名登记来源指纹，改名会让已审核译文失效，收益不匹配代价。
 - 同一条错误只在一处登记译文：`webui/errors.<lang>.yml` 与 service 级 yml 不得重复覆盖同一 code。
 - 前端 `apiErrors.<code>` 保持社区语言的唯一出口；未登记的 code 回退后端原文。
-- 迁移用 ratchet：`scripts/audit_error_codes.py` 按文件记录未声明 code 的 `"error": t(...)` 数量（`scripts/error_code_baseline.json`），只允许减少。首个模块 `webui/services/worlds.py` 已完成（52 处）。
+- 迁移用 ratchet：`scripts/audit_error_codes.py` 按文件记录「载荷有 `error` 但没有 `error_code`」的处数（`scripts/error_code_baseline.json`），只允许减少。口径包含 `t()` 文本、裸字面量与只写 `code` 三种，因为前端对这三种都拿不到 code。
+- 已迁移 373 处；当前基线 **511 处 / 89 个文件**，剩余是动态消息（`str(exc)`）与需要为英文文案另起 code 的站点。
 
 ### 5. verdict 词表统一（第一项落地，取代 display-as-identity）
 
@@ -152,7 +153,7 @@
 
 两个脚本都是「冻结今天，只允许变好」，不清算存量：
 
-- `scripts/audit_error_codes.py` + `scripts/error_code_baseline.json`：扫描 `src/webui/services`、`src/webui/routes` 与 `src/webui/api.py`，按文件统计「顶层 `{"error": t(...)}` 且没有 `error_code`」的处数。`src/webui/api.py` 必须在内，否则 orchestrator 等于有免检通道。
+- `scripts/audit_error_codes.py` + `scripts/error_code_baseline.json`：扫描 `src/webui/services`、`src/webui/routes` 与 `src/webui/api.py`，按文件统计「载荷有 `error` 但没有 `error_code`」的处数（`t()` 文本、裸字面量、只写 `code` 都算）。`src/webui/api.py` 必须在内，否则 orchestrator 等于有免检通道。
 - `scripts/audit_localization.py` + `scripts/localization_baseline.json`：按包统计运行期 CJK 字符串字面量（排除 docstring），并对 `src/engine/` 与 `src/rulesets/` 逐文件单独统计 —— 机械目录的增长（包括新增文件）直接失败。已登记例外只有 `check_verdict.py`、`language.py` 与 `intent/locales/`。
 - `localization/locales/**/*.yml` 的 en / zh-CN key 齐平由 `tests/test_localization_messages.py` 覆盖；前端目录由 `locales:check` 覆盖。
 

@@ -44,7 +44,7 @@ def _validated_messages(body: object) -> tuple[list[dict[str, str]], str]:
 
 async def api_assistant_chat(request: web.Request) -> web.StreamResponse:
     if not request.get("owner_authenticated"):
-        return web.json_response({"error": t("webui.routes.assistant.unauthorized")}, status=401)
+        return web.json_response({"error": t("webui.routes.assistant.unauthorized"), "error_code": "route_assistant_unauthorized"}, status=401)
     try:
         body = await request.json()
         messages, language = _validated_messages(body)

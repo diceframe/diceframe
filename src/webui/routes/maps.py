@@ -32,7 +32,7 @@ async def api_game_map_background_file(request: web.Request) -> web.StreamRespon
         str(request.match_info["asset_id"] or ""),
     )
     if path is None:
-        return web.json_response({"error": t("webui.routes.maps.background_missing")}, status=404)
+        return web.json_response({"error": t("webui.routes.maps.background_missing"), "error_code": "route_maps_background_missing"}, status=404)
     return web.FileResponse(path, headers={"Cache-Control": "private, max-age=3600"})
 
 
@@ -41,9 +41,9 @@ async def api_map_background_update(request: web.Request) -> web.Response:
     api = _get_api(request)
     detail = api.game_detail(game_key)
     if not detail:
-        return web.json_response({"error": "游戏不存在"}, status=404)
+        return web.json_response({"error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     if request.get("user_id", "") != detail.get("gm_uid", ""):
-        return web.json_response({"error": t("webui.routes.maps.background_gm_only")}, status=403)
+        return web.json_response({"error": t("webui.routes.maps.background_gm_only"), "error_code": "route_maps_background_gm_only"}, status=403)
 
     body = await request.json()
     selection = body.get("map_background")

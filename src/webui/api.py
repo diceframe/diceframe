@@ -3256,7 +3256,7 @@ class WebAPI:
 
         instance = self.get_game_instance(game_key)
         if instance is None:
-            return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
+            return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在", "error_code": "game_not_found"}
         async with instance.authoritative_write() as entered:
             if not entered:
                 return error_payload("webui.api.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")
@@ -3277,7 +3277,7 @@ class WebAPI:
 
         instance = self.get_game_instance(game_key)
         if instance is None:
-            return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
+            return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在", "error_code": "game_not_found"}
         async with instance.authoritative_write() as entered:
             if not entered:
                 return error_payload("webui.api.rewriting_wait_and_retry", code="REWRITE_IN_PROGRESS")

@@ -219,7 +219,7 @@ def apply_card(
         return {
             "ok": False,
             "code": "INVALID_OPERATION_ID",
-            "error": t("webui.services.ruleset_advancement.operation_id_required"),
+            "error": t("webui.services.ruleset_advancement.operation_id_required"), "error_code": "ruleset_advancement_operation_id_required",
         }
     revision = int(card.get("ruleset_revision", 0) or 0)
     operation_log = card.get("ruleset_operation_log")
@@ -250,7 +250,7 @@ def apply_card(
         return {
             "ok": False,
             "code": "INVALID_CHARACTER_REVISION",
-            "error": t("webui.services.ruleset_advancement.expected_revision_required"),
+            "error": t("webui.services.ruleset_advancement.expected_revision_required"), "error_code": "ruleset_advancement_expected_revision_required",
         }
     if expected_revision != revision:
         return {
@@ -535,15 +535,15 @@ async def apply_live(
 ) -> dict[str, Any]:
     instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
     if not instance:
-        return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
+        return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在", "error_code": "game_not_found"}
     async with instance.authoritative_write() as write_entered:
         if not write_entered:
             return {
                 "ok": False, "code": "REWRITE_IN_PROGRESS",
-                "error": t("webui.services.ruleset_advancement.rewriting_wait_and_retry"),
+                "error": t("webui.services.ruleset_advancement.rewriting_wait_and_retry"), "error_code": "ruleset_advancement_rewriting_wait_and_retry",
             }
         if dependencies.get_instance(instance.game_key) is not instance:
-            return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.ruleset_advancement.game_restarted_refresh_and_retry")}
+            return {"ok": False, "code": "STALE_RUN", "error": t("webui.services.ruleset_advancement.game_restarted_refresh_and_retry"), "error_code": "ruleset_advancement_game_restarted_refresh_and_retry"}
         return await _apply_live_authority(dependencies, game_key, user_id, body, instance)
 
 
@@ -567,7 +567,7 @@ async def _apply_live_authority(
     if not operation_id or len(operation_id) > 160:
         return {
             "ok": False, "code": "INVALID_OPERATION_ID",
-            "error": t("webui.services.ruleset_advancement.operation_id_required"),
+            "error": t("webui.services.ruleset_advancement.operation_id_required"), "error_code": "ruleset_advancement_operation_id_required",
         }
     revision = int(character.get("ruleset_revision", 0) or 0)
     raw_log = character.get("ruleset_operation_log")
@@ -580,7 +580,7 @@ async def _apply_live_authority(
         if previous.get("kind") != "advancement":
             return {
                 "ok": False, "code": "OPERATION_ID_REUSED",
-                "error": t("webui.services.ruleset_advancement.operation_id_reused"),
+                "error": t("webui.services.ruleset_advancement.operation_id_reused"), "error_code": "ruleset_advancement_operation_id_reused",
             }
         return {
             "ok": True, "rule_id": rule.rule_id, "game_key": game_key,
@@ -595,7 +595,7 @@ async def _apply_live_authority(
     except (TypeError, ValueError):
         return {
             "ok": False, "code": "INVALID_CHARACTER_REVISION",
-            "error": t("webui.services.ruleset_advancement.expected_revision_required"),
+            "error": t("webui.services.ruleset_advancement.expected_revision_required"), "error_code": "ruleset_advancement_expected_revision_required",
         }
     if expected_revision != revision:
         return {
@@ -682,14 +682,14 @@ def live_status(
 ) -> dict[str, Any]:
     instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
     if not instance:
-        return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
+        return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在", "error_code": "game_not_found"}
     rule = dependencies.load_rule_for_game(instance)
     try:
         runtime = dependencies.ruleset_registry.resolve(rule.template) if rule else None
     except (AttributeError, TypeError, ValueError):
         runtime = None
     if not isinstance(runtime, LiveAdvancementTransactionRuntime):
-        return {"ok": False, "code": "RULESET_ADVANCEMENT_UNAVAILABLE", "error": t("webui.services.ruleset_advancement.advancement_control_unsupported")}
+        return {"ok": False, "code": "RULESET_ADVANCEMENT_UNAVAILABLE", "error": t("webui.services.ruleset_advancement.advancement_control_unsupported"), "error_code": "ruleset_advancement_advancement_control_unsupported"}
     return {"ok": True, "advancement": runtime.live_advancement_status(instance)}
 
 
@@ -700,12 +700,12 @@ async def control_live(
 ) -> dict[str, Any]:
     instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
     if not instance:
-        return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
+        return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在", "error_code": "game_not_found"}
     async with instance.authoritative_write() as write_entered:
         if not write_entered:
             return {
                 "ok": False, "code": "REWRITE_IN_PROGRESS",
-                "error": t("webui.services.ruleset_advancement.rewriting_wait_and_retry"),
+                "error": t("webui.services.ruleset_advancement.rewriting_wait_and_retry"), "error_code": "ruleset_advancement_rewriting_wait_and_retry",
             }
         return await _control_live_authority(dependencies, game_key, body)
 
@@ -717,14 +717,14 @@ async def _control_live_authority(
 ) -> dict[str, Any]:
     instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
     if not instance:
-        return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在"}
+        return {"ok": False, "code": "GAME_NOT_FOUND", "error": "游戏不存在", "error_code": "game_not_found"}
     rule = dependencies.load_rule_for_game(instance)
     try:
         runtime = dependencies.ruleset_registry.resolve(rule.template) if rule else None
     except (AttributeError, TypeError, ValueError):
         runtime = None
     if not isinstance(runtime, LiveAdvancementTransactionRuntime):
-        return {"ok": False, "code": "RULESET_ADVANCEMENT_UNAVAILABLE", "error": t("webui.services.ruleset_advancement.advancement_control_unsupported")}
+        return {"ok": False, "code": "RULESET_ADVANCEMENT_UNAVAILABLE", "error": t("webui.services.ruleset_advancement.advancement_control_unsupported"), "error_code": "ruleset_advancement_advancement_control_unsupported"}
     parsed = validate_draft_shape(body)
     try:
         ruleset_runtime.require_binding(instance, runtime.runtime_id)

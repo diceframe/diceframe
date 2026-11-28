@@ -63,7 +63,7 @@ def experience(
 ) -> dict[str, Any]:
     rule = dependencies.load_rule(rule_id, language)
     if rule is None:
-        return {"ok": False, "code": "RULE_NOT_FOUND", "error": t("webui.services.ruleset_builder.rule_missing", rule_id=rule_id)}
+        return {"ok": False, "code": "RULE_NOT_FOUND", "error": t("webui.services.ruleset_builder.rule_missing", rule_id=rule_id), "error_code": "ruleset_builder_rule_missing"}
     runtime = dependencies.ruleset_registry.resolve(rule.template)
     return {
         "ok": True,

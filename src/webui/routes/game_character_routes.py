@@ -38,7 +38,7 @@ async def api_char_update(request: web.Request) -> web.Response:
     api = _get_api(request)
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"error": "游戏不存在"}, status=404)
+        return web.json_response({"error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     session_uid = request.get("user_id", "")
     if not can_modify_character(
         session_uid,
@@ -46,7 +46,7 @@ async def api_char_update(request: web.Request) -> web.Response:
         inst.gm_uid,
         owner=bool(request.get("owner_authenticated", False)),
     ):
-        return web.json_response({"error": "无权修改他人角色卡"}, status=403)
+        return web.json_response({"error": "无权修改他人角色卡", "error_code": "forbidden_edit_character"}, status=403)
     result = await api.update_character(
         gk, uid, body if isinstance(body, dict) else {},
         gm_authority=_has_sheet_authority(request, inst),
@@ -80,7 +80,7 @@ async def api_ruleset_character_profile_update(request: web.Request) -> web.Resp
     api = _get_api(request)
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
+        return web.json_response({"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     session_uid = request.get("user_id", "")
     if not can_modify_character(
         session_uid,
@@ -89,7 +89,7 @@ async def api_ruleset_character_profile_update(request: web.Request) -> web.Resp
         owner=bool(request.get("owner_authenticated", False)),
     ):
         return web.json_response(
-            {"ok": False, "error": "无权修改他人角色卡"}, status=403
+            {"ok": False, "error": "无权修改他人角色卡", "error_code": "forbidden_edit_character"}, status=403
         )
     body = await request.json()
     result = await api.update_ruleset_character_profile(gk, uid, body)
@@ -106,7 +106,7 @@ async def api_ruleset_character_adopt_card(request: web.Request) -> web.Response
     api = _get_api(request)
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
+        return web.json_response({"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     session_uid = request.get("user_id", "")
     if not can_modify_character(
         session_uid,
@@ -115,7 +115,7 @@ async def api_ruleset_character_adopt_card(request: web.Request) -> web.Response
         owner=bool(request.get("owner_authenticated", False)),
     ):
         return web.json_response(
-            {"ok": False, "error": "无权修改他人角色卡"}, status=403
+            {"ok": False, "error": "无权修改他人角色卡", "error_code": "forbidden_edit_character"}, status=403
         )
     body = await request.json()
     card_id = str(body.get("card_id") or "")
@@ -159,7 +159,7 @@ async def _api_live_character_advancement(
     api = _get_api(request)
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
+        return web.json_response({"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     session_uid = request.get("user_id", "")
     runtime_id = str((ruleset_runtime.binding(inst) or {}).get("id") or "")
     can_advance = (
@@ -174,7 +174,7 @@ async def _api_live_character_advancement(
     )
     if not can_advance:
         return web.json_response(
-            {"ok": False, "error": "无权修改他人角色卡"}, status=403
+            {"ok": False, "error": "无权修改他人角色卡", "error_code": "forbidden_edit_character"}, status=403
         )
     body = await request.json()
     try:
@@ -238,7 +238,7 @@ async def api_live_character_rest(request: web.Request) -> web.Response:
     api = _get_api(request)
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
+        return web.json_response({"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     if not can_modify_character(
         request.get("user_id", ""),
         uid,
@@ -246,7 +246,7 @@ async def api_live_character_rest(request: web.Request) -> web.Response:
         owner=bool(request.get("owner_authenticated", False)),
     ):
         return web.json_response(
-            {"ok": False, "error": "无权修改他人角色卡"}, status=403
+            {"ok": False, "error": "无权修改他人角色卡", "error_code": "forbidden_edit_character"}, status=403
         )
     payload = await request.json()
     result = await api.ruleset_rest_submit_live(gk, uid, payload)
@@ -272,7 +272,7 @@ async def api_live_character_spells(request: web.Request) -> web.Response:
     api = _get_api(request)
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
+        return web.json_response({"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     if not can_modify_character(
         request.get("user_id", ""),
         uid,
@@ -300,7 +300,7 @@ async def api_live_character_rest_options(request: web.Request) -> web.Response:
     api = _get_api(request)
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
+        return web.json_response({"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     if not can_modify_character(
         request.get("user_id", ""),
         uid,
@@ -330,7 +330,7 @@ async def api_live_character_ritual(request: web.Request) -> web.Response:
     api = _get_api(request)
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
+        return web.json_response({"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     if not can_modify_character(
         request.get("user_id", ""),
         uid,
@@ -338,7 +338,7 @@ async def api_live_character_ritual(request: web.Request) -> web.Response:
         owner=bool(request.get("owner_authenticated", False)),
     ):
         return web.json_response(
-            {"ok": False, "error": "无权修改他人角色卡"}, status=403
+            {"ok": False, "error": "无权修改他人角色卡", "error_code": "forbidden_edit_character"}, status=403
         )
     payload = await request.json()
     result = await api.ruleset_ritual_resolve_live(gk, uid, payload)
@@ -364,7 +364,7 @@ async def api_live_character_ritual_options(request: web.Request) -> web.Respons
     api = _get_api(request)
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
+        return web.json_response({"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     if not can_modify_character(
         request.get("user_id", ""),
         uid,
@@ -428,7 +428,7 @@ async def api_char_delete(request: web.Request) -> web.Response:
     api = _get_api(request)
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"error": "游戏不存在"}, status=404)
+        return web.json_response({"error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     session_uid = request.get("user_id", "")
     if not can_modify_character(
         session_uid,
@@ -436,7 +436,7 @@ async def api_char_delete(request: web.Request) -> web.Response:
         inst.gm_uid,
         owner=bool(request.get("owner_authenticated", False)),
     ):
-        return web.json_response({"error": "无权删除他人角色"}, status=403)
+        return web.json_response({"error": "无权删除他人角色", "error_code": "forbidden_delete_character"}, status=403)
     # A player-side caller may delete its seat only before the seat acted.
     result = await api.delete_character(
         gk, uid, gm_authority=_has_sheet_authority(request, inst),
@@ -458,9 +458,9 @@ async def api_npc_portrait_update(request: web.Request) -> web.Response:
     api = _get_api(request)
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"error": "游戏不存在"}, status=404)
+        return web.json_response({"error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     if request.get("user_id", "") != inst.gm_uid:
-        return web.json_response({"error": "仅 GM 可修改 NPC 头像"}, status=403)
+        return web.json_response({"error": "仅 GM 可修改 NPC 头像", "error_code": "gm_only"}, status=403)
     body = await request.json()
     result = await api.update_npc_portrait(gk, npc_id, body.get("portrait"))
     status = 409 if result.get("error_code") == "REWRITE_IN_PROGRESS" else 200
@@ -474,12 +474,12 @@ async def api_npc_standing_portrait_update(request: web.Request) -> web.Response
     api = _get_api(request)
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"error": "游戏不存在"}, status=404)
+        return web.json_response({"error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     if request.get("user_id", "") != inst.gm_uid:
-        return web.json_response({"error": t("webui.routes.game_character_routes.npc_portrait_gm_only")}, status=403)
+        return web.json_response({"error": t("webui.routes.game_character_routes.npc_portrait_gm_only"), "error_code": "route_game_character_routes_npc_portrait_gm_only"}, status=403)
     body = await request.json()
     if not isinstance(body, dict):
-        return web.json_response({"error": t("webui.routes.game_character_routes.body_not_object")}, status=400)
+        return web.json_response({"error": t("webui.routes.game_character_routes.body_not_object"), "error_code": "route_game_character_routes_body_not_object"}, status=400)
     # A field missing from the body is left unchanged; null clears it.
     fields = {
         name: body[key]
@@ -501,9 +501,9 @@ async def api_npc_voice_update(request: web.Request) -> web.Response:
     api = _get_api(request)
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"error": "游戏不存在"}, status=404)
+        return web.json_response({"error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     if request.get("user_id", "") != inst.gm_uid:
-        return web.json_response({"error": t("webui.routes.game_character_routes.npc_voice_gm_only")}, status=403)
+        return web.json_response({"error": t("webui.routes.game_character_routes.npc_voice_gm_only"), "error_code": "route_game_character_routes_npc_voice_gm_only"}, status=403)
     body = await request.json()
     result = await api.update_npc_voice(gk, npc_id, body.get("voice_profile"))
     status = 409 if result.get("error_code") == "REWRITE_IN_PROGRESS" else 200
@@ -516,7 +516,7 @@ async def api_player_create(request: web.Request) -> web.Response:
     api = _get_api(request)
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"ok": False, "error": "游戏不存在"}, status=404)
+        return web.json_response({"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     owner = bool(request.get("owner_authenticated", False))
     acting_uid = request.get("user_id", "")
     session_uid = str(request.get("session_user_id", acting_uid) or "")

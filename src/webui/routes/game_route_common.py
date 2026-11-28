@@ -87,7 +87,7 @@ def _gm_only_inst(request: web.Request, gk: str):
         request.get("user_id", ""),
         bool(request.get("owner_authenticated", False)),
     ):
-        return None, web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return None, web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     return inst, None
 
 

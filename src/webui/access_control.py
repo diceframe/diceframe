@@ -269,7 +269,7 @@ class WebAccessControl:
             return web.json_response(
                 {
                     "ok": False,
-                    "error": "游戏不存在",
+                    "error": "游戏不存在", "error_code": "game_not_found",
                     "code": "GAME_NOT_FOUND",
                 },
                 status=404,

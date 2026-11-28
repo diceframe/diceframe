@@ -12,7 +12,7 @@ async def api_manual_roll_list(request):
     api=_get_api(request); inst=api.get_game_instance(request.match_info["game_key"])
     uid=str(request.get("user_id") or (inst.gm_uid if inst and request.get("owner_authenticated") else ""))
     items=api.manual_roll_requests(request.match_info["game_key"],uid)
-    if items is None: return web.json_response({"ok":False,"error":"游戏不存在"},status=404)
+    if items is None: return web.json_response({"ok":False,"error":"游戏不存在", "error_code": "game_not_found"},status=404)
     return web.json_response({"ok":True,"run_id":inst.run_id,"requests":items})
 async def api_manual_roll_create(request):
     api=_get_api(request); _,err=_gm_only_inst(request,request.match_info["game_key"])
@@ -24,7 +24,7 @@ async def api_manual_roll_create(request):
 async def api_manual_roll_resolve(request):
     api=_get_api(request); body=await request.json()
     if request.get("player_preview") and not request.get("player_delegate"):
-        return web.json_response({"ok":False,"error":t("webui.routes.manual_roll_routes.preview_requires_proxy_permission")},status=403)
+        return web.json_response({"ok":False,"error":t("webui.routes.manual_roll_routes.preview_requires_proxy_permission"), "error_code": "route_manual_roll_routes_preview_requires_proxy_permission"},status=403)
     inst = api.get_game_instance(request.match_info["game_key"])
     uid = request.get("user_id") or (inst.gm_uid if inst and request.get("owner_authenticated") else "")
     out=await api.resolve_manual_roll_request(request.match_info["game_key"],uid,request.match_info["request_id"],body)

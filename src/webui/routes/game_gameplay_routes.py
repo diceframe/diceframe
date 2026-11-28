@@ -33,12 +33,12 @@ async def api_gm_command(request: web.Request) -> web.Response:
     if not inst:
         return web.json_response({"ok": False, "error": "not found"}, status=404)
     if request.get("user_id", "") != inst.gm_uid:
-        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     body = await request.json()
     command = str(body.get("command", "") or "")
     if len(command) > MAX_ACTION_CHARS:
         return web.json_response(
-            {"ok": False, "error": t("webui.routes.game_gameplay_routes.gm_command_too_long", max_action_chars=MAX_ACTION_CHARS)},
+            {"ok": False, "error": t("webui.routes.game_gameplay_routes.gm_command_too_long", max_action_chars=MAX_ACTION_CHARS), "error_code": "route_game_gameplay_routes_gm_command_too_long"},
             status=400,
         )
     result = await api.gm_command(gk, command, str(body.get("mode", "note") or "note"))
@@ -76,7 +76,7 @@ async def api_gm_private_message(request: web.Request) -> web.Response:
     text = str(body.get("text", "") or "")
     if len(text) > MAX_ACTION_CHARS:
         return web.json_response(
-            {"ok": False, "error": t("webui.routes.game_gameplay_routes.whisper_too_long", max_action_chars=MAX_ACTION_CHARS)},
+            {"ok": False, "error": t("webui.routes.game_gameplay_routes.whisper_too_long", max_action_chars=MAX_ACTION_CHARS), "error_code": "route_game_gameplay_routes_whisper_too_long"},
             status=400,
         )
     result = await _get_api(request).gm_private_message(
@@ -92,13 +92,13 @@ async def api_action(request: web.Request) -> web.Response:
     text = body.get("text", "")
     if len(text) > MAX_ACTION_CHARS:
         return web.json_response(
-            {"error": t("webui.routes.game_gameplay_routes.action_too_long", max_action_chars=MAX_ACTION_CHARS)}, status=400
+            {"error": t("webui.routes.game_gameplay_routes.action_too_long", max_action_chars=MAX_ACTION_CHARS), "error_code": "route_game_gameplay_routes_action_too_long"}, status=400
         )
     if request.get("player_preview", False) and not request.get(
         "player_delegate", False
     ):
         return web.json_response(
-            {"error": "当前是房主预览模式，请先开启允许代操作"}, status=403
+            {"error": "当前是房主预览模式，请先开启允许代操作", "error_code": "preview_mode_forbidden"}, status=403
         )
     on_delta, on_reset = _narration_callbacks(request, gk)
     try:
@@ -161,7 +161,7 @@ async def api_kp_question(request: web.Request) -> web.Response:
             {
                 "ok": False,
                 "code": "QUESTION_TOO_LONG",
-                "error": t("webui.routes.game_gameplay_routes.question_too_long", max_action_chars=MAX_ACTION_CHARS),
+                "error": t("webui.routes.game_gameplay_routes.question_too_long", max_action_chars=MAX_ACTION_CHARS), "error_code": "route_game_gameplay_routes_question_too_long",
             },
             status=400,
         )
@@ -172,7 +172,7 @@ async def api_kp_question(request: web.Request) -> web.Response:
             {
                 "ok": False,
                 "code": "PREVIEW_MODE_FORBIDDEN",
-                "error": "当前是房主预览模式，请先开启允许代操作",
+                "error": "当前是房主预览模式，请先开启允许代操作", "error_code": "preview_mode_forbidden",
             },
             status=403,
         )
@@ -256,7 +256,7 @@ async def api_ruleset_submit_intent(request: web.Request) -> web.Response:
             {
                 "ok": False,
                 "code": "PREVIEW_MODE_FORBIDDEN",
-                "error": "当前是房主预览模式，请先开启允许代操作",
+                "error": "当前是房主预览模式，请先开启允许代操作", "error_code": "preview_mode_forbidden",
             },
             status=403,
         )
@@ -265,7 +265,7 @@ async def api_ruleset_submit_intent(request: web.Request) -> web.Response:
         body = await request.json()
     except (json.JSONDecodeError, ValueError):
         return web.json_response(
-            {"ok": False, "code": "INVALID_JSON", "error": t("webui.routes.game_gameplay_routes.body_must_be_json_object")},
+            {"ok": False, "code": "INVALID_JSON", "error": t("webui.routes.game_gameplay_routes.body_must_be_json_object"), "error_code": "route_game_gameplay_routes_body_must_be_json_object"},
             status=400,
         )
     result = await api.ruleset_submit_intent(
@@ -301,7 +301,7 @@ async def api_ruleset_resolve_decision(request: web.Request) -> web.Response:
             {
                 "ok": False,
                 "code": "PREVIEW_MODE_FORBIDDEN",
-                "error": "当前是房主预览模式，请先开启允许代操作",
+                "error": "当前是房主预览模式，请先开启允许代操作", "error_code": "preview_mode_forbidden",
             },
             status=403,
         )
@@ -325,7 +325,7 @@ async def api_luck_decision(request: web.Request) -> web.Response:
         "player_delegate", False
     ):
         return web.json_response(
-            {"ok": False, "error": "当前是房主预览模式，请先开启允许代操作"}, status=403
+            {"ok": False, "error": "当前是房主预览模式，请先开启允许代操作", "error_code": "preview_mode_forbidden"}, status=403
         )
     try:
         body = await request.json()
@@ -401,7 +401,7 @@ async def api_payment_resolve(request: web.Request) -> web.Response:
     payment_id = request.match_info["payment_id"]
     inst = api.get_game_instance(gk)
     if not inst:
-        return web.json_response({"error": "游戏不存在"}, status=404)
+        return web.json_response({"error": "游戏不存在", "error_code": "game_not_found"}, status=404)
     session_uid = request.get("user_id", "")
     body = await request.json()
     result = await api.resolve_payment(
@@ -449,7 +449,7 @@ async def api_payment_create(request: web.Request) -> web.Response:
     if not is_gm:
         # 非 GM 只允许“玩家自助出价”：给自己买、来源固定 player_self。
         if source != "player_self" or payer_uid != actor_uid or recipient_uid != actor_uid:
-            return web.json_response({"ok": False, "error": "GM only"}, status=403)
+            return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     elif source not in {"gm_manual", "player_self"}:
         source = "gm_manual"
     result = await api.create_payment_proposal(
@@ -502,7 +502,7 @@ async def api_combat_action(request: web.Request) -> web.Response:
         session_uid not in inst.players
         and not is_game_gm(inst, session_uid, owner)
     ):
-        return web.json_response({"ok": False, "error": "未加入本局"}, status=403)
+        return web.json_response({"ok": False, "error": "未加入本局", "error_code": "player_not_in_game"}, status=403)
     try:
         body = await request.json()
     except Exception:
@@ -534,7 +534,7 @@ async def api_combat_scheduler_advance(request: web.Request) -> web.Response:
     session_uid = str(request.get("user_id", "") or "")
     owner = bool(request.get("owner_authenticated", False))
     if not is_game_gm(inst, session_uid, owner):
-        return web.json_response({"ok": False, "error": "GM only"}, status=403)
+        return web.json_response({"ok": False, "error": "GM only", "error_code": "gm_only"}, status=403)
     result = await api.combat_extension_scheduler_advance(gk)
     await _broadcast_combat_change(request, gk, result)
     code = declared_error_code(result)

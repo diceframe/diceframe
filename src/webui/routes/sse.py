@@ -39,7 +39,7 @@ async def api_sse_ticket(request: web.Request) -> web.Response:
     if not inst:
         return web.json_response({"error": "not found"}, status=404)
     if not user_id or user_id not in inst.players:
-        return web.json_response({"error": "未加入本局，无法订阅"}, status=403)
+        return web.json_response({"error": "未加入本局，无法订阅", "error_code": "player_not_in_game"}, status=403)
     ticket, expires_in = request.app["sse_tickets"].issue(
         game_key, user_id, _ticket_grant(request, inst, user_id),
     )
@@ -87,7 +87,7 @@ async def sse_stream_action(request: web.Request) -> web.StreamResponse:
     body = await request.json()
     text = body.get("text", "")
     if len(text) > MAX_ACTION_CHARS:
-        return web.json_response({"error": t("webui.routes.sse.action_too_long", max_action_chars=MAX_ACTION_CHARS)}, status=400)
+        return web.json_response({"error": t("webui.routes.sse.action_too_long", max_action_chars=MAX_ACTION_CHARS), "error_code": "route_sse_action_too_long"}, status=400)
     selected_attribute = str(body.get("selected_attribute", "") or "")
     selected_skill = str(body.get("selected_skill", "") or "")
     target_text = str(body.get("target_text", "") or "")
@@ -97,9 +97,9 @@ async def sse_stream_action(request: web.Request) -> web.StreamResponse:
         return web.json_response({"error": "not found"}, status=404)
     user_id = request.get("user_id", "")
     if not user_id or user_id not in inst.players:
-        return web.json_response({"error": "未加入本局，无法提交行动"}, status=403)
+        return web.json_response({"error": "未加入本局，无法提交行动", "error_code": "player_not_in_game"}, status=403)
     if inst.is_dead(user_id):
-        return web.json_response({"error": "角色已死亡，无法提交行动"}, status=403)
+        return web.json_response({"error": "角色已死亡，无法提交行动", "error_code": "character_deceased"}, status=403)
     await api.drain_economy_outbox(gk)
     if has_blocking_economy_decision(inst):
         return web.json_response(
@@ -107,7 +107,7 @@ async def sse_stream_action(request: web.Request) -> web.StreamResponse:
             status=409,
         )
     if inst.state == GameState.ACTIVE_JUDGMENT:
-        return web.json_response({"error": "本轮正在推进剧情，请等待下一轮开始"}, status=409)
+        return web.json_response({"error": "本轮正在推进剧情，请等待下一轮开始", "error_code": "round_processing"}, status=409)
 
     response = web.StreamResponse()
     response.headers["Content-Type"] = "text/event-stream"
@@ -186,7 +186,7 @@ async def sse_play(request: web.Request) -> web.StreamResponse:
     if not inst:
         raise web.HTTPNotFound()
     if not user_id or user_id not in inst.players:
-        return web.json_response({"error": "未加入本局，无法订阅"}, status=403)
+        return web.json_response({"error": "未加入本局，无法订阅", "error_code": "player_not_in_game"}, status=403)
 
     # Credentials are checked once, when the stream opens; re-check what it was
     # granted under every tick so rotation, removal, a room password change or

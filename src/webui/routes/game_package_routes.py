@@ -54,7 +54,7 @@ async def api_export_game(request: web.Request) -> web.Response:
         return web.json_response({"error": "not found"}, status=404)
     session_uid = request.get("user_id", "")
     if not session_uid or session_uid != inst.gm_uid:
-        return web.json_response({"error": "仅 GM 可导出游戏"}, status=403)
+        return web.json_response({"error": "仅 GM 可导出游戏", "error_code": "gm_only"}, status=403)
 
     result = api.export_game_package(game_key)
     if not result.get("ok"):
@@ -83,28 +83,28 @@ async def api_import_game(request: web.Request) -> web.Response:
     api = _get_api(request)
     if request.content_type != "multipart/form-data":
         return web.json_response(
-            {"ok": False, "error": t("webui.routes.game_package_routes.multipart_required")}, status=400
+            {"ok": False, "error": t("webui.routes.game_package_routes.multipart_required"), "error_code": "route_game_package_routes_multipart_required"}, status=400
         )
     if request.content_length and request.content_length > MAX_SAVE_PACKAGE_BYTES:
         return web.json_response(
-            {"ok": False, "error": "存档包不能超过 50 MB"}, status=413
+            {"ok": False, "error": "存档包不能超过 50 MB", "error_code": "save_package_too_large"}, status=413
         )
     try:
         reader = await request.multipart()
         payload = await _read_save_upload(reader)
         if not payload:
             return web.json_response(
-                {"ok": False, "error": "缺少存档 zip 文件"}, status=400
+                {"ok": False, "error": "缺少存档 zip 文件", "error_code": "save_zip_missing"}, status=400
             )
         result = await api.import_game_package(payload)
     except _SavePackageTooLarge:
         return web.json_response(
-            {"ok": False, "error": "存档包不能超过 50 MB"}, status=413
+            {"ok": False, "error": "存档包不能超过 50 MB", "error_code": "save_package_too_large"}, status=413
         )
     except Exception as exc:
         logger.exception("导入存档失败")
         return web.json_response(
-            {"ok": False, "error": t("webui.routes.game_package_routes.import_failed", exc=exc)}, status=400
+            {"ok": False, "error": t("webui.routes.game_package_routes.import_failed", exc=exc), "error_code": "route_game_package_routes_import_failed"}, status=400
         )
     return web.json_response(result, status=200 if result.get("ok") else 400)
 
@@ -116,22 +116,22 @@ async def api_batch_delete_games(request: web.Request) -> web.Response:
     session_uid = request.get("user_id", "")
     if not session_uid:
         return web.json_response(
-            {"ok": False, "error": "未登录，无法删除存档"}, status=403
+            {"ok": False, "error": "未登录，无法删除存档", "error_code": "save_delete_unauthorized"}, status=403
         )
     api = _get_api(request)
     try:
         body = await request.json()
     except Exception:
         return web.json_response(
-            {"ok": False, "error": t("webui.routes.game_package_routes.body_not_json")}, status=400
+            {"ok": False, "error": t("webui.routes.game_package_routes.body_not_json"), "error_code": "route_game_package_routes_body_not_json"}, status=400
         )
     keys = body.get("game_keys")
     if not isinstance(keys, list) or not keys:
         return web.json_response(
-            {"ok": False, "error": t("webui.routes.game_package_routes.game_keys_required")}, status=400
+            {"ok": False, "error": t("webui.routes.game_package_routes.game_keys_required"), "error_code": "route_game_package_routes_game_keys_required"}, status=400
         )
     if len(keys) > 100:
-        return web.json_response({"ok": False, "error": t("webui.routes.game_package_routes.batch_limit")}, status=400)
+        return web.json_response({"ok": False, "error": t("webui.routes.game_package_routes.batch_limit"), "error_code": "route_game_package_routes_batch_limit"}, status=400)
 
     deleted: list[str] = []
     failed: list[dict] = []
@@ -164,7 +164,7 @@ async def api_delete_game(request: web.Request) -> web.Response:
         return denied
     session_uid = request.get("user_id", "")
     if not session_uid:
-        return web.json_response({"error": "未登录，无法删除存档"}, status=403)
+        return web.json_response({"error": "未登录，无法删除存档", "error_code": "save_delete_unauthorized"}, status=403)
     api = _get_api(request)
     game_key = request.match_info["game_key"]
     access = api.saved_game_access(game_key)
@@ -172,9 +172,9 @@ async def api_delete_game(request: web.Request) -> web.Response:
         return web.json_response({"error": "not found"}, status=404)
     gm_uid = str(access.get("gm_uid") or "")
     if not gm_uid:
-        return web.json_response({"error": "存档缺少 GM 身份，拒绝删除"}, status=403)
+        return web.json_response({"error": "存档缺少 GM 身份，拒绝删除", "error_code": "save_missing_gm_identity"}, status=403)
     if not _can_delete_save(request, session_uid, gm_uid):
-        return web.json_response({"error": "仅 GM 可删除游戏"}, status=403)
+        return web.json_response({"error": "仅 GM 可删除游戏", "error_code": "gm_only"}, status=403)
     result = api.delete_game(request.match_info["game_key"])
     if not result.get("ok"):
         error = str(result.get("error") or "删除失败")
