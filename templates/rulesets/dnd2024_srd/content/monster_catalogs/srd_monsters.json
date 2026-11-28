@@ -8299,7 +8299,7 @@
       "skills": {},
       "passive_perception": 10,
       "languages": [
-        "Common"
+        "language:common"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -8359,7 +8359,7 @@
       },
       "passive_perception": 14,
       "languages": [
-        "Draconic"
+        "language:draconic"
       ],
       "senses": {
         "darkvision": 60,
@@ -8469,7 +8469,7 @@
       },
       "passive_perception": 10,
       "languages": [
-        "Primordial"
+        "language:primordial"
       ],
       "senses": {
         "darkvision": 60
@@ -8545,7 +8545,7 @@
       },
       "passive_perception": 14,
       "languages": [
-        "Draconic"
+        "language:draconic"
       ],
       "senses": {
         "darkvision": 60,
@@ -8873,8 +8873,8 @@
       "skills": {},
       "passive_perception": 8,
       "languages": [
-        "Common",
-        "Giant"
+        "language:common",
+        "language:giant"
       ],
       "senses": {
         "darkvision": 60
@@ -8949,10 +8949,10 @@
       },
       "passive_perception": 16,
       "languages": [
-        "Celestial",
-        "Common",
-        "Elvish",
-        "Sylvan"
+        "language:celestial",
+        "language:common",
+        "language:elvish",
+        "language:sylvan"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -9150,7 +9150,7 @@
       },
       "passive_perception": 14,
       "languages": [
-        "Draconic"
+        "language:draconic"
       ],
       "senses": {
         "darkvision": 60,
@@ -9254,7 +9254,7 @@
       },
       "passive_perception": 15,
       "languages": [
-        "Infernal"
+        "language:infernal"
       ],
       "senses": {
         "darkvision": 60
@@ -9428,8 +9428,8 @@
       },
       "passive_perception": 15,
       "languages": [
-        "Common",
-        "Giant"
+        "language:common",
+        "language:giant"
       ],
       "senses": {},
       "resist_damage_types": [],
@@ -9600,7 +9600,7 @@
       },
       "passive_perception": 14,
       "languages": [
-        "Draconic"
+        "language:draconic"
       ],
       "senses": {
         "darkvision": 60,

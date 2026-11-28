@@ -608,13 +608,18 @@ def map_record(record: dict) -> dict:
         if isinstance(record.get(key), (int, float)) and record[key] > 0
     }
     raw_languages = (record.get("languages") or {}).get("data") or []
-    # feed 的语言是对象数组（name/key/desc），契约要的是名字列表。
-    languages = [
-        str(item.get("name") or item.get("key") or "").strip()
-        if isinstance(item, dict) else str(item).strip()
-        for item in raw_languages
-    ]
-    languages = [name for name in dict.fromkeys(languages) if name]
+    # 语言在目录里是**引用**（`language:common`），不是显示名：显示名会被
+    # 本地化，而引用不会。feed 给的是 name/key，这里取 key 做 canonical id。
+    languages = []
+    for item in raw_languages:
+        if isinstance(item, dict):
+            key = str(item.get("key") or item.get("name") or "").strip()
+        else:
+            key = str(item).strip()
+        key = key.lower().replace(" ", "_").replace("'", "")
+        if key:
+            languages.append(f"language:{key}")
+    languages = list(dict.fromkeys(languages))
     defenses = record.get("resistances_and_immunities") or {}
     attacks = map_attacks(record.get("actions") or [])
     return {
