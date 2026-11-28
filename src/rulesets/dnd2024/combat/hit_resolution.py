@@ -14,12 +14,15 @@ from .action_adapter import (
     attack_damage_node,
     damage_dice_count,
     dice_count,
+    double_dice_counts,
+    formula_node_from_dice_formula,
     reduce_dice_count,
     roll_damage_node,
     roll_damage_node_with_trace,
 )
 from .reaction_spells import attack_is_ranged
 from .primitives import (
+    SAVAGE_ATTACKER_DECISION,
     CombatIntentError,
     actor_kind as _actor_kind,
     attack_damage_parts,
@@ -360,30 +363,35 @@ class CombatHitResolutionMixin:
         slayer_dice = self._colossus_slayer_dice(instance, combat, actor, target)
         if slayer_dice:
             extra_dice.append(slayer_dice)
-        damage_node = attack_damage_node(
-            damage_formula=damage_formula,
-            modifier=modifier,
-            critical=critical,
-            extra_dice_formulas=extra_dice,
+        # 主骰与附加骰分开掷：Savage Attacker 只重掷武器自己的骰，若整棵
+        # AST 一起掷，重掷会把偷袭 / 印记一起换掉。RNG 顺序与 AST 顺序一致
+        # （主骰 → 各附加骰），所以点数序列与合并掷法逐项相同。
+        weapon_node = formula_node_from_dice_formula(damage_formula)
+        if critical:
+            weapon_node = double_dice_counts(weapon_node)
+        weapon_dice = damage_dice_count(damage_formula) * (2 if critical else 1)
+        weapon_total, weapon_rolls, floored = roll_damage_node_with_trace(
+            weapon_node, rng, die_floor=die_floor, floored_dice=weapon_dice,
         )
+        extra_total = 0
+        extra_rolls: list[int] = []
+        for extra in extra_dice:
+            extra_node = formula_node_from_dice_formula(extra)
+            if critical:
+                extra_node = double_dice_counts(extra_node)
+            part_total, part_rolls, _ = roll_damage_node_with_trace(extra_node, rng)
+            extra_total += part_total
+            extra_rolls.extend(part_rolls)
+        rage_damage = 0
         if ability == "str" and "rage" in actor["conditions"]:
             # 狂暴加值只在力量攻击命中时附加到伤害，不影响攻击加值。
             rage_damage = int(self.features.feature_value(
                 self._feature_character(actor), "rage", "rage_damage", 0,
             ) or 0)
-            if rage_damage:
-                damage_node = {"op": "add", "args": [
-                    damage_node, {"op": "constant", "value": rage_damage},
-                ]}
-        floored_dice = damage_dice_count(damage_formula) * (2 if critical else 1)
-        damage, rolls, floored = roll_damage_node_with_trace(
-            damage_node, rng,
-            die_floor=die_floor,
-            floored_dice=floored_dice,
-        )
-        damage = max(0, damage)
+        damage = max(0, weapon_total + extra_total + modifier + rage_damage)
+        rolls = [*weapon_rolls, *extra_rolls]
         damage, resistance = self._resist_damage(target, damage, damage_type)
-        damage_event = {
+        damage_event: dict[str, Any] = {
             "type": "resource.changed", "resource": "hp", "target_id": target_id,
             "delta": -damage, "amount": damage, "damage_type": damage_type,
             "critical": critical, "rolls": rolls,
@@ -487,11 +495,23 @@ class CombatHitResolutionMixin:
         offer = self._hit_spell_offer(
             instance, combat, actor, weapon, target_id, damage_event, intent,
         )
+        # Savage 排在至圣斩之前：它改的是武器主骰，而至圣斩追加的是独立伤害
+        # 源；先定主骰，追加骰才有意义。它也必须在减伤窗口之前挂起。
+        savage = self._savage_attacker_offer(
+            instance, combat, actor, weapon, target_id,
+            attempt_id=str(check.get("roll_id") or ""),
+            damage_event=damage_event,
+            weapon_node=weapon_node, weapon_dice=weapon_dice,
+            weapon_rolls=weapon_rolls, extra_total=extra_total,
+            modifier=modifier, rage_damage=rage_damage,
+            damage_type=damage_type, die_floor=die_floor,
+            next_decision=offer,
+        )
         damage_window = self._damage_window_offer(
             instance, combat, actor, target, damage_event, intent,
-            exclude_bards=exclude_bards, next_decision=offer,
+            exclude_bards=exclude_bards, next_decision=savage or offer,
         )
-        next_decision = damage_window or offer
+        next_decision = damage_window or savage or offer
         reaction = self._hit_reaction_offer(
             instance, combat, actor, target, check, damage_event, intent,
             next_decision=next_decision,
@@ -501,12 +521,76 @@ class CombatHitResolutionMixin:
         if reaction is not None and str(target["actor_id"]) in spent_reactions:
             # 同一反应预算已被本次攻击的检定面花掉：不能再开防守反应窗。
             reaction = None
-        if reaction or damage_window or offer:
-            return [{"type": "dnd2024.decision.pending", **(reaction or damage_window or offer)}]
+        if reaction or next_decision:
+            return [{"type": "dnd2024.decision.pending", **(reaction or next_decision)}]
         return self._resolve_committed_hit(
             instance, combat, actor_id, target, damage_event, damage, rng,
             settle_attack_declarations=True,
         )
+
+    def _savage_attacker_offer(
+        self, instance: Any, combat: dict[str, Any], actor: dict[str, Any],
+        weapon: dict[str, Any], target_id: str, *, attempt_id: str,
+        damage_event: dict[str, Any],
+        weapon_node: dict[str, Any], weapon_dice: int,
+        weapon_rolls: list[int], extra_total: int, modifier: int,
+        rage_damage: int, damage_type: str, die_floor: int,
+        next_decision: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Offer Savage Attacker's "roll twice, keep one" on this weapon hit.
+
+        The offer is made *before* the damage is revealed: the decision holds
+        the damage event, and only ``use`` rolls the second set.  Rolling it
+        here would put the alternate total where a player could read it and
+        then decline -- strictly stronger than the printed feat.
+        """
+
+        if actor["kind"] not in {"player", "companion"}:
+            return None
+        if int(actor.get("weapon_damage_rerolls_per_turn") or 0) <= 0:
+            return None
+        if weapon.get("unarmed"):
+            return None
+        if not weapon_rolls:
+            # 没有骰可换（伤害全靠常数）时重掷没有意义。
+            return None
+        actor_id = str(actor["actor_id"])
+        if self._feature_used_this_turn(combat, actor_id, "savage_attacker"):
+            return None
+        # 用这次攻击检定的 id 做决策标识：replay 走到同一击会得到同一个窗口，
+        # 而不是第二个；也不必从 intent 里取字段。
+        if not attempt_id:
+            return None
+        return {
+            "decision_id": f"savage-attacker:{attempt_id}",
+            "kind": SAVAGE_ATTACKER_DECISION,
+            "actor_id": actor_id,
+            "target_id": target_id,
+            "assigned_to": (
+                str(actor["id"]) if actor["kind"] == "player" else str(instance.gm_uid)
+            ),
+            # 与其它"用能力换结果"的窗口同一个词：前端已有 spend/decline
+            # 两个按钮，不需要为这一个能力再长一个 use 分支。
+            "options": ["spend", "decline"],
+            "critical": bool(damage_event.get("critical")),
+            # 选择发生在伤害揭示之前：公开投影会抹掉 amount/rolls。
+            "conceal_damage": True,
+            "damage_event": deepcopy(damage_event),
+            # 私有续接参数：不在 ``_PUBLIC_DECISION_FIELDS`` 里，非 GM 看不到，
+            # 所以玩家做决定前不会看到第二组骰。
+            "reroll_plan": {
+                "weapon_node": deepcopy(weapon_node),
+                "weapon_dice": int(weapon_dice),
+                "weapon_rolls": list(weapon_rolls),
+                "extra_total": int(extra_total),
+                "modifier": int(modifier),
+                "rage_damage": int(rage_damage),
+                "damage_type": damage_type,
+                "die_floor": int(die_floor),
+                "first_amount": int(damage_event.get("amount") or 0),
+            },
+            "next_decision": deepcopy(next_decision) if next_decision else None,
+        }
 
     def _hit_rider_declarations(
         self, instance: Any, actor: dict[str, Any], weapon: dict[str, Any],

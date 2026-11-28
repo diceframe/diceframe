@@ -2,7 +2,10 @@
   "schema_version": 1,
   "kind": "feat",
   "id": "savage_attacker",
-  "automation_level": "guided",
+  "automation_level": "deterministic",
   "category": "origin",
-  "source_ref": "srd-5.2.1:p87:savage-attacker"
+  "source_ref": "srd-5.2.1:p87:savage-attacker",
+  "parameters": {
+    "weapon_damage_rerolls_per_turn": 1
+  }
 }

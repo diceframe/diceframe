@@ -45,4 +45,37 @@ def two_handed_melee_damage_die_minimum(
     return floor
 
 
-__all__ = ["two_handed_melee_damage_die_minimum"]
+def weapon_damage_rerolls_per_turn(
+    definitions: Mapping[str, FeatDefinition],
+    character: Mapping[str, Any] | None,
+) -> int:
+    """How many times per turn this character may reroll weapon damage dice.
+
+    Savage Attacker says once.  Whether *this* attack qualifies (a weapon, not
+    unarmed) and whether the budget is spent are combat's questions: the
+    declaration only carries the number, and two copies do not stack.
+    """
+
+    if not isinstance(character, Mapping):
+        return 0
+    features = character.get("features")
+    feat_refs = features.get("feat_refs") if isinstance(features, Mapping) else None
+    if not isinstance(feat_refs, list) or not feat_refs:
+        return 0
+    budget = 0
+    for ref in feat_refs:
+        if not isinstance(ref, str):
+            continue
+        definition = definitions.get(ref.removeprefix("feat:"))
+        if definition is None:
+            continue
+        value = definition.parameters.get("weapon_damage_rerolls_per_turn")
+        if isinstance(value, int) and not isinstance(value, bool):
+            budget = max(budget, value)
+    return budget
+
+
+__all__ = [
+    "two_handed_melee_damage_die_minimum",
+    "weapon_damage_rerolls_per_turn",
+]

@@ -39,6 +39,12 @@ _PUBLIC_DAMAGE_FIELDS = frozenset({
     "type", "resource", "target_id", "delta", "amount", "damage_type",
     "critical", "rolls", "resisted", "resistance", "penalty", "penalty_rolls",
 })
+#: 决策要求"在看到结果之前决定"时，伤害事件只保留能描述这件事的字段。
+#: 例如 Savage Attacker：若玩家先看到这一组骰面，就可以"只在这组低时才重掷"，
+#: 比印刷版的能力更强。骰面在 resolve 之后的事件里才公开。
+_CONCEALED_DAMAGE_FIELDS = frozenset({
+    "type", "target_id", "damage_type", "critical",
+})
 
 
 def public_enemy(enemy: Any) -> Any:
@@ -88,6 +94,14 @@ def public_pending_decision(
             continue
         if key == "damage_event":
             projected[key] = _public_damage_event(decision[key])
+            if decision.get("conceal_damage"):
+                # 这个窗口的存在理由是"选择发生在结果之前"；数值与骰面
+                # 留到 resolve 之后的事件里（GM 分支不受影响）。
+                projected[key] = {
+                    field: projected[key][field]
+                    for field in _CONCEALED_DAMAGE_FIELDS
+                    if field in projected[key]
+                }
         elif key == "next_decision":
             # Nested decisions are authoritative continuation state; the owner
             # resolves only the current window and must not receive the chain.

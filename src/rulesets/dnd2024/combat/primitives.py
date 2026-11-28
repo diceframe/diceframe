@@ -219,6 +219,9 @@ INTENT_TYPES = frozenset({
 # 它和其它 pending decision 一样由 resolution 结算、reducer 记账，区别只在
 # 开窗者是 reducer —— 只有它知道"扣完临时 HP 之后是否真的到 0"。
 RELENTLESS_RAGE_DECISION = "relentless_rage"
+# Savage Attacker: offered on a weapon hit, before the damage is revealed, so
+# "use either roll" cannot become "look at the roll, then decide".
+SAVAGE_ATTACKER_DECISION = "savage_attacker"
 # 该决策只能写回这一处角色特性状态；未知键必须 fail closed，不能变成通用
 # character 写入口。同一个闭集也是 combat actor view 的投影范围：战斗读不到
 # 的状态，reducer 就不该写，休息引擎也不该写第二种形状。

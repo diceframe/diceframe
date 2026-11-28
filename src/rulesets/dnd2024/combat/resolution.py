@@ -49,6 +49,7 @@ from .primitives import (
     world_minutes,
     INITIATIVE_CHOICES,
     RELENTLESS_RAGE_DECISION,
+    SAVAGE_ATTACKER_DECISION,
     CombatIntentError,
     actor_kind as _actor_kind,
     attack_damage_parts,
@@ -1716,6 +1717,8 @@ class CombatResolutionMixin(
             return self._finish_check_window(instance, combat, decision, intent, rng)
         if decision.get("kind") == DAMAGE_WINDOW_DECISION:
             return self._finish_damage_window(instance, combat, decision, intent, rng)
+        if decision.get("kind") == SAVAGE_ATTACKER_DECISION:
+            return self._finish_savage_attacker(instance, combat, decision, intent, rng)
 
         if decision.get("kind") == RELENTLESS_RAGE_DECISION:
             return self._finish_relentless_rage(instance, combat, decision, intent, rng)

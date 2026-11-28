@@ -601,6 +601,10 @@ class CombatViewMixin:
             "two_handed_melee_damage_die_minimum": int(
                 feature_projection["two_handed_melee_damage_die_minimum"]
             ),
+            # Savage Attacker 的每回合重掷次数；同上，适用性在结算处判。
+            "weapon_damage_rerolls_per_turn": int(
+                feature_projection["weapon_damage_rerolls_per_turn"]
+            ),
         }
         # S0-F18 §4.2.4：感官是角色自己的属性，必须在 actor view 里。挂在
         # cast_spell 那一行会让"法术用尽 / 不在自己回合"时整条感官消失，

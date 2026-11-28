@@ -32,7 +32,10 @@ from .equipment import Dnd2024EquipmentCatalog
 from . import option_pool
 from .feat_capabilities import capability_labels, owned_capability_feats
 from .feat_models import FeatDefinition, load_feat_definitions
-from .feat_parameters import two_handed_melee_damage_die_minimum
+from .feat_parameters import (
+    two_handed_melee_damage_die_minimum,
+    weapon_damage_rerolls_per_turn,
+)
 from .models import (
     ClassFeatureDefinition,
     ClassFeatureError,
@@ -1454,6 +1457,12 @@ class Dnd2024ClassFeatureResolver:
             ),
             "two_handed_melee_damage_die_minimum": (
                 two_handed_melee_damage_die_minimum(
+                    self.feat_definitions, character,
+                )
+            ),
+            # Savage Attacker 的每回合重掷次数；适用性与额度消耗由结算处判定。
+            "weapon_damage_rerolls_per_turn": (
+                weapon_damage_rerolls_per_turn(
                     self.feat_definitions, character,
                 )
             ),
