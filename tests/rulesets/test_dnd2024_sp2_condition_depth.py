@@ -222,14 +222,16 @@ def test_enfeebled_only_penalises_strength_checks() -> None:
     registry = catalog["conditions"]
     conditions = {"enfeebled": {"source": "test"}}
 
+    for surface in ("ability_check", "skill_check", "saving_throw"):
+        assert check_disadvantage_sources(
+            registry, conditions, surface=surface, ability="str",
+        ) == ["enfeebled"], surface
+        assert check_disadvantage_sources(
+            registry, conditions, surface=surface, ability="dex",
+        ) == [], surface
+    # 查不到属性时按"不匹配"处理，不能当成"任意属性"。
     assert check_disadvantage_sources(
-        registry, conditions, surface="skill_check", ability="str",
-    ) == ["enfeebled"]
-    assert check_disadvantage_sources(
-        registry, conditions, surface="skill_check", ability="dex",
-    ) == []
-    assert check_disadvantage_sources(
-        registry, conditions, surface="attack", ability="str",
+        registry, conditions, surface="skill_check",
     ) == []
 
 
@@ -253,3 +255,39 @@ def test_an_enfeebled_actor_rolls_strength_saves_at_disadvantage() -> None:
     assert events["rolls"] == [10, 3]
     assert events["natural"] == 3
     assert events["advantage_mode"] == "disadvantage"
+
+
+# --- the repeated save is a mechanism this slice must not lose -------------
+
+def _repeat_save(engine, instance, rolls):
+    combat = ruleset_runtime.state(instance)["combat"]
+    return engine._save_repeat_events(
+        instance, combat, "enemy:goblin-1", SequenceRng(list(rolls)),
+    )
+
+
+def test_a_failed_repeat_save_keeps_the_condition() -> None:
+    _, engine, instance = _combat(focus="spell:blindness_deafness")
+    _cast(engine, instance, "spell:blindness_deafness", 2, ["enemy:goblin-1"], rolls=[1])
+    assert "blinded" in _enemy_conditions(instance)
+
+    events = _repeat_save(engine, instance, [1])
+
+    assert "blinded" in _enemy_conditions(instance)
+    assert any(e["type"] == "check.resolved" and e["kind"] == "saving_throw" for e in events)
+    assert not [e for e in events if e["type"] == "condition.removed"]
+
+
+def test_a_successful_repeat_save_ends_the_condition() -> None:
+    _, engine, instance = _combat(focus="spell:blindness_deafness")
+    _cast(engine, instance, "spell:blindness_deafness", 2, ["enemy:goblin-1"], rolls=[1])
+
+    events = _repeat_save(engine, instance, [20])
+
+    # `_save_repeat_events` 只产出事件，状态由 reducer 应用——断言事件而不是
+    # 状态，否则测的是"我有没有手动 apply"，不是"机制有没有决定移除"。
+    check = next(e for e in events if e["type"] == "check.resolved")
+    assert check["success"] is True
+    removed = next(e for e in events if e["type"] == "condition.removed")
+    assert removed["reason"] == "save_repeat"
+    assert removed["condition"] == "blinded"

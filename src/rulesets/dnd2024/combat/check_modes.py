@@ -42,7 +42,9 @@ def check_disadvantage_sources(
             if str(row.get("mode") or "") != "disadvantage":
                 continue
             scoped = row.get("abilities")
-            if scoped and ability and ability not in scoped:
+            # 查询没给属性**不等于**"任意属性"：声明里 abilities 缺省才是
+            # 全部，查询缺属性只能算不知道——按不匹配处理，宁可漏也不误伤。
+            if scoped and (not ability or ability not in scoped):
                 continue
             if condition_id not in found:
                 found.append(condition_id)

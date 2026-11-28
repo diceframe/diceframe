@@ -261,8 +261,7 @@ class Dnd2024CombatCatalog:
                         f"combat spell {dice_field} is invalid: {spell_id}"
                     )
             # S0-SP2：`condition` 允许字符串或 {choices, picked} 对象。对象形态
-            # 只服务"二选一"（Blindness/Deafness），所以只允许这两个键，且
-            # 每个候选项必须是已登记的条件——写错名字在这个阶段就红。
+            # 只服务"二选一"（Blindness/Deafness），所以只允许这两个键。
             condition = effect.get("condition")
             if isinstance(condition, dict):
                 if set(condition) - {"choices", "picked"}:
@@ -476,7 +475,9 @@ class Dnd2024CombatCatalog:
                         raise CombatCatalogError(
                             f"combat condition check_modes surface is invalid: {condition_id}"
                         )
-                    if str(row.get("mode") or "") not in {"advantage", "disadvantage"}:
+                    # 只有 disadvantage 有消费者。写 advantage 会静默无效，
+                    # 与"枚举值存在但引擎丢弃"是同一类问题。
+                    if str(row.get("mode") or "") != "disadvantage":
                         raise CombatCatalogError(
                             f"combat condition check_modes mode is invalid: {condition_id}"
                         )

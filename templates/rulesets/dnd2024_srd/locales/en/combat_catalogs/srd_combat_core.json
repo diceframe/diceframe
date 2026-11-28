@@ -9,7 +9,7 @@
     "labels": {
       "unarmed_strike": "Unarmed Strike",
       "condition.enfeebled": "Enfeebled",
-      "condition.enfeebled.summary": "Disadvantage on Strength-based D20 Tests.",
+      "condition.enfeebled.summary": "Disadvantage on Strength-based ability checks and saving throws.",
       "condition.blinded": "Blinded",
       "condition.blinded.summary": "Can't see: your attacks have disadvantage, attacks against you have advantage.",
       "condition.charmed": "Charmed",

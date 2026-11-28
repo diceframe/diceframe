@@ -41,6 +41,7 @@
 | 片 | 内容 | 状态 | 证据 |
 |---|---|---|---|
 | S0-SP1 | 1–2 环直填第一批：`ray_of_sickness`、`dissonant_whispers` | 🔵 | #899 + 执行报告；8 条候选里 2 条落地，6 条退回（各缺一个机制） |
+| S0-SP2 | `condition` 的检定维度与二选一：`mind_spike`、`blindness_deafness`、`ray_of_enfeeblement` | 🔵 | #899 + 执行报告；3 条落地（ray 只有失败分支），GAP-53/54/55 |
 
 > 进度不要写在这里，跑 `python scripts/spell_coverage.py`。
 >

@@ -117,7 +117,7 @@
     },
     "invisibility": {"mode": "buff", "range": 5, "target_count": 1, "upcast_target_count": 1, "condition": "invisible", "condition_duration": "concentration", "concentration": true, "ends_on": ["attack_roll", "damage_dealt", "spell_cast"]},
     "greater_invisibility": {"mode": "buff", "range": 5, "target_count": 1, "condition": "invisible", "condition_duration": "concentration", "concentration": true},
-    "blindness_deafness": {"mode": "saving_throw", "save": "con", "range": 120, "condition": {"choices": ["blinded", "deafened"], "picked": 0}, "condition_duration": "1_minute", "save_repeat": "con"},
+    "blindness_deafness": {"mode": "saving_throw", "save": "con", "range": 120, "target_count": 1, "upcast_target_count": 1, "condition": {"choices": ["blinded", "deafened"], "picked": 0}, "condition_duration": "1_minute", "save_repeat": "con"},
     "blur": {"mode": "buff", "range": 5, "target_count": 1, "target_scope": "self", "condition": "blurred", "condition_duration": "concentration", "concentration": true},
     "see_invisibility": {"mode": "buff", "range": 5, "target_count": 1, "target_scope": "self", "condition": "see_invisibility", "condition_duration": "1_hour"},
     "stoneskin": {"mode": "buff", "range": 5, "target_count": 1, "condition": "stoneskinned", "condition_duration": "concentration", "concentration": true},

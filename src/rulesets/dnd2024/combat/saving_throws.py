@@ -380,7 +380,10 @@ class CombatSavingThrowsMixin:
             self.catalog.conditions,
             actor.get("conditions") or {},
             surface="skill_check",
-            ability=self._skill_default_ability(skill),
+            # 用**本次实际**的属性，不是技能的默认属性：Primal Knowledge 在
+            # 狂暴时把 Acrobatics 之类做成力量检定，按默认属性匹配会让
+            # Enfeebled 在那类检定上失效（或反过来误伤）。
+            ability=check_ability or self._skill_default_ability(skill),
         ):
             declared.append({"code": condition_id, "mode": "disadvantage"})
         mode = mode_from_sources(declared)
