@@ -3,12 +3,20 @@ export type ManualRollStatus = 'pending' | 'resolved' | 'cancelled'
 export type ManualRollPurpose = 'free' | 'check' | 'contest'
 export type ManualRollComparison = 'auto' | 'at_least' | 'at_most'
 
+export interface ManualRollFace {
+  sides: number
+  value: number
+  taken: boolean
+  sign?: number
+}
+
 export interface ManualRollResult {
   formula: string
   rolls: number[]
   modifier: number
   total: number
   natural: number | null
+  faces?: ManualRollFace[]
   target?: number
   comparison?: ManualRollComparison
   verdict?: 'success' | 'failure' | 'winner' | 'loss' | string
@@ -34,6 +42,7 @@ export interface ManualRollRequest {
   /** G4：GM 指定的技能/属性检定；有它时结算由规则集负责。 */
   check?: ManualRollCheck | null
   purpose?: ManualRollPurpose
+  source?: 'quick' | string
   target?: number | null
   comparison?: ManualRollComparison
   include_in_ai_context?: boolean

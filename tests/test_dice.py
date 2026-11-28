@@ -281,3 +281,49 @@ class TestParsePlayerRoll:
         assert parse_player_roll("这把骰子不错") is None
         assert parse_player_roll("let's roll") is None
         assert parse_player_roll("我要攻击") is None
+
+
+class TestExtendedDiceExpression:
+    def test_keep_highest_and_lowest(self, monkeypatch):
+        seq = iter([4, 17, 19, 3])
+        monkeypatch.setattr("random.randint", lambda a, b: next(seq))
+
+        adv = roll("2d20kh1+2")
+        assert adv.rolls == [4, 17]
+        assert adv.natural == 17
+        assert adv.modifier == 2
+        assert adv.total == 19
+        assert adv.faces == [
+            {"sides": 20, "value": 4, "taken": False, "sign": 1},
+            {"sides": 20, "value": 17, "taken": True, "sign": 1},
+        ]
+
+        dis = roll("2d20kl")
+        assert dis.rolls == [19, 3]
+        assert dis.natural == 3
+        assert dis.total == 3
+        assert [f["taken"] for f in dis.faces] == [False, True]
+
+    def test_4d6kh3_and_multi_term_expression(self, monkeypatch):
+        seq = iter([2, 6, 4, 5, 7, 3, 2])
+        monkeypatch.setattr("random.randint", lambda a, b: next(seq))
+
+        stat = roll("4d6kh3")
+        assert stat.rolls == [2, 6, 4, 5]
+        assert stat.natural == 15
+        assert stat.total == 15
+        assert [f["taken"] for f in stat.faces] == [False, True, True, True]
+
+        combo = roll("1d8 + 1d6 - 1d4 + 3")
+        assert combo.formula == "1d8+1d6-1d4+3"
+        assert combo.rolls == [7, 3, 2]
+        assert combo.natural == 8  # 7 + 3 - 2
+        assert combo.modifier == 3
+        assert combo.total == 11
+        assert [f["sides"] for f in combo.faces] == [8, 6, 4]
+        assert [f["sign"] for f in combo.faces] == [1, 1, -1]
+
+    def test_extended_formula_rejects_invalid_and_overflow(self):
+        for bad in ("", "5", "2d6kh3", "2d6kl0", "101d6", "60d6+60d6", "d20+101", "1d6++2", "d6+abc"):
+            with pytest.raises(ValueError):
+                roll(bad)

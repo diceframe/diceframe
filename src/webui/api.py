@@ -2348,6 +2348,9 @@ class WebAPI:
     async def cancel_manual_roll_request(self, game_key, user_id, request_id, body):
         return await self._manual_rolls.cancel(game_key, user_id, request_id, body)
 
+    async def quick_manual_roll(self, game_key, user_id, body):
+        return await self._manual_rolls.quick_roll(game_key, user_id, body)
+
     async def reveal_check(self, game_key: str, check_id: str, user_id: str):
         return await self._check_reveals.reveal(game_key, check_id, user_id)
 

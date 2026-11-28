@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { NIcon } from 'naive-ui'
-import { BookOutline, ChatbubbleEllipsesOutline, ChevronBack, ChevronForward, KeyOutline, PlayForwardOutline, ShareOutline, ShieldOutline, StatsChartOutline, TerminalOutline } from '@vicons/ionicons5'
+import { BookOutline, ChatbubbleEllipsesOutline, ChevronBack, ChevronForward, DiceOutline, KeyOutline, PlayForwardOutline, ShareOutline, ShieldOutline, StatsChartOutline, TerminalOutline } from '@vicons/ionicons5'
 import { useRoute, useRouter } from 'vue-router'
 import { api, apiBlob, errorMessage as apiErrorMessage, hasAccessToken, isNotFoundError, retryOnRateLimit } from '@/api/client'
 import type { BotBindTokenResponse, CharacterCard, CharacterCardsResponse, CharacterListResponse, CharacterPortrait, CharacterSheet, CheckResult, CommandResponse, GameDetail, GmStyle, HealthResponse, JsonObject, LuckDecisionResponse, PendingPayment, Player, PlayerContextResponse, PublicAction, RestActivity, RuleMeta, StoryMode, WorldCandidate, WorldListResponse, WorldTemplatesResponse } from '@/api/types'
@@ -28,6 +28,7 @@ import RunFinalePanel from '@/features/play/run-story/RunFinalePanel.vue'
 import DirectorProposalCard from '@/components/play/DirectorProposalCard.vue'
 import CombatMessageComposer from '@/components/play/CombatMessageComposer.vue'
 import KpQuestionDialog from '@/components/play/KpQuestionDialog.vue'
+import FreeRollModal from '@/features/play/manual-rolls/FreeRollModal.vue'
 import TableTalkFeed from '@/components/play/TableTalkFeed.vue'
 import EconomyProposalCard from '@/components/play/EconomyProposalCard.vue'
 import GmChargeComposer from '@/features/play/economy/GmChargeComposer.vue'
@@ -348,9 +349,12 @@ const hasRulesetPanels = computed(() => (rulesetGameplay.value?.panels || []).so
 )))
 const hasCombatExtension = computed(() => Boolean(game.detail.value?.combat_extension))
 const hasProfessionalTools = computed(() => hasCampaignGuidance.value || hasAuthoritativeCombat.value)
+const showFreeRoll = ref(false)
+const canFreeRoll = computed(() => Boolean(game.currentGame.value && game.detail.value?.run_id && actorId.value && !runReadOnly.value))
+const freeRollLabel = computed(() => String(locale.value).startsWith('zh') ? '自由掷骰' : 'Free roll')
 // 自由规则可能只开启 combat_extension：此时 tools 栏也必须出现，否则「战斗动作」没有入口。
-// 同理，仅声明顺序检定/组合技能的非战斗规则（SK-01）也需要工具栏承载顺序动作编排器。
-const hasComposerTools = computed(() => hasProfessionalTools.value || canAskKp.value || hasCombatExtension.value || hasRulesetActionCapability.value)
+// 同理，仅声明顺序检定/组合技能的非战斗规则（SK-01）与全员可用的自由掷骰也需要工具栏承载入口。
+const hasComposerTools = computed(() => hasProfessionalTools.value || canAskKp.value || canFreeRoll.value || hasCombatExtension.value || hasRulesetActionCapability.value)
 const hasSequentialActionCapability = computed(() => Boolean(
   game.detail.value?.ruleset_runtime?.capabilities?.sequential_checks
   || game.detail.value?.ruleset_runtime?.capabilities?.composite_action,
@@ -1432,6 +1436,16 @@ function onPlayKeydown(event: KeyboardEvent) {
         @shared="game.refresh(true)"
       />
 
+      <FreeRollModal
+        v-if="showFreeRoll && canFreeRoll"
+        :game-key="game.currentGame.value"
+        :run-id="String(game.detail.value.run_id || '')"
+        :preview="preview"
+        :delegate="delegate"
+        @close="showFreeRoll = false"
+        @rolled="game.refresh(true)"
+      />
+
       <Modal
         v-if="showCharacterCenter && game.player.value && hasRulesAwareCharacters"
         :title="t('advancedCharacterCenter')"
@@ -1604,6 +1618,15 @@ function onPlayKeydown(event: KeyboardEvent) {
           <template #tools>
             <div v-if="hasComposerTools" class="ruleset-context-tools" :aria-label="rulesetToolCopy.menu">
               <button
+                v-if="canFreeRoll"
+                class="free-roll-tool-trigger"
+                data-testid="free-roll-trigger"
+                type="button"
+                :title="freeRollLabel"
+                :aria-label="freeRollLabel"
+                @click="showFreeRoll = true"
+              ><NIcon :component="DiceOutline" /><span>{{ freeRollLabel }}</span></button>
+              <button
                 v-if="canAskKp"
                 class="kp-question-tool-trigger"
                 type="button"
@@ -1672,6 +1695,15 @@ function onPlayKeydown(event: KeyboardEvent) {
           </template>
           <template #tools>
             <div v-if="hasComposerTools" class="ruleset-context-tools" :aria-label="rulesetToolCopy.menu">
+              <button
+                v-if="canFreeRoll"
+                class="free-roll-tool-trigger"
+                data-testid="free-roll-trigger"
+                type="button"
+                :title="freeRollLabel"
+                :aria-label="freeRollLabel"
+                @click="showFreeRoll = true"
+              ><NIcon :component="DiceOutline" /><span>{{ freeRollLabel }}</span></button>
               <button
                 v-if="canAskKp"
                 class="kp-question-tool-trigger"
