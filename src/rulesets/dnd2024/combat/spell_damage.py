@@ -25,5 +25,6 @@ def damage_node_for(
     node = spell_formula_node(
         str(payload["dice"]), upcast_damage, spell, slot_level, actor,
     )
-    # 重击翻的是骰数，不是加值：与各站点原来的顺序一致。
+    # 重击翻的是**骰数**（`2d8` → `4d8`），不是把骰出的数值×2，也不动固定
+    # 加值——`double_dice_counts` 只重写 `dice` 节点的 `formula`。
     return double_dice_counts(node) if critical else node

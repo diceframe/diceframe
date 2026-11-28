@@ -219,8 +219,9 @@ class CombatTriggeredSpellsMixin:
                 "args": [node, formula_node_from_dice_formula(effect["extra_damage"])],
             }
         if decision["critical"]:
-            # 重击翻的是"整棵树"，而额外伤害段在上一行刚加进去——所以翻骰必须
-            # 发生在加完额外伤害之后，不能改从效果项重建（那会丢掉那一段）。
+            # 重击翻的是"树里每个骰节点的**骰数**"（固定加值不动，见
+            # `double_dice_counts`）。额外伤害段在上一行刚加进去，所以翻骰必须
+            # 发生在它之后——改从效果项重建会丢掉那一段。
             node = double_dice_counts(node)
         damage, rolls = roll_damage_node(node, rng)
         events = self._spell_cost_events(actor, spell, slot)
