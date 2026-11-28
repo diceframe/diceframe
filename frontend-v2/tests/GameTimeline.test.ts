@@ -15,6 +15,8 @@ describe('GameTimeline',()=>{
     })
     const paragraphs = wrapper.findAll('.live-narration')
     expect(paragraphs).toHaveLength(2)
+    expect(paragraphs[0]!.classes()).not.toContain('live-narration-active')
+    expect(paragraphs[1]!.classes()).toContain('live-narration-active')
     expect(paragraphs[0]!.text()).toContain('你示意恩恩')
     expect(paragraphs[1]!.text()).toContain('韦恩举着灯')
     expect(paragraphs[1]!.text()).toContain('<img src=x onerror=alert(1)>')
