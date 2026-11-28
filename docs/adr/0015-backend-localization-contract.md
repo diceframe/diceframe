@@ -106,6 +106,9 @@
 - 出口 `error_code_middleware` 的职责收窄：已声明的 code 原样保留；能在 `webui/errors.<lang>.yml` 找到同码译文时用译文替换 `error`，否则保留抛出点渲染的文案。
 - `ERROR_CODE_MAP`（中文文案 → code）冻结：只允许删除，不允许新增。它是迁移遗留，不是新路径。
 - 新 code 必须 snake_case（`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`）；现存的 80 个 UPPER 写法登记为 `LEGACY_DECLARED_CODES` 并冻结。**不批量改写旧 code**：`apiErrors` 的社区译文按 key 名登记来源指纹，改名会让已审核译文失效，收益不匹配代价。
+- **一个载荷只能声明一个 code。** `code` 与 `error_code` 同时出现时值必须相同；路由状态经
+  `declared_error_code()`（优先 `error_code`，回退 `code`）解析，两个不同的值会让白名单失配，
+  把 403 变成 422。`tests/test_error_codes.py` 对全仓 AST 检查这条不变量。
 - 同一条错误只在一处登记译文：`webui/errors.<lang>.yml` 与 service 级 yml 不得重复覆盖同一 code。
 - 前端 `apiErrors.<code>` 保持社区语言的唯一出口；未登记的 code 回退后端原文。
 - 迁移用 ratchet：`scripts/audit_error_codes.py` 按文件记录「载荷有 `error` 但没有 `error_code`」的处数（`scripts/error_code_baseline.json`），只允许减少。口径包含 `t()` 文本、裸字面量与只写 `code` 三种，因为前端对这三种都拿不到 code。
