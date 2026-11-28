@@ -139,7 +139,7 @@ def test_scheduler_gates_actions_until_the_gauge_is_full(rule: RuleSystem) -> No
     blocked = cast(instance, rule, "p2", "spell:fireball", target_ids=["npc:old_monk"])
 
     assert blocked["ok"] is False
-    assert blocked["code"] == "SCHEDULER_NOT_READY"
+    assert blocked["error_code"] == "SCHEDULER_NOT_READY"
     assert instance.get_character_sheet("p2")["ling_li"] == 30
     assert instance.npcs["old_monk"]["hp"] == 30
 
@@ -201,7 +201,7 @@ def test_action_consumes_the_action_gauge_turn(rule: RuleSystem) -> None:
 
     again = cast(instance, rule, "p1", "spell:fireball", target_ids=["npc:old_monk"])
 
-    assert again["ok"] is False and again["code"] == "SCHEDULER_NOT_READY"
+    assert again["ok"] is False and again["error_code"] == "SCHEDULER_NOT_READY"
 
 
 def test_speed_technique_lands_in_the_action_gauge(rule: RuleSystem) -> None:
@@ -266,5 +266,5 @@ def test_rule_without_combat_declaration_keeps_the_legacy_turn_flow() -> None:
         {"intent_id": "legacy-1", "action_id": "spell:fireball"},
         actor_uid="p1", viewer_is_gm=False,
     )
-    assert result["code"] == "COMBAT_EXTENSION_NOT_CONFIGURED"
+    assert result["error_code"] == "COMBAT_EXTENSION_NOT_CONFIGURED"
     assert "combat_extension" not in instance.to_dict()["modules"] or not combat_extension_state.current(instance)

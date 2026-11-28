@@ -35,6 +35,8 @@ from src.rulesets.dnd2024.features.attack_declarations import (
     committed_hit_events,
     held_hit_declarations,
 )
+from . import invocation_effects
+from ..spells.casting import free_cast_resource
 from .cover import cover_axis
 from .reaction_spells import effective_armor_class
 
@@ -420,6 +422,12 @@ class CombatSpellResolutionMixin:
         """
 
         base = int(effect["range"])
+        # 祈唤给的射程加值先落在"生效射程"上，Distant Spell 再对它翻倍：
+        # 反过来的话 15 级 Eldritch Spear 只会多 30 尺。
+        extended = base + invocation_effects.spear_range_bonus(
+            self.features, self._feature_character(actor),
+            str(spell.get("ref") or ""), base,
+        )
         if metamagic_plan is not None and metamagic_plan.has("distant_spell"):
             # Distant Spell：射程 ≥5 尺翻倍；触及变 30 尺。Self 不变——"自己"
             # 没有可以拉长的距离。
@@ -430,14 +438,14 @@ class CombatSpellResolutionMixin:
             # 否则 Cure Wounds 会被"翻倍"成 10 尺。
             if text.startswith("touch"):
                 return 30
-            if base < 5:
+            if extended < 5:
                 return 30
-            return base * 2
+            return extended * 2
         if self._potent_spellcasting_owner(actor, spell) != "class:druid":
-            return base
+            return extended
         character = self._feature_character(actor)
         if not self.features.has_feature(character, "improved_elemental_fury"):
-            return base
+            return extended
         bonus = int(self.features.feature_value(
             character, "improved_elemental_fury", "range_bonus_ft", 0,
         ) or 0)
@@ -445,15 +453,26 @@ class CombatSpellResolutionMixin:
             character, "improved_elemental_fury", "range_minimum_ft", 0,
         ) or 0)
         if not bonus or base < minimum:
-            return base
-        return base + bonus
+            return extended
+        return extended + bonus
 
-    def _add_potent_spellcasting(
-        self, actor: dict[str, Any], spell: dict[str, Any], node: dict[str, Any],
+    def _add_cantrip_damage_bonus(
+        self, actor: dict[str, Any], spell: dict[str, Any], spell_ref: str,
+        node: dict[str, Any],
     ) -> dict[str, Any]:
-        """Add the flat Wisdom bonus as a constant, so crits never double it."""
+        """Add flat per-roll cantrip bonuses as one constant.
+
+        Potent Spellcasting (a class option) and Agonizing Blast (an invocation
+        bound to this cantrip) are the same shape: a flat modifier on every
+        damage roll.  Summing them here keeps every damage branch calling one
+        function instead of each growing another branch, and the constant keeps
+        crits from doubling it.
+        """
 
         bonus = self._potent_spellcasting_bonus(actor, spell)
+        bonus += invocation_effects.agonizing_bonus(
+            self.features, self._feature_character(actor), actor, spell, spell_ref,
+        )
         if not bonus:
             return node
         return {
@@ -861,7 +880,9 @@ class CombatSpellResolutionMixin:
                         damage_node = double_dice_counts(damage_node)
                     # Potent Spellcasting 是加值不是骰：先翻倍骰数再追加，
                     # 否则重击会把这个固定加值也一起翻倍。
-                    damage_node = self._add_potent_spellcasting(actor, spell, damage_node)
+                    damage_node = self._add_cantrip_damage_bonus(
+                        actor, spell, spell_ref, damage_node,
+                    )
                     damage_node = self._maybe_overchannel(intent, damage_node)
                     damage, rolls, empowered = self._damage_roll(
                         damage_node, metamagic_plan, rng,
@@ -892,6 +913,24 @@ class CombatSpellResolutionMixin:
                     if relentless:
                         damage_event["relentless"] = relentless
                     events.append(damage_event)
+                    # Repelling Blast：每次命中推一次，距离由玩家声明（校验
+                    # 已确认 0-10、绑定这把戏法）。多道射线各自命中就各自推——
+                    # 规则说的是"每次命中该戏法"；目标过大则这一次不推。
+                    push_feature, push_ft = invocation_effects.repelling_push_ft(
+                        self.features, self._feature_character(actor),
+                        spell_ref, intent.get("spell_push_ft"),
+                        str(target.get("size") or ""),
+                    )
+                    if push_ft:
+                        direction = (
+                            1 if self._position(combat, target_id)
+                            >= self._position(combat, actor_id) else -1
+                        )
+                        events.append({
+                            "type": "dnd2024.position.changed", "actor_id": target_id,
+                            "distance": direction * push_ft, "forced": True,
+                            "source_rider": push_feature,
+                        })
                     # Hunter's Mark 认的是"任意攻击检定命中"，法术攻击也在内：
                     # 独立实例、独立抗性，但只算一次专注豁免。
                     mark_row = self._mark_rider_row(actor, target_id)
@@ -999,7 +1038,9 @@ class CombatSpellResolutionMixin:
                     )
                     # 加值先并入骰式，再走豁免减半与抗性：三者都只作用于
                     # 同一个总数，顺序不能倒。
-                    damage_node = self._add_potent_spellcasting(actor, spell, damage_node)
+                    damage_node = self._add_cantrip_damage_bonus(
+                        actor, spell, spell_ref, damage_node,
+                    )
                     damage_node = self._maybe_overchannel(intent, damage_node)
                     damage, rolls, empowered = self._damage_roll(
                         damage_node, metamagic_plan, rng,
@@ -1059,7 +1100,9 @@ class CombatSpellResolutionMixin:
                     str(effect["damage"]), effect.get("upcast_damage"),
                     spell, slot_level, actor,
                 )
-                damage_node = self._add_potent_spellcasting(actor, spell, damage_node)
+                damage_node = self._add_cantrip_damage_bonus(
+                        actor, spell, spell_ref, damage_node,
+                    )
                 damage_node = self._maybe_overchannel(intent, damage_node)
                 damage, rolls, empowered = self._damage_roll(
                     damage_node, metamagic_plan, rng,
@@ -1142,10 +1185,25 @@ class CombatSpellResolutionMixin:
                 flat = int(effect.get("upcast_flat", 0) or 0)
                 if flat and levels > 0:
                     node = {"op": "add", "args": [node, {"op": "constant", "value": flat * levels}]}
+                # Fiendish Vigor：经它自己的免槽施放时骰面取最大（False Life
+                # 固定 12）。是否走的是那个槽由角色卡上的免槽行回答，不看
+                # "这次施法是不是免费的"——两种都免费时不能混为一谈。
+                paid = (
+                    free_cast_resource(actor, spell_ref, int(spell["level"]))
+                    if int(slot_level or 0) == 0 else None
+                )
+                maximized = invocation_effects.temp_hp_maximized(
+                    self.features, self._feature_character(actor),
+                    list(actor.get("free_cast_slots") or []), slot_level,
+                    spell_ref, str((paid or {}).get("free_slot_id") or ""),
+                )
+                if maximized:
+                    node = maximize_dice_nodes(node)
                 amount, rolls = roll_damage_node(node, rng)
                 events.append({
                     "type": "resource.changed", "resource": "temp_hp", "target_id": target_id,
                     "delta": amount, "amount": amount, "rolls": rolls,
+                    **({"maximized": True} if maximized else {}),
                 })
                 succeeded = True
             elif mode == "teleport":
@@ -1308,6 +1366,7 @@ class CombatSpellResolutionMixin:
                 direction = 1 if self._position(combat, target_id) >= self._position(combat, actor_id) else -1
                 events.append({
                     "type": "dnd2024.position.changed", "actor_id": target_id,
+                    "feet": int(effect["push"]), "away_from": actor_id,
                     "distance": direction * int(effect["push"]), "forced": True,
                 })
         # 使用计数与自伤都落在法术效果之后、胜利判定之前：计数是这次施法的

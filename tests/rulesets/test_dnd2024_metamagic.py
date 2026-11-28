@@ -626,7 +626,7 @@ def test_replace_may_drop_an_option_picked_in_the_same_level(caster_levels) -> N
 # 这一组用两条法术做对照：
 #   * spell:burning_hands —— 术士列表（也在法师列表上），豁免 + 伤害；
 #   * spell:vicious_mockery —— 只有吟游诗人列表，豁免 + 伤害；
-#   * spell:fire_bolt / spell:eldritch_blast —— 法术攻击戏法，一术士一邪术。
+#   * spell:fire_bolt / spell:eldritch_blast —— 法术攻击戏法，一术士一魔契师。
 # 目标是证明：法术能不能施放与它是不是"术士法术"无关；只有后者决定 +1 与优势。
 
 

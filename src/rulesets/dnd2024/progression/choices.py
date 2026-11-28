@@ -19,6 +19,7 @@ from src.rulesets.dnd2024.progression.catalog import ProgressionCatalogError
 
 if TYPE_CHECKING:
     from src.rulesets.bundle import LoadedRulesetBundle
+    from src.rulesets.dnd2024.features.feat_models import FeatDefinition
     from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
 
 
@@ -55,7 +56,7 @@ class AdvancementChoicesMixin:
         # Supplied by ``Dnd2024AdvancementEngine``; no runtime state here.
         bundle: LoadedRulesetBundle
         catalog: Dnd2024ProgressionCatalog
-        advancement_feats: dict[str, dict[str, Any]]
+        advancement_feats: dict[str, FeatDefinition]
         advancement_feat_labels: dict[str, str]
         _feature_resolver: Dnd2024ClassFeatureResolver
         def missing_choices(self, payload: dict[str, Any]) -> list[dict[str, Any]]: ...
@@ -330,26 +331,26 @@ class AdvancementChoicesMixin:
         if not selected_ref:
             errors.append(f"{'epic_boon_ref' if epic else 'feat_ref'} is required at this level")
             return {}, "", errors
-        if feat is None or feat.get("category") != expected_category:
+        if feat is None or feat.category != expected_category:
             errors.append(f"{selected_ref} is not an eligible {expected_category} feat")
             return {}, "", errors
         target_level = int(snapshot["level"])
-        if target_level < int(feat.get("minimum_level", 1) or 1):
+        if target_level < feat.minimum_level:
             errors.append(f"{selected_ref} level prerequisite is not met")
         owned = list(character.get("features", {}).get("feat_refs") or [])
-        if selected_ref in owned and not bool(feat.get("repeatable")):
+        if selected_ref in owned and not feat.repeatable:
             errors.append(f"{selected_ref} cannot be selected more than once")
-        minimums = feat.get("any_ability_minimum")
+        minimums = feat.legacy.get("any_ability_minimum")
         abilities = character.get("abilities") or {}
         if isinstance(minimums, dict) and not any(
             int(abilities.get(ability, 0) or 0) >= int(minimum)
             for ability, minimum in minimums.items()
         ):
             errors.append(f"{selected_ref} ability prerequisite is not met")
-        if feat.get("requires_spellcasting") and not snapshot.get("slot_profile"):
+        if feat.legacy.get("requires_spellcasting") and not snapshot.get("slot_profile"):
             errors.append(f"{selected_ref} requires Spellcasting")
 
-        ability_choice = feat.get("ability_choice")
+        ability_choice = feat.legacy.get("ability_choice")
         if not isinstance(ability_choice, dict):
             if raw not in (None, {}):
                 errors.append(f"{selected_ref} does not grant an ability increase")
@@ -424,6 +425,10 @@ class AdvancementChoicesMixin:
                 definition = resolver.catalog.features_by_key.get(key)
                 if definition is None or definition.choice is None:
                     continue
+                if definition.choice.count_track:
+                    # 按职业表计数的池由 `plan_pools` 负责，包括"本级刚获得
+                    # 这个特性"的情形；留在这里会被当成普通互斥槽再要求一次。
+                    continue
                 seen.add(key)
                 declared.append(definition)
 
@@ -434,6 +439,13 @@ class AdvancementChoicesMixin:
             errors.append("feature_choices must be an array")
             raw_choices = []
 
+        # 池子的提交由 `plan_pools` 消费：它不是"本级新获得特性"的槽，留在这里
+        # 会被下面那条"does not belong to a feature gained at this level"判非法。
+        pool_keys = {
+            (item.owner, item.id, item.choice.id)
+            for item in resolver.features_for(character)
+            if item.choice is not None and item.choice.count_track
+        }
         submitted: list[dict[str, Any]] = []
         for raw in raw_choices:
             if not isinstance(raw, dict):
@@ -442,6 +454,13 @@ class AdvancementChoicesMixin:
             unknown = sorted(set(raw) - FEATURE_CHOICE_KEYS)
             if unknown:
                 errors.append(f"feature choice has an unknown field: {unknown[0]}")
+                continue
+            submitted_key = (
+                str(raw.get("owner") or ""),
+                str(raw.get("feature_id") or ""),
+                str(raw.get("choice_id") or ""),
+            )
+            if submitted_key in pool_keys:
                 continue
             submitted.append({
                 "owner": str(raw.get("owner") or ""),
@@ -459,6 +478,106 @@ class AdvancementChoicesMixin:
         }
         for definition in declared:
             choice = definition.choice
+            if choice is not None and choice.kind == "language":
+                # 语言槽与技能槽分开处理：语言不参与任何机械化判定，它只是
+                # "这个角色懂什么语言"的权威记录。因此**未作答不阻塞升级**——
+                # 强制每个既有游侠在 2 级补两个语言会让他们全部升级失败，而
+                # 漏选两个语言不会导致任何错误结算。
+                allowed_languages = set(choice.enabled_options) or {
+                    f"language:{entity['id']}" for entity in self.bundle.list("language")
+                    if entity.get("rarity") == "standard"
+                }
+                known_languages = {
+                    *(str(ref) for ref in ((character.get("proficiencies") or {}).get("language_refs") or [])),
+                    *resolver.language_sources(character),
+                    *(str(ref) for prior in records for ref in prior["selected_refs"] if str(ref).startswith("language:")),
+                }
+                options = []
+                for entity in self.bundle.list("language"):
+                    lang_ref = f"language:{entity['id']}"
+                    reasons: list[str] = []
+                    if lang_ref not in allowed_languages:
+                        reasons.append("not_standard")
+                    if lang_ref in known_languages:
+                        reasons.append("already_known")
+                    options.append({
+                        "value": lang_ref,
+                        "available": not reasons,
+                        "unavailable_reasons": reasons,
+                    })
+                requirements.append({
+                    "id": f"feature_choice:{definition.owner}:{definition.id}:{choice.id}",
+                    "kind": "feature_choice",
+                    "enforced": False,
+                    "required": False,
+                    "owner": definition.owner,
+                    "feature_id": definition.id,
+                    "choice_id": choice.id,
+                    "count": choice.count,
+                    "options": options,
+                })
+                slot = [
+                    index for index, record in enumerate(submitted)
+                    if record["owner"] == definition.owner
+                    and record["feature_id"] == definition.id
+                    and record["choice_id"] == choice.id
+                ]
+                if len(slot) > 1:
+                    errors.append(
+                        f"feature choice {definition.id} was submitted more than once"
+                    )
+                    matched.update(slot)
+                    continue
+                if not slot:
+                    continue
+                matched.add(slot[0])
+                record = submitted[slot[0]]
+                raw_refs = record["selected_refs"]
+                if not isinstance(raw_refs, list) or not all(
+                    isinstance(ref, str) for ref in raw_refs
+                ):
+                    errors.append(
+                        f"feature choice {definition.id} selected_refs must be strings"
+                    )
+                    continue
+                if len(raw_refs) != choice.count:
+                    errors.append(
+                        f"feature choice {definition.id} must select exactly "
+                        f"{choice.count} option"
+                    )
+                    continue
+                if len(set(raw_refs)) != len(raw_refs):
+                    errors.append(
+                        f"feature choice {definition.id} selected_refs repeats an option"
+                    )
+                    continue
+                allowed_languages = set(choice.enabled_options) or {
+                    f"language:{entity['id']}" for entity in self.bundle.list("language")
+                    if entity.get("rarity") == "standard"
+                }
+                if any(ref not in allowed_languages for ref in raw_refs):
+                    errors.append(
+                        f"feature choice {definition.id} selected a non-Standard language"
+                    )
+                    continue
+                known_languages = {
+                    *(str(ref) for ref in ((character.get("proficiencies") or {}).get("language_refs") or [])),
+                    *resolver.language_sources(character),
+                    *(str(ref) for prior in records for ref in prior["selected_refs"] if str(ref).startswith("language:")),
+                }
+                duplicate_lang = next((ref for ref in raw_refs if ref in known_languages), "")
+                if duplicate_lang:
+                    errors.append(f"{duplicate_lang} is already known")
+                    continue
+                records.append({
+                    "owner": definition.owner,
+                    "feature_id": definition.id,
+                    "choice_id": choice.id,
+                    "selected_refs": list(raw_refs),
+                    "granted_level": target_level,
+                    "grants": "",
+                })
+                continue
             if choice is not None and choice.kind == "skill_proficiency":
                 options = self._skill_options(choice, proficient, expertise)
                 requirements.append({
@@ -478,9 +597,14 @@ class AdvancementChoicesMixin:
                     expertise=expertise,
                 )
                 records.extend(chosen)
-                expertise.update(
-                    str(ref) for record in chosen for ref in record["selected_refs"]
-                )
+                if choice.grants == "expertise":
+                    expertise.update(
+                        str(ref) for record in chosen for ref in record["selected_refs"]
+                    )
+                elif choice.grants == "proficiency":
+                    proficient.update(
+                        str(ref) for record in chosen for ref in record["selected_refs"]
+                    )
                 continue
             if choice is not None and choice.kind == "feature_option":
                 # 互斥特性选项（Divine Strike / Potent Spellcasting、Primal
@@ -636,8 +760,8 @@ class AdvancementChoicesMixin:
                 continue
             ref = str(raw_refs[0])
             feat = self.advancement_feats.get(ref.removeprefix("feat:"))
-            if not ref.startswith("feat:") or not isinstance(feat, dict) or (
-                feat.get("category") != choice.category
+            if not ref.startswith("feat:") or feat is None or (
+                feat.category != choice.category
             ):
                 errors.append(f"{ref} is not a {choice.category} feat")
                 continue
@@ -777,6 +901,8 @@ class AdvancementChoicesMixin:
             "choice_id": choice.id,
             "selected_refs": list(raw_refs),
             "granted_level": target_level,
+            # 落地时要区分"加倍"与"新增熟练"：只看 ref 分不出来。
+            "grants": choice.grants,
         }]
 
     def _feat_options(
@@ -790,27 +916,30 @@ class AdvancementChoicesMixin:
         owned = list(character.get("features", {}).get("feat_refs") or [])
         result: list[dict[str, Any]] = []
         for feat_id, feat in self.advancement_feats.items():
-            if feat.get("category") != category:
+            if feat.category != category:
                 continue
             unavailable_reasons: list[str] = []
-            if target_level < int(feat.get("minimum_level", 1) or 1):
+            if target_level < feat.minimum_level:
                 unavailable_reasons.append("level")
-            if f"feat:{feat_id}" in owned and not bool(feat.get("repeatable")):
+            if f"feat:{feat_id}" in owned and not feat.repeatable:
                 unavailable_reasons.append("already_owned")
-            minimums = feat.get("any_ability_minimum")
+            # 这两条前置仍以旧字段声明（FD2 迁进 ``requires``），只有**位置**
+            # 从顶层换到了 ``legacy``，判据语义一字未改。
+            minimums = feat.legacy.get("any_ability_minimum")
             if isinstance(minimums, dict) and not any(
                 int(abilities.get(ability, 0) or 0) >= int(minimum)
                 for ability, minimum in minimums.items()
             ):
                 unavailable_reasons.append("ability_prerequisite")
-            if feat.get("requires_spellcasting") and not snapshot.get("slot_profile"):
+            if feat.legacy.get("requires_spellcasting") and not snapshot.get("slot_profile"):
                 unavailable_reasons.append("spellcasting")
             result.append({
                 "value": f"feat:{feat_id}",
                 "name": self.advancement_feat_labels[feat_id],
-                "source_ref": str(feat["source_ref"]),
+                "source_ref": feat.source_ref,
                 "available": not unavailable_reasons,
                 "unavailable_reasons": unavailable_reasons,
-                "ability_choice": deepcopy(feat.get("ability_choice") or {}),
+                # 对外投影保持原形：前端读这个键，内部声明改了它也不变。
+                "ability_choice": deepcopy(feat.legacy.get("ability_choice") or {}),
             })
         return result

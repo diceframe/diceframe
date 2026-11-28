@@ -164,6 +164,17 @@ def _set_rest_session(instance: Any, session: dict[str, Any]) -> None:
     state["rest_session"] = session
 
 
+def _rest_hp(character: dict[str, Any]) -> int:
+    """The HP the rest engine will gate on: canonical first, legacy card second."""
+
+    canonical = character.get("ruleset_character")
+    if isinstance(canonical, dict):
+        resources = canonical.get("resources")
+        hp = resources.get("hp") if isinstance(resources, dict) else None
+        return hp if isinstance(hp, int) and not isinstance(hp, bool) else 0
+    return int(character.get("hp", 0) or 0)
+
+
 def _rest_eligible_uids(instance: Any) -> list[str]:
     """Only present, conscious characters need to opt into a party rest."""
 
@@ -171,7 +182,7 @@ def _rest_eligible_uids(instance: Any) -> list[str]:
         uid for uid in instance.players
         if uid not in instance.away_players
         and instance.is_alive(uid)
-        and int(instance.get_character_sheet(uid).get("hp", 0) or 0) > 0
+        and _rest_hp(instance.get_character_sheet(uid)) > 0
     )
 
 
@@ -436,6 +447,8 @@ async def _resolve_live_authority(
             "STALE_CHARACTER_REVISION", t("webui.services.ruleset_rest.character_updated_elsewhere"),
             revision=revision,
         )
+    if _rest_hp(character) < 1:
+        return _failure("REST_NOT_AVAILABLE", t("webui.services.ruleset_rest.hp_required"))
     try:
         hit_die_rolls = _server_hit_die_rolls(
             character, parsed.get("hit_dice") if rest == "short" else None,
@@ -555,7 +568,7 @@ async def _resolve_live_party_authority(
         if user_id not in instance.players:
             return _failure("CHARACTER_NOT_FOUND", "角色不存在")
         character = instance.get_character_sheet(user_id)
-        if int(character.get("hp", 0) or 0) < 1:
+        if _rest_hp(character) < 1:
             return _failure("REST_NOT_AVAILABLE", t("webui.services.ruleset_rest.hp_required"))
         try:
             hit_dice = _validate_hit_dice_counts(
@@ -593,7 +606,7 @@ async def _resolve_live_party_authority(
             uid for uid in session.get("required_uids", [])
             if uid in instance.players and uid not in instance.away_players
             and instance.is_alive(uid)
-            and int(instance.get_character_sheet(uid).get("hp", 0) or 0) > 0
+            and _rest_hp(instance.get_character_sheet(uid)) > 0
         }
         if user_id not in required:
             return _failure("REST_NOT_AVAILABLE", t("webui.services.ruleset_rest.character_not_in_party_rest"))

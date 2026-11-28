@@ -223,7 +223,7 @@ async def test_set_gm_style_service_roundtrip_and_errors(tmp_path):
     assert bad["ok"] is False
 
     missing = await service.set_gm_style("web|ghost|bot", {})
-    assert missing == {"ok": False, "error": "游戏不存在"}
+    assert missing == {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
 
 
 def test_game_detail_hides_gm_style_override_from_players(tmp_path):

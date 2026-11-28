@@ -61,15 +61,15 @@ def save_map_background_upload(
     backgrounds_dir: Path, file_data: str, file_name: str = "",
 ) -> dict[str, Any]:
     if not file_data:
-        return {"ok": False, "error": t("webui.services.map_backgrounds.file_missing")}
+        return {"ok": False, "error": t("webui.services.map_backgrounds.file_missing"), "error_code": "map_backgrounds_file_missing"}
     if len(file_data) > (MAX_MAP_BACKGROUND_BYTES * 4 // 3) + 32:
-        return {"ok": False, "error": t("webui.services.map_backgrounds.file_too_large")}
+        return {"ok": False, "error": t("webui.services.map_backgrounds.file_too_large"), "error_code": "map_backgrounds_file_too_large"}
     try:
         raw = base64.b64decode(file_data, validate=True)
     except (ValueError, binascii.Error):
-        return {"ok": False, "error": t("webui.services.map_backgrounds.file_data_invalid")}
+        return {"ok": False, "error": t("webui.services.map_backgrounds.file_data_invalid"), "error_code": "map_backgrounds_file_data_invalid"}
     if not raw or len(raw) > MAX_MAP_BACKGROUND_BYTES:
-        return {"ok": False, "error": t("webui.services.map_backgrounds.file_too_large")}
+        return {"ok": False, "error": t("webui.services.map_backgrounds.file_too_large"), "error_code": "map_backgrounds_file_too_large"}
     try:
         payload = _normalized_map_background(raw)
     except ValueError as exc:

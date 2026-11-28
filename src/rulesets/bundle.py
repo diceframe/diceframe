@@ -13,10 +13,17 @@ from src.engine.language import content_locale_candidates
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
 _BUNDLE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]*$")
+_LANGUAGE_RARITIES = frozenset({"standard", "rare", "secret"})
+
 _AUTOMATION_LEVELS = frozenset({"deterministic", "guided", "reference"})
 _FORBIDDEN_EXECUTION_KEYS = frozenset({
     "python", "javascript", "script", "code", "eval", "module", "callable",
 })
+# 有些字段名不带 `_ref(s)` 后缀但语义就是引用表：怪物 stat block 的
+# `languages` 是其一（`language:common`），既有的命名不能被改，
+# 又必须受同一条"引用必须存在"的校验约束。
+_REF_ALIASES = {"languages": "language"}
+
 _LOCALE_FIELDS = frozenset({
     "name", "description", "summary", "hint", "recommendation_reason",
     "tutorial", "labels", "text",
@@ -45,6 +52,11 @@ class RulesetBundleManifest:
     supported_locales: tuple[str, ...]
     license_id: str
     attribution_path: str
+    # 这个 bundle 里允许出现的"内容包"标识。``primary`` 是缺省：一个实体
+    # 不声明 ``content_pack`` 就属于它。其余的值让同一份 bundle 能装下
+    # 非主来源的内容（例如 PHB 独有的专长），而不必假装它们是 SRD。
+    primary_content_pack: str = ""
+    content_packs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +72,19 @@ class LoadedRulesetBundle:
 
     def list(self, kind: str) -> list[dict[str, Any]]:
         return [deepcopy(item) for item in self.entities.get(kind, {}).values()]
+
+
+def _validate_language(entity: dict[str, Any], path: Path) -> None:
+    """A language must declare how it may be acquired.
+
+    Character creation only offers Standard languages, so this field decides
+    what the builder shows.  Letting a typo through here would either hide a
+    Standard language or offer a rare one as a creation pick.
+    """
+
+    rarity = entity.get("rarity")
+    if rarity not in _LANGUAGE_RARITIES:
+        raise RulesetBundleError(f"invalid language rarity {rarity!r}: {path}")
 
 
 def _read_object(path: Path) -> dict[str, Any]:
@@ -139,7 +164,7 @@ class RulesetBundleLoader:
             raise RulesetBundleError(f"ruleset bundle does not exist: {directory_id}")
 
         manifest = self._load_manifest(root)
-        entities = self._load_entities(root)
+        entities = self._load_entities(root, manifest)
         self._validate_references(entities)
         active_locale = self._select_locale(manifest, locale)
         materialized = deepcopy(entities)
@@ -175,6 +200,27 @@ class RulesetBundleLoader:
         attribution = (root / attribution_path).resolve()
         if not attribution.is_relative_to(root) or not attribution.is_file():
             raise RulesetBundleError("license.attribution must reference a file inside the bundle")
+        primary_pack = ''
+        packs: tuple[str, ...] = ()
+        raw_packs = raw.get("content_packs")
+        if raw_packs is not None:
+            if not isinstance(raw_packs, dict):
+                raise RulesetBundleError("content_packs must be an object")
+            primary_pack = _required_text(
+                raw_packs.get("primary"), "content_packs.primary",
+            )
+            declared = raw_packs.get("declared")
+            if not isinstance(declared, list) or not declared:
+                raise RulesetBundleError("content_packs.declared must be a non-empty array")
+            packs = tuple(
+                _required_text(item, "content_packs.declared[]") for item in declared
+            )
+            if len(set(packs)) != len(packs):
+                raise RulesetBundleError("content_packs.declared must not contain duplicates")
+            if primary_pack not in packs:
+                raise RulesetBundleError(
+                    "content_packs.primary must be listed in content_packs.declared"
+                )
         return RulesetBundleManifest(
             schema_version=schema_version,
             bundle_id=bundle_id,
@@ -185,9 +231,13 @@ class RulesetBundleLoader:
             supported_locales=supported_locales,
             license_id=license_id,
             attribution_path=attribution_path,
+            primary_content_pack=primary_pack,
+            content_packs=packs,
         )
 
-    def _load_entities(self, root: Path) -> dict[str, dict[str, dict[str, Any]]]:
+    def _load_entities(
+        self, root: Path, manifest: RulesetBundleManifest,
+    ) -> dict[str, dict[str, dict[str, Any]]]:
         content_root = root / "content"
         if not content_root.is_dir():
             raise RulesetBundleError("ruleset bundle content directory is missing")
@@ -214,8 +264,27 @@ class RulesetBundleLoader:
                     raise RulesetBundleError(
                         f"invalid automation_level {automation!r}: {path}"
                     )
+                if kind == "language":
+                    _validate_language(entity, path)
                 _validate_no_executable_content(entity, path)
                 _validate_effects(entity, path)
+                # 来源写在实体上而不是靠目录布局：同一条目录（feats/）里可以
+                # 同时装 SRD 与 PHB 的内容，只靠"文件放在哪"是分不出来的。
+                # 缺省归属主包，所以只有非主来源的内容需要显式声明。
+                raw_pack = entity.get("content_pack")
+                if raw_pack is not None and not isinstance(raw_pack, str):
+                    raise RulesetBundleError(
+                        f"entity {kind}:{entity_id} content_pack must be a string"
+                    )
+                pack = raw_pack or ""
+                if not pack:
+                    pack = manifest.primary_content_pack
+                    entity["content_pack"] = pack
+                elif pack not in manifest.content_packs:
+                    raise RulesetBundleError(
+                        f"entity {kind}:{entity_id} declares an undeclared "
+                        f"content_pack: {pack!r}"
+                    )
                 by_kind = entities.setdefault(kind, {})
                 if entity_id in by_kind:
                     raise RulesetBundleError(f"duplicate entity {kind}:{entity_id}")
@@ -241,6 +310,12 @@ class RulesetBundleLoader:
                                     f"{source_kind}:{source_id} field {key} must be an array"
                                 )
                             refs = raw
+                        elif key in _REF_ALIASES:
+                            if not isinstance(raw, list):
+                                raise RulesetBundleError(
+                                    f"{source_kind}:{source_id} field {key} must be an array"
+                                )
+                            refs = raw
                         for ref in refs:
                             value = str(ref or "")
                             if value.count(":") != 1:
@@ -248,6 +323,11 @@ class RulesetBundleLoader:
                                     f"invalid internal reference {value!r} in {source_kind}:{source_id}"
                                 )
                             target_kind, target_id = value.split(":", 1)
+                            expected_kind = _REF_ALIASES.get(key)
+                            if expected_kind and target_kind != expected_kind:
+                                raise RulesetBundleError(
+                                    f"invalid reference kind {value!r} for {key} in {source_kind}:{source_id}"
+                                )
                             if target_id not in entities.get(target_kind, {}):
                                 raise RulesetBundleError(
                                     f"unresolved reference {value!r} in {source_kind}:{source_id}"

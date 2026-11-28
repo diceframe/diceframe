@@ -83,15 +83,15 @@ def builtin_scene_image_ref(rule_id: str = "") -> dict[str, str]:
 
 def save_scene_image_upload(dependencies: SceneImageDependencies | None, file_data: str, file_name: str = "") -> dict[str, Any]:
     if not file_data:
-        return {"ok": False, "error": t("webui.services.scene_images.file_missing")}
+        return {"ok": False, "error": t("webui.services.scene_images.file_missing"), "error_code": "scene_images_file_missing"}
     if len(file_data) > (MAX_SCENE_IMAGE_UPLOAD_BYTES * 4 // 3) + 32:
-        return {"ok": False, "error": t("webui.services.scene_images.file_too_large")}
+        return {"ok": False, "error": t("webui.services.scene_images.file_too_large"), "error_code": "scene_images_file_too_large"}
     try:
         raw = base64.b64decode(file_data, validate=True)
     except (ValueError, binascii.Error):
-        return {"ok": False, "error": t("webui.services.scene_images.file_data_invalid")}
+        return {"ok": False, "error": t("webui.services.scene_images.file_data_invalid"), "error_code": "scene_images_file_data_invalid"}
     if not raw or len(raw) > MAX_SCENE_IMAGE_UPLOAD_BYTES:
-        return {"ok": False, "error": t("webui.services.scene_images.file_too_large")}
+        return {"ok": False, "error": t("webui.services.scene_images.file_too_large"), "error_code": "scene_images_file_too_large"}
     try:
         payload = _normalized_scene_image(raw)
     except ValueError as exc:

@@ -18,6 +18,7 @@ from src.webui.routes.game_route_common import _gm_only_inst
 from src.engine import module_hooks
 from src.engine.modules import room_access
 from src.localization.messages import t
+from src.webui.errors import declared_error_code
 
 
 async def api_games(request: web.Request) -> web.Response:
@@ -75,7 +76,7 @@ async def api_gameplay_view(request: web.Request) -> web.Response:
     if not viewer.is_member:
         return web.json_response({"ok": False, "code": "GAME_MEMBER_REQUIRED"}, status=403)
     result = api.gameplay_view(game_key, viewer.uid, viewer.is_gm)
-    status = 200 if result.get("ok") else (409 if result.get("code") == "UNSUPPORTED_GAMEPLAY" else 422)
+    status = 200 if result.get("ok") else (409 if declared_error_code(result) == "UNSUPPORTED_GAMEPLAY" else 422)
     return web.json_response(result, status=status)
 
 

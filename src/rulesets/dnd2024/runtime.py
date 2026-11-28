@@ -36,6 +36,7 @@ import src.rulesets.dnd2024.advancement_access as advancement_access
 from src.rulesets.dnd2024.binding import rule_binding
 from src.rulesets.dnd2024.character.attunement import attunement_state_for_projection
 from src.rulesets.dnd2024.character.builder import Dnd2024CharacterBuilder
+from src.rulesets.dnd2024.character.health_display import sync_health_display
 from src.rulesets.dnd2024.character.primitives import ABILITY_IDS, ability_modifier
 from src.rulesets.dnd2024.character.reconciliation import (
     Dnd2024CharacterStateReconciler,
@@ -724,12 +725,32 @@ class Dnd2024Runtime:
             try:
                 choices["class_spells"] = Dnd2024SpellSelection(
                     self.load_bundle(str(draft.get("locale") or ""))
-                ).options(class_ref, 1)
+                ).options(class_ref, 1, character=self._draft_spell_proxy(draft, class_ref))
             except (ProgressionCatalogError, SpellCatalogError):
                 choices["class_spells"] = {}
         else:
             choices["class_spells"] = {}
         return choices
+
+    @staticmethod
+    def _draft_spell_proxy(draft: Mapping[str, Any], class_ref: str) -> dict[str, Any]:
+        level = int(draft.get("level", 1) or 1)
+        features_block: dict[str, Any] = {}
+        raw_features = draft.get("features")
+        if isinstance(raw_features, Mapping) and raw_features.get("subclass_ref"):
+            features_block["subclass_ref"] = str(raw_features["subclass_ref"])
+        raw_choices = draft.get("feature_choices")
+        if isinstance(raw_choices, list):
+            features_block["feature_choices"] = [
+                dict(row) for row in raw_choices if isinstance(row, Mapping)
+            ]
+        return {
+            "build": {
+                "level": level,
+                "class_levels": [{"class_ref": class_ref, "level": level}],
+            },
+            "features": features_block,
+        }
 
     def validate_character(self, rule: Any, draft: dict[str, Any]) -> list[str]:
         del rule
@@ -742,7 +763,10 @@ class Dnd2024Runtime:
             return errors
         _parsed, spell_errors = Dnd2024SpellSelection(
             bundle
-        ).validate(class_ref, 1, draft.get("class_spell_choices"))
+        ).validate(
+            class_ref, 1, draft.get("class_spell_choices"),
+            character=self._draft_spell_proxy(draft, class_ref),
+        )
         form_errors: list[str] = []
         if class_ref == "class:druid":
             entries = [
@@ -837,7 +861,11 @@ class Dnd2024Runtime:
             if not isinstance(choices, dict):
                 raise ValueError("professional character advancement choices are invalid")
             try:
-                rebuilt = engine.apply_next_level(rebuilt, choices)
+                # 老卡是逐级重放出来的：这一路径允许"本切片之前没有池记录"
+                # 的卡跳过必填槽，否则任何 2 级以上的旧魔契师卡都打不开。
+                rebuilt = engine.apply_next_level(
+                    rebuilt, choices, allow_legacy_pool=True,
+                )
             except ProgressionCatalogError as exc:
                 raise ValueError(f"professional character advancement is invalid: {exc}") from exc
         rebuilt = self._sync_class_resources(bundle, rebuilt)
@@ -1876,6 +1904,11 @@ class Dnd2024Runtime:
             "attunement": attunement,
         }
         merged = merge_live_character_projection(current, projected)
+        resources = current.get("resources")
+        if isinstance(resources, dict):
+            merged["resources"] = deepcopy(resources)
+            if "hp" in merged["resources"] and not isinstance(merged["resources"]["hp"], dict):
+                merged["resources"].pop("hp", None)
         # 带上既有的 revision / operation log，让随后的 reconcile 是在真实历史上
         # 继续推进，而不是从零重新计数。
         for field in ("ruleset_revision", "ruleset_operation_log"):
@@ -1886,6 +1919,7 @@ class Dnd2024Runtime:
         self._reconciler(bundle).reconcile(
             merged, frozenset({"equipment", "inventory"}),
         )
+        sync_health_display(merged, canonical)
         return merged
 
     def _reconcile_party_before_combat(self, instance: Any, bundle: Any) -> None:

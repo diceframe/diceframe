@@ -327,13 +327,13 @@ async def generate_rule(
         return config_error
     prompt = (prompt or "").strip()
     if not prompt:
-        return {"ok": False, "error": t("webui.services.generation.rule_theme_required")}
+        return {"ok": False, "error": t("webui.services.generation.rule_theme_required"), "error_code": "generation_rule_theme_required"}
     source_rule_id = (source_rule_id or "freeform_fantasy").strip()
     source_path = RuleSystem.path_for(
         dependencies.rules_dir, source_rule_id, language,
     )
     if not source_path.exists():
-        return {"ok": False, "error": t("webui.services.generation.source_rule_missing", source_rule_id=source_rule_id)}
+        return {"ok": False, "error": t("webui.services.generation.source_rule_missing", source_rule_id=source_rule_id), "error_code": "generation_source_rule_missing"}
     try:
         language = normalize_language(language)
         source_rule = json.loads(source_path.read_text(encoding="utf-8"))
@@ -348,7 +348,7 @@ async def generate_rule(
             language=language,
         )
         if not data:
-            return {"ok": False, "error": t("webui.services.generation.rule_json_parse_failed")}
+            return {"ok": False, "error": t("webui.services.generation.rule_json_parse_failed"), "error_code": "generation_rule_json_parse_failed"}
         data["rule_id"] = rule_id
         data["custom"] = True
         data["source_rule_id"] = source_rule_id
@@ -402,7 +402,7 @@ async def generate_character(
             language=resolved_language,
         )
         if not data:
-            return {"ok": False, "error": t("webui.services.generation.character_parse_failed")}
+            return {"ok": False, "error": t("webui.services.generation.character_parse_failed"), "error_code": "generation_character_parse_failed"}
         return {"ok": True, "character": data}
     except Exception as e:
         logger.exception("AI 生成角色失败")
@@ -420,7 +420,7 @@ async def generate_text(
         return config_error
     llm_client = dependencies.llm_client
     if llm_client is None:
-        return {"ok": False, "error": t("webui.services.generation.llm_client_uninitialized")}
+        return {"ok": False, "error": t("webui.services.generation.llm_client_uninitialized"), "error_code": "generation_llm_client_uninitialized"}
     language = normalize_language(language)
     system = system_hint or (
         "You are a TRPG character and setting assistant. Answer briefly and practically in natural English. Do not output JSON."

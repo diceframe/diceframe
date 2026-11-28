@@ -344,7 +344,7 @@
           "source_ref": "srd-5.2.1:p51:fleet-step",
           "summary": "When you take a Bonus Action other than Step of the Wind, you can also use Step of the Wind immediately after that Bonus Action.",
           "parameters": {
-            "free_step_after_bonus_action": true
+            "free_step_after_bonus_action_for": "step_of_the_wind"
           }
         },
         {
@@ -1222,6 +1222,44 @@
       "source_ref": "srd-5.2.1:p28:barbarian-features",
       "features": [
         {
+          "id": "primal_knowledge",
+          "owner": "class:barbarian",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p29:primal-knowledge",
+          "summary": "You gain proficiency in another skill of your choice from the skill list available to Barbarians at level 1. In addition, while your Rage is active, whenever you make an ability check using Acrobatics, Intimidation, Perception, Stealth, or Survival, you can make it as a Strength check even if it normally uses a different ability.",
+          "check_modifiers": [
+            {
+              "surface": "skill_check",
+              "skills": [
+                "skill:acrobatics",
+                "skill:intimidation",
+                "skill:perception",
+                "skill:stealth",
+                "skill:survival"
+              ],
+              "when_condition": "rage",
+              "replace_ability": "str"
+            }
+          ],
+          "choice": {
+            "id": "primal_knowledge_skill",
+            "kind": "skill_proficiency",
+            "category": "skill",
+            "grants": "proficiency",
+            "count": 1,
+            "requires_proficiency": false,
+            "exclude_expertise": true,
+            "enabled_options": [
+              "skill:animal_handling",
+              "skill:athletics",
+              "skill:intimidation",
+              "skill:nature",
+              "skill:perception",
+              "skill:survival"
+            ]
+          }
+        },
+        {
           "id": "unarmored_defense",
           "minimum_level": 1,
           "source_ref": "srd-5.2.1:p29:unarmored-defense",
@@ -1512,6 +1550,22 @@
       "source_ref": "srd-5.2.1:p61:rogue-features",
       "features": [
         {
+          "id": "thieves_cant",
+          "owner": "class:rogue",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p62:thieves-cant",
+          "summary": "You know Thieves' Cant and one other language of your choice, which you choose from the language tables in Character Creation.",
+          "parameters": {
+            "language_grants": ["language:thieves_cant"]
+          },
+          "choice": {
+            "id": "thieves_cant_language",
+            "kind": "language",
+            "category": "language",
+            "count": 1
+          }
+        },
+        {
           "id": "expertise",
           "minimum_level": 1,
           "source_ref": "srd-5.2.1:p62:rogue-expertise",
@@ -1752,6 +1806,35 @@
     "ranger": {
       "source_ref": "srd-5.2.1:p59:ranger-features",
       "features": [
+        {
+          "id": "deft_explorer",
+          "owner": "class:ranger",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p59:deft-explorer",
+          "summary": "Expertise. Choose one of your skill proficiencies with which you lack Expertise. You gain Expertise in that skill.",
+          "choice": {
+            "id": "deft_explorer_skill",
+            "kind": "skill_proficiency",
+            "category": "skill",
+            "grants": "expertise",
+            "count": 1,
+            "requires_proficiency": true,
+            "exclude_expertise": true
+          }
+        },
+        {
+          "id": "deft_explorer_languages",
+          "owner": "class:ranger",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p59:deft-explorer",
+          "summary": "Languages. You know two languages of your choice from the language tables in Character Creation. (The other half of Deft Explorer is declared separately because a feature carries one choice slot.)",
+          "choice": {
+            "id": "deft_explorer_language",
+            "kind": "language",
+            "category": "language",
+            "count": 2
+          }
+        },
         {
           "id": "favored_enemy",
           "minimum_level": 1,
@@ -2089,6 +2172,22 @@
             "grants": "expertise",
             "count": 2,
             "requires_proficiency": true,
+            "exclude_expertise": true
+          }
+        },
+        {
+          "id": "bonus_proficiencies",
+          "owner": "subclass:college_of_lore",
+          "minimum_level": 3,
+          "source_ref": "srd-5.2.1:p35:bonus-proficiencies",
+          "summary": "You gain proficiency with three skills of your choice.",
+          "choice": {
+            "id": "bonus_proficiency_skills",
+            "kind": "skill_proficiency",
+            "category": "skill",
+            "grants": "proficiency",
+            "count": 3,
+            "requires_proficiency": false,
             "exclude_expertise": true
           }
         },
@@ -2594,12 +2693,202 @@
               ]
             }
           ]
+        },
+        {
+          "id": "eldritch_invocations",
+          "owner": "class:warlock",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p70:eldritch-invocations",
+          "summary": "You have learned eldritch invocations, fragments of forbidden knowledge. You gain one invocation of your choice, and you gain more as you reach higher levels, as shown in the Invocations column of the Warlock Features table. You can replace one invocation with another one for which you qualify whenever you gain a Warlock level.",
+          "choice": {
+            "id": "invocations",
+            "kind": "feature_option",
+            "category": "feature",
+            "count": 1,
+            "count_track": "eldritch_invocations",
+            "replace_per_level": 1,
+            "enabled_options": [
+              "feature:agonizing_blast",
+              "feature:devil_s_sight",
+              "feature:eldritch_mind",
+              "feature:eldritch_spear",
+              "feature:fiendish_vigor",
+              "feature:lessons_of_the_first_ones",
+              "feature:repelling_blast",
+              "feature:witch_sight"
+            ]
+          }
+        },
+        {
+          "id": "agonizing_blast",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p72:agonizing-blast",
+          "summary": "Prerequisite: Level 2+ Warlock, a Warlock Cantrip That Deals Damage. Choose one of your known Warlock cantrips that deals damage. You can add your Charisma modifier to that spell's damage rolls. Repeatable: choose a different eligible cantrip each time.",
+          "parameters": {
+            "invocation_effect_status": "complete",
+            "invocation_repeatable": true,
+            "invocation_binds": "known_cantrip",
+            "invocation_cantrip_deals_damage": true,
+            "invocation_damage_bonus_ability": "cha"
+          }
+        },
+        {
+          "id": "devil_s_sight",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p72:devils-sight",
+          "summary": "Prerequisite: Level 2+ Warlock. You can see normally in Dim Light and Darkness, both magical and nonmagical, within 120 feet of yourself.",
+          "parameters": {
+            "invocation_effect_status": "guided",
+            "invocation_unautomated_reason": "light_model"
+          }
+        },
+        {
+          "id": "eldritch_mind",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p72:eldritch-mind",
+          "summary": "You have Advantage on Constitution saving throws that you make to maintain Concentration.",
+          "parameters": {
+            "invocation_effect_status": "complete",
+            "invocation_concentration_advantage": true
+          }
+        },
+        {
+          "id": "eldritch_spear",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p72:eldritch-spear",
+          "summary": "Prerequisite: Level 2+ Warlock, a Warlock Cantrip That Deals Damage. Choose one of your known Warlock cantrips that deals damage and has a range of 10+ feet. When you cast that spell, its range increases by a number of feet equal to 30 times your Warlock level. Repeatable: choose a different eligible cantrip each time.",
+          "parameters": {
+            "invocation_effect_status": "complete",
+            "invocation_repeatable": true,
+            "invocation_binds": "known_cantrip",
+            "invocation_cantrip_deals_damage": true,
+            "invocation_cantrip_min_range_ft": 10,
+            "invocation_range_bonus_per_level_ft": 30
+          }
+        },
+        {
+          "id": "fiendish_vigor",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p72:fiendish-vigor",
+          "summary": "Prerequisite: Level 2+ Warlock. You can cast False Life on yourself without expending a spell slot. When you cast the spell with this feature, you don't roll the die for the Temporary Hit Points; you automatically get the highest number on the die.",
+          "parameters": {
+            "invocation_effect_status": "complete",
+            "free_cast_slots": [
+              "fiendish_vigor:1:unlimited:0:spell:false_life"
+            ],
+            "invocation_free_cast_maximized": true
+          }
+        },
+        {
+          "id": "lessons_of_the_first_ones",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p72:lessons-of-the-first-ones",
+          "summary": "Prerequisite: Level 2+ Warlock. You have received knowledge from an elder entity of the multiverse, allowing you to gain one Origin feat of your choice. Repeatable: choose a different Origin feat each time.",
+          "parameters": {
+            "invocation_effect_status": "guided",
+            "invocation_unautomated_reason": "origin_feat_pool",
+            "invocation_repeatable": true,
+            "invocation_binds": "origin_feat"
+          }
+        },
+        {
+          "id": "repelling_blast",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 2,
+          "source_ref": "srd-5.2.1:p72:repelling-blast",
+          "summary": "Prerequisite: Level 2+ Warlock, a Warlock Cantrip That Deals Damage via an Attack Roll. Choose one of your known Warlock cantrips that requires an attack roll. When you hit a Large or smaller creature with that cantrip, you can push the creature up to 10 feet straight away from you. Repeatable: choose a different eligible cantrip each time.",
+          "parameters": {
+            "invocation_effect_status": "complete",
+            "invocation_repeatable": true,
+            "invocation_binds": "known_cantrip",
+            "invocation_cantrip_deals_damage": true,
+            "invocation_cantrip_attack_roll": true,
+            "invocation_push_distance_ft": 10,
+            "invocation_push_size_limit": "large"
+          }
+        },
+        {
+          "id": "witch_sight",
+          "owner": "class:warlock",
+          "option_of": "eldritch_invocations",
+          "minimum_level": 15,
+          "source_ref": "srd-5.2.1:p74:witch-sight",
+          "summary": "Prerequisite: Level 15+ Warlock. You have Truesight with a range of 30 feet.",
+          "parameters": {
+            "invocation_effect_status": "complete",
+            "truesight_range_ft": 30
+          }
         }
       ]
     },
     "cleric": {
       "source_ref": "srd-5.2.1:p40:cleric-features",
       "features": [
+        {
+          "id": "divine_order",
+          "owner": "class:cleric",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p37:divine-order",
+          "summary": "Choose one of the following roles. Protector: proficiency with Martial weapons and training with Heavy armor. Thaumaturge: you know one extra cantrip from the Cleric spell list, and a bonus to your Intelligence (Arcana or Religion) checks equal to your Wisdom modifier (minimum of +1).",
+          "choice": {
+            "id": "divine_order_option",
+            "kind": "feature_option",
+            "category": "feature",
+            "count": 1,
+            "enabled_options": [
+              "feature:divine_order_protector",
+              "feature:divine_order_thaumaturge"
+            ]
+          }
+        },
+        {
+          "id": "divine_order_protector",
+          "owner": "class:cleric",
+          "minimum_level": 1,
+          "option_of": "divine_order",
+          "source_ref": "srd-5.2.1:p37:divine-order",
+          "summary": "Protector. You gain proficiency with Martial weapons and training with Heavy armor.",
+          "parameters": {
+            "armor_category_grants": ["heavy"],
+            "weapon_category_grants": ["martial"]
+          }
+        },
+        {
+          "id": "divine_order_thaumaturge",
+          "owner": "class:cleric",
+          "minimum_level": 1,
+          "option_of": "divine_order",
+          "source_ref": "srd-5.2.1:p37:divine-order",
+          "summary": "Thaumaturge. You know one extra cantrip from the Cleric spell list. In addition, you gain a bonus to your Intelligence (Arcana or Religion) checks equal to your Wisdom modifier (minimum of +1).",
+          "parameters": {
+            "cantrip_count_bonus": 1
+          },
+          "check_modifiers": [
+            {
+              "surface": "skill_check",
+              "skills": ["skill:arcana", "skill:religion"],
+              "abilities": ["int"],
+              "add": {
+                "source": "ability_modifier",
+                "ability": "wis",
+                "minimum": 1
+              }
+            }
+          ]
+        },
         {
           "id": "channel_divinity",
           "minimum_level": 2,
@@ -2845,6 +3134,69 @@
     "druid": {
       "source_ref": "srd-5.2.1:p46:druid-features",
       "features": [
+        {
+          "id": "druidic",
+          "owner": "class:druid",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p42:druidic",
+          "summary": "You know Druidic, the secret language of Druids. You always have the Speak with Animals spell prepared. You can use Druidic to leave hidden messages: creatures that know Druidic automatically spot such a message, and others can tell a message is present with a successful DC 15 Intelligence (Investigation) check but cannot decipher it without magic.",
+          "parameters": {
+            "language_grants": ["language:druidic"],
+            "always_prepared": ["1:spell:speak_with_animals"]
+          }
+        },
+        {
+          "id": "primal_order",
+          "owner": "class:druid",
+          "minimum_level": 1,
+          "source_ref": "srd-5.2.1:p42:primal-order",
+          "summary": "Choose one of the following roles. Magician: you know one extra cantrip from the Druid spell list, and a bonus to your Intelligence (Arcana or Nature) checks equal to your Wisdom modifier (minimum of +1). Warden: proficiency with Martial weapons and training with Medium armor.",
+          "choice": {
+            "id": "primal_order_option",
+            "kind": "feature_option",
+            "category": "feature",
+            "count": 1,
+            "enabled_options": [
+              "feature:primal_order_magician",
+              "feature:primal_order_warden"
+            ]
+          }
+        },
+        {
+          "id": "primal_order_magician",
+          "owner": "class:druid",
+          "minimum_level": 1,
+          "option_of": "primal_order",
+          "source_ref": "srd-5.2.1:p42:primal-order",
+          "summary": "Magician. You know one extra cantrip from the Druid spell list. In addition, you gain a bonus to your Intelligence (Arcana or Nature) checks equal to your Wisdom modifier (minimum of +1).",
+          "parameters": {
+            "cantrip_count_bonus": 1
+          },
+          "check_modifiers": [
+            {
+              "surface": "skill_check",
+              "skills": ["skill:arcana", "skill:nature"],
+              "abilities": ["int"],
+              "add": {
+                "source": "ability_modifier",
+                "ability": "wis",
+                "minimum": 1
+              }
+            }
+          ]
+        },
+        {
+          "id": "primal_order_warden",
+          "owner": "class:druid",
+          "minimum_level": 1,
+          "option_of": "primal_order",
+          "source_ref": "srd-5.2.1:p42:primal-order",
+          "summary": "Warden. You gain proficiency with Martial weapons and training with Medium armor.",
+          "parameters": {
+            "armor_category_grants": ["medium"],
+            "weapon_category_grants": ["martial"]
+          }
+        },
         {
           "id": "natural_recovery",
           "owner": "subclass:circle_of_the_land",

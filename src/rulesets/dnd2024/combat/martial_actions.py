@@ -619,6 +619,7 @@ class CombatMartialActionsMixin:
             )
             events.append({
                 "type": "dnd2024.position.changed", "actor_id": target_id,
+                "feet": distance, "away_from": attacker_id,
                 "distance": direction * distance, "forced": True,
                 "source_feature": "open_hand_technique",
             })
@@ -642,12 +643,17 @@ class CombatMartialActionsMixin:
         所以判断的是"这个能力是不是 Step of the Wind"而不是"花了附赠动作没有"。
         """
 
-        if capability.feature_id == "step_of_the_wind":
+        character = self._feature_character(actor)
+        # 谁被放宽由声明说了算：``free_step_after_bonus_action_for`` 写在
+        # 放宽者（Fleet Step）身上，被放宽的能力不需要知道它存在。扫描面由
+        # resolver 统一（特性 + 专长），与投影走同一份答案。
+        relaxed = self.features.relaxed_bonus_action_targets_for(character)
+        if not relaxed:
+            return []
+        if capability.feature_id in relaxed:
+            # 用被放宽的能力自己付 bonus action 时不再授予，否则链式无限。
             return []
         if capability.cost.slot != "bonus_action":
-            return []
-        character = self._feature_character(actor)
-        if not self.features.has_feature(character, "fleet_step"):
             return []
         return [{
             "type": "dnd2024.economy.granted", "actor_id": str(actor["actor_id"]),

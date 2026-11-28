@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "kind": "language",
+  "id": "thieves_cant",
+  "source_ref": "srd-5.2.1:p62:thieves-cant",
+  "automation_level": "deterministic",
+  "rarity": "secret"
+}

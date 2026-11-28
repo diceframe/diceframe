@@ -202,7 +202,7 @@ def test_builtin_dnd2024_inventory_and_locale_presentation_are_complete() -> Non
     )} == {
         "ability": 6,
         "skill": 18,
-        "language": 10,
+        "language": 19,
         "class": 12,
         "species": 9,
         "background": 4,

@@ -17,7 +17,12 @@ from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.primitives import ABILITY_IDS
 from src.rulesets.dnd2024.progression.catalog import Dnd2024ProgressionCatalog
 
-from .models import ClassFeatureDefinition, ClassFeatureError, Dnd2024ClassFeatureCatalog
+from .models import (
+    ClassFeatureDefinition,
+    ClassFeatureError,
+    Dnd2024ClassFeatureCatalog,
+    FeatureCapability,
+)
 from .resources import FEATURE_USAGE_SCOPES, Dnd2024ClassResourceCatalog
 
 
@@ -138,6 +143,7 @@ def validate_declarations(
 ) -> None:
     """Fail closed when a declared parameter has no backing bundle table."""
 
+    _validate_capability_ids_are_unique(catalog, bundle)
     if progression_catalog is None:  # pragma: no cover - guarded by ``available``
         return
     # 循环外取一次。``LoadedRulesetBundle.get`` 返回的是 deepcopy，放进按特性
@@ -146,6 +152,9 @@ def validate_declarations(
     combat_conditions = (
         bundle.get("combat_catalog", "srd_combat_core") or {}
     ).get("conditions", {})
+    known_skill_ids = frozenset(
+        str(entity.get("id")) for entity in bundle.list("skill")
+    )
     known_feature_ids = frozenset(
         definition.id for definition in catalog.features_by_key.values()
     )
@@ -214,6 +223,7 @@ def validate_declarations(
         validate_hit_rider_parameters(definition)
         validate_cunning_strike_parameters(definition, combat_conditions)
         validate_deflect_parameters(definition, known_feature_ids)
+        validate_check_modifier_parameters(definition, known_skill_ids)
         validate_attack_state_parameters(definition)
         validate_mark_parameters(definition)
         if definition.resource_id:
@@ -1106,6 +1116,34 @@ _DEFLECT_KEYS = frozenset({
 })
 _DEFLECT_ENERGY_KEYS = frozenset({"extends_feature", "deflect_all_damage_types"})
 
+#: 修正能作用的三类掷骰。攻击与伤害**故意不在**这里：枚举值一旦存在，
+#: 内容写了就会静默无效，那是"声明了但没人读"的假契约。刃契锁那类
+#: 需求进来时，加的是 surface 值 + 一个默认属性选择函数。
+_CHECK_MODIFIER_SURFACES = frozenset({"ability_check", "skill_check", "saving_throw"})
+_CHECK_MODIFIER_KEYS = frozenset({
+    "surface", "skills", "abilities", "when_condition",
+    "replace_ability", "add",
+})
+_CHECK_ADD_KEYS = frozenset({"source", "ability", "value", "minimum", "maximum", "multiplier"})
+_CHECK_ADD_SOURCES = frozenset({"constant", "ability_modifier", "proficiency_bonus"})
+
+
+def validate_check_modifier_parameters(
+    definition: ClassFeatureDefinition, known_skill_ids: frozenset[str],
+) -> None:
+    """Shape is the model's job (``_parse_check_modifiers``); this checks refs.
+
+    技能引用必须真实存在：写错的技能名不会报错，只会让那条修正在一次也
+    匹配不上的检定上静默失效——玩家以为拿了能力，日志里却什么都没有。
+    """
+
+    for index, entry in enumerate(definition.check_modifiers):
+        for ref in entry.get("skills") or ():
+            if str(ref)[len("skill:"):] not in known_skill_ids:
+                raise ClassFeatureError(
+                    f"{definition.id}.check_modifiers[{index}] names an unknown skill: {ref}"
+                )
+
 
 def validate_deflect_parameters(
     definition: ClassFeatureDefinition, known_ids: frozenset[str],
@@ -1343,3 +1381,44 @@ def validate_mark_parameters(definition: ClassFeatureDefinition) -> None:
                 f"{feature_id}.mark_damage_die must be one of "
                 f"{sorted(_MARK_DAMAGE_DICE)}"
             )
+
+
+def _validate_capability_ids_are_unique(
+    catalog: Dnd2024ClassFeatureCatalog, bundle: LoadedRulesetBundle,
+) -> None:
+    """One capability id identifies one (grantor, capability) pair, globally.
+
+    Combat declares a capability by id alone, so two grantors sharing an id would
+    let the forgery gate resolve one declaration while availability priced the
+    other.  Feats made this reachable: until they could grant capabilities, the
+    id space was class features only.
+    """
+
+    from .feat_models import FeatDefinitionError, load_feat_definitions
+
+    try:
+        feat_definitions = load_feat_definitions(bundle)
+    except FeatDefinitionError:
+        # 专长声明本身非法时，报错应由真正消费它的组件给出（升级引擎会把它
+        # 转成 ProgressionCatalogError）。这里只问"能力 id 是否唯一"，不该
+        # 抢在前面用另一种错误类型回答同一个问题。
+        # 但不能直接 return：下面还要查职业特性之间的重名，一条坏专长不该
+        # 让那项检查静默消失。
+        feat_definitions = {}
+
+    seen: dict[str, str] = {}
+
+    def claim(owner_id: str, capabilities: tuple[FeatureCapability, ...]) -> None:
+        for capability in capabilities:
+            previous = seen.get(capability.id)
+            if previous is not None:
+                raise ClassFeatureError(
+                    f"capability id {capability.id!r} is declared by both "
+                    f"{previous} and {owner_id}; combat names it by id alone"
+                )
+            seen[capability.id] = owner_id
+
+    for definition in catalog.features_by_key.values():
+        claim(definition.id, definition.capabilities)
+    for feat_definition in feat_definitions.values():
+        claim(feat_definition.id, feat_definition.capabilities)

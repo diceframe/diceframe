@@ -532,7 +532,7 @@ class UpdaterService:
 
     async def rollback_update(self) -> dict[str, Any]:
         if self.is_busy():
-            return {"ok": False, "error": t("webui.services.updater.update_in_progress")}
+            return {"ok": False, "error": t("webui.services.updater.update_in_progress"), "error_code": "updater_update_in_progress"}
         target = self._rollback_target()
         if target is None:
             return {"ok": False, "error": self.get_rollback_status()["reason"]}
@@ -547,7 +547,7 @@ class UpdaterService:
             try:
                 await asyncio.to_thread(prepare_rollback_access, target_data)
             except (OSError, ValueError) as exc:
-                return {"ok": False, "error": t("webui.services.updater.rollback_data_failed", exc=exc)}
+                return {"ok": False, "error": t("webui.services.updater.rollback_data_failed", exc=exc), "error_code": "updater_rollback_data_failed"}
         signal: dict[str, Any] = {
             "schema": 1,
             "operation": "rollback",
@@ -566,14 +566,14 @@ class UpdaterService:
             install_root = Path(os.getenv("TRPG_INSTALL_ROOT", "")).resolve()
             launcher = install_root / "DiceFrame.exe"
             if not launcher.is_file():
-                return {"ok": False, "error": t("webui.services.updater.portable_launcher_missing")}
+                return {"ok": False, "error": t("webui.services.updater.portable_launcher_missing"), "error_code": "updater_portable_launcher_missing"}
             staged_launcher = self._dir / (
                 _ROLLBACK_LAUNCHER_PREFIX + _safe_version_dir(version) + ".exe"
             )
             try:
                 shutil.copy2(launcher, staged_launcher)
             except OSError as exc:
-                return {"ok": False, "error": t("webui.services.updater.rollback_launcher_failed", exc=exc)}
+                return {"ok": False, "error": t("webui.services.updater.rollback_launcher_failed", exc=exc), "error_code": "updater_rollback_launcher_failed"}
             signal["launcher_path"] = str(staged_launcher)
 
         self._state.update(
@@ -596,11 +596,11 @@ class UpdaterService:
 
     async def download_update(self, kind: str) -> dict[str, Any]:
         if self._mirrors is None:
-            return {"ok": False, "error": t("webui.services.updater.mirror_unavailable")}
+            return {"ok": False, "error": t("webui.services.updater.mirror_unavailable"), "error_code": "updater_mirror_unavailable"}
         if kind not in _ASSET_PATTERNS:
-            return {"ok": False, "error": t("webui.services.updater.package_kind_unknown", kind=kind)}
+            return {"ok": False, "error": t("webui.services.updater.package_kind_unknown", kind=kind), "error_code": "updater_package_kind_unknown"}
         if self.is_busy():
-            return {"ok": False, "error": t("webui.services.updater.update_in_progress")}
+            return {"ok": False, "error": t("webui.services.updater.update_in_progress"), "error_code": "updater_update_in_progress"}
 
         support = is_self_update_supported(self._root)
         if not support.get("supported"):
@@ -623,15 +623,15 @@ class UpdaterService:
         version = str(latest.get("version", ""))
         selection = select_asset(latest, kind, version)
         if not selection:
-            return {"ok": False, "error": t("webui.services.updater.package_kind_not_found", kind=kind)}
+            return {"ok": False, "error": t("webui.services.updater.package_kind_not_found", kind=kind), "error_code": "updater_package_kind_not_found"}
 
         asset, sha_asset = selection
         if kind == "docker":
             if not sha_asset:
-                return {"ok": False, "error": t("webui.services.updater.docker_checksums_missing")}
+                return {"ok": False, "error": t("webui.services.updater.docker_checksums_missing"), "error_code": "updater_docker_checksums_missing"}
             size = int(asset.get("size", 0) or 0)
             if size <= 0 or size > MAX_APP_UPDATE_BYTES:
-                return {"ok": False, "error": t("webui.services.updater.docker_package_size_invalid")}
+                return {"ok": False, "error": t("webui.services.updater.docker_package_size_invalid"), "error_code": "updater_docker_package_size_invalid"}
         self._task = asyncio.create_task(
             self._run_download(asset, sha_asset, version, kind)
         )
@@ -731,13 +731,13 @@ class UpdaterService:
 
     async def apply_update(self) -> dict[str, Any]:
         if self.is_busy():
-            return {"ok": False, "error": t("webui.services.updater.update_in_progress")}
+            return {"ok": False, "error": t("webui.services.updater.update_in_progress"), "error_code": "updater_update_in_progress"}
         if self._state.get("state") != "staged":
-            return {"ok": False, "error": t("webui.services.updater.no_downloaded_package")}
+            return {"ok": False, "error": t("webui.services.updater.no_downloaded_package"), "error_code": "updater_no_downloaded_package"}
 
         archive = Path(str(self._state.get("path", "")))
         if not archive.is_file() or not _path_within(archive, self._dir):
-            return {"ok": False, "error": t("webui.services.updater.downloaded_package_missing")}
+            return {"ok": False, "error": t("webui.services.updater.downloaded_package_missing"), "error_code": "updater_downloaded_package_missing"}
 
         support = is_self_update_supported(self._root)
         if not support.get("supported"):

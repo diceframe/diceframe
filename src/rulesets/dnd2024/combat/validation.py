@@ -759,7 +759,14 @@ def _validate_statblock_extras(enemy: dict[str, Any], label: str) -> None:
             raise CombatIntentError(f"{label} languages must be a list")
         seen: set[str] = set()
         for item in languages:
-            if not isinstance(item, str) or not item.strip() or len(item) > 40:
+            # 语言是内容引用（`language:common`），不是显示名：显示名走 locale，
+            # 两边用同一个 id 才能和玩家的 language_refs 对上。
+            if (
+                not isinstance(item, str)
+                or not item.startswith("language:")
+                or not item[len("language:"):].strip()
+                or len(item) > 60
+            ):
                 raise CombatIntentError(f"{label} language entry is invalid")
             if item in seen:
                 raise CombatIntentError(f"{label} language entry is duplicated")
@@ -1139,6 +1146,20 @@ class CombatValidationMixin(
                 # 两次吐息"。
                 if intent.get("second_target_of"):
                     pass
+                elif intent_type == "attack" and intent.get("cleave_from"):
+                    # Cleave 的第二击与 Horde Breaker 同构：不付动作、不占
+                    # `attacks_remaining`，前提与额度由各自的校验回答。
+                    pass
+                elif (
+                    intent_type == "attack"
+                    and declaration_value(intent, LIGHT_EXTRA_ATTACK) is True
+                ):
+                    # Light 追加攻击不是 Attack action 的一击，也不是靠
+                    # ``attacks_remaining`` 兑现的那几次：它的成本是附赠动作
+                    # （或 Nick 的"每回合一次"），由 `_validate_light_extra_attack`
+                    # 单独结账。留在这道门里会让它在真实回合里永远不可达——
+                    # 动作已经花掉了。
+                    pass
                 elif not has_action and not (
                     intent_type == "attack"
                     and int(economy.get("attacks_remaining", 0) or 0) >= 1
@@ -1221,6 +1242,19 @@ class CombatValidationMixin(
 
     _WILD_SHAPE_CR_BY_LEVEL = ((4, "1/4"), (8, "1/2"), (99, "1"))
 
+    def _relaxed_capability_ids(self, actor: dict[str, Any]) -> frozenset[str]:
+        """Every capability id a declared relaxation covers, for this actor."""
+
+        character = self._feature_character(actor)
+        owned = self.features.capability_owners_for(character)
+        relaxed = self.features.relaxed_bonus_action_targets_for(character)
+        return frozenset(
+            capability.id
+            for definition in owned
+            if definition.id in relaxed
+            for capability in definition.capabilities
+        )
+
     def _validate_class_capability(
         self, instance: Any, combat: dict[str, Any], intent: dict[str, Any],
         actor: dict[str, Any], economy: dict[str, Any],
@@ -1242,9 +1276,12 @@ class CombatValidationMixin(
         if via_fleet_step is not None and not isinstance(via_fleet_step, bool):
             raise CombatIntentError("via_fleet_step must be a boolean")
         if via_fleet_step:
-            if capability_id != "step_of_the_wind":
+            # 放宽关系写在授予者（Fleet Step）身上，所以这里读声明：只有它
+            # 点名的那个能力的各个使用选项才能走"免槽"路径。按能力名判会把
+            # 同一特性的另一个使用选项（花气档）漏掉。
+            if capability_id not in self._relaxed_capability_ids(actor):
                 raise CombatIntentError(
-                    "Fleet Step can only grant Step of the Wind"
+                    "Fleet Step can only grant the step it declares"
                 )
             if not bool(economy.get("fleet_step_available")):
                 raise CombatIntentError("Fleet Step is not available this turn")
@@ -1344,13 +1381,19 @@ class CombatValidationMixin(
                 raise CombatIntentError(
                     "the declared open hand technique choice is not available"
                 )
+        # 按 (授予者, 能力) 建索引，不按能力 id 单独索引：专长与子职可能声明
+        # 同名能力，只按 id 取会让"校验用的 capability"和"定价用的 view"来自
+        # 不同的授予者。
         views = {
-            view.id: view
+            (view.feature_id, view.id): view
             for view in self._available_class_capabilities(
                 actor, economy, include_unavailable=True,
             )
         }
-        view = views.get(capability_id)
+        view = (
+            views.get((capability.feature_id, capability_id))
+            if capability is not None else None
+        )
         if view is None:
             raise CombatIntentError("class capability is not available to this actor")
         if not view.available:
@@ -1398,10 +1441,15 @@ class CombatValidationMixin(
         item = self.bundle.get("item", item_ref.removeprefix("item:"))
         if not isinstance(item, dict):
             raise CombatIntentError("item is not defined in the active bundle")
-        if self._item_is_merged_in_form(instance, actor["actor_id"], item_ref):
+        form_mode = self._form_item_mode(instance, actor["actor_id"], item_ref)
+        if form_mode == "merge":
             # merged 的含义就是"没有效果"，不是"在 UI 里藏起来"：连激活也不行。
             raise CombatIntentError(
                 "that item has no effect while you are shape-shifted (merged)"
+            )
+        if form_mode == "drop":
+            raise CombatIntentError(
+                "that item was dropped when you shape-shifted"
             )
         try:
             declaration = validate_activation_declaration(item)

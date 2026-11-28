@@ -36,7 +36,25 @@ def _advance(runtime: Dnd2024Runtime, sheet: dict, target_level: int) -> dict:
     while int(sheet["ruleset_character"]["build"]["level"]) < target_level:
         preview = runtime.preview_advancement(None, sheet, {})
         answers: dict = {}
+        feature_choices: list[dict] = []
         for requirement in preview.get("requirements") or []:
+            if requirement.get("kind") == "feature_choice":
+                # 升级到某级会带来新的选择槽（Primal Knowledge 的技能、
+                # Deft Explorer 的两个语言……）。这里按声明顺序取可用项，
+                # 与玩家在界面上"全选第一个"是同一个行为。
+                count = int(requirement.get("count", 1) or 1)
+                available = [
+                    str(option["value"]) for option in requirement.get("options") or []
+                    if option.get("available")
+                ]
+                if available:
+                    feature_choices.append({
+                        "owner": str(requirement.get("owner") or ""),
+                        "feature_id": str(requirement.get("feature_id") or ""),
+                        "choice_id": str(requirement.get("choice_id") or ""),
+                        "selected_refs": available[:count],
+                    })
+                continue
             requirement_id = str(requirement["id"])
             if requirement_id == "subclass_ref":
                 answers["subclass_ref"] = str(requirement["options"][0]["value"])
@@ -59,6 +77,8 @@ def _advance(runtime: Dnd2024Runtime, sheet: dict, target_level: int) -> dict:
                 answers["ability_score_increases"] = {
                     "con": int(requirement.get("total", 2)),
                 }
+        if feature_choices:
+            answers["feature_choices"] = feature_choices
         if answers:
             preview = runtime.preview_advancement(None, sheet, answers)
         assert preview["ok"] is True, preview["errors"]

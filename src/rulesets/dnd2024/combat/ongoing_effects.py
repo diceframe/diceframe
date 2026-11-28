@@ -392,6 +392,40 @@ class CombatOngoingEffectsMixin:
             },
         }]
 
+    def _validate_intimidating_presence(
+        self, instance: Any, combat: dict[str, Any], actor_id: str,
+        actor: dict[str, Any], capability: Any, intent: dict[str, Any],
+    ) -> str:
+        """Fail closed on empty, duplicate, self, unknown or all-out-of-range targets."""
+
+        raw_targets = intent.get("target_ids")
+        if not isinstance(raw_targets, list) or not raw_targets:
+            return "Intimidating Presence requires at least one target"
+        targets: list[str] = []
+        for item in raw_targets:
+            if not isinstance(item, str) or not item.strip():
+                return "Intimidating Presence target_ids must be non-empty actor ids"
+            targets.append(item)
+        if len(set(targets)) != len(targets):
+            return "Intimidating Presence cannot target the same creature twice"
+        character = self._feature_character(actor)
+        range_ft = int(self.features.feature_value(
+            character, capability.feature_id, "target_range_ft", 30,
+        ) or 30)
+        eligible = 0
+        for target_id in targets:
+            if target_id == actor_id:
+                return "Intimidating Presence cannot target yourself"
+            target = self._actor_view(instance, combat, target_id)
+            if (
+                int(target.get("hp", 0) or 0) > 0
+                and self._distance(combat, actor_id, target_id) <= range_ft
+            ):
+                eligible += 1
+        if eligible < 1:
+            return "Intimidating Presence requires at least one living target within range"
+        return ""
+
     def _intimidating_presence_events(
         self, instance: Any, combat: dict[str, Any], actor_id: str,
         actor: dict[str, Any], capability: Any, intent: dict[str, Any], rng: Any,
@@ -430,31 +464,29 @@ class CombatOngoingEffectsMixin:
             + int(actor.get("proficiency_bonus", 0) or 0)
         )
         events: list[dict[str, Any]] = []
-        for target_id in [str(item) for item in (intent.get("target_ids") or [])]:
+        unique_targets = list(dict.fromkeys(
+            str(item) for item in (intent.get("target_ids") or [])
+            if isinstance(item, str) and item
+        ))
+        for target_id in unique_targets:
             if target_id == actor_id:
                 continue
             if self._distance(combat, actor_id, target_id) > range_ft:
                 continue
             target = self._actor_view(instance, combat, target_id)
-            roll = int(rng.randint(1, 20))
-            modifier = int(
-                (target.get("saving_throws") or {}).get(save_ability, 0) or 0
+            if int(target.get("hp", 0) or 0) <= 0:
+                continue
+            # 统一走共享豁免入口：魔抗/优势劣势、圣武士保护光环、Bless/Bane 骰与
+            # 传说抗性都在其中结算，不再绕开豁免管线手写 d20。
+            check = self._saving_throw_check(
+                instance, combat, target, target_id,
+                save_ability, dc, actor_id, events, rng,
             )
-            total = roll + modifier
-            total, replacement = self._strength_total_replacement(
-                target, save_ability, total,
-            )
-            saved = total >= dc
+            check["feature_id"] = feature_id
+            check["channel_effect"] = "intimidating_presence"
             check_index = len(events)
-            events.append({
-                "type": "check.resolved", "kind": "saving_throw",
-                "actor_id": target_id, "ability": save_ability,
-                "rolls": [roll], "natural": roll, "modifier": modifier,
-                "total": total, "target": dc, "success": saved,
-                "feature_id": feature_id, "channel_effect": "intimidating_presence",
-                **replacement,
-            })
-            if saved:
+            events.append(check)
+            if bool(check.get("success")):
                 continue
             blocker = self._condition_immunity_blocker(
                 instance, combat, target, condition,

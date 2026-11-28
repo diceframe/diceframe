@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "kind": "language",
+  "id": "druidic",
+  "source_ref": "srd-5.2.1:p42:druidic",
+  "automation_level": "deterministic",
+  "rarity": "secret"
+}

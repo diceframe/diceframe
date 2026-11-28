@@ -411,7 +411,7 @@ def multiplayer_status(
 ) -> dict[str, Any]:
     instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
     if not instance:
-        return {"ok": False, "error": "游戏不存在"}
+        return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
     return {"ok": True, **instance.multiplayer_status()}
 
 
@@ -434,7 +434,7 @@ def private_log(
 ) -> dict[str, Any]:
     instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
     if not instance:
-        return {"ok": False, "error": "游戏不存在"}
+        return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
     return {"ok": True, "messages": _private_log_messages(instance)[-50:]}
 
 
@@ -445,9 +445,9 @@ def private_log_for_user(
 ) -> dict[str, Any]:
     instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
     if not instance:
-        return {"ok": False, "error": "游戏不存在"}
+        return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
     if user_id not in instance.players:
-        return {"ok": False, "error": "玩家不存在"}
+        return {"ok": False, "error": "玩家不存在", "error_code": "player_not_found"}
     return {
         "ok": True,
         "messages": _private_log_messages(instance, user_id)[-50:],
@@ -462,7 +462,7 @@ def table_talk(
 
     instance = dependencies.get_instance(dependencies.parse_game_key(game_key))
     if not instance:
-        return {"ok": False, "error": "游戏不存在"}
+        return {"ok": False, "error": "游戏不存在", "error_code": "game_not_found"}
     exchanges = [
         dict(item)
         for item in module_hooks.read(instance, module_hooks.TABLE_TALK)

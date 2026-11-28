@@ -5,6 +5,9 @@
 > **规格文档在哪**：32 份 `S0*.md` 只在 `docs/dnd2024-s0-specs` 分支上，**main 里没有**；
 > 权威索引是同一分支的 `S0_TASK_INDEX_2026-11-07.md`。本表状态取自该索引 + 已合并 PR + 代码探测。
 >
+> **本次刷新**：2026-11-27，按 main `0b12b0ea` 的代码与 PR 状态逐行核对（#828/#881 已合并，
+> F25 由 #830/#836/#838 交付，F32 开 PR #892）。之前标 🔵 的三行是"PR 已开"的旧记录，合并后未回填。
+>
 > **更新规则**
 >
 > 1. 状态变了就改本表，**同一次提交里改**。
@@ -83,16 +86,16 @@
 | F4 | 授予从内容读 | ✅ | #760；`@745baaee` |
 | F5 | 免费施放 | ✅ | #760；`@910733c0` |
 | F6 | 休息与资源转换，**拆三段** | ✅ | F6a 短休恢复预算、F6b Magical Cunning 仪式、F6c Font of Magic 双向转换，三段全交付（索引 §13–§15） |
-| F7 | 武器词条（Weapon Mastery） | 🟡 | 部分交付（`feat/dnd2024-s0f7-weapon-mastery@872e165a`）：数量轨道、`tactical_master`、Push、Tactical Master 替换已做；**Cleave / Topple 未做**；Nick 移交 S0-G2，已随 #785 交付 |
+| F7 | 武器词条（Weapon Mastery） | ✅ | 八条词条全部实现：`graze/sap/vex/slow`（先前）、`push/topple/nick`（F7R）、`cleave`（F7C）。F7R 另修掉"Light 追加攻击被动作门禁挡住"的真缺陷；F7C 给 `attack_history` 补了 `hit` / `weapon_ref`。`tactical_master` 仍只有内容声明、src 零消费——它不属于词条机制，另记。三档触发策略（询问/自动/不触发）为 **GAP-51**，与本片无关 |
 | F8 | 三职业战斗风格与戏法替代选项 | ⬜ | 有任务书；代码里只有选项管道（B），**风格机制本身没有** |
 | F9 | 被动防御与移动派生 | ✅ | #757；索引：可自动化部分交付，环境面按停止条件记录 |
 | **F10** | Bonus Action 路由与移动附带效果 | **已拆分** | `S0F10_ACTION_ROUTING_STOP_NOTE` §5，原任务书作废 |
-| F10A | Pounce / Tactical Shift / Steady Aim / Fleet Step / Heightened Focus | 🔵 | #828；16 条矩阵 15 条，Step 携带生物未做 → **缺口 GAP-19** |
-| F10B | 战斗内 Hide：默认拒绝 + 三前提 + 检定收口 | 🔵 | #828；「被敌人发现」未做 → **缺口 GAP-16** |
+| F10A | Pounce / Tactical Shift / Steady Aim / Fleet Step / Heightened Focus | 🟡 | #828 已合并（2026-11-22）；16 条矩阵 15 条，Step 携带生物未做 → **缺口 GAP-19** |
+| F10B | 战斗内 Hide：默认拒绝 + 三前提 + 检定收口 | 🟡 | #828 已合并（2026-11-22）；「被敌人发现」未做 → **缺口 GAP-16** |
 | F10C | 战前潜行（遭遇前） | ⏸ | **缺口 GAP-5**：Surprised 机制不存在，产物无消费者 |
 | F10D | Fast Hands ①③（工具存在性 + 借用 + 动作降级） | ⬜ | `S0F10D_..._TASK_SPEC`；等 F10B 合入后复用其检定函数 |
 | F10E | Fast Hands ②（Utilize） | ⏸ | **缺口 GAP-6 / GAP-16 / GAP-18**：数据齐（35 个工具的 utilize 表），缺 GM 施加后果与区域触发 |
-| F11 | 伤害反应与远程重定向 | 🔵 | PR #881 待合并；Retaliation 早已落地，本片完成 Deflect Attacks / Deflect Energy（`test_dnd2024_damage_reactions.py` 14 条）；**Slow Fall 按 §7 停工**（无 fall trigger，GAP-50） |
+| F11 | 伤害反应与远程重定向 | 🟡 | #881 已合并（2026-11-27）；Retaliation 早已落地，本片完成 Deflect Attacks / Deflect Energy（`test_dnd2024_damage_reactions.py` 14 条）；**Slow Fall 按 §7 停工**（无 fall trigger，GAP-50） |
 | F12 | 豁免优势、Evasion、邪魔韧性、无情狂怒 | ✅ | #763 + 执行报告（35 条） |
 | F13 | 条件免疫、抑制与移除 | ✅ | #763 + 报告（30 条） |
 | F14 | 命中附加效果、命中后条件、施法侧加值 | ✅ | #763 + 报告（52 条） |
@@ -106,18 +109,18 @@
 | F22 | Channel Divinity 与治疗分配/rider | ✅ | #784 |
 | F23 | 武器增益、控制与 Smite 光环 | ✅ | #784 |
 | F24 | 属性、熟练与总值替换被动 | ✅ | #784 |
-| F25 | Wild Shape（德鲁伊核心，含 Beast Spells / Archdruid） | ⬜ | 有任务书 + 调研 `S0F25_WILD_SHAPE_RESEARCH`；被 **GAP-20/21/22/23** 挡住（变形地基整条未建） |
+| F25 | Wild Shape（德鲁伊核心，含 Beast Spells / Archdruid） | ✅ | #830 地基 + #836 收尾（`2026-11-22`）；`forms/` 已进 main，`attacks` 走 replace 覆盖；遗留项见执行报告 §8.2（无甲防御加值不参与形态 AC） |
 | F26 | Land 主动特性 | ✅ | #839 + 执行报告；区域模型复用既有 zone |
 | F27 | ~~召唤物~~（**移出本线**） | ➖ | 实为召唤类法术的效果层（`find_familiar` L1 / `find_steed` L2 / `summon_dragon` L5），三个 feature 只是入口修饰（免材料/免槽一次/类型锁定）。不属于职业特性线，交由法术与召唤子系统处理 |
 | F28 | Metamagic | ✅ | #847 + 执行报告；十选项 + 容器 + 2/10/17 选择 + 每级替换 + 前端两种 kind |
 | F29 | Divine Words 类 | ⬜ | 有任务书；未开工 |
 | F30 | 长时效应 | ✅ | #841 + 执行报告（44 条）；角色级 long_effect 存储 + 世界时钟到期 |
 | F31 | 法术书与物品 | ✅ | #869 + 执行报告；Use Magic Device / 仪式 / Evocation Savant |
-| F32 | 祈唤主干 | ⬜ | 有任务书；引擎无 `eldritch_invocation` 实现 |
+| F32 | 祈唤主干 | 🔵 | **#892 待合并**（基座 `0b12b0ea`，35 文件 +3566/−78）；42 条用例、六项效果、两项 `guided`（Devil's Sight / Lessons）；多束场景被 **GAP-44** 挡住。逐项状态见 `S0_INVOCATION_STATUS_2026-11-26.md`，执行报告 `S0F32_INVOCATION_CORE_EXECUTION_REPORT_2026-11-27.md` |
 | F33 | 祈唤施法 | ⬜ | 有任务书；未开工 |
 | F34 | 祈唤刃 | ⬜ | 有任务书；未开工 |
 | F35 | 祈唤契约 | ⬜ | 有任务书；未开工 |
-| F36 | 简单授予 | ⬜ | 有任务书；未开工 |
+| F36 | 简单授予 | ⬜ | 任务书 + 2026-11-27 方案修订（§10）；七项落在四类既有载体上，新增只有「检定修正列表 + 加值原语」一层；**语言在本片范围内**（§10.1 四层：扩充 + ref 化 + 授予 + 展示）；GM 非战斗查阅 stat block 另记 GAP-52 |
 | F37 | 覆盖度审计 | ⬜ | 有任务书；未开工 |
 | F38 | 武器基本词条、在手状态与双持 | ✅ | #785 |
 
@@ -134,14 +137,14 @@
 | 片 | 内容 | 状态 | 证据 |
 |---|---|---|---|
 | S0-MM1 | stat block 事实层（size / speeds / 三组防御 / 条件免疫 / senses / cr / xp） | ✅ | #809 |
-| S0-MM2 | 六维参与检定 + 六字段 + CR0–1 全类型目录（135 条）+ 查询 | ✅ | 已合入 main：目录 135 条在 `0b12b0ea` 的 `srd_monsters.json` 里，`test_dnd2024_monster_catalog.py` 覆盖 |
-| S0-MM3a | 攻击多段伤害 `damage[]` + 附带效果 `riders[]`（四种 kind） | ✅ | 攻击多段/rider 已在 `hit_resolution` 消费； `feat/dnd2024-s0mm3a-attack-riders`（叠在 #829 上）+ `S0MM3A_ATTACK_RIDERS_TASK_SPEC` |
-| S0-MM3b | Multiattack 三原语 `repeat` / `combo` / `choice`，生物内别名，整批原子 | ✅ | `repeat`/`combo` 已可导入并被战斗结算； 同上分支（与 MM3a 同一提交，见执行报告 §5） |
-| S0-MM3c | 存档型动作 `save_action` + 半伤独立骰池 + `recharge` / `per_day` | ✅ | `save_action` + `recharge` 已在预算内； 同上分支 |
-| S0-MM3d | 八个高频被动特质（闭集 id，未知即拒绝） | ✅ | 八个闭集特质 id 在目录里真实出现； 同上分支 |
-| S0-MM3e | 条件自带的解除声明：`escape`（挣脱）与 `stand_up`（花半速起身）+ prone 的距离门槛 | ✅ | `escape` / `stand_up` 是 `INTENT_TYPES` 成员； 同上分支第三个提交；关掉 GAP-38/39 |
-| **S0-MM4** | CR 4 以内的填量：只收"零缺口"条目（152 条）+ 目录级缺口账本 | 🔵 | 本片；`S0MM4_CR4_FILL_TASK_SPEC_2026-11-27.md`。`entries` 135 → 152，`incomplete` 78（已入库但有洞）、`skipped` 66（有洞故未入库） |
-| S0-MM3+ 余项 | 怪物施法 / 巢穴与传奇动作 / 剩余 318 条特质、507 条动作 | ⬜ | 未立项 |
+| S0-MM2 | 六维参与检定 + 六字段 + CR0–1 全类型目录（135 条）+ 查询 | ✅ | #829（`2026-11-22`）+ `S0MM2_..._EXECUTION_REPORT` |
+| S0-MM3a | 攻击多段伤害 `damage[]` + 附带效果 `riders[]`（四种 kind） | ✅ | #835（`2026-11-22`，+16092/−176，a–e 同一次合并） |
+| S0-MM3b | Multiattack 三原语 `repeat` / `combo` / `choice`，生物内别名，整批原子 | ✅ | #835 |
+| S0-MM3c | 存档型动作 `save_action` + 半伤独立骰池 + `recharge` / `per_day` | ✅ | #835 |
+| S0-MM3d | 八个高频被动特质（闭集 id，未知即拒绝） | ✅ | #835 |
+| S0-MM3e | 条件自带的解除声明：`escape`（挣脱）与 `stand_up`（花半速起身）+ prone 的距离门槛 | ✅ | #835；关掉 GAP-38/39 |
+| **S0-MM4** | CR 4 以内的填量：只收"零缺口"条目（135 → **152**）+ 目录级缺口账本 | 🔵 | 本片；`S0MM4_CR4_FILL_TASK_SPEC_2026-11-27.md`。`incomplete` 78（已入库但有洞）、`skipped` 66（有洞故未入库，名字在账本里） |
+| S0-MM3+ 余项 | 怪物施法 / 巢穴与传奇动作 / 剩余特质与动作 | ⬜ | 未立项。**内容侧现状**（`2026-11-27` 实测 135 条）：132 条有 `attacks`、148 条攻击用了多段 `damage[]`、15 条带 `riders`、11 条 `multiattack`、7 条 `save_action`、46 条 `traits`、**0 条怪物施法**；`cr` 只覆盖 0–1，CR 2+ 一条未进目录 |
 
 ## H 与休息
 

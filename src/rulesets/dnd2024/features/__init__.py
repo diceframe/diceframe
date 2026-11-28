@@ -7,6 +7,12 @@ what a character owns and what it may declare, and nothing else.
 
 from .combat import CombatContext
 from .equipment import Dnd2024EquipmentCatalog, weapon_matches_kind
+from .feat_models import (
+    FeatDefinition,
+    FeatDefinitionError,
+    load_feat_definitions,
+    parse_feat,
+)
 from .models import (
     CapabilityCost,
     CapabilityCostView,
@@ -17,6 +23,7 @@ from .models import (
     Dnd2024ClassFeatureCatalog,
     EquipmentRequirement,
     FeatureCapability,
+    FeatureChoice,
     FeatureView,
     ResourceCost,
     SpellSlotCost,
@@ -43,11 +50,16 @@ __all__ = [
     "Dnd2024ClassResourceCatalog",
     "Dnd2024EquipmentCatalog",
     "EquipmentRequirement",
+    "FeatDefinition",
+    "FeatDefinitionError",
     "FeatureCapability",
+    "FeatureChoice",
     "FeatureView",
     "ResourceCost",
     "ResourceDefinition",
     "SpellSlotCost",
     "WEAPON_KINDS",
+    "load_feat_definitions",
+    "parse_feat",
     "weapon_matches_kind",
 ]

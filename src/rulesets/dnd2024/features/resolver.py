@@ -15,6 +15,7 @@ from copy import deepcopy
 from typing import Any, Mapping
 
 from src.rulesets.bundle import LoadedRulesetBundle
+from .grants import check_modifiers, fixed_sources, saving_throw_sources
 from src.rulesets.dnd2024.character.primitives import ABILITY_IDS
 from src.rulesets.dnd2024.progression.catalog import (
     Dnd2024ProgressionCatalog,
@@ -25,8 +26,12 @@ from .combat import (
     CombatContext,
     combat_capabilities as _project_capabilities,
     martial_arts_profile as _martial_arts_profile,
+    relaxed_bonus_action_targets,
 )
 from .equipment import Dnd2024EquipmentCatalog
+from . import option_pool
+from .feat_capabilities import capability_labels, owned_capability_feats
+from .feat_models import FeatDefinition, load_feat_definitions
 from .models import (
     ClassFeatureDefinition,
     ClassFeatureError,
@@ -157,6 +162,8 @@ class Dnd2024ClassFeatureResolver:
         self._feat_categories: dict[str, str] | None = None
         # 技能目录同样惰性：只有声明了技能选择的特性才需要它。
         self._skill_id_set: set[str] | None = None
+        # 专长声明同样惰性：只有角色拥有带 capability 的专长时才需要解析。
+        self._feat_definitions: dict[str, FeatDefinition] | None = None
         # 与 ``Dnd2024Runtime._sync_class_resources`` 相同的边界：bundle 没有
         # 声明这套可选内容时，职业特性整体降级为「不存在」，而不是让每一个
         # 角色投影都失败。声明存在但格式非法时仍然 fail closed。
@@ -194,6 +201,23 @@ class Dnd2024ClassFeatureResolver:
         if self._equipment is None:
             self._equipment = Dnd2024EquipmentCatalog.from_bundle(self.bundle)
         return self._equipment
+
+    @property
+    def feat_definitions(self) -> dict[str, FeatDefinition]:
+        """Every feat declaration, parsed once per resolver."""
+
+        if self._feat_definitions is None:
+            self._feat_definitions = load_feat_definitions(self.bundle)
+        return self._feat_definitions
+
+    def _owned_feat_capability_owners(
+        self, character: Mapping[str, Any] | None,
+    ) -> tuple[FeatDefinition, ...]:
+        """Feats the character owns that actually grant an active capability."""
+
+        features = (character or {}).get("features")
+        refs = features.get("feat_refs") if isinstance(features, Mapping) else None
+        return owned_capability_feats(refs, self.feat_definitions)
 
     # ------------------------------------------------------------------
     # identity
@@ -457,26 +481,24 @@ class Dnd2024ClassFeatureResolver:
             for definition in self.features_for(character)
         )
 
-    def saving_throw_proficiency_sources(
-        self, character: Mapping[str, Any] | None,
-    ) -> dict[str, str]:
-        """``{ability: feature_id}`` for every feature-granted saving throw.
+    def owns_definition(self, character: Mapping[str, Any] | None, definition: Any) -> bool:
+        parent = definition.option_of
+        return True if not parent else self.feature_option_choice(character, parent, owner=definition.owner) == definition.id
 
-        The source travels with the grant because the ref set cannot say who
-        put an ``ability:wis`` there: the class table and a feature look
-        identical once merged, and an audit that cannot tell them apart cannot
-        explain the bonus either.
-        """
+    def _owned_definitions(self, character: Mapping[str, Any] | None) -> list[Any]:
+        return [d for d in self.features_for(character) if self.owns_definition(character, d)]
 
-        sources: dict[str, str] = {}
-        for definition in self.features_for(character):
-            declared = definition.parameters.get("saving_throw_proficiencies")
-            if not isinstance(declared, list):
-                continue
-            for ability in declared:
-                if isinstance(ability, str) and ability and ability not in sources:
-                    sources[ability] = definition.id
-        return sources
+    def language_sources(self, character: Mapping[str, Any] | None) -> dict[str, str]:
+        return fixed_sources(self._owned_definitions(character), "language_grants")
+
+    def category_sources(self, character: Mapping[str, Any] | None, key: str) -> dict[str, str]:
+        return fixed_sources(self._owned_definitions(character), key)
+
+    def check_modifiers(self, character: Mapping[str, Any] | None, surface: str) -> list[dict[str, Any]]:
+        return check_modifiers(self._owned_definitions(character), surface)
+
+    def saving_throw_proficiency_sources(self, character: Mapping[str, Any] | None) -> dict[str, str]:
+        return saving_throw_sources(self.features_for(character))
 
     def ability_bonuses(
         self, character: Mapping[str, Any] | None,
@@ -1048,40 +1070,9 @@ class Dnd2024ClassFeatureResolver:
         contract.
         """
 
-        choice = definition.choice
-        if choice is None:
-            return None
-        matches = [
-            record
-            for record in self._feature_choice_records(character)
-            if record.get("owner") == definition.owner
-            and record.get("feature_id") == definition.id
-            and record.get("choice_id") == choice.id
-        ]
-        # 同一个三元组可以合法地出现多次：Bard 的 Expertise 在 2 级与 9 级各选
-        # 两项，两级共用一个 (owner, feature_id, choice_id)。区分它们的是
-        # ``granted_level``，所以按等级分组：组内重复仍然是"写了两次"的歧义，
-        # 不同等级则是先后两次合法选择，合并成一份选择集。
-        groups: dict[Any, list[Mapping[str, Any]]] = {}
-        for record in matches:
-            groups.setdefault(record.get("granted_level"), []).append(record)
-        if any(len(group) > 1 for group in groups.values()):
-            return {"choice_id": choice.id, "selected_refs": []}
-        allowed = set(choice.enabled_options)
-        selected: list[str] = []
-        for group in groups.values():
-            raw_refs = group[0].get("selected_refs")
-            if not isinstance(raw_refs, list):
-                continue
-            for ref in raw_refs:
-                if not isinstance(ref, str):
-                    continue
-                if not self._choice_ref_is_valid(choice, ref, allowed):
-                    continue
-                if ref not in selected:
-                    selected.append(ref)
-        return {"choice_id": choice.id, "selected_refs": selected}
-
+        return option_pool.project_feature_selection(
+            definition, self._feature_choice_records(character), self._choice_ref_is_valid,
+        )
     def _choice_ref_is_valid(
         self, choice: Any, ref: str, allowed: set[str],
     ) -> bool:
@@ -1093,6 +1084,10 @@ class Dnd2024ClassFeatureResolver:
             if ref[6:] not in self._skill_ids():
                 return False
             return ref in allowed if allowed else True
+        if choice.kind == "feature_option":
+            # 选项池的选择指回同一份特性目录里的声明，不是成长专长：拿专长
+            # 目录去校验会一律判假，角色卡的 selection 就整片消失。
+            return ref in allowed
         categories = self._advancement_feat_categories()
         if categories.get(ref.removeprefix("feat:")) != choice.category:
             return False
@@ -1278,11 +1273,25 @@ class Dnd2024ClassFeatureResolver:
             refs = record.get("selected_refs")
             if not isinstance(refs, list):
                 continue
-            for ref in refs:
-                local = str(ref).removeprefix("feature:")
+            for raw in refs:
+                # 可重复选项的每次选择是 {"ref", "object_ref"}：绑定属于"哪一次
+                # 选择"，不属于"拥有哪一项"。所有权只回答后者，所以这里只读
+                # ref；把 dict 直接 str() 会得到一个什么都对不上的字符串。
+                ref = raw.get("ref") if isinstance(raw, Mapping) else raw
+                local = str(ref or "").removeprefix("feature:")
                 if local in choice.enabled_options or f"feature:{local}" in choice.enabled_options:
                     selected.add(local)
         return frozenset(selected)
+
+    def bound_objects(
+        self, character: Mapping[str, Any] | None, feature_id: str, *, owner: str = "",
+    ) -> tuple[str, ...]:
+        return option_pool.bound_objects(character, feature_id, owner)
+
+    def owns_binding(
+        self, character: Mapping[str, Any] | None, feature_id: str, object_ref: str, *, owner: str = "",
+    ) -> bool:
+        return option_pool.owns_binding(character, feature_id, object_ref, owner)
 
     def feature_option_choice(
         self,
@@ -1618,6 +1627,7 @@ class Dnd2024ClassFeatureResolver:
         """
 
         active = self.active_features_for(character)
+        feat_owners = self._owned_feat_capability_owners(character)
         definitions = {
             definition.id: definition for definition in self.resource_definitions(character)
         }
@@ -1625,7 +1635,7 @@ class Dnd2024ClassFeatureResolver:
         class_magic = spellcasting.get("class") if isinstance(spellcasting, Mapping) else None
         return _project_capabilities(
             self.catalog,
-            active,
+            (*active, *feat_owners),
             CombatContext.from_economy(
                 combat_context, actor_id,
                 class_magic=class_magic if isinstance(class_magic, Mapping) else None,
@@ -1633,6 +1643,30 @@ class Dnd2024ClassFeatureResolver:
             ),
             definitions,
             include_unavailable=include_unavailable,
+            extra_labels=capability_labels(feat_owners),
+            feature_owner_ids=frozenset(definition.id for definition in active),
+        )
+
+    def relaxed_bonus_action_targets_for(
+        self, character: Mapping[str, Any] | None,
+    ) -> dict[str, str]:
+        """Which capabilities a declared relaxation covers, features and feats both.
+
+        Combat asks this in three places (the projection, the grant event, the
+        forgery gate).  Answering it here keeps them from each scanning a
+        different owner set -- the asymmetry the review flagged.
+        """
+
+        return relaxed_bonus_action_targets(self.capability_owners_for(character))
+
+    def capability_owners_for(
+        self, character: Mapping[str, Any] | None,
+    ) -> tuple[ClassFeatureDefinition | FeatDefinition, ...]:
+        """All owned class features and feats that can declare combat capabilities."""
+
+        return (
+            *self.active_features_for(character),
+            *self._owned_feat_capability_owners(character),
         )
 
     def declared_capability(
@@ -1643,6 +1677,12 @@ class Dnd2024ClassFeatureResolver:
         wanted = str(capability_id or "")
         for definition in self.active_features_for(character):
             for capability in definition.capabilities:
+                if capability.id == wanted:
+                    return capability
+        # 专长的 capability 不在特性目录里，但申报端必须认得出——否则伪造防护
+        # 会把合法申报当成"未知能力"拒掉。
+        for feat_definition in self._owned_feat_capability_owners(character):
+            for capability in feat_definition.capabilities:
                 if capability.id == wanted:
                     return capability
         return None
@@ -1694,22 +1734,19 @@ class Dnd2024ClassFeatureResolver:
             return 0
         features = character.get("features")
         feat_refs = features.get("feat_refs") if isinstance(features, Mapping) else None
-        if not isinstance(feat_refs, list):
+        if not isinstance(feat_refs, list) or not feat_refs:
             return 0
-        catalog = self.bundle.get("advancement_feat_catalog", "srd_advancement_feats")
-        feats = catalog.get("feats") if isinstance(catalog, Mapping) else None
-        if not isinstance(feats, Mapping):
-            return 0
+        # 读已校验的声明，不读原始目录：直接摸 ``bundle.get("advancement_feat_catalog")``
+        # 会绕开参数注册表，"值域写错"要到战斗里才表现为一个怪数字。
+        definitions = self.feat_definitions
         total = 0
         for ref in feat_refs:
             if not isinstance(ref, str):
                 continue
-            feat = feats.get(ref.removeprefix("feat:"))
-            parameters = feat.get("parameters") if isinstance(feat, Mapping) else None
-            bonus = (
-                parameters.get("ranged_attack_bonus")
-                if isinstance(parameters, Mapping) else None
-            )
+            definition = definitions.get(ref.removeprefix("feat:"))
+            if definition is None:
+                continue
+            bonus = definition.parameters.get("ranged_attack_bonus")
             if isinstance(bonus, int) and not isinstance(bonus, bool):
                 total += bonus
         return total
@@ -1728,20 +1765,16 @@ class Dnd2024ClassFeatureResolver:
             return False
         features = character.get("features")
         feat_refs = features.get("feat_refs") if isinstance(features, Mapping) else None
-        if not isinstance(feat_refs, list):
+        if not isinstance(feat_refs, list) or not feat_refs:
             return False
-        catalog = self.bundle.get("advancement_feat_catalog", "srd_advancement_feats")
-        feats = catalog.get("feats") if isinstance(catalog, Mapping) else None
-        if not isinstance(feats, Mapping):
-            return False
+        definitions = self.feat_definitions
         for ref in feat_refs:
             if not isinstance(ref, str):
                 continue
-            feat = feats.get(ref.removeprefix("feat:"))
-            parameters = feat.get("parameters") if isinstance(feat, Mapping) else None
+            definition = definitions.get(ref.removeprefix("feat:"))
             if (
-                isinstance(parameters, Mapping)
-                and parameters.get("light_extra_attack_ability_damage") is True
+                definition is not None
+                and definition.parameters.get("light_extra_attack_ability_damage") is True
             ):
                 return True
         return False

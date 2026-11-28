@@ -97,15 +97,40 @@ def advancement_choices(preview: dict[str, Any]) -> dict[str, Any]:
             # 角色。这里只挑前几个 available 的具体选项，具体选中什么由
             # 调用方自己的 preview 决定。槽可以要求多选（Expertise 一次两
             # 项），所以按 ``count`` 取，而不是固定取一个。
-            available = [
-                option for option in requirement["options"] if option.get("available")
-            ]
-            count = int(requirement.get("count", 1) or 1)
+            #
+            # 可重复选项的每次选择还要绑定一个对象（祈唤绑定戏法）：不带
+            # 绑定的提交会被服务端拒成"must be bound"，所以这里顺手取第一个
+            # 可用的绑定对象，并且不重复用同一个对象。
+            #
+            # ``count`` 可以显式是 0（池子这一级不给新名额）：`or 1` 会把它
+            # 变成"还要选一个"，于是每一级都多提交一次。
+            raw_count = requirement.get("count", 1)
+            count = 1 if raw_count is None else int(raw_count)
+            picked: list[Any] = []
+            used: set[tuple[str, str]] = set()
+            for option in requirement["options"]:
+                if len(picked) >= count:
+                    break
+                if not option.get("available"):
+                    continue
+                ref = str(option["value"])
+                bind = [
+                    row for row in option.get("bind_options") or []
+                    if row.get("available")
+                ]
+                if bind:
+                    bound = str(bind[0]["value"])
+                    if (ref, bound) in used:
+                        continue
+                    used.add((ref, bound))
+                    picked.append({"ref": ref, "object_ref": bound})
+                elif ref not in {str(item.get("ref") if isinstance(item, dict) else item) for item in picked}:
+                    picked.append(ref)
             choices.setdefault("feature_choices", []).append({
                 "owner": str(requirement["owner"]),
                 "feature_id": str(requirement["feature_id"]),
                 "choice_id": str(requirement["choice_id"]),
-                "selected_refs": [str(option["value"]) for option in available[:count]],
+                "selected_refs": picked,
             })
         elif requirement_id == "metamagic_option_ids" or requirement.get("kind") == "metamagic":
             count = int(requirement.get("count", 1) or 1)

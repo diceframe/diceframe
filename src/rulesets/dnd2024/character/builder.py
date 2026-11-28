@@ -7,10 +7,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.rulesets.bundle import LoadedRulesetBundle
-from src.rulesets.dnd2024.features import Dnd2024ClassFeatureResolver
+from src.rulesets.dnd2024.features import (
+    Dnd2024ClassFeatureResolver,
+    FeatureChoice,
+)
+from src.rulesets.dnd2024.features.feat_models import load_feat_definitions
 
 
-from .derivation import CharacterDerivationMixin, plan_skill_choices
+from src.rulesets.dnd2024.features import option_pool
+from .derivation import CharacterDerivationMixin, plan_feature_choices
 from .primitives import (
     ABILITY_IDS,
     POINT_BUY_COSTS,
@@ -118,6 +123,9 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             draft, class_entity=class_entity, species=species, background=background,
         )
         skill_choices = self._present_skill_choices(draft, background, class_ref)
+        language_choices = self._present_language_choices(draft, class_ref)
+        option_choices = self._present_feature_options(draft, class_ref)
+        invocation_choices = self._present_invocation_choices(draft, class_ref)
         return {
             "ability_methods": [
                 {
@@ -145,7 +153,13 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             "species": [present(item, "species") for item in self.bundle.list("species")],
             "backgrounds": [present(item, "background") for item in self.bundle.list("background")],
             "skills": [present(item, "skill") for item in self.bundle.list("skill")],
-            "languages": [present(item, "language") for item in self.bundle.list("language")],
+            # 建卡只能选 Standard：SRD p20 把罕见语言留在 DM 手里，秘密语言
+            # 更是只能由特性授予。目录里的 rarity 就是为了区分这三类。
+            "languages": [
+                present(item, "language")
+                for item in self.bundle.list("language")
+                if item.get("rarity") == "standard"
+            ],
             "origin_feats": [
                 present(item, "feat")
                 for item in self.bundle.list("feat")
@@ -184,6 +198,9 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             "species_feat_count": int(species_feat_choice.get("count", 0) or 0),
             "feat_choices": feat_choices,
             "skill_choices": skill_choices,
+            "language_choices": language_choices,
+            "feature_option_choices": option_choices,
+            "invocation_choices": invocation_choices,
             "class_tools": [present(item, "tool") for item in class_tools],
             "class_tool_count": int(class_tool_choice.get("count", 0) or 0),
             "quick_presets": quick_presets,
@@ -221,13 +238,24 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
     ) -> dict[str, list[dict[str, Any]]]:
         del species
         result: dict[str, list[dict[str, Any]]] = {}
+        # 专长的声明现在和子职共用 ``FeatureChoice``：名称、数量、从哪些目录
+        # 取候选都由 ``choice`` 决定，不再有一个只为 Skilled 存在的字段。
+        definitions = load_feat_definitions(self.bundle)
         for feat_ref in self._acquired_feat_refs(draft, background):
-            feat = self.bundle.get("feat", _ref_id(feat_ref, "feat"))
-            if feat is None:
+            feat_id = _ref_id(feat_ref, "feat")
+            feat = self.bundle.get("feat", feat_id)
+            if feat is None and feat_id not in definitions:
                 continue
-            specs = deepcopy(feat.get("choice_specs") or [])
-            proficiency_choice = feat.get("proficiency_choice") or {}
-            if proficiency_choice:
+            definition = definitions.get(feat_id)
+            # ``choice_specs`` 仍是 Magic Initiate 的形状（P4 迁进 grants）。
+            # 从 ``definition.legacy`` 取，而不是从实体再读一次：同一个字段有
+            # 两个来源时，P4 删除会漏掉一处，那一处会静默变空。
+            specs = (
+                deepcopy(definition.legacy.get("choice_specs") or [])
+                if definition is not None else []
+            )
+            choice = definition.choice if definition is not None else None
+            if choice is not None and choice.kind == "skill_proficiency":
                 occupied = {
                     *list((background or {}).get("skill_refs") or []),
                     *list(draft.get("class_skill_refs") or []),
@@ -236,22 +264,37 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
                     *list((class_entity or {}).get("tool_proficiency_refs") or []),
                     *list(draft.get("class_tool_refs") or []),
                 }
-                allowed_kinds = set(proficiency_choice.get("allowed_kinds") or [])
-                allowed_refs = [
-                    f"{kind}:{item['id']}"
-                    for kind in ("skill", "tool")
-                    if kind in allowed_kinds
-                    for item in self.bundle.list(kind)
-                    if f"{kind}:{item['id']}" not in occupied
-                ]
                 specs.append({
-                    "id": "proficiencies",
-                    "count": int(proficiency_choice.get("count", 0) or 0),
-                    "option_refs": allowed_refs,
+                    "id": choice.id,
+                    "count": choice.count,
+                    "option_refs": self._choice_pool(choice, occupied),
                 })
             if specs:
                 result[feat_ref] = specs
         return result
+
+    def _choice_pool(
+        self, choice: FeatureChoice, occupied: set[str],
+    ) -> list[str]:
+        """Every ref a declared choice may still take.
+
+        ``enabled_options`` empty means "the whole catalog(s)", which is how a
+        feat says "any three skills or tools"; a named list is filtered the same
+        way so an occupied ref never reappears.
+        """
+
+        if choice.enabled_options:
+            candidates = list(choice.enabled_options)
+        else:
+            kinds = (
+                ("skill", "tool") if choice.category == "skill_or_tool" else ("skill",)
+            )
+            candidates = [
+                f"{kind}:{item['id']}"
+                for kind in kinds
+                for item in self.bundle.list(kind)
+            ]
+        return [ref for ref in candidates if ref not in occupied]
 
     def _present_feat_choices(
         self,
@@ -334,7 +377,7 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
     def validate(self, draft: dict[str, Any]) -> list[str]:
         """Draft validation plus the skill-choice slots of this slice.
 
-        The slot rules exist exactly once (``plan_skill_choices``).  Leaving them
+        The slot rules exist exactly once (``plan_feature_choices``).  Leaving them
         out of ``validate`` would make the API boundary lie: the caller's
         validation step would pass and ``derive`` would then raise, so the same
         illegal slot would be "fine" or "fatal" depending on which entry point
@@ -356,14 +399,291 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
         background = self.bundle.get(
             "background", str(draft.get("background_ref") or "").split(":", 1)[-1],
         )
-        _records, choice_errors = plan_skill_choices(
-            draft.get("feature_choices"),
-            Dnd2024ClassFeatureResolver(self.bundle),
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        _records, _languages, choice_errors = plan_feature_choices(
+            self._skill_only_submissions(draft),
+            features,
             self._skill_choice_proxy(draft, class_ref),
             self._skill_proficiency_refs(draft, background),
             level=int(draft.get("level", 1) or 1),
+            known_languages=draft.get("language_refs") or (),
         )
-        return [*errors, *choice_errors]
+        return [
+            *errors, *choice_errors,
+            *self._invocation_choice_errors(draft, class_ref, features),
+        ]
+
+    def _skill_only_submissions(self, draft: dict[str, Any]) -> list[Any]:
+        """Drop pool records before the skill-slot planner sees them.
+
+        ``plan_skill_choices`` rejects any record it cannot match, so a pool
+        submission would be reported as "a slot this character does not have".
+        """
+
+        pool_keys = self._pool_keys(draft, str(draft.get("class_ref") or ""))
+        return [
+            record for record in draft.get("feature_choices") or []
+            if not (
+                isinstance(record, dict)
+                and (
+                    str(record.get("owner") or ""),
+                    str(record.get("feature_id") or ""),
+                    str(record.get("choice_id") or ""),
+                ) in pool_keys
+            )
+        ]
+
+    def _pool_keys(
+        self, draft: dict[str, Any], class_ref: str,
+    ) -> set[tuple[str, str, str]]:
+        if not class_ref:
+            return set()
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        return {
+            (definition.owner, definition.id, definition.choice.id)
+            for definition in features.features_for(
+                self._skill_choice_proxy(draft, class_ref)
+            )
+            if definition.choice is not None and definition.choice.count_track
+        }
+
+    def _invocation_choice_errors(
+        self, draft: dict[str, Any], class_ref: str,
+        features: Dnd2024ClassFeatureResolver,
+    ) -> list[str]:
+        """Validate the pool records a draft commits at creation."""
+
+        if not class_ref:
+            return []
+        level = int(draft.get("level", 1) or 1)
+        cantrips = [
+            str(ref) for ref in (
+                (draft.get("class_spell_choices") or {}).get("cantrip_refs") or []
+            )
+        ]
+        submitted = self._pool_submissions(draft)
+        errors: list[str] = []
+        for definition in features.features_for(
+            self._skill_choice_proxy(draft, class_ref)
+        ):
+            choice = definition.choice
+            if choice is None or not choice.count_track:
+                continue
+            _record, slot_errors = option_pool.plan_creation_pool(
+                resolver=features,
+                definition=definition,
+                cantrips=cantrips,
+                submitted=submitted.get(
+                    (definition.owner, definition.id, choice.id),
+                ),
+                level=level,
+                track_total=self._track_total(choice.count_track, class_ref, level),
+                spells=self._spell_entities(),
+                spell_effects=self._spell_effects(),
+            )
+            errors.extend(slot_errors)
+        return errors
+
+    def _present_invocation_choices(
+        self, draft: dict[str, Any], class_ref: str,
+    ) -> list[dict[str, Any]]:
+        """The track-counted pools a level-1 build can answer right now.
+
+        Same contract as ``skill_choices``: every option is listed with the
+        reason it is unavailable, and nothing here is authoritative -- the
+        derive stage re-validates with the level-up rules.
+        """
+
+        if not class_ref:
+            return []
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        proxy = self._skill_choice_proxy(draft, class_ref)
+        level = int(draft.get("level", 1) or 1)
+        cantrips = [
+            str(ref) for ref in (
+                (draft.get("class_spell_choices") or {}).get("cantrip_refs") or []
+            )
+        ]
+        submitted = self._pool_submissions(draft)
+        slots: list[dict[str, Any]] = []
+        for definition in features.features_for(proxy):
+            choice = definition.choice
+            if choice is None or not choice.count_track:
+                continue
+            slot_id = f"feature_choice:{definition.owner}:{definition.id}:{choice.id}"
+            plan = option_pool.plan_pool(
+                resolver=features,
+                definition=definition,
+                character={
+                    "build": {"level": level, "class_levels": []},
+                    "features": {},
+                    "spellcasting": {"class": {"cantrip_refs": cantrips}},
+                },
+                target_level=level,
+                track_total=self._track_total(choice.count_track, class_ref, level),
+                submitted=None,
+                replacement=None,
+                spells=self._spell_entities(),
+                spell_effects=self._spell_effects(),
+            )
+            requirement = plan.requirement
+            if requirement is None:
+                continue
+            slots.append({
+                "id": slot_id,
+                "owner": requirement["owner"],
+                "feature_id": requirement["feature_id"],
+                "choice_id": requirement["choice_id"],
+                "count": requirement["count"],
+                "total": requirement["total"],
+                "selected_refs": submitted.get(
+                    (definition.owner, definition.id, choice.id), [],
+                ),
+                "options": requirement["options"],
+            })
+        return slots
+
+    def _pool_submissions(
+        self, draft: dict[str, Any],
+    ) -> dict[tuple[str, str, str], list[Any]]:
+        result: dict[tuple[str, str, str], list[Any]] = {}
+        for record in draft.get("feature_choices") or []:
+            if not isinstance(record, dict):
+                continue
+            refs = record.get("selected_refs")
+            if not isinstance(refs, list):
+                continue
+            key = (
+                str(record.get("owner") or ""),
+                str(record.get("feature_id") or ""),
+                str(record.get("choice_id") or ""),
+            )
+            result.setdefault(key, []).extend(refs)
+        return result
+
+    def _track_total(self, track: str, class_ref: str, level: int) -> int:
+        return option_pool.track_value(
+            self.bundle.get("progression_catalog", "srd_classes") or {},
+            track, class_ref, level,
+        )
+
+    def _spell_entities(self) -> dict[str, dict[str, Any]]:
+        catalog = self.bundle.get("spell_catalog", "srd_spells") or {}
+        return {
+            str(row.get("id")): row
+            for row in (catalog.get("spells") or [])
+            if isinstance(row, dict)
+        }
+
+    def _spell_effects(self) -> dict[str, Any]:
+        combat = self.bundle.get("combat_catalog", "srd_combat_core") or {}
+        effects = combat.get("spell_effects")
+        return dict(effects) if isinstance(effects, dict) else {}
+
+    def _present_feature_options(
+        self, draft: dict[str, Any], class_ref: str,
+    ) -> list[dict[str, Any]]:
+        """The mutually exclusive branches a level-1 build still has to answer.
+
+        Divine Order and Primal Order are available at level 1, so creation can
+        commit to one; without this projection the player picks nothing and the
+        branch's grants never apply.
+        """
+
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        if not class_ref:
+            return []
+        proxy = self._skill_choice_proxy(draft, class_ref)
+        result: list[dict[str, Any]] = []
+        for definition in features.features_for(proxy):
+            choice = definition.choice
+            if choice is None or choice.kind != "feature_option" or choice.count_track:
+                continue
+            options: list[dict[str, Any]] = []
+            for ref in choice.enabled_options:
+                option_id = str(ref).removeprefix("feature:")
+                option = features.catalog.features_by_key.get(
+                    (definition.owner, option_id),
+                )
+                if option is None:  # pragma: no cover - loader guarantees it
+                    continue
+                options.append({
+                    "value": str(ref),
+                    "name": str(
+                        features.catalog.labels.get(option_id) or _humanize_id(option_id)
+                    ),
+                    "summary": option.summary,
+                    "source_ref": option.source_ref,
+                    "available": True,
+                    "unavailable_reasons": [],
+                })
+            result.append({
+                "owner": definition.owner,
+                "feature_id": definition.id,
+                "choice_id": choice.id,
+                "count": choice.count,
+                "options": options,
+            })
+        return result
+
+    def _present_language_choices(
+        self, draft: dict[str, Any], class_ref: str,
+    ) -> list[dict[str, Any]]:
+        """The language slots a level-1 build still has to answer.
+
+        Options are the Standard languages (the same pool creation accepts) plus
+        whatever the declaration names explicitly; a rare language is listed and
+        marked unavailable rather than hidden, so "you cannot pick that" and
+        "that does not exist" stay distinguishable to the player.
+        """
+
+        features = Dnd2024ClassFeatureResolver(self.bundle)
+        if not class_ref:
+            return []
+        proxy = self._skill_choice_proxy(draft, class_ref)
+        known = {
+            str(ref)
+            for record in draft.get("feature_choices") or []
+            if isinstance(record, dict)
+            for ref in record.get("selected_refs") or []
+            if str(ref).startswith("language:")
+        }
+        known.update(
+            str(ref) for ref in draft.get("language_refs") or []
+            if str(ref).startswith("language:")
+        )
+        result: list[dict[str, Any]] = []
+        for definition in features.features_for(proxy):
+            choice = definition.choice
+            if choice is None or choice.kind != "language":
+                continue
+            declared = set(choice.enabled_options)
+            options: list[dict[str, Any]] = []
+            for entity in self.bundle.list("language"):
+                ref = f"language:{entity['id']}"
+                if declared and ref not in declared:
+                    continue
+                reasons: list[str] = []
+                if not declared and entity.get("rarity") != "standard":
+                    reasons.append("not_standard")
+                if ref in known:
+                    reasons.append("already_known")
+                options.append({
+                    "value": ref,
+                    "name": str(entity.get("name") or _humanize_id(str(entity["id"]))),
+                    "source_ref": str(entity.get("source_ref") or ""),
+                    "available": not reasons,
+                    "unavailable_reasons": reasons,
+                })
+            result.append({
+                "owner": definition.owner,
+                "feature_id": definition.id,
+                "choice_id": choice.id,
+                "count": choice.count,
+                "grants": choice.grants,
+                "options": options,
+            })
+        return result
 
     def _present_skill_choices(
         self,
@@ -436,6 +756,18 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             "ruleset_character": canonical,
         }
 
+    @property
+    def _creation_choice_kinds(self) -> dict[tuple[str, str], str]:
+        """``{(owner, feature id): choice kind}`` for the choices creation can answer."""
+
+        kinds: dict[tuple[str, str], str] = {}
+        for definition in Dnd2024ClassFeatureResolver(
+            self.bundle,
+        ).catalog.features_by_key.values():
+            if definition.choice is not None and not definition.choice.count_track:
+                kinds.setdefault((definition.owner, definition.id), definition.choice.kind)
+        return kinds
+
     def normalize_submission(self, character: dict[str, Any]) -> dict[str, Any]:
         """Rebuild a submitted sheet from canonical choices, never derived client values."""
 
@@ -493,6 +825,35 @@ class Dnd2024CharacterBuilder(CharacterValidationMixin, CharacterDerivationMixin
             ),
             "language_refs": deepcopy(build.get("language_refs") or []),
             "class_spell_choices": deepcopy(build.get("class_spell_choices")),
+            # 选择槽必须一起搬回来，否则重建会静默丢掉玩家答过的槽：Expertise、
+            # 二选一（Divine Order）与语言选择都不在 draft 的其它字段里。
+            # 子职也要搬：子职自己的槽（Champion 的额外战斗风格）按 owner
+            # 匹配，`features_for` 不知道子职就会把它们判成"这个角色没有的槽"。
+            "features": {
+                "subclass_ref": str(
+                    (canonical.get("features") or {}).get("subclass_ref") or ""
+                ),
+            },
+            # 只搬提交格式的四个字段——canonical 的记录还带 `granted_level`
+            # 与 `grants`，那是落地信息，提交契约不接受。
+            "feature_choices": [
+                {
+                    "owner": record.get("owner"),
+                    "feature_id": record.get("feature_id"),
+                    "choice_id": record.get("choice_id"),
+                    "selected_refs": deepcopy(record.get("selected_refs") or []),
+                }
+                for record in (canonical.get("features") or {}).get(
+                    "feature_choices",
+                ) or []
+                if isinstance(record, dict)
+                # 只搬建卡路径能校验的三类槽（技能 / 语言 / 二选一）。
+                # `advancement_feat` 的槽由 `feat_refs` 承载，重建时从那里
+                # 重新发放；一起搬进来只会被当成"这个角色没有的槽"。
+                and self._creation_choice_kinds.get(
+                    (str(record.get("owner") or ""), str(record.get("feature_id") or "")), "",
+                ) in {"skill_proficiency", "language", "feature_option"}
+            ],
         }
         return self.finalize(draft)
 

@@ -15,7 +15,9 @@ _CLASS_ALIASES = {
     "游侠": "ranger", "レンジャー": "ranger", "ranger": "ranger",
     "游荡者": "rogue", "ローグ": "rogue", "rogue": "rogue",
     "术士": "sorcerer", "ソーサラー": "sorcerer", "sorcerer": "sorcerer",
-    "邪术师": "warlock", "ウォーロック": "warlock", "warlock": "warlock",
+    # 5R（2024）官方中文把 Warlock 译作「魔契师」；「邪术师」是 2014 版译名，
+    # 留作旧卡导入的别名，不删。
+    "魔契师": "warlock", "邪术师": "warlock", "ウォーロック": "warlock", "warlock": "warlock",
     "法师": "wizard", "ウィザード": "wizard", "wizard": "wizard",
 }
 

@@ -485,8 +485,14 @@ class CombatReactionSpellsMixin:
                 return events
             damage_event["amount"] = amount
             damage_event["delta"] = -amount
-            events.extend(self._submit_hit_damage(damage_event))
+            events.extend(self._commit_hit_damage(
+                instance, combat, damage_event, rng,
+                attacker_id=str(decision["attacker_id"]),
+            ))
             defender = self._actor_view(instance, combat, defender_id)
+            events.extend(self._multiattack_mark_events(
+                self._actor_view(instance, combat, str(decision["attacker_id"])), defender,
+            ))
             # 半伤类反应压的是"这次攻击的伤害"，因此第二段与 rider 同样按
             # 同一倍率缩放——只压主伤害会让"减半"变成"减了一部分"。
             tail_events, tail_damage = self._hit_tail_events(
@@ -550,8 +556,14 @@ class CombatReactionSpellsMixin:
         # Shield 没有改变结果（或只是被放弃）：命中成立，最终提交基础伤害，
         # 连同延迟记录的特性使用。
         damage_event = deepcopy(decision["damage_event"])
-        events.extend(self._submit_hit_damage(damage_event))
+        events.extend(self._commit_hit_damage(
+            instance, combat, damage_event, rng,
+            attacker_id=str(decision.get("attacker_id") or ""),
+        ))
         defender = self._actor_view(instance, combat, defender_id)
+        events.extend(self._multiattack_mark_events(
+            self._actor_view(instance, combat, str(decision["attacker_id"])), defender,
+        ))
         tail_events, tail_damage = self._hit_tail_events(
             instance, combat, str(decision["attacker_id"]), defender,
             damage_event, rng,
@@ -615,6 +627,10 @@ class CombatReactionSpellsMixin:
                 held["delta"] = -final
             events.append({"type": "dnd2024.decision.pending", **forwarded})
             return events
+        # 这次攻击已命中防守者（即便伤害随后被减到 0 或重定向，仍是一次命中）。
+        events.extend(self._multiattack_mark_events(
+            self._actor_view(instance, combat, attacker_id), defender,
+        ))
         redirect = choice.get("redirect") or {}
         if final == 0 and not _CARRYING_TAIL_KEYS.intersection(damage_event):
             window = self._redirect_window(
@@ -626,7 +642,10 @@ class CombatReactionSpellsMixin:
         damage_event["amount"] = final
         damage_event["delta"] = -final
         if final > 0:
-            events.extend(self._submit_hit_damage(damage_event))
+            events.extend(self._commit_hit_damage(
+                instance, combat, damage_event, rng,
+                attacker_id=str(decision["attacker_id"]),
+            ))
         defender = self._actor_view(instance, combat, defender_id)
         tail_events, tail_damage = self._hit_tail_events(
             instance, combat, attacker_id, defender, damage_event, rng,
@@ -781,7 +800,7 @@ class CombatReactionSpellsMixin:
         bonus = ability_modifier(
             int((defender.get("abilities") or {}).get(bonus_ability, 10) or 10)
         )
-        raw = sum(rolls) + bonus
+        raw = max(0, sum(rolls) + bonus)
         damage_type = str(window.get("damage_type") or "")
         amount, resistance = self._resist_damage(target, raw, damage_type)
         event: dict[str, Any] = {
@@ -822,8 +841,14 @@ class CombatReactionSpellsMixin:
         attacker_id = str(decision["attacker_id"])
         damage_event = deepcopy(decision["damage_event"])
         amount = int(damage_event["amount"])
-        events.extend(self._submit_hit_damage(damage_event))
+        events.extend(self._commit_hit_damage(
+            instance, combat, damage_event, rng,
+            attacker_id=str(decision.get("attacker_id") or ""),
+        ))
         defender = self._actor_view(instance, combat, defender_id)
+        events.extend(self._multiattack_mark_events(
+            self._actor_view(instance, combat, attacker_id), defender,
+        ))
         tail_events, tail_damage = self._hit_tail_events(
             instance, combat, attacker_id, defender, damage_event, rng,
         )
