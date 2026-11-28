@@ -281,6 +281,30 @@ def damage_node_for(
 
 **验收**：法术相关用例全绿；`grep spell_formula_node` 的站点数从 2 降到 0（只留在构造器里）。
 
+## 6.12 P5 盘点：combat 层知道多少个职业能力
+
+跑了一遍注册表（30 个 kind）与实现落点，结果不是"分散"，是**声明在一处、实现在另一处**：
+
+| kind | 实现 | 声明 |
+|---|---|---|
+| `resistance_all` / `quivering_palm_end` / `holy_nimbus` / `dragon_wings` / `intimidating_presence` | `combat/ongoing_effects.py` | `features/activation_effects.py`（Protocol stub） |
+| `bardic_grant` | `combat/support_actions.py` | `features/activation_targets.py` |
+| `divine_spark` / `turn_undead` / `abjure_foes` / `preserve_life` / `lay_on_hands` / `divine_sense` | `combat/divine_actions.py` | `features/activation_targets.py` |
+| `hide` | `combat/stealth_actions.py` | `features/kinds.py` |
+| `innate_sorcery` | `combat/spell_resolution.py` | `features/kinds.py` |
+| `unarmed_strike` | `combat/view.py` | — |
+
+**结论：`combat/` 认识至少 12 个具体职业能力**（含名字）。这与 AGENTS.md 的
+"specific ruleset 不应反向污染 generic engine"不完全同类，但同源：**owner module 错位**——
+职业能力的施加逻辑长在通用战斗层里。
+
+因此 P5 不是"11 个 handler 改成发效果项"，而是三步：
+
+1. **去重**：Protocol stub 保留在 `features/`（它只描述接口），实现不再两包各有一份；
+2. **收窄**：实现里只保留"参数 → 效果项"，施加交给 `_apply_effect_items`；
+3. **搬迁**：凡是只为某个职业能力存在的代码（`divine_actions.py` 里的四个）应回到
+   `features/` 侧，`combat/` 只留机制。这一步动面大，**是否可以拆到下一切片，需要评审决定**。
+
 ## 7. 验收指标
 
 1. **形状**：`effect_items.py` 提供字段闭集、`normalize_effect_item(s)`、`lifetime_of`、
