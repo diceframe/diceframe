@@ -1,0 +1,22 @@
+{
+  "source": "synthetic-from-api-schema",
+  "source_type": "scene",
+  "source_version": "v14",
+  "api_reference": [
+    "https://foundryvtt.com/api/v14/interfaces/foundry.documents.types.SceneData.html",
+    "https://foundryvtt.com/api/v14/interfaces/foundry.documents.types.TokenData.html"
+  ],
+  "expected_level": "contains_script",
+  "expected_issue_levels": [
+    "contains_script"
+  ],
+  "expected_warnings": [],
+  "expected_unknown_fields": [],
+  "preserved_fields": [
+    "_id",
+    "name",
+    "flags"
+  ],
+  "expected_error": null,
+  "notes": "A macro command inside scene flags and a script flag on a token. Both are preserved as inert data and reported; the adapter never evaluates them."
+}

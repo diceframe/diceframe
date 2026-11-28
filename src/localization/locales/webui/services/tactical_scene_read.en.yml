@@ -1,0 +1,5 @@
+# Messages returned by src/webui/services/tactical_scene_read.py.
+"en":
+  tactical_scene_not_found: "Scene not found"
+  tactical_scene_forbidden: "You are not allowed to view this scene"
+  tactical_scene_invalid_payload: "The scene data cannot be read safely"

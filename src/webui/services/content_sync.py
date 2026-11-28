@@ -16,12 +16,28 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.content_modules import sync
+from src.content_modules.adapters.compendium import CompendiumSyncImporter
 from src.content_modules.plan import declared_source_ref
 
 IMPORT_SOURCE_INVALID = "IMPORT_SOURCE_INVALID"
 CURSOR_INVALID = "CURSOR_INVALID"
 
 _LIST_FIELDS = frozenset({"kind", "cursor", "limit"})
+
+
+def _importers(dependencies: ContentSyncDependencies, pushed_by_device: str) -> Mapping[str, Any]:
+    """Registered importers plus the FVTT compendium pack reader.
+
+    A ``foundry-compendium`` item rides the lorebook slot and delegates every
+    other document to the wrapped lorebook importer unchanged (workplan §6.17
+    m3-01). Wrapping here keeps the WebAPI registration untouched.
+    """
+
+    found = dict(dependencies.importers(pushed_by_device))
+    lorebook = found.get("lorebook-v3")
+    if lorebook is not None:
+        found["lorebook-v3"] = CompendiumSyncImporter(lorebook)
+    return found
 
 
 @dataclass(frozen=True)
@@ -69,7 +85,7 @@ def preview_import(
 ) -> dict[str, Any]:
     try:
         source, items = parse_import_request(body)
-        return sync.preview(dependencies.importers(pushed_by_device), source, items)
+        return sync.preview(_importers(dependencies, pushed_by_device), source, items)
     except sync.SyncItemError as exc:
         return _failure(exc)
 
@@ -86,7 +102,7 @@ def commit_import(
     try:
         source, items = parse_import_request(body)
         return sync.commit(
-            dependencies.importers(pushed_by_device), source, items,
+            _importers(dependencies, pushed_by_device), source, items,
             confirmed_digest=digest, decisions=decisions,
         )
     except sync.SyncItemError as exc:

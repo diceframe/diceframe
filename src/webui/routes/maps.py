@@ -2,11 +2,29 @@
 
 from __future__ import annotations
 
+import json
+
 from aiohttp import web
 
+from src.webui.errors import declared_error_code
 from src.webui.routes._common import _get_api
 from src.webui.viewer import viewer_for
 from src.localization.messages import t
+
+_CONVERSION_STATUS = {
+    "map_background_forbidden": 403,
+    "map_background_not_found": 404,
+    "map_background_unconfirmed": 400,
+    "map_background_unresolvable": 422,
+    "map_background_conversion_conflict": 409,
+    "tactical_scene_forbidden": 403,
+    "tactical_scene_not_found": 404,
+    "tactical_scene_invalid_payload": 422,
+    "tactical_scene_unsupported_schema": 422,
+    "tactical_scene_stale_revision": 409,
+    "rewrite_in_progress": 409,
+    "stale_run": 409,
+}
 
 
 async def api_map_locations(request: web.Request) -> web.Response:
@@ -59,6 +77,30 @@ async def api_map_background_update(request: web.Request) -> web.Response:
     return web.json_response(result, status=200 if result.get("ok") else 400)
 
 
+async def api_map_background_to_tactical_scene(request: web.Request) -> web.Response:
+    api = _get_api(request)
+    game_key = request.match_info["game_key"]
+    viewer = viewer_for(request, api.get_game_instance(game_key))
+    raw = await request.text()
+    try:
+        body = json.loads(raw) if raw.strip() else {}
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        return web.json_response(
+            {"ok": False, "error_code": "map_background_unconfirmed",
+             "error": "Confirm the conversion and its grid before creating a tactical scene."},
+            status=400,
+        )
+    pool = request.app.get("connection_pool")
+    result = await api.convert_map_background_to_tactical_scene(
+        game_key, viewer, intent=body,
+        broadcast=pool.broadcast if pool is not None else None,
+    )
+    status = 200 if result.get("ok") else _CONVERSION_STATUS.get(declared_error_code(result), 400)
+    return web.json_response(result, status=status)
+
+
 def register_maps(app: web.Application) -> None:
     app.router.add_post("/api/map-backgrounds", api_map_background_upload)
     app.router.add_get("/api/games/{game_key}/map", api_map_locations)
@@ -67,3 +109,7 @@ def register_maps(app: web.Application) -> None:
         api_game_map_background_file,
     )
     app.router.add_post("/api/games/{game_key}/map-background", api_map_background_update)
+    app.router.add_post(
+        "/api/games/{game_key}/tactical-scenes/from-map-background",
+        api_map_background_to_tactical_scene,
+    )

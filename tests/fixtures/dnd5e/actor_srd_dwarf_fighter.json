@@ -1,0 +1,223 @@
+{
+  "_id": "SRDActorDwarfFighter",
+  "_stats": {
+    "coreVersion": "14.367",
+    "systemId": "dnd5e",
+    "systemVersion": "6.1.2",
+    "createdTime": 1764288000000,
+    "modifiedTime": 1764288000000
+  },
+  "name": "Dain Ironfoot",
+  "type": "character",
+  "img": "icons/creatures/dwarf-guard.webp",
+  "folder": null,
+  "sort": 0,
+  "ownership": {
+    "default": 0
+  },
+  "flags": {},
+  "system": {
+    "abilities": {
+      "str": {"value": 17, "proficient": 0, "max": null, "bonuses": {}},
+      "dex": {"value": 12, "proficient": 0, "max": null, "bonuses": {}},
+      "con": {"value": 16, "proficient": 1, "max": null, "bonuses": {}},
+      "int": {"value": 9, "proficient": 0, "max": null, "bonuses": {}},
+      "wis": {"value": 13, "proficient": 0, "max": null, "bonuses": {}},
+      "cha": {"value": 8, "proficient": 0, "max": null, "bonuses": {}}
+    },
+    "attributes": {
+      "hp": {"value": 13, "max": 13, "temp": 0, "tempmax": 0, "bonuses": {}},
+      "ac": {"flat": 18, "calc": "default"},
+      "movement": {"walk": 30, "units": "ft"},
+      "init": {"bonus": 0, "roll": {"mode": 0}},
+      "prof": 2
+    },
+    "details": {
+      "race": "SRDRaceDwarf",
+      "background": "SRDBackgroundSoldier",
+      "alignment": "lg",
+      "originalClass": "fighter",
+      "biography": {"value": "<p>A veteran of the Iron Hills.</p>"},
+      "trait": "",
+      "ideal": "",
+      "bond": "",
+      "flaw": ""
+    },
+    "skills": {
+      "acrobatics": {"value": 0, "ability": "dex", "bonuses": {}},
+      "animal_handling": {"value": 0, "ability": "wis", "bonuses": {}},
+      "arcana": {"value": 0, "ability": "int", "bonuses": {}},
+      "athletics": {"value": 1, "ability": "str", "bonuses": {}},
+      "deception": {"value": 0, "ability": "cha", "bonuses": {}},
+      "history": {"value": 1, "ability": "int", "bonuses": {}},
+      "insight": {"value": 0, "ability": "wis", "bonuses": {}},
+      "intimidation": {"value": 1, "ability": "cha", "bonuses": {}},
+      "investigation": {"value": 0, "ability": "int", "bonuses": {}},
+      "medicine": {"value": 0, "ability": "wis", "bonuses": {}},
+      "nature": {"value": 0, "ability": "int", "bonuses": {}},
+      "perception": {"value": 1, "ability": "wis", "bonuses": {}},
+      "performance": {"value": 0, "ability": "cha", "bonuses": {}},
+      "persuasion": {"value": 0, "ability": "cha", "bonuses": {}},
+      "religion": {"value": 0, "ability": "int", "bonuses": {}},
+      "sleight_of_hand": {"value": 0, "ability": "dex", "bonuses": {}},
+      "stealth": {"value": 0.5, "ability": "dex", "bonuses": {}},
+      "survival": {"value": 0, "ability": "wis", "bonuses": {}}
+    },
+    "traits": {
+      "languages": {"value": ["common", "dwarvish", "ALL"], "custom": "Undercommon sign"},
+      "weaponProf": {"value": ["sim", "mar"], "custom": ""},
+      "armorProf": {"value": ["lgt", "med", "hvy", "shl"], "custom": ""}
+    },
+    "currency": {"pp": 0, "gp": 10, "ep": 0, "sp": 5, "cp": 0},
+    "resources": {},
+    "spells": {"spell1": {"value": 0, "override": null}},
+    "tools": {},
+    "bonuses": {"spell": {"dc": ""}},
+    "favorites": [],
+    "someFutureField": {"note": "unknown structure, must be preserved"}
+  },
+  "items": [
+    {
+      "_id": "SRDRaceDwarf",
+      "name": "Dwarf",
+      "type": "race",
+      "img": "icons/creatures/dwarf.webp",
+      "system": {
+        "identifier": "dwarf",
+        "description": {"value": "<p>Dwarven hardiness.</p>"},
+        "type": {"value": "humanoid", "subtype": "dwarf"},
+        "movement": {"walk": 30, "units": "ft"}
+      }
+    },
+    {
+      "_id": "SRDBackgroundSoldier",
+      "name": "Soldier",
+      "type": "background",
+      "img": "icons/skills/social/intimidation.webp",
+      "system": {
+        "identifier": "soldier",
+        "description": {"value": "<p>You served in an army.</p>"}
+      }
+    },
+    {
+      "_id": "SRDClassFighter",
+      "name": "Fighter",
+      "type": "class",
+      "img": "icons/weapons/swords/sword-ornate.webp",
+      "system": {
+        "identifier": "fighter",
+        "levels": 1,
+        "hitDice": "d10",
+        "advancement": {}
+      }
+    },
+    {
+      "_id": "SRDFeatSavageAttacker",
+      "name": "Savage Attacker",
+      "type": "feat",
+      "img": "icons/skills/melee/weapons-crossing-axe.webp",
+      "system": {
+        "identifier": "savage-attacker",
+        "description": {"value": "<p>Once per turn when you hit with a weapon, roll damage twice.</p>"},
+        "type": {"value": "feat"},
+        "prerequisites": {"level": 0}
+      }
+    },
+    {
+      "_id": "SRDItemLongsword",
+      "name": "Longsword",
+      "type": "weapon",
+      "img": "icons/weapons/swords/sword-guard.webp",
+      "system": {
+        "identifier": "longsword",
+        "description": {"value": "<p>A martial melee weapon.</p>", "chat": ""},
+        "source": {"custom": "", "book": "SRD 5.1", "license": "CC-BY-4.0"},
+        "quantity": 1,
+        "weight": {"value": 3, "units": "lb"},
+        "price": {"value": 15, "denomination": "gp"},
+        "equipped": true,
+        "proficient": 1,
+        "properties": ["ver"],
+        "type": {"value": "martialM", "subtype": "sword"},
+        "damage": {
+          "base": {"number": 1, "denomination": 8, "bonus": "", "types": ["slashing"]},
+          "versatile": {"number": 1, "denomination": 10, "bonus": "", "types": ["slashing"]}
+        },
+        "activation": {"type": "action", "cost": 1, "condition": ""},
+        "activities": {
+          "SrdLongswordAttack": {
+            "_id": "SrdLongswordAttack",
+            "type": "attack",
+            "name": "Attack",
+            "activation": {"type": "action", "value": 1}
+          }
+        }
+      }
+    },
+    {
+      "_id": "SRDItemChainMail",
+      "name": "Chain Mail",
+      "type": "equipment",
+      "img": "icons/equipment/chest/chainmail.webp",
+      "system": {
+        "identifier": "chain-mail",
+        "description": {"value": "<p>Heavy armor.</p>"},
+        "quantity": 1,
+        "weight": {"value": 55, "units": "lb"},
+        "price": {"value": 75, "denomination": "gp"},
+        "equipped": true,
+        "properties": ["stealthDisadvantage"],
+        "type": {"value": "heavy", "subtype": "chain"},
+        "armor": {"value": 16, "dex": 0}
+      }
+    },
+    {
+      "_id": "CustomItemBlade",
+      "name": "Blade of Testing",
+      "type": "weapon",
+      "img": "icons/weapons/swords/flame-sword.webp",
+      "system": {
+        "identifier": "blade-of-testing",
+        "description": {"value": "<p>A custom magic weapon.</p>"},
+        "quantity": 1,
+        "weight": {"value": 3, "units": "lb"},
+        "price": {"value": 0, "denomination": "gp"},
+        "equipped": true,
+        "properties": ["mgc"],
+        "type": {"value": "martialM", "subtype": "sword"},
+        "rarity": "rare",
+        "attunement": "required",
+        "damage": {
+          "base": {"number": 2, "denomination": 6, "bonus": "", "types": ["fire"]}
+        },
+        "activities": {
+          "CustomAttack": {
+            "_id": "CustomAttack",
+            "type": "attack",
+            "name": "Flame Strike"
+          }
+        },
+        "customProperty": "homebrew flag unknown to the converter"
+      },
+      "effects": [
+        {
+          "_id": "CustomItemBladeEffect",
+          "label": "Flame aura",
+          "changes": [
+            {"key": "system.bonuses.mwak.damage", "mode": 2, "value": "1d6", "priority": 20}
+          ]
+        }
+      ]
+    }
+  ],
+  "effects": [
+    {
+      "_id": "SRDActorEffect",
+      "label": "Blessed",
+      "origin": "Item.SomeOrigin",
+      "changes": [
+        {"key": "system.bonuses.abilities.save", "mode": 2, "value": "+1", "priority": 20}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+- _id: ActorMira0000001
+  name: Mira the Ranger
+  type: npc
+  img: actors/mira.webp
+  system:
+    details:
+      biography:
+        value: "<p>Mira tracks the moor's eastern edge.</p>"
+    attributes:
+      hp:
+        value: 22
+        max: 22
+  prototypeToken:
+    name: Mira
+  items: []
+  flags:
+    core:
+      sourceId: Actor.ActorMira0000001
+- _id: SceneMoorCamp001
+  name: Moor Camp
+  width: 2400
+  height: 1600
+  _stats:
+    coreVersion: "14.370"
+  grid:
+    type: 1
+    size: 100
+    distance: 5
+    units: ft
+  tokens:
+    - _id: TokenCampfire01
+      name: Campfire
+      x: 100
+      y: 100
+  walls: []
+  notes:
+    - _id: NoteCamp0000001
+      text: "<p>Cold ashes; someone left in a hurry.</p>"
+  navigation: false
+  backgroundColor: "#111111"
+- _id: PlayAmbience001
+  name: Moor Ambience
+  sounds:
+    - _id: SndWind000000001
+      name: Wind
+      path: audio/wind.ogg
+      repeat: true
+  playback:
+    mode: 1

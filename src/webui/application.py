@@ -38,6 +38,7 @@ from src.webui.routes.character_cards import register_character_cards
 from src.webui.routes.content import register_content
 from src.webui.routes.content_review import register as register_content_review
 from src.webui.routes.creator import register_creator
+from src.webui.routes.foundry import register_foundry
 from src.webui.routes.games import register_games
 from src.webui.routes.generated_images import register_generated_images
 from src.webui.routes.embedding_models import register_embedding_models
@@ -53,6 +54,7 @@ from src.webui.routes.pages import add_response_security_headers, register_pages
 from src.webui.routes.pairing import PAIRING_SERVICE_KEY, register_pairing
 from src.webui.routes.plugins import register_plugins
 from src.webui.routes.rules import register_rules
+from src.webui.routes.tactical_scene import register_tactical_scene
 from src.webui.routes.scene_images import register_scene_images
 from src.webui.routes.security import register_security
 from src.webui.routes.speech import register_speech
@@ -185,6 +187,8 @@ def register_routes(
     register_avatars(application)
     register_scene_images(application)
     register_maps(application)
+    register_tactical_scene(application)
+    register_foundry(application)
     application.router.add_get("/api/config", dependencies.config_get)
     application.router.add_post("/api/config", dependencies.config_post)
     application.router.add_post(

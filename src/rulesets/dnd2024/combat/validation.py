@@ -17,6 +17,7 @@ from ..character.attunement import (
     owned_ref_counts,
 )
 from .action_adapter import is_supported_damage_formula
+from . import spatial
 from ..features.attack_declarations import (
     BRUTAL_STRIKE, CUNNING_STRIKE_EFFECTS_KEY, LIGHT_EXTRA_ATTACK, SELECTION_KEY,
     STUNNING_STRIKE, declaration_value, selection_error, validate_cunning_strike,
@@ -923,6 +924,11 @@ class CombatValidationMixin(
             self._validate_player_positions(instance, intent.get("player_positions"))
             self._validate_mounted_players(instance, intent.get("mounted_player_ids"))
             self._validate_initiative_choices(instance, intent)
+            if spatial.has_start_input(intent):
+                try:
+                    spatial.validate_start_input(intent)
+                except spatial.SpatialError as exc:
+                    raise CombatIntentError(str(exc)) from exc
             return
         if combat.get("status") != "active":
             raise CombatIntentError("combat is not active")
@@ -1178,20 +1184,32 @@ class CombatValidationMixin(
                 if not gate["allowed"]:
                     raise CombatIntentError(str(gate["reason"]))
         if intent_type == "move":
-            distance = intent.get("distance")
-            if isinstance(distance, bool) or not isinstance(distance, int) or distance == 0:
-                raise CombatIntentError("movement distance must be a non-zero integer")
-            if abs(distance) > int(economy.get("movement", 0) or 0):
-                raise CombatIntentError("movement exceeds the remaining speed")
-            for source_id in self._restriction_sources(conditions, "cannot_approach_source"):
-                before = self._distance(combat, actor["actor_id"], source_id)
-                after = self._distance_after_move(
-                    combat, actor["actor_id"], source_id, distance,
-                )
-                if after < before:
-                    raise CombatIntentError(
-                        "a frightened creature cannot move closer to the source of its fear"
+            if combat.get("position_mode") == spatial.POSITION_MODE_GRID:
+                try:
+                    spatial.check_move(
+                        combat, str(actor["actor_id"]), intent,
+                        budget_ft=int(economy.get("movement", 0) or 0),
+                        approach_sources=self._restriction_sources(
+                            conditions, "cannot_approach_source",
+                        ),
                     )
+                except spatial.SpatialError as exc:
+                    raise CombatIntentError(str(exc)) from exc
+            else:
+                distance = intent.get("distance")
+                if isinstance(distance, bool) or not isinstance(distance, int) or distance == 0:
+                    raise CombatIntentError("movement distance must be a non-zero integer")
+                if abs(distance) > int(economy.get("movement", 0) or 0):
+                    raise CombatIntentError("movement exceeds the remaining speed")
+                for source_id in self._restriction_sources(conditions, "cannot_approach_source"):
+                    before = self._distance(combat, actor["actor_id"], source_id)
+                    after = self._distance_after_move(
+                        combat, actor["actor_id"], source_id, distance,
+                    )
+                    if after < before:
+                        raise CombatIntentError(
+                            "a frightened creature cannot move closer to the source of its fear"
+                        )
         if intent_type == "attack":
             self._validate_attack(instance, combat, intent, actor)
             self._validate_horde_breaker(instance, combat, intent, actor)

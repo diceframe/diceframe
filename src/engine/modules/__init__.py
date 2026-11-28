@@ -31,6 +31,7 @@ from src.engine.modules import (  # noqa: F401
     round_presentation,
     round_safety,
     ruleset_runtime,
+    tactical_scene,
     seat_activity,
     world_reports,
     run_story,

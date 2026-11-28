@@ -1,0 +1,12 @@
+{
+  "name": "Lantern Pack",
+  "type": "Item",
+  "documents": [
+    {
+      "_id": "ItemLantern000002",
+      "name": "Brass Lantern",
+      "type": "loot",
+      "system": {"description": {"value": "<p>A brass lantern with a cracked pane.</p>"}}
+    }
+  ]
+}

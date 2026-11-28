@@ -1,0 +1,2 @@
+{"_id": "ItemRope00000001", "name": "Hemp Rope", "type": "loot", "img": "icons/sundries/rope.webp", "system": {"description": {"value": "<p>Fifty feet of stout hemp rope.</p>"}, "quantity": 1, "price": {"value": 1, "denomination": "gp"}}, "effects": [], "flags": {}}
+{"_id": "ItemLantern000001", "name": "Hooded Lantern", "type": "loot", "img": "data:image/png;base64,AAAA", "system": {"description": {"value": "<p>Burns for six hours on one flask of oil.</p>"}, "quantity": 1}, "effects": []}

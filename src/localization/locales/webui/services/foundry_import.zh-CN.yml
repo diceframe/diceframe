@@ -1,0 +1,12 @@
+# Messages returned by src/webui/services/foundry_import.py.
+"zh-CN":
+  tactical_scene_forbidden: "只有 GM 可以导入场景"
+  tactical_scene_not_found: "对局或场景不存在"
+  tactical_scene_invalid_payload: "场景数据无法安全导入"
+  foundry_version_unsupported: "不支持的 Foundry 版本；仅支持 v13/v14"
+  foundry_import_plan_invalid: "导入计划无效或策略不合法"
+  foundry_import_stale: "预览后场景状态已变化，请重新预览"
+  tactical_scene_stale_revision: "场景已被其他修改，请刷新后重试"
+  rewrite_in_progress: "历史正在重建，请稍后重试"
+  stale_run: "对局已重启，请刷新后重试"
+  save_failed: "保存场景失败；本次导入已回滚"

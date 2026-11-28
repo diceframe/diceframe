@@ -1,0 +1,72 @@
+{
+  "_id": "CustomActorHalfElfArtificer",
+  "_stats": {
+    "coreVersion": "14.367",
+    "systemId": "dnd5e",
+    "systemVersion": "6.1.2"
+  },
+  "name": "Rilla Quickfoot",
+  "type": "character",
+  "img": "icons/creatures/halfling-scout.webp",
+  "system": {
+    "abilities": {
+      "str": {"value": 8, "proficient": 0},
+      "dex": {"value": 16, "proficient": 1},
+      "con": {"value": 14, "proficient": 0},
+      "int": {"value": 17, "proficient": 1},
+      "wis": {"value": 12, "proficient": 0},
+      "cha": {"value": 10, "proficient": 0}
+    },
+    "attributes": {
+      "hp": {"value": 10, "max": 10, "temp": 0},
+      "movement": {"walk": 30, "units": "ft"}
+    },
+    "details": {
+      "race": "CustomRaceHalfElf",
+      "background": "Haunted One",
+      "alignment": "chaotic good",
+      "biography": {"value": "<p>A tinkerer with a dark past.</p>"}
+    },
+    "skills": {
+      "arcana": {"value": 1, "ability": "int"},
+      "investigation": {"value": 1, "ability": "int"},
+      "stealth": {"value": 1, "ability": "dex"},
+      "persuasion": {"value": 0.5, "ability": "cha"}
+    },
+    "traits": {
+      "languages": {"value": ["common", "elvish"], "custom": ""}
+    },
+    "currency": {"gp": 25}
+  },
+  "items": [
+    {
+      "_id": "CustomRaceHalfElf",
+      "name": "Half-Elf",
+      "type": "race",
+      "system": {
+        "identifier": "half-elf",
+        "description": {"value": "<p>Custom lineage.</p>"},
+        "type": {"value": "humanoid", "subtype": "half-elf"}
+      }
+    },
+    {
+      "_id": "CustomClassArtificer",
+      "name": "Artificer",
+      "type": "class",
+      "system": {
+        "identifier": "artificer",
+        "levels": 1
+      }
+    },
+    {
+      "_id": "CustomItemWrench",
+      "name": "Tinker's Wrench",
+      "type": "tool",
+      "system": {
+        "identifier": "tinkers-wrench",
+        "quantity": 1,
+        "weight": {"value": 2, "units": "lb"}
+      }
+    }
+  ]
+}

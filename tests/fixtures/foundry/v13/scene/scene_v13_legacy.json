@@ -1,0 +1,76 @@
+{
+  "_id": "c0ffee0000000001",
+  "name": "Old Crypt",
+  "navName": "Old Crypt",
+  "width": 1200,
+  "height": 900,
+  "padding": 0.1,
+  "shiftX": 0,
+  "shiftY": 0,
+  "initial": {
+    "x": 600,
+    "y": 450,
+    "scale": 0.75
+  },
+  "background": {
+    "src": "worlds/legacy/crypt.webp",
+    "tint": "#ffffff",
+    "alphaThreshold": 0.5,
+    "scaleX": 1,
+    "scaleY": 1
+  },
+  "foreground": "worlds/legacy/crypt-fg.webp",
+  "foregroundElevation": 5,
+  "fog": {
+    "exploration": true,
+    "overlay": null,
+    "colors": {
+      "explored": "#000000",
+      "unexplored": "#222222"
+    },
+    "reset": 1700000000000
+  },
+  "environment": {
+    "darknessLevel": 0.6,
+    "globalLight": true,
+    "hue": 0,
+    "saturation": 0,
+    "intensity": 0
+  },
+  "grid": {
+    "type": 1,
+    "size": 100,
+    "style": "solidLines",
+    "thickness": 1,
+    "color": "#111111",
+    "alpha": 0.3,
+    "distance": 5,
+    "units": "ft"
+  },
+  "templates": [
+    {
+      "_id": "tpl0000000000001",
+      "t": "circle",
+      "x": 500,
+      "y": 500,
+      "distance": 20,
+      "flags": {}
+    }
+  ],
+  "tiles": [],
+  "tokens": [],
+  "walls": [],
+  "lights": [],
+  "sounds": [],
+  "notes": [],
+  "drawings": [],
+  "regions": [],
+  "sort": 300000,
+  "ownership": {
+    "default": 0
+  },
+  "flags": {},
+  "_stats": {
+    "coreVersion": "13.350"
+  }
+}

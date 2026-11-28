@@ -1018,6 +1018,8 @@ class CombatHitResolutionMixin:
                 )
                 applied.append({
                     "type": "dnd2024.position.changed", "actor_id": target_id,
+                    "feet": int(rider.get("distance") or 0),
+                    "away_from": attacker_id,
                     "distance": direction * int(rider.get("distance") or 0),
                     "forced": True,
                     "source_rider": "push",

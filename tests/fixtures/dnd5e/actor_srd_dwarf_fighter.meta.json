@@ -1,0 +1,36 @@
+{
+  "source": "synthetic-from-dnd5e-6.1.x-schema",
+  "source_type": "actor",
+  "source_system": "foundryvtt/dnd5e 6.1.x (commit 75750bf1b8bd79f8448af40495c8bb5c99f49551, system 6.1.2)",
+  "schema_reference": [
+    "https://github.com/foundryvtt/dnd5e/blob/6.1.x/module/data/actor/character.mjs",
+    "https://github.com/foundryvtt/dnd5e/blob/6.1.x/module/data/actor/templates/creature.mjs",
+    "https://github.com/foundryvtt/dnd5e/blob/6.1.x/module/data/actor/templates/details.mjs",
+    "https://github.com/foundryvtt/dnd5e/blob/6.1.x/module/data/actor/templates/traits.mjs",
+    "https://github.com/foundryvtt/dnd5e/blob/6.1.x/module/data/fields/local-document-field.mjs",
+    "https://github.com/foundryvtt/dnd5e/blob/6.1.x/module/data/item/templates/item-description.mjs"
+  ],
+  "verified_fields": [
+    "system.abilities.<id>.value is the persisted ability score (NumberField min 0, initial 10)",
+    "system.details.race and system.details.background are LocalDocumentField values persisted as the embedded item _id",
+    "class level is the sum of embedded class items' system.levels (system.details.level is persisted:false)",
+    "system.skills.<key>.value is the proficiency level 0/0.5/1/2",
+    "system.traits.languages is a SimpleTraitField {value: Set, custom: string}"
+  ],
+  "expected_level": "saved_not_runnable",
+  "expected_catalog_refs": [
+    "species:dwarf",
+    "class:fighter",
+    "background:soldier",
+    "skill:history",
+    "skill:perception",
+    "language:common",
+    "language:dwarvish",
+    "feat:savage_attacker",
+    "item:longsword",
+    "item:chain_mail"
+  ],
+  "expected_unsupported_kinds": ["language", "activity", "unsupported", "active_effect"],
+  "expected_unknown_fields": ["system.someFutureField"],
+  "expected_warnings_contain": ["background +2/+1 split cannot be reconstructed"]
+}

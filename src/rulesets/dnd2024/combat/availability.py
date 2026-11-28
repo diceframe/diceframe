@@ -28,6 +28,7 @@ from src.rulesets.dnd2024.items.charges import (
     charges_of,
     validate_charges_declaration,
 )
+from . import spatial
 from .weapon_masteries import WEAPON_MASTERY_FEATURE_ID, cleave_grant, nick_active
 from .check_modes import (
     HUNTERS_MARK_REF,
@@ -1016,22 +1017,42 @@ class CombatAvailabilityMixin:
                 }
             movement = int(economy.get("movement", 0) or 0)
             if movement > 0 and not flags["speed_zero"]:
-                actor_position = self._position(combat, actor_id)
-                target_position = self._position(combat, str(target["actor_id"]))
-                desired_range = max(
-                    (int(item.get("range", 5) or 5) for item in actor.get("attacks") or []),
-                    default=5,
-                )
-                needed = max(0, abs(target_position - actor_position) - desired_range)
-                distance_to_move = min(movement, needed)
-                if distance_to_move > 0:
-                    signed = distance_to_move if target_position > actor_position else -distance_to_move
-                    return {
-                        **base,
-                        "intent_id": f"{base['intent_id']}:move",
-                        "type": "move",
-                        "distance": signed,
-                    }
+                if spatial.is_grid(combat):
+                    target_id = str(target["actor_id"])
+                    desired_range = max(
+                        (int(item.get("range", 5) or 5) for item in actor.get("attacks") or []),
+                        default=5,
+                    )
+                    needed = max(
+                        0, self._distance(combat, actor_id, target_id) - desired_range,
+                    )
+                    cell = spatial.automatic_move_target(
+                        combat, actor_id, target_id, min(movement, needed),
+                    )
+                    if cell is not None:
+                        return {
+                            **base,
+                            "intent_id": f"{base['intent_id']}:move",
+                            "type": "move",
+                            "target_cell": cell,
+                        }
+                else:
+                    actor_position = self._position(combat, actor_id)
+                    target_position = self._position(combat, str(target["actor_id"]))
+                    desired_range = max(
+                        (int(item.get("range", 5) or 5) for item in actor.get("attacks") or []),
+                        default=5,
+                    )
+                    needed = max(0, abs(target_position - actor_position) - desired_range)
+                    distance_to_move = min(movement, needed)
+                    if distance_to_move > 0:
+                        signed = distance_to_move if target_position > actor_position else -distance_to_move
+                        return {
+                            **base,
+                            "intent_id": f"{base['intent_id']}:move",
+                            "type": "move",
+                            "distance": signed,
+                        }
             return {
                 **base,
                 "intent_id": f"{base['intent_id']}:dodge",
@@ -1143,8 +1164,7 @@ class CombatAvailabilityMixin:
                     }
                 movement = int(economy.get("movement", 0) or 0)
                 if movement > 0:
-                    actor_position = self._position(combat, actor_id)
-                    target_position = self._position(combat, str(target["actor_id"]))
+                    target_id = str(target["actor_id"])
                     desired_range = max(
                         (
                             int(weapon.get("range", 5) or 5)
@@ -1152,18 +1172,35 @@ class CombatAvailabilityMixin:
                         ),
                         default=5,
                     )
-                    needed = max(0, abs(target_position - actor_position) - desired_range)
-                    distance_to_move = min(movement, needed)
-                    if distance_to_move > 0:
-                        signed = (
-                            distance_to_move
-                            if target_position > actor_position else -distance_to_move
+                    if spatial.is_grid(combat):
+                        needed = max(
+                            0, self._distance(combat, actor_id, target_id) - desired_range,
                         )
-                        return {
-                            **base,
-                            "intent_id": f"{base['intent_id']}:move",
-                            "type": "move", "distance": signed,
-                        }
+                        cell = spatial.automatic_move_target(
+                            combat, actor_id, target_id, min(movement, needed),
+                        )
+                        if cell is not None:
+                            return {
+                                **base,
+                                "intent_id": f"{base['intent_id']}:move",
+                                "type": "move",
+                                "target_cell": cell,
+                            }
+                    else:
+                        actor_position = self._position(combat, actor_id)
+                        target_position = self._position(combat, target_id)
+                        needed = max(0, abs(target_position - actor_position) - desired_range)
+                        distance_to_move = min(movement, needed)
+                        if distance_to_move > 0:
+                            signed = (
+                                distance_to_move
+                                if target_position > actor_position else -distance_to_move
+                            )
+                            return {
+                                **base,
+                                "intent_id": f"{base['intent_id']}:move",
+                                "type": "move", "distance": signed,
+                            }
             return {**base, "intent_id": f"{base['intent_id']}:dodge", "type": "dodge"}
         return {**base, "intent_id": f"{base['intent_id']}:end", "type": "end_turn"}
 

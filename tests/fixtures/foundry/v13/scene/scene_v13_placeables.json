@@ -1,0 +1,226 @@
+{
+  "_id": "c3d4e5f6a7b8c9d0",
+  "name": "Chapel of the Shield",
+  "navName": "Old Crypt",
+  "width": 1200,
+  "height": 900,
+  "padding": 0.1,
+  "shiftX": 0,
+  "shiftY": 0,
+  "initial": {
+    "x": 600,
+    "y": 450,
+    "scale": 0.75
+  },
+  "background": {
+    "src": "worlds/legacy/crypt.webp",
+    "tint": "#ffffff",
+    "alphaThreshold": 0.5,
+    "scaleX": 1,
+    "scaleY": 1
+  },
+  "foreground": "worlds/legacy/crypt-fg.webp",
+  "foregroundElevation": 5,
+  "fog": {
+    "exploration": true,
+    "overlay": null,
+    "colors": {
+      "explored": "#000000",
+      "unexplored": "#222222"
+    },
+    "reset": 1700000000000
+  },
+  "environment": {
+    "darknessLevel": 0.6,
+    "globalLight": true,
+    "hue": 0,
+    "saturation": 0,
+    "intensity": 0
+  },
+  "grid": {
+    "type": 1,
+    "size": 100,
+    "style": "solidLines",
+    "thickness": 1,
+    "color": "#111111",
+    "alpha": 0.3,
+    "distance": 5,
+    "units": "ft"
+  },
+  "templates": [],
+  "tiles": [],
+  "tokens": [],
+  "walls": [
+    {
+      "_id": "wallChapel00001",
+      "c": [
+        0,
+        0,
+        1200,
+        0
+      ],
+      "dir": 0,
+      "door": 0,
+      "ds": 0,
+      "move": 1,
+      "sight": 1,
+      "sound": 1,
+      "light": 1,
+      "threshold": {
+        "light": 10,
+        "sight": 10,
+        "sound": 10,
+        "attenuation": false
+      },
+      "flags": {}
+    },
+    {
+      "_id": "wallChapel00002",
+      "c": [
+        600,
+        0,
+        600,
+        450
+      ],
+      "dir": 0,
+      "door": 2,
+      "doorSound": "doorLocked",
+      "ds": 2,
+      "move": 2,
+      "sight": 2,
+      "sound": 0,
+      "light": 0,
+      "threshold": {
+        "light": 10,
+        "sight": 10,
+        "sound": 10,
+        "attenuation": false
+      },
+      "flags": {}
+    },
+    {
+      "_id": "wallChapel00003",
+      "c": [
+        0,
+        900,
+        400,
+        900
+      ],
+      "door": 7,
+      "move": "weird",
+      "flags": {
+        "wall-editor": {
+          "snap": true
+        }
+      }
+    }
+  ],
+  "lights": [
+    {
+      "_id": "lightChapel0001",
+      "x": 300,
+      "y": 450,
+      "rotation": 0,
+      "elevation": 0,
+      "hidden": false,
+      "vision": false,
+      "walls": true,
+      "config": {
+        "dim": 40,
+        "bright": 20,
+        "angle": 360,
+        "color": "#ffaa00",
+        "alpha": 0.6,
+        "animation": {
+          "type": "torch",
+          "speed": 3,
+          "intensity": 3,
+          "reverse": false
+        },
+        "darkness": {
+          "min": 0,
+          "max": 1
+        },
+        "priority": 0,
+        "attenuation": 0.5,
+        "luminosity": 0.5,
+        "saturation": 0,
+        "contrast": 0,
+        "shadows": 0,
+        "coloration": 1,
+        "negative": false
+      },
+      "flags": {}
+    },
+    {
+      "_id": "lightChapel0002",
+      "x": 900,
+      "y": 450,
+      "rotation": 0,
+      "elevation": 0,
+      "hidden": true,
+      "vision": false,
+      "walls": true,
+      "config": {
+        "dim": 40,
+        "bright": 20,
+        "angle": 360,
+        "color": "#ffaa00",
+        "alpha": 0.6,
+        "animation": {
+          "type": "torch",
+          "speed": 3,
+          "intensity": 3,
+          "reverse": false
+        },
+        "darkness": {
+          "min": 0,
+          "max": 1
+        },
+        "priority": 0,
+        "attenuation": 0.5,
+        "luminosity": 0.5,
+        "saturation": 0,
+        "contrast": 0,
+        "shadows": 0,
+        "coloration": 1,
+        "negative": false
+      },
+      "flags": {}
+    }
+  ],
+  "sounds": [],
+  "notes": [
+    {
+      "_id": "noteChapel0001",
+      "x": 600,
+      "y": 450,
+      "entryId": "JE0000000000001",
+      "pageId": "JP0000000000001",
+      "text": "Altar",
+      "textColor": "#00ff00",
+      "fontSize": 24,
+      "fontFamily": "Signika",
+      "textAnchor": 0,
+      "iconSize": 40,
+      "texture": {
+        "src": "worlds/test/icons/altar.svg",
+        "tint": null
+      },
+      "elevation": 0,
+      "sort": 0,
+      "global": true,
+      "flags": {}
+    }
+  ],
+  "drawings": [],
+  "regions": [],
+  "sort": 300000,
+  "ownership": {
+    "default": 0
+  },
+  "flags": {},
+  "_stats": {
+    "coreVersion": "13.350"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "source": "synthetic-from-api-schema",
+  "source_type": "scene",
+  "source_version": "v13",
+  "api_reference": [
+    "https://foundryvtt.com/api/v13/interfaces/foundry.documents.types.SceneData.html",
+    "https://foundryvtt.com/api/v13/interfaces/foundry.documents.types.AmbientLightData.html",
+    "https://foundryvtt.com/api/v13/interfaces/foundry.documents.types.NoteData.html"
+  ],
+  "expected_level": "degraded_display",
+  "expected_issue_levels": [
+    "degraded_display"
+  ],
+  "expected_warnings": [
+    "scene.walls: converted for display; movement and line of sight rules do not use them in this phase",
+    "scene.lights: converted for display; lighting rules do not use them in this phase"
+  ],
+  "expected_unknown_fields": [
+    "scene.walls[0].threshold",
+    "scene.walls[1].doorSound",
+    "scene.notes[0].fontFamily"
+  ],
+  "preserved_fields": [
+    "_id",
+    "name",
+    "walls",
+    "lights",
+    "notes"
+  ],
+  "expected_error": null,
+  "notes": "v13 shapes of the same placeables (a v13 light has no name). v13 fog.exploration is already reported as degraded_display by the legacy fixture. Synthetic scene built from the official WallData / AmbientLightData / LightData / NoteData type definitions. The third wall carries vocabulary outside the known range (door 7, move \"weird\") on purpose: it must be preserved in extensions and reported as degraded_display, never interpreted. Nested residual structures (wall threshold, light animation and darkness) are preserved verbatim; their field names are not verified against a real export. No real FVTT export sample exists yet."
+}

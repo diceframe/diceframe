@@ -12,6 +12,9 @@
 .map-game-picker { display: grid; gap: 4px; color: var(--df-text-muted); font-size: 11px; }
 .map-game-picker select { min-width: 190px; }
 .map-back-link { color: var(--df-interactive-strong); font-size: 13px; }
+.map-convert-button { padding: 6px 14px; border: 1px solid var(--df-accent); border-radius: var(--df-radius-sm); background: var(--df-surface-2); color: var(--df-accent-strong); font-size: 13px; cursor: pointer; }
+.map-convert-button:hover { background: var(--df-surface-1); border-color: var(--df-accent-strong); }
+.map-convert-button:disabled { opacity: .5; cursor: default; }
 .map-page-error, .map-page-state { max-width: 1320px; margin: 20px auto; padding: 18px; border: 1px solid var(--df-border-soft); border-radius: var(--df-radius-md); background: var(--df-surface-1); }
 .map-page-error { color: var(--df-danger, var(--df-warning)); }
 .map-page-error button { margin-left: 8px; }

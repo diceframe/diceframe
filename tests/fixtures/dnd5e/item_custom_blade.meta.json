@@ -1,0 +1,13 @@
+{
+  "source": "synthetic-from-dnd5e-6.1.x-schema",
+  "source_type": "item",
+  "source_system": "foundryvtt/dnd5e 6.1.x (system 6.1.2)",
+  "schema_reference": [
+    "https://github.com/foundryvtt/dnd5e/blob/6.1.x/module/data/item/weapon.mjs"
+  ],
+  "note": "Custom identifier with no dnd2024 catalog entry: preserved verbatim, reported, never guessed. Includes Activity and embedded ActiveEffect data that must stay inert.",
+  "expected_catalog_ref": null,
+  "expected_level": "saved_not_runnable",
+  "expected_unsupported_kinds": ["activity", "active_effect", "unsupported"],
+  "expected_unknown_fields": ["item.system.customProperty"]
+}

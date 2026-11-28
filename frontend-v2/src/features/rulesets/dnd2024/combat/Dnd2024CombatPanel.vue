@@ -32,7 +32,9 @@ import CombatLiveBar from '@/components/play/CombatLiveBar.vue'
 import ActionDock, { type DockTab } from './hud/ActionDock.vue'
 import ActionTile from './hud/ActionTile.vue'
 import Battlefield from './hud/Battlefield.vue'
+import MoveDock from './hud/MoveDock.vue'
 import { battleDistance, buildBattleTokens } from './hud/battleView'
+import { useGridCombat } from './hud/useGridCombat'
 import ConditionAdjudicator, { type AdjudicableCondition } from './hud/ConditionAdjudicator.vue'
 import InitiativeBar from './hud/InitiativeBar.vue'
 import type { BattlefieldLabels } from './hud/labels'
@@ -313,7 +315,7 @@ const stagedSummary = computed(() => {
     const aimed = payload.target_id ? ` → ${target}` : ''
     return `${copy.value.activateItem} · ${item?.name || payload.item_ref}${aimed}`
   }
-  if (type === 'move') return `${copy.value.move} · ${Number(payload.distance || 0)} ${copy.value.feet}`
+  if (type === 'move') return grid.moveSummary(payload) || `${copy.value.move} · ${Number(payload.distance || 0)} ${copy.value.feet}`
   if (type === 'class_capability') {
     const capability = capabilityActions.value.find(
       item => item.capability_id === payload.capability_id,
@@ -495,7 +497,7 @@ const cardToken = computed(() => (
 ))
 const currentToken = computed(() => battleTokens.value.find(token => token.isCurrent) || null)
 const cardDistance = computed(() => (
-  currentToken.value && cardToken.value ? battleDistance(currentToken.value.coord, cardToken.value.coord) : null
+  currentToken.value && cardToken.value ? battleDistance(currentToken.value.coord, cardToken.value.coord, grid.cellSize) : null
 ))
 const initiativeTokens = computed(() => (combat.value?.initiative || [])
   .map(id => battleTokens.value.find(token => token.id === id))
@@ -522,8 +524,10 @@ const dockTabs = computed<DockTab[]>(() => {
 })
 const dockTargetToken = computed(() => battleTokens.value.find(token => token.id === aimedTargetId.value) || null)
 const dockTargetDistance = computed(() => (
-  currentToken.value && dockTargetToken.value ? battleDistance(currentToken.value.coord, dockTargetToken.value.coord) : null
+  currentToken.value && dockTargetToken.value ? battleDistance(currentToken.value.coord, dockTargetToken.value.coord, grid.cellSize) : null
 ))
+
+const grid = useGridCombat({ combat, moveAction, tokens: battleTokens, currentToken, isOwnTurn, selectDockTab, stage, copy, t: (key, params) => t(key as never, params as never) })
 const dockCost = computed(() => {
   if (dockMode.value === 'attack') return copy.value.action
   if (dockMode.value === 'form') return copy.value.bonus
@@ -538,7 +542,7 @@ const dockCost = computed(() => {
     return selectedItem.value.cost === 'bonus_action' ? copy.value.bonus : copy.value.action
   }
   if (dockMode.value === 'explore_item') return ''
-  if (dockMode.value === 'move') return `${Math.abs(Number(movementDistance.value || 0))} ${copy.value.feet}`
+  if (dockMode.value === 'move') return grid.isGrid ? grid.dockCost : `${Math.abs(Number(movementDistance.value || 0))} ${copy.value.feet}`
   return ''
 })
 const dockNeedsTarget = computed(() => dockMode.value === 'attack' || (dockMode.value === 'spell' && spellChoices.value.length > 0)
@@ -558,7 +562,7 @@ const canStageDock = computed(() => {
       && (selectedItem.value.target !== 'ally' || selectedItemTargetId.value))
     case 'explore': return Boolean(explorationSpellRef.value && explorationSlotValid.value)
     case 'explore_item': return Boolean(explorationItem.value)
-    case 'move': return Boolean(movementDistance.value)
+    case 'move': return grid.isGrid ? Boolean(grid.selectedCell) : Boolean(movementDistance.value)
     default: return false
   }
 })
@@ -1026,7 +1030,9 @@ function stageExplorationItem(): void {
 }
 
 function stageMove(): void {
-  if (!moveAction.value || !movementDistance.value) return
+  if (!moveAction.value) return
+  if (grid.isGrid) return grid.stageMove()
+  if (!movementDistance.value) return
   stage({
     type: 'move', actor_id: moveAction.value.actor_id,
     distance: Number(movementDistance.value),
@@ -1364,12 +1370,15 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               :can-reach="canReachPosition"
               :labels="battlefieldLabels"
               :floaters="floaters"
+              :grid="grid"
+              :move-active="dockMode === 'move'"
               @select-token="pickBattleTarget"
               @choose-position="chooseTrackPosition"
+              @choose-cell="grid.chooseCell"
             />
             <TargetCard :token="cardToken" :distance="cardDistance" :labels="targetCardLabels" />
           </div>
-          <p class="battlefield-hint">{{ copy.chooseDestination }}</p>
+          <p v-if="!grid.isGrid" class="battlefield-hint">{{ copy.chooseDestination }}</p>
         </section>
 
         <section v-if="pendingDecision" class="decision-card" aria-live="assertive">
@@ -1677,18 +1686,15 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
               </label>
             </div>
 
-            <div v-if="dockMode === 'move' && moveAction" class="mode-panel move-panel" data-mode="move">
-              <p class="dock-hint">{{ copy.moveHint }}</p>
-              <div class="move-row">
-                <label>{{ copy.move }}
-                  <input v-model.number="movementDistance" type="number" :min="-Number(moveAction.movement_remaining || 0)" :max="Number(moveAction.movement_remaining || 0)" step="5">
-                </label>
-                <button type="button" class="move-submit" :disabled="!canStageDock" @click="stageDock()">
-                  <NIcon :component="FootstepsOutline" />{{ copy.move }}
-                </button>
-              </div>
-              <small class="move-range">± {{ moveAction.movement_remaining }} {{ copy.feet }}</small>
-            </div>
+            <MoveDock
+              v-if="dockMode === 'move' && moveAction"
+              v-model:distance="movementDistance"
+              :grid="grid"
+              :remaining="Number(moveAction.movement_remaining || 0)"
+              :can-stage="canStageDock"
+              :labels="{ move: copy.move, moveHint: copy.moveHint, feet: copy.feet, none: copy.none }"
+              @stage="stageDock"
+            />
           </template>
 
           <template #tiles>
@@ -1833,12 +1839,6 @@ button, select, input { min-height: 44px; font: inherit; }
 .dock-actions { display: grid; gap: 8px; margin-top: auto; align-self: end; }
 .dock-actions .dock-confirm { margin: 0; }
 .dock-finish { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid rgb(120 150 175 / 22%); }
-.move-panel .move-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
-.move-panel .move-row label { margin: 0; min-width: 0; }
-.move-panel .move-row input { min-height: 38px; }
-.move-range { color: #9aa9b4; font-size: 11px; }
-.move-submit { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 38px; min-height: 38px; margin: 0; padding: 0 16px; border: 1px solid #e4b75e; border-radius: 10px; background: linear-gradient(180deg, #b87d27, #7a4f16); color: #fff6df; font-size: 13px; font-weight: 600; cursor: pointer; }
-.move-submit:disabled { border-color: #5a5648; background: #2a2820; color: #8a8576; cursor: not-allowed; }
 .end-turn-ready { display: flex; align-items: center; gap: 6px; margin: 2px 0 0; padding: 8px 9px; border: 1px solid #b88b3e; border-radius: 8px; background: rgb(197 148 67 / 14%); color: #f2d28f; font-size: 12px; font-weight: 700; }
 .decision-card, .confirm-card { padding: 12px; border: 1px solid #c2974a; border-radius: 12px; background: #322716; }
 .decision-card div, .confirm-card div { display: flex; gap: 7px; flex-wrap: wrap; }

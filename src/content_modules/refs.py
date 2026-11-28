@@ -35,6 +35,10 @@ from typing import Any, Literal
 
 from src.engine.world.contracts import canonical_id, validate_source_ref
 
+# Portable Tactical Scene definition (workplan §6.17 m3-03): the payload is a
+# scene-adapter produced TacticalSceneDocument, never a second scene schema.
+PORTABLE_SCENE_SCHEMA = "tactical-scene-v1"
+
 # 跨域内容 kind 首版词表：generic adventure 实体 + D&D 内容库类型（§29）。
 # 词表允许按需扩展，但必须经过本常量（防自由字符串漂移）。
 CONTENT_KINDS = (
@@ -71,6 +75,11 @@ _CONTENT_KIND_SPECS: dict[str, ContentKindSpec] = {
     "adventure": ContentKindSpec("adventure", "adventure-v2", "catalog", "adventure", cloneable=True),
     "character_template": ContentKindSpec("character", "character-card", "character_card", "character"),
     "npc": ContentKindSpec("content_package", "lore-entry", "lorebook_entry", "lorebook"),
+    # 每局场景是 Tactical Scene 槽位（§12.2）：可移植定义只描述场景，写入发生在
+    # 一场对局内，由 GM 显式导入经 tactical_scene_create 完成。
+    "scene": ContentKindSpec(
+        "content_package", PORTABLE_SCENE_SCHEMA, "tactical_scene_create", "tactical_scene",
+    ),
     "item": ContentKindSpec("content_package", "lore-entry", "lorebook_entry", "lorebook"),
     "spell": ContentKindSpec("content_package", "lore-entry", "lorebook_entry", "lorebook"),
     "class": ContentKindSpec("content_package", "lore-entry", "lorebook_entry", "lorebook"),
@@ -492,6 +501,7 @@ class ContentRefChain:
 __all__ = [
     "CONTENT_KINDS",
     "CONTENT_KIND_REGISTRY",
+    "PORTABLE_SCENE_SCHEMA",
     "ContentKindRegistry",
     "ContentKindSpec",
     "ContentDraft",

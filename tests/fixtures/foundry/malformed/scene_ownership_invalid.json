@@ -1,0 +1,12 @@
+{
+  "_id": "badbadbadbadbad2",
+  "name": "Ownership Out Of Range",
+  "width": 800,
+  "height": 600,
+  "ownership": {
+    "default": 9
+  },
+  "_stats": {
+    "coreVersion": "14.370"
+  }
+}

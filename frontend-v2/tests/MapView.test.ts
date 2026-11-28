@@ -1,11 +1,23 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createRouter, createMemoryHistory } from 'vue-router'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { i18n } from '../src/i18n'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { i18n, messages } from '../src/i18n'
 import MapView from '../src/features/maps/MapView.vue'
 import * as client from '../src/api/client'
 import * as backgrounds from '../src/api/mapBackgrounds'
+import { registerNaiveApis } from '../src/composables/useNaiveBridge'
 import type { MapData } from '../src/api/types'
+
+const toasts: Array<{ kind: string; content: string }> = []
+registerNaiveApis(
+  {
+    success: (content: string) => toasts.push({ kind: 'success', content }),
+    error: (content: string) => toasts.push({ kind: 'error', content }),
+    info: () => {},
+    warning: () => {},
+  } as never,
+  {} as never,
+)
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -18,10 +30,10 @@ function map(name: string): MapData {
   return { active_map: { id: name, name, mode: 'graph', background: { id: `${name}-asset`, url: `blob:${name}` } }, locations: [{ id: name, name, content: `${name} detail` }] }
 }
 
-async function mountMap(apiMock: ReturnType<typeof vi.fn>) {
+async function mountMap(apiMock: ReturnType<typeof vi.fn>, user?: string) {
   vi.spyOn(client, 'api').mockImplementation(apiMock as typeof client.api)
-  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/map', name: 'map', component: MapView }, { path: '/play', name: 'play', component: { template: '<div />' } }] })
-  await router.push({ name: 'map', query: { game: 'one' } })
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/map', name: 'map', component: MapView }, { path: '/play', name: 'play', component: { template: '<div />' } }, { path: '/tactical-scene', name: 'tactical-scene', component: { template: '<div />' } }] })
+  await router.push({ name: 'map', query: { game: 'one', ...(user ? { user } : {}) } })
   await router.isReady()
   const wrapper = mount(MapView, { global: { plugins: [i18n, router] } })
   await flushPromises()
@@ -88,5 +100,59 @@ describe('MapView projection lifecycle', () => {
     await flushPromises()
     wrapper.unmount()
     expect(revoke).toHaveBeenCalledWith(expect.objectContaining({ active_map: expect.objectContaining({ id: 'one' }) }))
+  })
+})
+
+describe('MapView tactical conversion button', () => {
+  beforeEach(() => { toasts.length = 0 })
+
+  it('is GM-only and converts the background then opens the tactical scene page', async () => {
+    vi.spyOn(client, 'hasAccessToken').mockReturnValue(true)
+    const apiMock = vi.fn((path: string) => {
+      if (path === '/games') return Promise.resolve({ games: [{ game_key: 'one', gm_uid: 'gm' }] })
+      if (path === '/games/one/tactical-scenes/from-map-background') {
+        return Promise.resolve({ ok: true, created: true, scene_id: 'mapbg.upload.x', revision: 1, active_scene_ref: null, scene: { canonical_id: 'mapbg.upload.x' } })
+      }
+      return Promise.resolve(map('one'))
+    })
+    const { wrapper, router } = await mountMap(apiMock)
+    await wrapper.get('[data-testid="map-convert-tactical"]').trigger('click')
+    await flushPromises()
+    expect(apiMock).toHaveBeenCalledWith('/games/one/tactical-scenes/from-map-background', {
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+    })
+    expect(toasts.at(-1)?.kind).toBe('success')
+    expect(router.currentRoute.value.name).toBe('tactical-scene')
+    expect(router.currentRoute.value.query.game).toBe('one')
+  })
+
+  it('hides the button for a named player preview', async () => {
+    vi.spyOn(client, 'hasAccessToken').mockReturnValue(true)
+    const apiMock = vi.fn((path: string) => path === '/games'
+      ? Promise.resolve({ games: [{ game_key: 'one', gm_uid: 'gm' }] })
+      : Promise.resolve(map('one')))
+    const { wrapper } = await mountMap(apiMock, 'player-1')
+    expect(wrapper.find('[data-testid="map-convert-tactical"]').exists()).toBe(false)
+  })
+
+  it('surfaces the localized unresolvable error without navigating', async () => {
+    vi.spyOn(client, 'hasAccessToken').mockReturnValue(true)
+    const apiMock = vi.fn((path: string) => {
+      if (path === '/games') return Promise.resolve({ games: [{ game_key: 'one', gm_uid: 'gm' }] })
+      if (path === '/games/one/tactical-scenes/from-map-background') {
+        return Promise.reject(new client.ApiError('not a stored image', 422, 'map_background_unresolvable'))
+      }
+      return Promise.resolve(map('one'))
+    })
+    const { wrapper, router } = await mountMap(apiMock)
+    await wrapper.get('[data-testid="map-convert-tactical"]').trigger('click')
+    await flushPromises()
+    expect(toasts.at(-1)?.kind).toBe('error')
+    expect([
+      messages['zh-CN'].apiErrors.map_background_unresolvable,
+      messages.en.apiErrors.map_background_unresolvable,
+    ]).toContain(toasts.at(-1)?.content)
+    expect(router.currentRoute.value.name).toBe('map')
   })
 })

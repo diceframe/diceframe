@@ -1,0 +1,11 @@
+# src/webui/services/tactical_scene_ops.py 返回给请求方的提示。
+"zh-CN":
+  tactical_scene_forbidden: "只有 GM 可以修改场景"
+  tactical_scene_stale_revision: "场景已被其他修改更新，请刷新后重试"
+  tactical_scene_not_found: "场景不存在"
+  tactical_scene_invalid_payload: "场景数据无法安全写入"
+  tactical_scene_unsupported_schema: "场景数据版本不受支持"
+  tactical_scene_placeable_not_found: "场景元素不存在"
+  rewrite_in_progress: "正在重建历史，请稍后重试"
+  stale_run: "游戏已重新开始，请刷新后重试"
+  save_failed: "场景保存失败，已回滚本次修改"

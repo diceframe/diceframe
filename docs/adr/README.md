@@ -26,6 +26,8 @@ DF Agent 的统一应用动作目录、动态 descriptor、有限服务端授权
 
 - [ADR-0005：通用底座、玩法拼装与具体游戏](0005-composable-game-platform.md) — 拆能力部分 `Accepted`（轨道 R 已落地）；组合层部分保持 `Proposed`，触发条件已满足（见 ADR-0010），契约从实现中归纳。
 
+- [ADR-0016：战术场景与战斗位置归属](0016-tactical-scene-position-authority.md) — `Proposed`；Token 位置按“战斗中 / 非战斗”划分 authority（非战斗归场景槽位，战斗中的参战者归规则集 combat state）；二维坐标采用加法方案（`position_mode: "grid"`、`board`、`spatial_position`），不改旧存档的事件形状；规则集不 import 场景模块。施工计划见 [FVTT_COMPAT_WORKPLAN.md](../internal/FVTT_COMPAT_WORKPLAN.md)。
+
 ## 什么时候需要 ADR
 
 通常只有以下情况值得写：

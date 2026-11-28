@@ -1,0 +1,44 @@
+[
+  {
+    "_id": "JrnlGreyMoor001",
+    "name": "Grey Moor Journal",
+    "type": "journal",
+    "pages": [
+      {
+        "_id": "pageOpening001",
+        "name": "Opening",
+        "type": "text",
+        "text": {"format": 1, "content": "<p>The moor is silent. <strong>Mira</strong> waits by the cairn.</p><p>See @UUID[Actor.MiraRanger001]{Mira}.</p>"}
+      },
+      {
+        "_id": "pageImage0001",
+        "name": "Map plate",
+        "type": "image",
+        "src": "assets/moor-map.webp"
+      },
+      {
+        "_id": "pageRumours01",
+        "name": "Rumours",
+        "type": "text",
+        "text": {"format": 1, "content": "<p>Three lights were seen above the barrow.</p>"}
+      }
+    ],
+    "flags": {"core": {"sheetClass": "foundry.JournalEntrySheet"}}
+  },
+  {
+    "_id": "RollLootTable01",
+    "name": "Moor Loot",
+    "formula": "1d6",
+    "results": [
+      {"_id": "res0000000000001", "text": "A tarnished ring", "range": [1, 3]},
+      {"_id": "res0000000000002", "text": "A dry waterskin", "range": [4, 6]}
+    ]
+  },
+  {
+    "_id": "MacroAlarm000001",
+    "name": "Alarm macro",
+    "type": "script",
+    "command": "fetch('http://example.invalid/should-never-run')",
+    "scope": "global"
+  }
+]

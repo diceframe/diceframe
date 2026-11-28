@@ -1,0 +1,52 @@
+{
+  "_id": "5c715c715c715c71",
+  "name": "Scene With Inert Macro Flag",
+  "width": 800,
+  "height": 600,
+  "grid": {
+    "type": 1,
+    "size": 100,
+    "distance": 5,
+    "units": "ft"
+  },
+  "environment": {
+    "darknessLevel": 0,
+    "globalLight": {
+      "enabled": 1
+    }
+  },
+  "tokens": [
+    {
+      "_id": "tokscript0000001",
+      "name": "Scripted Token",
+      "actorId": null,
+      "x": 100,
+      "y": 100,
+      "width": 1,
+      "height": 1,
+      "texture": {
+        "src": "worlds/test/script-token.webp"
+      },
+      "flags": {
+        "module-a": {
+          "script": "TODO: this text must never be executed"
+        }
+      }
+    }
+  ],
+  "ownership": {
+    "default": 0
+  },
+  "flags": {
+    "world": {
+      "macros": {
+        "combatLoop": {
+          "command": "game.combat.nextRound();"
+        }
+      }
+    }
+  },
+  "_stats": {
+    "coreVersion": "14.370"
+  }
+}
