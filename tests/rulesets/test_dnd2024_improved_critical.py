@@ -42,6 +42,10 @@ def _fighter_sheet(
     # 角色。需要"已拥有 Defense"的场景由测试显式传 defense。
     draft["class_feature_feat_choices"] = {"fighting_style": fighting_style}
     sheet = runtime.finalize_character(None, draft)
+    # Soldier grants Savage Attacker; its window would hold the damage.
+    feats = sheet["ruleset_character"]["features"].setdefault("feat_refs", [])
+    if "feat:savage_attacker" in feats:
+        feats.remove("feat:savage_attacker")
     # 高等级必须走真实升级链；默认 helper 总把 ASI 加在 STR 上会撞 20 上限，
     # 因此这里按"仍有空间"的确定性规则分配。
     while int(sheet["ruleset_character"]["build"]["level"]) < level:

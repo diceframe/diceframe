@@ -56,6 +56,12 @@ def _combat(
     for ref in extra:
         if ref not in refs:
             refs.append(ref)
+    # Soldier also grants Savage Attacker, whose hit window would hold the
+    # damage this file reads straight off the attack.  FD10 covers it; here it
+    # would only be noise.
+    feats = sheet["ruleset_character"]["features"]["feat_refs"]
+    if "feat:savage_attacker" in feats:
+        feats.remove("feat:savage_attacker")
     return new_combat(runtime, sheet, enemies=[enemy(position=5)])
 
 

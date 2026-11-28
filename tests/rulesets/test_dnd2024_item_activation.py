@@ -50,6 +50,11 @@ def _runtime_sheet() -> tuple[Dnd2024Runtime, dict]:
     choices = runtime.builder_choices(None, {"locale": "en"})
     preset = next(item for item in choices["quick_presets"] if item["id"] == "stalwart_guardian")
     sheet = runtime.finalize_character(None, {**preset["draft"], "locale": "en", "name": "Arden"})
+    # Soldier grants Savage Attacker; its hit window would hold the damage
+    # this file asserts on directly.
+    feats = sheet["ruleset_character"]["features"].setdefault("feat_refs", [])
+    if "feat:savage_attacker" in feats:
+        feats.remove("feat:savage_attacker")
     return runtime, sheet
 
 

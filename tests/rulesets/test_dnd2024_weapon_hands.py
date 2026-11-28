@@ -47,6 +47,10 @@ def _sheet(
         None, {**preset["draft"], "locale": LOCALE, "name": "Grip"},
     )
     canonical = sheet["ruleset_character"]
+    # Soldier's Savage Attacker window would hold the damage this file reads.
+    refs = canonical.setdefault("features", {}).setdefault("feat_refs", [])
+    if "feat:savage_attacker" in refs:
+        refs.remove("feat:savage_attacker")
     canonical["equipment"]["item_refs"] = [f"item:{item}" for item in equipment]
     if two_weapon_fighting:
         features = canonical.setdefault("features", {})
