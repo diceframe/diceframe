@@ -569,21 +569,15 @@ def test_a_reaction_kind_the_engine_cannot_settle_is_refused() -> None:
         _start(engine, instance, bad)
 
 
-def test_parry_needs_a_proficiency_bonus_to_offer() -> None:
-    """没有熟练加值就没有可加的 AC，这条反应不该出现。"""
+def test_parry_is_offered_for_melee_only_and_reaches_the_view() -> None:
+    """两个不变量：条目能到 actor view（否则永远不可达），且只管近战。"""
 
     engine, instance = _instance()
     enemy = _enemy([_attack("bite-0", "Bite")], [])
     enemy["reactions"] = [{"id": "parry", "kind": "ac_bonus", "bonus": "proficiency"}]
-    # 契约不允许 0 熟练加值，所以这一条用"没有 bonuses 的反应条目"来表达
-    # 同一个事实：拿不出加值就不提供。
-    enemy["reactions"] = [{"id": "parry", "kind": "ac_bonus", "bonus": "proficiency"}]
-    enemy.pop("proficiency_bonus", None)
     _start(engine, instance, enemy)
+    combat = ruleset_runtime.state(instance)["combat"]
+    view = engine._actor_view(instance, combat, "enemy:beast-1")
 
-    choices = engine._enemy_reaction_choices(
-        ruleset_runtime.state(instance)["combat"],
-        engine._actor_view(instance, ruleset_runtime.state(instance)["combat"], "enemy:beast-1"),
-    )
-
-    assert choices == []
+    assert engine._enemy_reaction_choices(combat, view), "reactions 必须在视图里"
+    assert engine._enemy_reaction_choices(combat, view, ranged=True) == [], "远程不能 Parry"

@@ -84,3 +84,19 @@
 - **GAP-52**：多攻击里混入非攻击动作（`and uses X` / `replace ... with a use of X`），8 只。
 - 池的前端选择器：本片只投影 `pool`，面板接线随页面改动一起做（若未做，面板仍可提交既有形状，池形状显示为不可选而不是错打）。
 - CR 5+。
+
+## 6. 独立审核与修复（2026-11-28）
+
+审核逐条核过后，本文有三处**承诺与代码不符**，已按事实订正：
+
+| 原文 | 实际 |
+|---|---|
+| §3 "`replace one attack with a § attack` → 池 + `at_most`" | **没有这个分支**。含 `replace` / `uses` 的句子现在整条不解析（此前会被当池收下、把"还能替换一次"吞掉——已修） |
+| §3/§4.6 "`makes N A or B attacks` → `choice`" | 用了 `.match`，真实句子以 `"The X makes …"` 开头，永远匹配不到。改 `.search` 后 `warrior-veteran` 才真的进库 |
+| §4.5 "引用本生物没有的攻击 → 目录加载失败" | 契约只看 id 形状，引用在展开时回答；测试按展开时拒绝写 |
+
+§4.7 的"≥171 / skipped 减少 ≥19"也不成立：17 只 "in any combination" 里多数还有别的缺口，实际只进 2 只。
+
+已修（代码）：池的 `sequence` 只允许池形状（`view.py` 显式拒绝）；导入器不再吞 `replace` 子句。
+
+仍未做（登记）：池成员的引用**在契约层**核对（需要把 `attack_ids` 传进 `_validate_multiattack_action`）；`at_least`/`at_most` 的**聚合可行性**（`sum(at_least) <= count`、同一攻击上下界互斥）。

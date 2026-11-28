@@ -399,6 +399,10 @@ def _parse_pool_combination(action: dict, attacks: list[dict]) -> dict | None:
     """
 
     text = str(action.get("desc") or "")
+    # 同一句里还带 replace / uses / 施法时，池只表达得了一半——整条不解析，
+    # 让它留在 skipped 里，而不是把"还能替换一次"这个能力悄悄吞掉。
+    if re.search(r"replace|uses |use of|Spellcasting", text):
+        return None
     match = _POOL_RE.search(text)
     if not match:
         return None
@@ -457,7 +461,7 @@ def parse_multiattack(action: dict, attacks: list[dict]) -> dict | None:
         # 都在下面单独解析；其余（uses / replace with a use of / 施法）仍然不解析。
         if "in any combination" in text:
             return _parse_pool_combination(action, attacks)
-        whole = _WHOLE_GROUP_OR_RE.match(text)
+        whole = _WHOLE_GROUP_OR_RE.search(text)
         if whole:
             return _parse_whole_group_or(whole, attacks, action)
         return None

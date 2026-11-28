@@ -143,6 +143,8 @@ class CombatViewMixin:
                 # S0-MM3d：特质随 stat block 投影，消费者（豁免优势、集群
                 # 战术、传奇抗性、飞行经过）都从这一份读，不各自解析文本。
                 "traits": deepcopy(enemy.get("traits") or []),
+                **({"reactions": deepcopy(enemy["reactions"])}
+                   if enemy.get("reactions") else {}),
                 "conditions": deepcopy(enemy.get("conditions") or {}),
                 "death_saves": {}, "equipment_refs": [], "spell_refs": [], "slots": {},
                 "weapon_category_refs": [],
@@ -940,6 +942,10 @@ class CombatViewMixin:
         named another monster's attack would silently borrow its numbers.
         """
 
+        if intent.get("sequence") is not None and not isinstance(action.get("pool"), dict):
+            # 只有池形状按顺序结算。别的形状带 sequence 说明客户端对形状理解
+            # 错了，静默忽略会让它以为顺序生效了。
+            raise CombatIntentError("only a pool multiattack takes a sequence")
         raw_parts: list[dict[str, Any]] = []
         repeat = action.get("repeat")
         if isinstance(repeat, dict):

@@ -73,3 +73,16 @@ CR ≤ 4 里因为 `Parry (Reaction)` 而进不了库的条目。它与池叠加
 
 - 其它反应型动作（Nimble Escape、Legendary Resistance 的巢穴形态等）。
 - Parry 的"每回合多次攻击只挡一次"之外的变体（如加值来自属性）。
+
+## 7. 独立审核与修复（2026-11-28）
+
+审核抓到四个必须修，全部已改：
+
+1. **Parry 不可达**：`reactions` 既没进 `resolution.py` 的敌人快照，也没进 `view._actor_view`，于是窗口永远拿不到它。两处都补了投影。
+2. **远程也能 Parry**：SRD 是"one **melee** attack"。`_enemy_reaction_choices` 现在收 `ranged`，远程直接不提供。
+3. **仍命中时吞掉后续**：Parry 挡下没挡住的攻击原先只 `_commit_hit_damage` 就返回，丢掉了 `next_decision`（命中触发法术）、`_hit_tail_events`（rider / 第二段伤害）、专注豁免与击杀触发。现在与其它三条路径一致。
+4. **校验层不认识 `parry`**：`_validate_hit_reaction` 会放过它。现在会重新问一次资格，过期决策干净拒绝。
+
+订正：§2.1 写的"0–2 条"与代码（1–2 条）不符；§6 说的"guard-captain / pirate 只差这一项"也不对——guard-captain 是 MM5 的池解锁，pirate 缺的是 GAP-52；Parry 实际新增的是 `bandit-captain`、`knight`，并补全 `noble`。
+
+仍未做：Parry 的"看见攻击者 / 手持武器"两个前提没有建模；两条 `ac_bonus` 反应只使用第一条（契约允许两条，实际只用第一条——应收到 1 条或按序使用）。

@@ -171,7 +171,7 @@ class CombatReactionSpellsMixin:
         return choices
 
     def _enemy_reaction_choices(
-        self, combat: dict[str, Any], defender: dict[str, Any],
+        self, combat: dict[str, Any], defender: dict[str, Any], *, ranged: bool = False,
     ) -> list[dict[str, Any]]:
         """S0-MM6：stat block 自带的反应（目前只有 Parry）。
 
@@ -179,7 +179,8 @@ class CombatReactionSpellsMixin:
         Parry 又用别的反应。
         """
 
-        if defender["kind"] != "enemy":
+        if defender["kind"] != "enemy" or ranged:
+            # SRD：Parry 挡的是"one melee attack"。远程攻击不提供这一项。
             return []
         if "shield" in defender["conditions"]:
             return []
@@ -383,7 +384,7 @@ class CombatReactionSpellsMixin:
         features = self._reaction_feature_choices(
             combat, defender, attacker, damage_event, next_decision, ranged=ranged,
         )
-        parry = self._enemy_reaction_choices(combat, defender)
+        parry = self._enemy_reaction_choices(combat, defender, ranged=ranged)
         if not spells and not features and not parry:
             return None
         kind, raw_id = actor_kind(defender["actor_id"])
@@ -421,6 +422,14 @@ class CombatReactionSpellsMixin:
         option = intent.get("option")
         if option == "redirect":
             self._validate_redirect(instance, combat, decision, intent)
+            return
+        if option == "parry":
+            defender = self._actor_view(instance, combat, str(decision["actor_id"]))
+            choices = self._enemy_reaction_choices(
+                combat, defender, ranged=bool(decision.get("attack_ranged")),
+            )
+            if not choices:
+                raise CombatIntentError("this creature cannot parry this attack")
             return
         if option not in {"cast", "feature"}:
             return
@@ -490,10 +499,29 @@ class CombatReactionSpellsMixin:
             })
             if not hit:
                 return events
+            # 仍然命中：后续结算必须与普通命中路径一致，否则命中触发法术、
+            # 第二段伤害、rider、击杀触发都会被这一分支静默吞掉。
+            next_decision = decision.get("next_decision")
+            if isinstance(next_decision, dict):
+                events.append({"type": "dnd2024.decision.pending", **deepcopy(next_decision)})
+                return events
             damage_event = deepcopy(decision.get("damage_event") or {})
             events.extend(self._commit_hit_damage(
                 instance, combat, damage_event, rng,
                 attacker_id=str(decision["attacker_id"]),
+            ))
+            defender = self._actor_view(instance, combat, defender_id)
+            events.extend(self._multiattack_mark_events(
+                self._actor_view(instance, combat, str(decision["attacker_id"])), defender,
+            ))
+            tail_events, tail_damage = self._hit_tail_events(
+                instance, combat, str(decision["attacker_id"]), defender, damage_event, rng,
+            )
+            events.extend(tail_events)
+            total = int(damage_event.get("amount", 0) or 0) + tail_damage
+            events.extend(self._concentration_events(instance, combat, defender, total, rng))
+            events.extend(self._enemy_zero_hp_feature_events(
+                instance, combat, str(decision["attacker_id"]), defender, total,
             ))
             return events
         if intent["option"] == "redirect":

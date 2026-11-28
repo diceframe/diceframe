@@ -9700,6 +9700,107 @@
       "traits": []
     },
     {
+      "id": "warrior-veteran",
+      "name": "Warrior Veteran",
+      "source_ref": "srd-5.2.1:creatures:srd-2024_warrior-veteran",
+      "creature_type": "humanoid",
+      "subtype": "",
+      "size": "small",
+      "cr": "3",
+      "xp": 700,
+      "proficiency_bonus": 2,
+      "armor_class": 17,
+      "hp": 65,
+      "hit_dice": "10d8+20",
+      "speeds": {
+        "walk": 30
+      },
+      "abilities": {
+        "str": 16,
+        "dex": 13,
+        "con": 14,
+        "int": 10,
+        "wis": 11,
+        "cha": 10
+      },
+      "saving_throws": {},
+      "skills": {
+        "athletics": 5,
+        "perception": 2
+      },
+      "passive_perception": 12,
+      "languages": [
+        "language:common"
+      ],
+      "senses": {},
+      "resist_damage_types": [],
+      "immune_damage_types": [],
+      "vulnerable_damage_types": [],
+      "attacks": [
+        {
+          "id": "greatsword-0",
+          "name": "Greatsword",
+          "attack_bonus": 5,
+          "damage": [
+            {
+              "dice": "2d6+3",
+              "type": "slashing"
+            }
+          ],
+          "range": 5,
+          "long_range": 5
+        },
+        {
+          "id": "heavy-crossbow-0",
+          "name": "Heavy Crossbow",
+          "attack_bonus": 3,
+          "damage": [
+            {
+              "dice": "2d10+1",
+              "type": "piercing"
+            }
+          ],
+          "range": 100,
+          "long_range": 400
+        }
+      ],
+      "actions": [
+        {
+          "id": "multiattack",
+          "name": "Multiattack",
+          "kind": "multiattack",
+          "choice": [
+            {
+              "label": "greatsword",
+              "parts": [
+                {
+                  "attack_id": "greatsword-0",
+                  "count": 2
+                }
+              ]
+            },
+            {
+              "label": "heavy_crossbow",
+              "parts": [
+                {
+                  "attack_id": "heavy-crossbow-0",
+                  "count": 2
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "traits": [],
+      "reactions": [
+        {
+          "id": "parry",
+          "kind": "ac_bonus",
+          "bonus": "proficiency"
+        }
+      ]
+    },
+    {
       "id": "winter-wolf",
       "name": "Winter Wolf",
       "source_ref": "srd-5.2.1:creatures:srd-2024_winter-wolf",
@@ -10359,7 +10460,6 @@
     "bugbear-stalker": [
       "Abduct",
       "Morningstar (rider)",
-      "Multiattack",
       "Quick Grapple (Bonus Action)"
     ],
     "centaur-trooper": [
@@ -10538,31 +10638,33 @@
       "Umbral Dagger (rider)",
       "Vampiric Connection"
     ],
-    "warrior-veteran": [
-      "Multiattack"
-    ],
     "wereboar": [
       "Gore (rider)",
+      "Multiattack",
       "Shape-Shift (Bonus Action)",
       "Tusk (rider)"
     ],
     "wererat": [
       "Bite  (rider)",
+      "Multiattack",
       "Shape-Shift (Bonus Action)"
     ],
     "weretiger": [
       "Bite (rider)",
+      "Multiattack",
       "Prowl (Tiger or Hybrid Form Only) (Bonus Action)",
       "Shape-Shift (Bonus Action)"
     ],
     "werewolf": [
       "Bite (rider)",
+      "Multiattack",
       "Shape-Shift (Bonus Action)"
     ],
     "white-dragon-wyrmling": [
       "Ice Walk"
     ],
     "wight": [
+      "Multiattack",
       "Sunlight Sensitivity"
     ],
     "will-o-wisp": [
