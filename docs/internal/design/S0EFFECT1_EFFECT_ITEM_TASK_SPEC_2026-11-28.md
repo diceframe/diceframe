@@ -96,6 +96,17 @@
 **有没有维护者**——维护者决定了"谁会再来问它一次"（回合结束的重掷、专注中断）。
 正因为不互斥，才要分成两档而不是让 `duration` 一个字段同时回答两个问题。
 
+**"带过期"档的锚点是一个闭集**（这一条是我第一版漏写的，导致把"补齐枚举"误说成"新增机制"）：
+
+| 锚点 | 谁的时间轴 | 到期边界 |
+|---|---|---|
+| `target_turn_start` / `target_turn_end` | 目标 | 目标自己的回合边界 |
+| `attacker_next_turn_start` / `attacker_next_turn_end` | 来源（施法者 / 攻击者） | 来源的回合边界 |
+| `combat` | 遭遇 | 战斗结束 |
+
+加一个锚点 = 在同一个档里补一个取值 + 一处到期分支，**不是新原语**。P2b 补的
+`attacker_next_turn_end` 就属于这一类（此前这种写法返回 `None`，整条 rider 被丢弃）。
+
 判据落在代码里：`effect_items.lifetime_of(item)`，`save_repeat`/`concentration` → `maintained`，
 有 `duration` → `expiring`，否则 `instant`。
 
@@ -198,6 +209,21 @@ apply_effect_items(instance, combat, source, target, items, rng, *, dc) -> list[
 - 事件不变的做法换了：不是"反推标签"，而是"**生产方带着标签进来**"。
   `{"kind":"condition","condition":"prone"}` 依旧写 `source_rider: "condition"`。
 - 11 条用例（9 + 2 条 source 保留）+ 武器词条 37 条，全绿。
+
+## 6.8 P2b 结果（2026-11-28）
+
+**"rider 句式覆盖"这一片的真实规模比预估小得多。** 把 19 条未解析原文逐条读完：
+
+| 样式 | 例 | 结论 |
+|---|---|---|
+| `if the target is Large or smaller **and** the X moved 30+ feet toward it …, it has Prone` | Allosaurus / Boar / Elephant | 需**移动前提**，独立原语 |
+| `… the target has Poisoned until the end of the X's next turn` | Couatl | **已修**：补 `attacker_next_turn_end` 锚点 |
+| `the rug **can give** it Grappled (escape DC 13) **instead of** dealing damage` | Animated Rug | 需**替代伤害** |
+| `attaches to the target … has Blinded … suffocating` | Darkmantle | 需**附着** + 窒息 |
+
+结果：**条目数不变（157）**，因为 Couatl 的 rider 修好后它的缺口变成
+`Divine Aid / Shielded Mind / Spellcasting`——这三项不在本片范围。也就是
+"修好了一条 rider，但那只怪还没完整"，这正是本仓一再出现的形态。
 
 ## 7. 验收指标
 

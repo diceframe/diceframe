@@ -298,7 +298,8 @@ RIDER_PUSH_MAXIMUM_FT = 60
 # 附带效果能声明的时长。闭集，因为只有这几个被 ``reducer._expire_conditions``
 # 真正兑现；写一个没人读的时长等于给数据一个"永远不会到期"的假承诺。
 RIDER_DURATIONS = frozenset({
-    "combat", "target_turn_start", "target_turn_end", "attacker_next_turn_start",
+    "combat", "target_turn_start", "target_turn_end",
+    "attacker_next_turn_start", "attacker_next_turn_end",
 })
 # 规则的 15 个标准条件码。校验用它回答"这是不是一个条件名"；某个条件是否
 # 已经有机械落点，由战斗目录的 ``conditions`` 注册表回答（两者不混用）。

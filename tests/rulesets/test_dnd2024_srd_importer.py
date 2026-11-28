@@ -160,3 +160,16 @@ def test_an_unparsable_multiattack_is_a_gap() -> None:
     ])
 
     assert "Multiattack" in IMP.unmapped(record)
+
+
+def test_a_rider_that_lasts_until_the_source_turn_ends_keeps_its_anchor() -> None:
+    """"until the end of the couatl's next turn" 是"带过期"档里的一个锚点。
+
+    以前这种写法返回 None，整条 rider 被丢掉；它和 `_next_turn_start` 只差边界
+    在哪一侧，不是两种机制。
+    """
+
+    assert IMP.rider_duration("end", "couatl") == "attacker_next_turn_end"
+    assert IMP.rider_duration("start", "couatl") == "attacker_next_turn_start"
+    # 没有主语时仍然是"目标自己"的边界。
+    assert IMP.rider_duration("end", "") == "target_turn_end"

@@ -519,6 +519,15 @@ class CombatConditionsMixin:
                 if not isinstance(value, dict):
                     continue
                 if (
+                    value.get("duration") == "attacker_next_turn_end"
+                    and value.get("source_actor_id") == previous_actor_id
+                ):
+                    # "Until the end of <来源>的 next turn"：到期时刻是来源自己
+                    # 那一回合结束，所以读 previous_actor_id——与 start 那支
+                    # 只差"边界在哪一侧"。
+                    target_conditions.pop(condition_id, None)
+                    continue
+                if (
                     value.get("duration") == "attacker_next_turn_start"
                     and value.get("source_actor_id") == actor_id
                 ):

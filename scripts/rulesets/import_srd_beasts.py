@@ -153,7 +153,8 @@ def rider_duration(when: str, owner: str) -> str | None:
     text = owner.strip().lower()
     if not text:
         return "target_turn_end" if when == "end" else "target_turn_start"
-    return "attacker_next_turn_start" if when == "start" else None
+    # 有主语就是"来源的回合边界"：start 与 end 各是一个锚点，不是两种机制。
+    return "attacker_next_turn_start" if when == "start" else "attacker_next_turn_end"
 
 
 def parse_riders(desc: str) -> list[dict]:
