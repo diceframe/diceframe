@@ -305,6 +305,25 @@ def damage_node_for(
 3. **搬迁**：凡是只为某个职业能力存在的代码（`divine_actions.py` 里的四个）应回到
    `features/` 侧，`combat/` 只留机制。这一步动面大，**是否可以拆到下一切片，需要评审决定**。
 
+## 6.13 P5 第 1 步的实际结论：第 1 步等价于第 3 步
+
+加了守卫 `tests/architecture/test_effect_ownership.py` 之后发现：**`features/` 里那 13 处
+不是空体声明，而是有实体的方法**（守卫把它们算成"真实现"才会红）。也就是说
+所谓"去重"没有可去掉的壳——两处都是代码。
+
+**推论**：第 1 步（去重）不能独立完成，它等价于第 3 步（搬迁）：
+要减掉一份实现，只能把 `combat/` 里那份搬回 `features/`，或者反过来把
+`features/` 的声明改成 Protocol 空体。两种都要动归属，不是"去掉重复"。
+
+因此本片的交付改为：
+
+- **已做**：把现状钉成"只减不增"的名单（13 条），新增重复立即失败，名单残留也失败；
+- **未做（第 3 步）**：逐条搬迁，每条单独可评审。
+
+第 3 步的建议顺序（按引用面从小到大）：`divine_sense` → `bardic_grant` →
+`divine_spark` → `preserve_life` → `lay_on_hands` → `turn_undead` / `abjure_foes` →
+`ongoing_effects` 的五个（它们被回合推进引用，最贵）。
+
 ## 7. 验收指标
 
 1. **形状**：`effect_items.py` 提供字段闭集、`normalize_effect_item(s)`、`lifetime_of`、
