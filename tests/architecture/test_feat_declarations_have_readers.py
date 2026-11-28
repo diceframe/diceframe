@@ -31,7 +31,6 @@ UNREAD_BASELINE: frozenset[str] = frozenset()
 # Legacy feat fields are read by their old name until FD2 (requires) and P4
 # (spell grants) migrate them.  The set may shrink, never grow.
 LEGACY_FIELD_BASELINE: frozenset[str] = frozenset({
-    "ability_choice",
     "choice_specs",
 })
 

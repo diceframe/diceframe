@@ -9,7 +9,13 @@ from src.rulesets.dnd2024.runtime import Dnd2024Runtime
 from src.rulesets.dnd2024.resting import Dnd2024RestEngine
 from src.rulesets.events import EventBatchError
 
-from dnd2024_monk_common import SequenceRng, monk_draft, monk_instance, start_combat
+from dnd2024_monk_common import (
+    SequenceRng,
+    advancement_choices,
+    monk_draft,
+    monk_instance,
+    start_combat,
+)
 
 
 def paladin_sheet(
@@ -43,6 +49,16 @@ def paladin_sheet(
                 ],
             }
         }
+        # Paladin 2 级必选一个战斗风格；这个槽由权威 preview 给出，测试
+        # 不手抄一份可选项。
+        preview = runtime.preview_advancement(None, sheet, choices)
+        choices.update(
+            {
+                key: value
+                for key, value in advancement_choices(preview).items()
+                if key == "feature_choices"
+            }
+        )
         sheet = runtime.apply_advancement(None, sheet, choices)
     return sheet
 

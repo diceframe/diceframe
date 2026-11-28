@@ -214,8 +214,8 @@ def test_the_real_catalog_declares_its_prerequisites_in_the_new_field(bundle) ->
     assert [r.kind for r in definitions["archery"].requires] == ["feature"]
     assert definitions["grappler"].requires[0].any_of == {"str": 13, "dex": 13}
     assert [r.kind for r in definitions["boon_of_spell_recall"].requires] == ["spellcasting"]
-    # 前置已整体迁出 legacy 袋子。
-    assert LEGACY_FEAT_FIELDS == frozenset({"ability_choice", "choice_specs"})
+    # 前置与属性提升都已迁出 legacy 袋子；只剩 P4 的 spell grants。
+    assert LEGACY_FEAT_FIELDS == frozenset({"choice_specs"})
 
 
 # ---------------------------------------------------------------------------
