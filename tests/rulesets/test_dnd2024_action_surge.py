@@ -66,6 +66,11 @@ def _fighter_sheet(runtime: Dnd2024Runtime, *, level: int = 2) -> dict:
             "class_feature_feat_choices": {"fighting_style": "feat:archery"},
         },
     )
+    # Soldier grants Savage Attacker; its hit window would hold the damage
+    # this file asserts on directly.
+    feats = sheet["ruleset_character"]["features"].setdefault("feat_refs", [])
+    if "feat:savage_attacker" in feats:
+        feats.remove("feat:savage_attacker")
     return _advance(runtime, sheet, level) if level > 1 else sheet
 
 

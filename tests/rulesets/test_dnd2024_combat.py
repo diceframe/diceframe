@@ -32,9 +32,15 @@ class SequenceRng:
 def _character(runtime: Dnd2024Runtime, preset_id: str, name: str) -> dict:
     choices = runtime.builder_choices(None, {"locale": "en"})
     preset = next(item for item in choices["quick_presets"] if item["id"] == preset_id)
-    return runtime.finalize_character(
+    character = runtime.finalize_character(
         None, {**preset["draft"], "locale": "en", "name": name},
     )
+    # Soldier grants Savage Attacker; its hit window would hold the damage
+    # this file asserts on directly.
+    feats = character["ruleset_character"]["features"].setdefault("feat_refs", [])
+    if "feat:savage_attacker" in feats:
+        feats.remove("feat:savage_attacker")
+    return character
 
 
 def _instance(*, wizard: bool = False) -> tuple[Dnd2024CombatEngine, GameInstance]:

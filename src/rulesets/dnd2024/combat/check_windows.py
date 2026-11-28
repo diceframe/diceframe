@@ -39,6 +39,8 @@ from src.engine.player_control import is_ai_controlled
 from src.engine.world.contracts import clock_minutes
 from src.rulesets.dnd2024.features.resources import resource_state
 
+from .action_adapter import roll_damage_node_with_trace
+
 from .check_modes import mode_from_sources
 from .primitives import (
     CombatIntentError,
@@ -1602,6 +1604,9 @@ class CombatCheckWindowsMixin:
                 crit_on_hit=bool(settlement.get("crit_on_hit")),
                 exclude_bards=exclude_bards,
                 spent_reactions=spent_reactions,
+                # 这一击是否吃巨武器下限已在建立 settlement 时定下：窗口改判的
+                # 只是命中与否，不改变握法与武器。
+                die_floor=int(settlement.get("die_floor") or 0),
             ))
         elif settlement.get("miss_face"):
             # The straight-through miss of this attack would have applied the
@@ -1759,6 +1764,77 @@ class CombatCheckWindowsMixin:
         target = self._actor_view(instance, combat, str(decision["target_id"]))
         events.extend(self._resolve_committed_hit(
             instance, combat, str(decision["attacker_id"]), target, damage_event,
+            int(damage_event["amount"]), rng,
+        ))
+        return events
+
+    def _finish_savage_attacker(
+        self, instance: Any, combat: dict[str, Any], decision: dict[str, Any],
+        intent: dict[str, Any], rng: Any,
+    ) -> list[dict[str, Any]]:
+        """Roll the second weapon-damage set on ``use``, keep the higher one.
+
+        The second set is rolled here, not when the window is offered: rolling
+        it earlier would put the alternate total in the decision payload before
+        the player answers.  Both sets are recorded so a replay never re-rolls.
+        """
+
+        events: list[dict[str, Any]] = [{
+            "type": "dnd2024.decision.cleared", "decision_id": decision["decision_id"],
+            "option": intent["option"],
+        }]
+        damage_event = deepcopy(decision["damage_event"])
+        plan = decision.get("reroll_plan")
+        if intent["option"] == "spend" and isinstance(plan, dict):
+            node = plan.get("weapon_node")
+            dice = int(plan.get("weapon_dice") or 0)
+            if isinstance(node, dict) and dice > 0:
+                alt_total, alt_rolls, _ = roll_damage_node_with_trace(
+                    node, rng,
+                    die_floor=int(plan.get("die_floor") or 0),
+                    floored_dice=dice,
+                )
+                total = (
+                    alt_total + int(plan.get("extra_total") or 0)
+                    + int(plan.get("modifier") or 0)
+                    + int(plan.get("rage_damage") or 0)
+                )
+                target = self._actor_view(
+                    instance, combat, str(decision["target_id"]),
+                )
+                alt_amount, _ = self._resist_damage(
+                    target, max(0, total), str(plan.get("damage_type") or ""),
+                )
+                first_amount = int(plan.get("first_amount") or 0)
+                first_rolls = [int(roll) for roll in plan.get("weapon_rolls") or []]
+                rider_rolls = list(damage_event.get("rolls") or [])[dice:]
+                # 「取较高一组」而不是「必须用新的一组」：低于原来那组时保留
+                # 原值，但两组都记下来，审计才能看出它确实重掷过。
+                picked = 1 if alt_amount > first_amount else 0
+                if picked:
+                    damage_event["rolls"] = [*alt_rolls, *rider_rolls]
+                    damage_event["amount"] = alt_amount
+                    damage_event["delta"] = -alt_amount
+                damage_event["damage_rerolls"] = [first_rolls, alt_rolls]
+                damage_event["damage_reroll_picked"] = picked
+                damage_event["damage_reroll_source"] = "savage_attacker"
+                # 与偷袭同一条延迟记账规则：只有真的用了才消耗本回合额度。
+                marks = damage_event.setdefault("feature_uses", [])
+                marks.append({
+                    "actor_id": str(decision["actor_id"]),
+                    "feature_id": "savage_attacker",
+                    "round": int(combat.get("round", 0)),
+                    "turn_index": int(combat.get("turn_index", 0)),
+                })
+        next_decision = decision.get("next_decision")
+        if isinstance(next_decision, dict):
+            events.append({
+                "type": "dnd2024.decision.pending", **deepcopy(next_decision),
+            })
+            return events
+        target = self._actor_view(instance, combat, str(decision["target_id"]))
+        events.extend(self._resolve_committed_hit(
+            instance, combat, str(decision["actor_id"]), target, damage_event,
             int(damage_event["amount"]), rng,
         ))
         return events

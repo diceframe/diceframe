@@ -116,6 +116,22 @@ def dice_count(formula: str) -> int:
     return _parse_ndm(formula)[0]
 
 
+def damage_dice_count(formula: str) -> int:
+    """Number of dice in a damage line, or ``0`` for a flat value.
+
+    ``dice_count`` is deliberately strict because it parses a dice *pool* the
+    caller may later reduce; a weapon line may also be ``1d8+3`` or the flat
+    ``1`` of a Tiny beast, and neither is a pool.  Both are legal damage, so
+    this reader answers the narrower question without turning them into errors.
+    """
+
+    text = str(formula or "")
+    if _FLAT_DAMAGE_RE.fullmatch(text):
+        return 0
+    match = DICE_RE.fullmatch(text)
+    return int(match.group(1)) if match else 0
+
+
 def reduce_dice_count(formula: str, spent: int) -> str | None:
     """Remove dice from a plain ``NdM`` pool, or ``None`` when nothing is left.
 
@@ -192,15 +208,62 @@ def spell_formula_node(
     return node
 
 
-def _rng_dice_roller(rng: Any) -> Any:
-    """把宿主 rng 包装成通用求值器的骰源；骰迹按骰顺序展开。"""
+def _rng_dice_roller(
+    rng: Any, *,
+    die_floor: int = 0,
+    floored_dice: int = 0,
+    floored: list[tuple[int, int]] | None = None,
+) -> Any:
+    """把宿主 rng 包装成通用求值器的骰源；骰迹按骰顺序展开。
+
+    ``die_floor`` 只作用于前 ``floored_dice`` 颗骰。攻击伤害 AST 的主骰永远
+    排在附加骰之前（``attack_damage_node`` 的既有约定），所以按颗数计数就能
+    把下限限定在武器伤害骰上，而不碰偷袭、印记这类附骰。RNG 的调用次数与
+    顺序不变：这里只抬高已掷出的点数，不是重掷。
+    """
+
+    remaining = max(0, int(floored_dice))
 
     def roller(formula: str) -> Any:
+        nonlocal remaining
         count, sides = _parse_ndm(formula)
-        rolls = [int(rng.randint(1, sides)) for _ in range(count)]
+        rolls: list[int] = []
+        for _ in range(count):
+            rolled = int(rng.randint(1, sides))
+            value = rolled
+            if remaining > 0:
+                if die_floor > 0:
+                    value = max(value, int(die_floor))
+                    if value != rolled and floored is not None:
+                        floored.append((rolled, value))
+                remaining -= 1
+            rolls.append(value)
         return SimpleNamespace(total=sum(rolls), rolls=rolls)
 
     return roller
+
+
+def roll_damage_node_with_trace(
+    node: dict[str, Any], rng: Any, *,
+    die_floor: int = 0,
+    floored_dice: int = 0,
+) -> tuple[int, list[int], list[tuple[int, int]]]:
+    """Damage settlement with the optional die floor, plus what it changed.
+
+    The third element lists ``(rolled, effective)`` for the dice the floor
+    actually raised, so the event can say "rolled 1, counted as 3" without
+    making every caller unpack three values.
+    """
+
+    floored: list[tuple[int, int]] = []
+    value, rolls = evaluate_formula_trace(
+        node,
+        _BLANK_CONTEXT,
+        dice_roller=_rng_dice_roller(
+            rng, die_floor=die_floor, floored_dice=floored_dice, floored=floored,
+        ),
+    )
+    return value, rolls, floored
 
 
 def roll_damage_node(
@@ -208,7 +271,7 @@ def roll_damage_node(
 ) -> tuple[int, list[int]]:
     """用通用求值器结算伤害/治疗节点，返回 (总值, 按骰顺序的明细)。"""
 
-    value, rolls = evaluate_formula_trace(node, _BLANK_CONTEXT, dice_roller=_rng_dice_roller(rng))
+    value, rolls, _floored = roll_damage_node_with_trace(node, rng)
     return value, rolls
 
 
@@ -253,5 +316,6 @@ __all__ = [
     "heal_ability_modifier_node",
     "maximize_dice_nodes",
     "roll_damage_node",
+    "roll_damage_node_with_trace",
     "spell_formula_node",
 ]

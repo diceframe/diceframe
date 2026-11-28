@@ -104,7 +104,7 @@ def paladin_sheet(runtime: Dnd2024Runtime, *, level: int = 2) -> dict:
     )
     sheet = runtime.finalize_character(None, draft)
     if level >= 2:
-        sheet = runtime.apply_advancement(None, sheet, {
+        choices = {
             "class_spell_choices": {
                 "cantrip_refs": [],
                 "spellbook_refs": [],
@@ -112,7 +112,17 @@ def paladin_sheet(runtime: Dnd2024Runtime, *, level: int = 2) -> dict:
                     "spell:heroism", "spell:cure_wounds", "spell:bless",
                 ],
             }
-        })
+        }
+        # Paladin 2 级必选一个战斗风格；这个槽由权威 preview 给出。
+        preview = runtime.preview_advancement(None, sheet, choices)
+        choices.update(
+            {
+                key: value
+                for key, value in advancement_choices(preview).items()
+                if key == "feature_choices"
+            }
+        )
+        sheet = runtime.apply_advancement(None, sheet, choices)
     return sheet
 
 

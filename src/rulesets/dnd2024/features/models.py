@@ -21,6 +21,10 @@ from typing import Any, Mapping
 
 from src.rulesets.bundle import LoadedRulesetBundle
 from src.rulesets.dnd2024.character.primitives import ABILITY_IDS
+from src.rulesets.dnd2024.features.feat_slots import (
+    advancement_feat_categories,
+    fill_advancement_feat_options,
+)
 
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
@@ -50,6 +54,9 @@ EQUIPMENT_REQUIREMENT_KEYS = frozenset(
 FEATURE_CHOICE_KINDS = frozenset({
     "advancement_feat", "skill_proficiency", "feature_option", "language",
 })
+# 选项的答案落在哪：特性自己的选项表，还是升级账本。两种存储今天并存（FD6b 统一），
+# 所以这是数据而不是"哪个函数先跑到"。
+FEATURE_CHOICE_HANDLERS = frozenset({"feature_choice", "advancement"})
 # 技能选择最终"授予什么"的闭集。``expertise`` 是子职侧的加值翻倍，
 # ``proficiency`` 是专长侧（Skilled）的"直接获得熟练"——两者都写在这张表里，
 # 因为玩家看到的是同一个"选技能"动作，只有结果不同。未知值必须加载期拒绝，
@@ -303,6 +310,10 @@ class FeatureChoice:
     category: str
     count: int
     enabled_options: tuple[str, ...]
+    #: 这个槽的答案由谁收下。``feature_choice`` 走 ``features.feature_choices``，
+    #: ``advancement`` 走 ``progression.history`` 的账本——两种存储今天并存，
+    #: 所以"怎么记"必须是数据，而不是"哪个函数先跑到"。
+    handled_by: str = "feature_choice"
     grants: str = ""
     requires_proficiency: bool = True
     exclude_expertise: bool = True
@@ -322,8 +333,7 @@ class FeatureChoice:
 FEATURE_CHOICE_KEYS = frozenset({
     "id", "kind", "category", "count", "enabled_options", "grants",
     "requires_proficiency", "exclude_expertise", "count_track",
-    "replace_per_level",
-})
+    "replace_per_level", "handled_by"})
 
 #: What an option of a track-counted choice may say about its own readiness.
 #: Only ``complete`` is selectable: an option whose effect has no home yet must
@@ -518,15 +528,24 @@ def _parse_feature_choice(
             raise ClassFeatureError(
                 f"{feature_id}.choice.count must be 1 for a feature option choice"
             )
+    handled_by = str(raw.get("handled_by") or "feature_choice")
+    if handled_by not in FEATURE_CHOICE_HANDLERS:
+        raise ClassFeatureError(f"{feature_id}.choice.handled_by is not supported: {handled_by!r}")
+    if handled_by != "feature_choice" and kind != "advancement_feat":
+        raise ClassFeatureError(f"{feature_id}.choice.handled_by only applies to an advancement feat slot")
     raw_refs = raw.get("enabled_options")
-    if raw_refs is None and kind in {"skill_proficiency", "language"}:
-        # 空清单 = 该目录的可选全集：技能按"已有熟练"再筛，语言按 rarity 再筛。
+    if raw_refs is None and kind in {"skill_proficiency", "language", "advancement_feat"}:
+        # 空清单 = 该目录的可选全集：技能按"已有熟练"再筛，语言按 rarity 再筛；
+        # 专长槽的清单由机械载荷推导（`feat_slots.fill_advancement_feat_options`）。
         raw_refs = []
     if not isinstance(raw_refs, list):
         raise ClassFeatureError(
             f"{feature_id}.choice.enabled_options must be an array"
         )
-    if not raw_refs and kind in {"advancement_feat", "feature_option"}:
+    # feature_option 是互斥选项，必须点名；advancement_feat 的清单由声明的
+    # 机械载荷推导（见 ``_fill_advancement_feat_options``），所以空值是"待填"
+    # 而不是"未实现"。账本槽（ASI / 恩惠）本来就空着。
+    if not raw_refs and kind == "feature_option":
         raise ClassFeatureError(
             f"{feature_id}.choice.enabled_options must be a non-empty array"
         )
@@ -642,6 +661,7 @@ def _parse_feature_choice(
         category=category,
         count=count,
         enabled_options=tuple(refs),
+        handled_by=handled_by,
         grants=grants,
         requires_proficiency=flags["requires_proficiency"],
         exclude_expertise=flags["exclude_expertise"],
@@ -670,20 +690,6 @@ def parse_feature_choice(
         allow_skill_or_tool=allow_skill_or_tool,
         allow_proficiency_grant=allow_proficiency_grant,
     )
-
-
-def _advancement_feat_categories(bundle: LoadedRulesetBundle) -> dict[str, str]:
-    """Every declared advancement feat's id and category, for cross-catalog checks."""
-
-    catalog = bundle.get("advancement_feat_catalog", "srd_advancement_feats")
-    feats = catalog.get("feats") if isinstance(catalog, Mapping) else None
-    if not isinstance(feats, Mapping):
-        return {}
-    return {
-        str(feat_id): str(feat.get("category") or "")
-        for feat_id, feat in feats.items()
-        if isinstance(feat, Mapping)
-    }
 
 
 def _validate_option_parameters(option: ClassFeatureDefinition) -> None:
@@ -795,7 +801,7 @@ def _validate_feature_choices(
     Expertise, and the count must not exceed the number of skills that exist.
     """
 
-    categories = _advancement_feat_categories(bundle)
+    categories = advancement_feat_categories(bundle)
     known = set(categories.values())
     skill_ids = {
         str(entity.get("id")) for entity in bundle.list("skill")
@@ -1089,6 +1095,7 @@ class Dnd2024ClassFeatureCatalog:
                 )
             if definition.option_of == definition.id:
                 raise ClassFeatureError(f"{definition.id} cannot be its own option")
+        features = fill_advancement_feat_options(features, bundle)
         _validate_feature_choices(features, bundle)
         return cls(
             source_ref=_require_text(raw.get("source_ref"), "class feature catalog source_ref"),

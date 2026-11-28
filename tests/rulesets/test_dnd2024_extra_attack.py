@@ -212,6 +212,11 @@ def _fighter_sheet(runtime: Dnd2024Runtime, *, level: int = 1) -> dict:
     sheet = runtime.finalize_character(
         None, {**preset["draft"], "locale": "en", "name": "stalwart_guardian"},
     )
+    # Soldier grants Savage Attacker; its hit window would hold the damage
+    # this file asserts on directly.
+    feats = sheet["ruleset_character"]["features"].setdefault("feat_refs", [])
+    if "feat:savage_attacker" in feats:
+        feats.remove("feat:savage_attacker")
     if level > 1:
         sheet = advance(runtime, sheet, level)
     return with_equipment(runtime, sheet, "item:longsword")

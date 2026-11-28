@@ -122,6 +122,11 @@ def _preset_instance(
     character = runtime.finalize_character(
         None, {**preset["draft"], "locale": locale, "name": preset_id},
     )
+    # Soldier grants Savage Attacker; its hit window would hold the damage
+    # this file asserts on directly.
+    feats = character["ruleset_character"]["features"].setdefault("feat_refs", [])
+    if "feat:savage_attacker" in feats:
+        feats.remove("feat:savage_attacker")
     return _instance(runtime, character, locale=locale)
 
 

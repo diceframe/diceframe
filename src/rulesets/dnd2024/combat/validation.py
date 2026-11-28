@@ -74,6 +74,7 @@ from .primitives import (
     MAX_ATTACK_RIDERS,
     MULTIATTACK_MAX_ATTACKS,
     RELENTLESS_RAGE_DECISION,
+    SAVAGE_ATTACKER_DECISION,
     RIDER_DURATIONS,
     RIDER_KINDS,
     RIDER_PUSH_MAXIMUM_FT,
@@ -113,6 +114,7 @@ _TURN_DECISION_ERRORS = {
     CHECK_WINDOW_DECISION: "resolve the pending check window first",
     DAMAGE_WINDOW_DECISION: "resolve the pending check window first",
     RELENTLESS_RAGE_DECISION: "resolve the relentless rage decision first",
+    SAVAGE_ATTACKER_DECISION: "resolve the savage attacker decision first",
 }
 
 

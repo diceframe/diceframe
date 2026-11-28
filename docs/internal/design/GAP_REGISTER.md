@@ -67,6 +67,10 @@
 | GAP-52 | 非战斗时 GMAgent 拿不到 stat block | GM 上下文走 `instance.to_llm_view()` → `GameContextProjector.project()`，字段只有 `scene` / `players` / `away_players` / `combat_state`；而 `combat_state` 来自 `module_hooks.combat_view()`，没有战斗投影时返回 `neutral_combat_view()`（`{"combat_state": "none", "combat_active": false, 空先攻}`）——**里面没有 `enemies`**。怪物信息的唯一入口是战斗中的 actor 视图（`view.py:172` 带出 stat block 的 `languages`），战斗一结束就随 `combat_state` 一起清空 | 探索、社交、偷听对话这些非战斗场景里，GM 无法“翻 MM 看这个怪物会什么语言”，也看不到 CR / 抗性 / 特质；它只能依赖作者写进 lorebook 的内容或自己的记忆。注意这**不是语言独有的问题**，语言只是受影响字段之一 | 需要一条按需查阅通道（按 id / 名字 / CR 查精简卡），而不是把 stat block 塞进叙事上下文——后者会让每次叙事都带上用不到的整张卡 | 已登记 |
 
 
+| GAP-58 | 巨武器战斗的伤害骰作用域无法选择 | `srd_advancement_feats.json` 的 `great_weapon_fighting` 只声明 `two_handed_melee_damage_die_minimum`；`combat/hit_resolution.py::_hit_settlement_events` 只对主骰取下限，附伤分别走 `hit_riders` / `extra_damage_parts` / `statblock_riders` 与独立的法术伤害事件（至圣斩），不在同一 AST | 网团常见的「所有附伤都吃 GWF」房规无法表达；若只在主骰路径加，会得到"hex/偷袭吃了、hit rider 与至圣斩没吃"的半成品，比不支持更难发现 | 专长域 L2（前置：把攻击附伤统一到一个 settlement 上下文，scope 才可安全扩成 `attack_dice`） | 未开工（本期按贤者谏言只落武器骰） |
+
+> 编号说明：专长域的 `GAP-50`~`57` 记在 `FD1`/`FD6` 文档对应的工作树里，与本文件已有的 50 号段并行占用；本文件从 58 起编，合并时按内容去重，不按号段拼接。
+
 ## 按片索引
 
 - **S0-F10A**：GAP-14（本片内解决）、GAP-13（后续抽象）

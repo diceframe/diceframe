@@ -163,6 +163,11 @@ def barbarian(level: int) -> dict:
         sheet = _RUNTIME.finalize_character(
             None, {**preset["draft"], "locale": LOCALE, "name": "Berserker"},
         )
+        # Soldier grants Savage Attacker; its hit window would hold the damage
+        # these tests assert on directly.  They test something else, so opt out.
+        feats = sheet["ruleset_character"]["features"].setdefault("feat_refs", [])
+        if "feat:savage_attacker" in feats:
+            feats.remove("feat:savage_attacker")
         _SHEETS[key] = _advance(_RUNTIME, sheet, level, "class:barbarian")
     return deepcopy(_SHEETS[key])
 

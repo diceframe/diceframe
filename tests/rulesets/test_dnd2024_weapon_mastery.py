@@ -84,6 +84,11 @@ def _preset_sheet(runtime: Dnd2024Runtime, preset_id: str, *, level: int = 1) ->
     sheet = runtime.finalize_character(
         None, {**preset["draft"], "locale": "en", "name": preset_id},
     )
+    # Soldier grants Savage Attacker; its hit window would hold the damage
+    # these tests assert on directly.  They test something else, so opt out.
+    feats = sheet["ruleset_character"]["features"].setdefault("feat_refs", [])
+    if "feat:savage_attacker" in feats:
+        feats.remove("feat:savage_attacker")
     return advance(runtime, sheet, level) if level > 1 else sheet
 
 
