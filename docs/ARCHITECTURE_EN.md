@@ -2599,6 +2599,38 @@ Filtering is therefore stateful. An unclosed think block must not be flushed to 
 
 ---
 
+## 15.6 Reasoning Effort
+
+`src/llm/reasoning.py` owns the reasoning-effort contract: the levels, their validity per API format and the request parameters of each format.
+
+Each chat route has one config key, saved with Model Routing; saving one rebuilds the model runtime:
+
+```text
+llm_provider_ref        → model_reasoning_effort
+fallback1_provider_ref  → fallback1_reasoning_effort
+fallback2_provider_ref  → fallback2_reasoning_effort
+check_provider_ref      → check_model_reasoning_effort
+```
+
+A level is an **explicit user setting**. It is sent as-is with every request on its route (narration, streaming, tool calls), and a rejecting endpoint surfaces as an error. No model-name heuristics are involved and nothing negotiates it away. Unset, each path keeps its pre-existing default, and only those automatic defaults are negotiated by `OpenAIChatTransport`:
+
+| Request path | Unset | Configured level |
+| --- | --- | --- |
+| OpenAI Chat · narration / streaming | nothing (official DeepSeek endpoint: `thinking.type = disabled`) | `reasoning_effort` |
+| OpenAI Chat · tool calls | `reasoning_effort = none` (official DeepSeek endpoint: `thinking.type = disabled`) | `reasoning_effort` |
+| OpenAI Responses | `reasoning.effort = medium` | `reasoning.effort` |
+| Anthropic Messages | nothing | `output_config.effort`; `thinking` untouched |
+
+- The OpenAI format accepts `none / minimal / low / medium / high / xhigh / max`. The native Anthropic format only has `low … max`; `none / minimal` are rejected on save.
+- Any other value is a provider-specific identifier: it is passed through as-is when it matches `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, and the endpoint judges it. `off` is reserved; unset is an empty value.
+- Anthropic effort applies with or without `thinking`, and the client never sends `thinking`: some models reject `disabled` or `adaptive`.
+- An unusable level on disk loads as unset with a warning; the config API rejects unusable values explicitly.
+- `anthropic-version` stays `2023-06-01`: from `2026-10-21` any request carrying `temperature`, `top_p` or `top_k` is rejected, so moving to that header is a separate contract change.
+
+AI seats (`src/webui/services/ai_seats.py`) and the connection test build their own requests and are outside these keys.
+
+---
+
 # 16. Stale Fence After an LLM Response
 
 Calling an LLM is a long-running operation.

@@ -63,6 +63,7 @@ async def main() -> None:
     providers = [ProviderConfig(
         provider_name="default", base_url=provider["base_url"],
         api_key=provider["api_key"], model_name=model, api_format=provider["api_format"],
+        reasoning_effort=config.get("model_reasoning_effort") or None,
     )]
     llm_client = LLMClient(
         providers=providers,

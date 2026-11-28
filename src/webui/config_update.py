@@ -13,7 +13,9 @@ from typing import Any
 
 from src.network_proxy import effective_proxy_url, is_supported_proxy_url
 from src.ai_providers import (
+    CHAT_REASONING_EFFORT_KEYS,
     PROVIDER_REF_KEYS,
+    REASONING_EFFORT_CONFIG_KEYS,
     UNSUPPORTED_AI_CONFIG_KEYS,
     is_provider_secret_key,
     normalize_ai_providers,
@@ -32,7 +34,9 @@ from src.tts.contracts import SUPPORTED_PROVIDER_IDS
 from src.webui.access_password import hash_access_password
 from src.webui.cors import invalid_cors_origins, normalize_cors_origins
 from src.llm.generation_options import validate_generation_options, validate_recent_rounds
+from src.llm.reasoning import ANTHROPIC_REASONING_EFFORTS, REASONING_EFFORTS, normalize_reasoning_effort
 from src.assistant_agent_limits import MIN_TASK_MAX_TOKENS, MAX_TASK_MAX_TOKENS
+from src.localization.messages import t
 
 SECRET_CONFIG_KEYS = frozenset({
     "access_token", "bot_token", "napcat_token",
@@ -54,6 +58,7 @@ CONFIG_KEYS = (
     "embedding_source", "embedding_local_model_id", "embedding_model", "embedding_max_input",
     "fallback1_enabled", "fallback1_model",
     "fallback2_enabled", "fallback2_model",
+    *REASONING_EFFORT_CONFIG_KEYS,
     "narrative_max_tokens", "character_gen_max_tokens", "summary_max_tokens", "brief_max_tokens",
     "analysis_max_tokens", "text_gen_max_tokens", "assistant_agent_max_tokens", "assistant_agent_task_max_tokens", "proxy_enabled", "proxy_url", "public_base_url", "access_token",
     "qq_bot_enabled", "napcat_host", "napcat_port", "napcat_token", "napcat_heartbeat_sec",
@@ -78,6 +83,7 @@ MODEL_RUNTIME_CONFIG_KEYS = frozenset({
     "embedding_enabled", "embedding_source", "embedding_local_model_id", "embedding_model", "embedding_max_input",
     "fallback1_enabled", "fallback1_model",
     "fallback2_enabled", "fallback2_model",
+    *REASONING_EFFORT_CONFIG_KEYS,
     "narrative_max_tokens", "summary_max_tokens", "brief_max_tokens", "analysis_max_tokens",
     "model_request_timeout_seconds",
     "proxy_enabled", "proxy_url",
@@ -209,6 +215,16 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
                     candidate[key] = (validate_generation_options(raw) if key == "llm_generation_options" else validate_recent_rounds(raw))
                 except ValueError as exc:
                     return PreparedConfigUpdate(candidate, changed_keys, access_password_changed, str(exc))
+                continue
+            if key in REASONING_EFFORT_CONFIG_KEYS:
+                try:
+                    candidate[key] = normalize_reasoning_effort(raw)
+                except ValueError:
+                    return PreparedConfigUpdate(
+                        candidate, changed_keys, access_password_changed,
+                        t("webui.config_update.reasoning_effort_invalid",
+                          field=key, levels="/".join(REASONING_EFFORTS)),
+                    )
                 continue
             if key in SECRET_CONFIG_KEYS:
                 value = clean_text_value(raw)
@@ -394,6 +410,23 @@ def prepare_config_update(current: dict[str, Any], body: dict[str, Any]) -> Prep
                 changed_keys,
                 access_password_changed,
                 "图像生成仅支持 OpenAI 兼容服务商",
+            )
+
+    # 推理强度按路由所绑定的服务商格式校验：Anthropic 原生格式用 output_config.effort
+    # 表达，没有 none/minimal 档位。明确拒绝，不让保存下来的设置在运行时静默不生效。
+    # 服务商自定义标识无法由这里判断，交给端点。
+    for ref_key, effort_key, route in CHAT_REASONING_EFFORT_KEYS:
+        effort = str(candidate.get(effort_key) or "")
+        provider = resolve_provider(candidate, str(candidate.get(ref_key) or ""))
+        if (effort in REASONING_EFFORTS and provider and provider["api_format"] == "anthropic"
+                and effort not in ANTHROPIC_REASONING_EFFORTS):
+            return PreparedConfigUpdate(
+                candidate,
+                changed_keys,
+                access_password_changed,
+                t("webui.config_update.reasoning_effort_format_mismatch",
+                  label=t(f"webui.config_update.route_{route}"), effort=effort,
+                  levels=", ".join(sorted(ANTHROPIC_REASONING_EFFORTS, key=REASONING_EFFORTS.index))),
             )
 
     active_proxy = effective_proxy_url(bool(candidate.get("proxy_enabled")), candidate.get("proxy_url", ""))

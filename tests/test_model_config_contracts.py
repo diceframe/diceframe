@@ -49,6 +49,8 @@ def test_all_model_routes_and_credentials_roundtrip(tmp_path):
         "llm_provider_ref": "cloud", "model": "chat",
         "fallback1_enabled": True, "fallback1_provider_ref": "local", "fallback1_model": "chat",
         "fallback2_enabled": True, "fallback2_provider_ref": "cloud", "fallback2_model": "chat",
+        "model_reasoning_effort": "high", "fallback1_reasoning_effort": "low",
+        "fallback2_reasoning_effort": "none", "check_model_reasoning_effort": "max",
         "embedding_enabled": True, "embedding_provider_ref": "local",
         "embedding_model": "embed", "embedding_max_input": 12345,
         "tts_provider": "openai-compatible", "tts_provider_ref": "cloud",

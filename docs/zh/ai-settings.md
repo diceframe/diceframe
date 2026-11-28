@@ -71,6 +71,30 @@ Chat 请求只根据明确的 API 拒绝协商兼容参数：`max_tokens` 可以
 的 `max_completion_tokens`；不受支持的功能默认温度可以省略，用户显式设置
 的值受到保护。这与既有的输出截断重试策略是两回事。
 
+## 推理强度
+
+**模型配置**里，主模型、两个备用模型和独立检定模型各有一个**推理强度**下拉，
+随该模型的所有请求发送：GM 叙事、摘要、角色生成、DF Agent、检定规划等。
+更换服务商，或在服务商目录里把另一个模型分配给该用途时，强度会恢复为默认。
+
+| 档位 | OpenAI 兼容服务商 | Anthropic 原生格式服务商 |
+| --- | --- | --- |
+| 默认（不发送） | 保持原有行为：叙事不发送；工具调用发送 `reasoning_effort: none`；官方 GPT-6.2 的 Responses 请求使用 `medium` | 不发送 |
+| `none`、`minimal` | `reasoning_effort` | 不支持，保存时拒绝 |
+| `low`、`medium`、`high`、`xhigh`、`max` | `reasoning_effort`（Responses 为 `reasoning.effort`） | `output_config.effort`，不改动思考开关 |
+| 自定义… | 填写服务商文档给出的标识，原样放入 `reasoning_effort` | 原样放入 `output_config.effort` |
+
+哪些档位可用取决于模型。未设置时工具调用自动携带的 `none` 若被服务商明确拒绝，
+会自动撤掉重试；**显式选择的档位原样发送，模型或服务商不支持时会报错，
+不会被悄悄丢弃**。预设档位覆盖不了服务商特有的标识时，选**自定义…**填写
+（1–64 位字母、数字、点、横线或下划线），同样原样发送，是否有效由服务商判定。
+
+思考内容计入输出 Token 上限（Anthropic 的 `max_tokens`、OpenAI 的
+`max_completion_tokens` / `max_output_tokens` 都是如此）。档位越高越容易触发
+截断重试，必要时在**高级生成设置**里调高输出预算。官方 DeepSeek 端点未设置时
+关闭思考；显式档位经 `reasoning_effort` 发送（该端点支持 `low`、`high`、`max`，
+其余档位由服务商折叠或拒绝），此时不再附带关闭思考的参数。
+
 ## DF Agent 预算
 
 **通用页面的 DF Agent 区域**可调整显示、恢复悬浮球位置，以及独立的单次请求输出预算

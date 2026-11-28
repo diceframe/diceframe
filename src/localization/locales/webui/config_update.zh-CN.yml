@@ -1,0 +1,8 @@
+# src/webui/config_update.py 返回给请求方的提示。
+"zh-CN":
+  reasoning_effort_invalid: "%{field} 必须为空（默认，不发送）、预设档位（%{levels}）之一，或 1–64 位字母、数字、点、横线或下划线组成的自定义标识"
+  reasoning_effort_format_mismatch: "%{label}的推理强度 %{effort} 不适用于 Anthropic 原生格式（仅支持 %{levels}）；请改选其他档位、恢复默认，或更换服务商"
+  route_main: "主模型"
+  route_fallback1: "备用模型 1"
+  route_fallback2: "备用模型 2"
+  route_check: "独立检定模型"

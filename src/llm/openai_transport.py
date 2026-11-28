@@ -2,6 +2,9 @@
 
 Only an explicit unsupported-parameter response may change a request. No model
 name heuristics are used, and a rejected request never expands its token budget.
+A configured reasoning-effort level is the exception: it is an explicit user
+setting, sent as-is, so a rejected level surfaces as the endpoint's error. Only
+the automatic tool-call default is negotiated away.
 """
 from __future__ import annotations
 
@@ -34,7 +37,8 @@ class OpenAIChatTransport:
         self._generation_options = validate_generation_options({} if generation_options is None else generation_options)
 
     @asynccontextmanager
-    async def post(self, session: Any, url: str, *, json: dict[str, Any], **kwargs: Any) -> AsyncIterator[Any]:
+    async def post(self, session: Any, url: str, *, json: dict[str, Any],
+                   explicit_reasoning: bool = False, **kwargs: Any) -> AsyncIterator[Any]:
         capabilities = self._capabilities.setdefault((url, str(json.get("model") or "")), _ChatCapabilities())
         for attempt in range(3):
             body = dict(json)
@@ -54,17 +58,19 @@ class OpenAIChatTransport:
                     body[token_key] = capabilities.max_tokens_ceiling
             if capabilities.default_temperature_only and "temperature" not in self._generation_options:
                 body.pop("temperature", None)
-            if capabilities.reasoning_effort_unsupported:
+            if capabilities.reasoning_effort_unsupported and not explicit_reasoning:
                 body.pop("reasoning_effort", None)
             async with observed_post(session, url, json=body, negotiation_retry=attempt > 0, **kwargs) as response:
                 if response.status == 400 and attempt < 2:
-                    if self._learn(capabilities, body, await response.text(), frozenset(self._generation_options)):
+                    if self._learn(capabilities, body, await response.text(), frozenset(self._generation_options),
+                                   learn_reasoning=not explicit_reasoning):
                         continue
                 yield response
                 return
 
     @staticmethod
-    def _learn(capabilities: _ChatCapabilities, body: dict[str, Any], error_text: str, protected: frozenset[str] = frozenset()) -> bool:
+    def _learn(capabilities: _ChatCapabilities, body: dict[str, Any], error_text: str, protected: frozenset[str] = frozenset(),
+               *, learn_reasoning: bool = True) -> bool:
         if len(error_text) > 16384:
             return False
         try:
@@ -108,7 +114,7 @@ class OpenAIChatTransport:
             capabilities.default_temperature_only = True
             logger.info("Chat endpoint only accepts its default temperature")
             return True
-        if parameter == "reasoning_effort" and "reasoning_effort" in body and (
+        if learn_reasoning and parameter == "reasoning_effort" and "reasoning_effort" in body and (
             code in {"unsupported_parameter", "unknown_parameter", "extra_forbidden"}
             or "reasoning_effort" in message
         ):
